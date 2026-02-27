@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}NariNakhre{% endblock %}</title>
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+    <style>
+        body { background: #0f172a !important; color: #e2e8f0 !important; }
+        .rose-accent { color: #be185d; }
+        .rose-btn {
+            background: linear-gradient(90deg, #be185d 0%, #f43f5e 100%);
+            color: #fff;
+            box-shadow: 0 0 12px 2px #be185d55, 0 2px 8px #0004;
+            transition: box-shadow 0.2s, transform 0.2s;
+        }
+        .rose-btn:hover, .rose-btn:focus {
+            box-shadow: 0 0 24px 4px #be185d99, 0 4px 16px #0008;
+            transform: translateY(-2px) scale(1.03);
+        }
+        .rose-bg, .bg-white, .rounded-xl, .rounded-lg, .rounded-2xl, .shadow-lg, .shadow, .shadow-sm, .shadow-xl {
+            background: #1e293b !important;
+            color: #e2e8f0 !important;
+            border-color: #334155 !important;
+        }
+        input, select, textarea {
+            background: #1e293b;
+            color: #e2e8f0;
+            border-color: #334155;
+        }
+        input:focus, select:focus, textarea:focus {
+            border-color: #be185d;
+            outline: none;
+        }
+        table, th, td {
+            border-color: #334155 !important;
+        }
+        th { color: #f472b6 !important; }
+        .text-3xl, .text-2xl, .font-extrabold, .font-semibold { color: #f1f5f9 !important; letter-spacing: 0.04em; }
+        .text-lg, .text-xl, .font-bold { color: #e2e8f0 !important; }
+    </style>
+</head>
+<body class="min-h-screen bg-slate-900">
+    <header class="flex justify-between items-center px-8 py-6 bg-slate-900 shadow-lg">
+        <a href="/" class="flex items-center gap-3">
+            <img src="/static/assets/logo.jpg" alt="NariNakhre Logo" class="h-12 w-auto rounded-lg shadow-lg" style="background:#fff;object-fit:contain;">
+            <span class="text-2xl rose-accent font-extrabold tracking-widest">NariNakhre</span>
+        </a>
+        <div class="flex gap-4 items-center">
+            <a href="/lookup-quote" class="rose-btn rounded-2xl px-6 py-2 font-bold shadow-lg transition hover:scale-105" aria-label="Log in to view your quotes">Login</a>
+            <a href="/cart" class="rose-btn rounded-2xl px-6 py-2 flex items-center relative transition-transform hover:scale-105">
+                <svg class="w-6 h-6 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M3 3h2l.4 2M7 13h10l4-8H5.4M7 13l-1.35 2.7A1 1 0 0 0 7 17h12a1 1 0 0 0 .95-.68l1.54-4.32M7 13V6h13"></path></svg>
+                Cart
+                <span id="cart-badge" aria-live="polite" class="absolute -top-2 -right-2 bg-pink-600 text-white text-xs font-black rounded-full h-6 w-6 flex items-center justify-center shadow-lg border-2 border-slate-900 hidden">0</span>
+            </a>
+        </div>
+    </header>
+    <main class="px-4 md:px-12 py-8">
+        {% block content %}{% endblock %}
+    </main>
+    <footer class="mt-12 py-8 text-center text-xs text-slate-400 bg-slate-900 border-t border-pink-900/30">
+        <div class="mb-2 font-bold text-pink-300">Mohini Cosmetics</div>
+        <div>GSTIN: 23JFGPS7650J1ZV</div>
+        <div>136, Dharhai Rd, Kotwali, Jabalpur, Madhya Pradesh 482001</div>
+        <div>Mob: +91 71572310, email: mohinicosmetics.india@gmail.com</div>
+        <div>website: narinakhre.com / wholesale.narinakhre.com</div>
+    </footer>
+    <script>
+    function updateCartCounter() {
+        const cart = JSON.parse(localStorage.getItem('cart') || '[]');
+        const totalSets = cart.reduce((sum, item) => sum + (item.Sets_Count || 0), 0);
+        const badge = document.getElementById('cart-badge');
+        if (totalSets > 0) {
+            badge.textContent = totalSets;
+            badge.classList.remove('hidden');
+        } else {
+            badge.classList.add('hidden');
+        }
+    }
+    document.addEventListener('DOMContentLoaded', updateCartCounter);
+    </script>
+</body>
+</html>

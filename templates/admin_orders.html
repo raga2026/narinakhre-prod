@@ -1,0 +1,70 @@
+{% extends "base.html" %}
+{% block title %}Admin Orders - NariNakhre{% endblock %}
+{% block content %}
+<h1 class="text-3xl font-extrabold rose-accent mb-8 text-center tracking-wide drop-shadow-lg">Wholesale Orders</h1>
+<div class="overflow-x-auto">
+    <table class="w-full text-left rounded-2xl shadow-lg bg-slate-900/60">
+        <thead class="bg-slate-900 text-slate-200">
+            <tr>
+                <th class="py-3 px-4">Order ID</th>
+                <th class="py-3 px-4">Customer Name</th>
+                <th class="py-3 px-4">WhatsApp</th>
+                <th class="py-3 px-4">Email</th>
+                <th class="py-3 px-4">Total Amount</th>
+                <th class="py-3 px-4">Date</th>
+                <th class="py-3 px-4">Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for order in orders %}
+            <tr class="border-b border-[#be185d22]">
+                <td class="py-2 px-4">{{ order.id }}</td>
+                <td class="py-2 px-4">{{ order.customer_name }}</td>
+                <td class="py-2 px-4">{{ order.whatsapp }}</td>
+                <td class="py-2 px-4">{{ order.email }}</td>
+                <td class="py-2 px-4 text-green-400 font-bold">₹{{ order.total_amount|round(2) }}</td>
+                <td class="py-2 px-4">{{ order.created_at }}</td>
+                <td class="py-2 px-4">
+                    <button class="rose-btn px-4 py-2 rounded-lg font-semibold" onclick="showCartModal({{ order.id }})">View Cart</button>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+<!-- Modal -->
+<div id="cart-modal" class="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-60 hidden">
+    <div class="bg-slate-900 rounded-2xl shadow-2xl p-8 max-w-lg w-full relative">
+        <button onclick="closeCartModal()" class="absolute top-2 right-2 text-pink-400 hover:text-pink-200 text-2xl">&times;</button>
+        <h2 class="text-xl font-bold rose-accent mb-4">Order Cart</h2>
+        <div id="cart-modal-content" class="text-slate-200"></div>
+    </div>
+</div>
+<script>
+const orders = {{ orders|tojson }};
+function showCartModal(orderId) {
+    const order = orders.find(o => o.id === orderId);
+    let cart = [];
+    try { cart = JSON.parse(order.cart_json); } catch (e) {}
+    let html = '';
+    if (cart.length) {
+        html += '<ul class="space-y-2">';
+        cart.forEach(item => {
+            html += `<li class="border-b border-[#be185d22] pb-2 mb-2">
+                <div class="font-semibold">${item.name} <span class="text-pink-300">(SKU: ${item.sku})</span></div>
+                <div class="text-pink-300">Qty: ${item.qty || item.quantity}</div>
+                <div class="text-pink-300">Size: ${item.size || ''}</div>
+            </li>`;
+        });
+        html += '</ul>';
+    } else {
+        html = '<div class="text-pink-300">No cart data.</div>';
+    }
+    document.getElementById('cart-modal-content').innerHTML = html;
+    document.getElementById('cart-modal').classList.remove('hidden');
+}
+function closeCartModal() {
+    document.getElementById('cart-modal').classList.add('hidden');
+}
+</script>
+{% endblock %}

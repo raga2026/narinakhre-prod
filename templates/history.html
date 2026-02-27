@@ -1,0 +1,97 @@
+{% extends "base.html" %}
+{% block title %}Quote History - NariNakhre{% endblock %}
+{% block content %}
+<div class="container mx-auto py-8">
+    <h1 class="text-3xl font-extrabold rose-accent mb-6 tracking-wide drop-shadow-lg">Your Quote History</h1>
+    <div class="bg-slate-800/50 backdrop-blur-xl rounded-3xl shadow-xl p-8 border border-pink-500/20">
+        {% if quotes and quotes|length > 0 %}
+        <table class="w-full mb-6">
+            <thead>
+                <tr class="text-pink-400 text-left border-b border-pink-900/30">
+                    <th class="py-4 px-2">Date</th>
+                    <th class="py-4 px-2">Quote ID</th>
+                    <th class="py-4 px-2">Total Items</th>
+                    <th class="py-4 px-2">Total Price</th>
+                    <th class="py-4 px-2">Action</th>
+                </tr>
+            </thead>
+            <tbody class="text-slate-200">
+                {% for q in quotes %}
+                {% set cart = q['cart_json'] | safe | from_json %}
+                {% set total_items = cart|length %}
+                {% set total_price = cart | map(attribute='Fixed_Price') | sum %}
+                <tr class="border-b border-slate-700/50">
+                    <td class="py-4">{{ q['created_at'] }}</td>
+                    <td class="py-4">{{ q['id'] }}</td>
+                    <td class="py-4">{{ total_items }}</td>
+                    <td class="py-4">₹{{ total_price }}</td>
+                    <td class="py-4">
+                        <button class="rose-btn px-4 py-2 rounded-xl font-bold shadow-lg" onclick="downloadQuotePDF('{{ q['id'] }}')">Download PDF</button>
+                                            <button class="rose-btn px-4 py-2 rounded-xl font-bold shadow-lg" onclick="downloadQuotePDF('{{ q['id'] }}')" aria-label="Download PDF Copy for Quote {{ q['id'] }}">Download PDF Copy</button>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+        <div class="text-center py-20">
+            <svg width="64" height="64" fill="none" viewBox="0 0 24 24" stroke="#be185d" class="mx-auto mb-4 drop-shadow-lg">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 3h2l.4 2M7 13h10l4-8H5.4M7 13l-1.35 2.7A2 2 0 0 0 7.5 19h9a2 2 0 0 0 1.85-1.3L17 13M7 13V6a1 1 0 0 1 1-1h9a1 1 0 0 1 1 1v7" />
+            </svg>
+            <h2 class="text-2xl text-slate-400 mb-4">No quotes found.</h2>
+            <a href="/" class="rose-btn px-8 py-3 rounded-full font-bold">Start Browsing</a>
+        </div>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+<script>
+function downloadQuotePDF(quoteId) {
+    // Find quote row
+    const row = document.querySelector(`button[onclick="downloadQuotePDF('${quoteId}')"]`).closest('tr');
+    let cells = row.querySelectorAll('td');
+    let pdfDiv = document.createElement('div');
+    pdfDiv.style.background = '#fff';
+    pdfDiv.style.color = '#222';
+    pdfDiv.style.padding = '32px';
+    pdfDiv.innerHTML = `
+        <div style="text-align:center;margin-bottom:24px;">
+            <img src="/static/assets/logoquote.jpg" alt="Mohini Cosmetics Logo" style="height:64px;width:auto;margin-bottom:8px;">
+            <h1 style="color:#be185d;font-size:2em;font-weight:bold;margin-bottom:0;">Mohini Cosmetics</h1>
+            <div style="font-size:1em;color:#333;margin-bottom:2px;">GSTIN: 23JFGPS7650J1ZV</div>
+            <div style="font-size:1em;color:#333;margin-bottom:2px;">136, Dharhai Rd, Kotwali, Jabalpur, Madhya Pradesh 482001</div>
+            <div style="font-size:1em;color:#333;margin-bottom:2px;">Mob: +91 71572310, email: mohinicosmetics.india@gmail.com</div>
+            <div style="font-size:1em;color:#333;margin-bottom:12px;">website: narinakhre.com / wholesale.narinakhre.com</div>
+            <h2 style="color:#be185d;font-size:1.3em;font-weight:bold;margin-bottom:0;">Wholesale Quote</h2>
+        </div>
+        <table style="width:100%;border-collapse:collapse;margin-bottom:24px;">
+            <thead style="background:#be185d;color:#fff;">
+                <tr>
+                    <th style="padding:8px;border:1px solid #be185d;">Date</th>
+                    <th style="padding:8px;border:1px solid #be185d;">Quote ID</th>
+                    <th style="padding:8px;border:1px solid #be185d;">Total Items</th>
+                    <th style="padding:8px;border:1px solid #be185d;">Total Price</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td style="padding:8px;border:1px solid #be185d;">${cells[0].innerText}</td>
+                    <td style="padding:8px;border:1px solid #be185d;">${cells[1].innerText}</td>
+                    <td style="padding:8px;border:1px solid #be185d;">${cells[2].innerText}</td>
+                    <td style="padding:8px;border:1px solid #be185d;">${cells[3].innerText}</td>
+                </tr>
+            </tbody>
+        </table>
+    `;
+    document.body.appendChild(pdfDiv);
+    html2pdf().set({
+        margin: 0.5,
+        filename: `NariNakhre_Quote_${quoteId}.pdf`,
+        html2canvas: { scale: 2 },
+        jsPDF: { orientation: 'portrait' }
+    }).from(pdfDiv).save().then(() => {
+        document.body.removeChild(pdfDiv);
+    });
+}
+</script>

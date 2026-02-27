@@ -1,0 +1,162 @@
+{% extends "base.html" %}
+{% block title %}NariNakhre Wholesale - Product Index{% endblock %}
+{% block content %}
+
+<h1 class="text-3xl font-extrabold rose-accent mb-8 text-center tracking-wide drop-shadow-lg">NariNakhre Wholesale Products</h1>
+
+{% if not grouped_products or grouped_products|length == 0 %}
+<div class="bg-slate-900 text-center py-24 rounded-2xl shadow-xl">
+    <h2 class="text-2xl rose-accent font-bold mb-4">Welcome to NariNakhre!</h2>
+    <p class="text-lg text-slate-300 mb-6">Our wholesale product catalog will appear here soon. Please check back later or contact us for inquiries.</p>
+</div>
+{% else %}
+    {% for category, products in grouped_products.items() %}
+    <section class="mb-12 category-section" data-category="{{ category }}">
+        <div class="flex items-center justify-between mb-4">
+            <h2 class="text-2xl font-bold rose-accent">{{ category }} <span>(Count: {{ products|length }})</span></h2>
+        </div>
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
+            {% for product in products %}
+            <div class="product-card rose-bg rounded-2xl shadow-lg border border-[#be185d55] p-4 flex flex-col items-center" 
+                 data-category="{{ product.category }}" data-name="{{ product.name|lower }}" data-sku="{{ product.sku|lower }}">
+                <a href="{{ url_for('product_detail', sku=product.sku) }}" class="block w-full text-center">
+                    <h2 class="text-xl font-bold rose-accent mb-2 hover:underline">{{ product.name }}</h2>
+                    <img src="{{ url_for('static', filename=(product.images|default(['assets/coming-soon.jpg']))[0]) }}" alt="{{ product.name }}"
+                        src="{{ url_for('static', filename='assets/products/thumbs/' + (product.images|default(['assets/coming-soon.jpg']))[0].split('/')[-1]) }}"
+                        class="rounded-xl shadow-lg border border-[#be185d55] mb-2 w-full h-48 object-cover hover:scale-105 transition" />
+                </a>
+                {% if product.sizes %}
+                <div class="w-full mb-2">
+                    <label class="block text-pink-300 mb-1" for="size-{{ product.sku }}">Size</label>
+                    <select id="size-{{ product.sku }}" class="w-full px-3 py-2 border border-[#be185d] rounded-lg bg-[#1e293b] text-pink-100">
+                        {% for size in product.sizes.split(',') %}
+                        <option value="{{ size|trim }}">{{ size|trim }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                {% endif %}
+                <div class="w-full mb-4">
+                    <label class="block text-pink-300 mb-1" for="qty-tier-{{ product.sku }}">Wholesale Quantity</label>
+                    <select id="qty-tier-{{ product.sku }}" class="w-full px-3 py-2 border border-[#be185d] rounded-lg bg-[#1e293b] text-pink-100">
+                        {% for tier in product.price_tiers %}
+                        <option value="{{ tier.price }}" data-qty="{{ tier.qty }}">
+                            {{ tier.qty }} Unit (@ ₹{{ tier.price|round(2) }})
+                        </option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="quote-action w-full" id="action-{{ product.sku }}">
+                    <button class="rose-btn w-full py-2 rounded-xl font-bold text-lg shadow-lg transition"
+                            onclick="initAddToCart('{{ product.sku }}', '{{ product.name }}')">
+                        Add to Quote
+                    </button>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+    </section>
+    {% endfor %}
+{% endif %}
+
+<script>
+// Logic to initialize the Add to Quote process
+function initAddToCart(sku, name) {
+    const qtySelect = document.getElementById(`qty-tier-${sku}`);
+    const sizeSelect = document.getElementById(`size-${sku}`);
+    const selectedOption = qtySelect.options[qtySelect.selectedIndex];
+    
+    const price = parseFloat(qtySelect.value);
+    const qtyPerSet = parseInt(selectedOption.getAttribute('data-qty'));
+    const size = sizeSelect ? sizeSelect.value : 'N/A';
+
+    // LOCK: Prevent changing selection
+    qtySelect.disabled = true;
+    if (sizeSelect) sizeSelect.disabled = true;
+
+    // Save to LocalStorage
+    let cart = JSON.parse(localStorage.getItem('cart') || '[]');
+    cart.push({ 
+        sku: sku, 
+        name: name, 
+        Fixed_Qty: qtyPerSet, 
+        Fixed_Price: price, 
+        size: size, 
+        Sets_Count: 1 
+    });
+    localStorage.setItem('cart', JSON.stringify(cart));
+
+    renderCounterUI(sku, 1);
+    updateCartBadge(); // Global function in base.html
+}
+
+function renderCounterUI(sku, count) {
+    const actionDiv = document.getElementById(`action-${sku}`);
+    actionDiv.innerHTML = `
+        <div class="flex items-center justify-between bg-slate-800 border border-pink-500 rounded-xl p-1 glow-pink">
+            <button onclick="updateSets('${sku}', -1)" class="px-4 py-1 text-pink-400 font-bold text-2xl">-</button>
+            <span class="text-white font-bold text-lg">${count}</span>
+            <button onclick="updateSets('${sku}', 1)" class="px-4 py-1 text-pink-400 font-bold text-2xl">+</button>
+        </div>`;
+}
+
+function updateSets(sku, delta) {
+    let cart = JSON.parse(localStorage.getItem('cart') || '[]');
+    const idx = cart.findIndex(item => item.sku === sku);
+
+    if (idx > -1) {
+        cart[idx].Sets_Count += delta;
+        if (cart[idx].Sets_Count <= 0) {
+            cart.splice(idx, 1);
+            localStorage.setItem('cart', JSON.stringify(cart));
+            location.reload(); // Re-enable dropdowns by refreshing
+        } else {
+            localStorage.setItem('cart', JSON.stringify(cart));
+            renderCounterUI(sku, cart[idx].Sets_Count);
+            updateCartBadge();
+        }
+    }
+}
+</script>
+
+<style>
+.glow-pink { box-shadow: 0 0 10px rgba(219, 39, 119, 0.4); }
+</style>
+
+<button id="calculate-quote-btn" aria-label="Calculate total for 0 items and proceed to checkout" class="fixed bottom-8 right-8 rose-btn glow-pink text-white font-extrabold text-lg px-8 py-4 rounded-2xl shadow-xl border-2 border-pink-500 focus:outline-none focus:ring-4 focus:ring-pink-400 z-50 transition" style="display:none;">
+    Calculate & Review Quote
+</button>
+
+<script>
+function getCounterItems() {
+    let cart = JSON.parse(localStorage.getItem('cart') || '[]');
+    return cart.filter(item => item.Sets_Count && item.Sets_Count > 0);
+}
+
+function updateCalculateBtn() {
+    const btn = document.getElementById('calculate-quote-btn');
+    const items = getCounterItems();
+    if (items.length > 0) {
+        btn.style.display = 'block';
+        btn.setAttribute('aria-label', `Calculate total for ${items.length} items and proceed to checkout`);
+    } else {
+        btn.style.display = 'none';
+    }
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+    updateCalculateBtn();
+    if (document.getElementById('calculate-quote-btn')) {
+        document.getElementById('calculate-quote-btn').addEventListener('click', function() {
+            const items = getCounterItems();
+            let totalQty = items.reduce((sum, item) => sum + (item.Sets_Count * item.Fixed_Qty), 0);
+            let totalPrice = items.reduce((sum, item) => sum + (item.Sets_Count * item.Fixed_Qty * item.Fixed_Price), 0);
+            localStorage.setItem('cart_summary', JSON.stringify({ totalQty, totalPrice }));
+            window.location.href = '/cart';
+        });
+    }
+});
+
+window.addEventListener('storage', updateCalculateBtn);
+</script>
+</style>
+{% endblock %}

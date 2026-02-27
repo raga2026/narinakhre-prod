@@ -1,0 +1,140 @@
+{% extends "base.html" %}
+{% block title %}{{ product.name }} - NariNakhre{% endblock %}
+{% block content %}
+<div class="min-h-screen bg-slate-900 text-slate-200 p-4 md:p-8">
+    <div class="max-w-6xl mx-auto bg-slate-800/40 backdrop-blur-xl border border-pink-500/20 rounded-3xl p-6 md:p-10 shadow-2xl">
+        
+        <a href="/" class="inline-flex items-center text-pink-400 hover:text-pink-300 mb-8 transition-colors" aria-label="Back to Product Gallery">
+            <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h18"/></svg>
+            Back to Gallery
+        </a>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-12">
+            <div class="space-y-6">
+                <div class="relative group">
+                    <img id="main-product-img" src="{{ url_for('static', filename=images[0]) }}" 
+                         alt="{{ product.name }} main image" 
+                         class="w-full h-auto rounded-2xl border border-pink-500/30 shadow-lg glow-pink object-cover transition duration-500 group-hover:scale-[1.02]">
+                </div>
+                <div class="grid grid-cols-4 gap-4" role="list" aria-label="Product thumbnails">
+                    {% for img in images %}
+                    <button onclick="document.getElementById('main-product-img').src=this.querySelector('img').src" 
+                            class="focus:outline-none focus:ring-2 focus:ring-pink-500 rounded-xl overflow-hidden border border-pink-500/10 hover:border-pink-500/50 transition"
+                            aria-label="View thumbnail {{ loop.index }}">
+                        <img src="{{ url_for('static', filename=img) }}" class="w-full h-20 object-cover" alt="Thumbnail">
+                    </button>
+                    {% endfor %}
+                </div>
+            </div>
+
+            <div class="flex flex-col space-y-6">
+                <div>
+                    <h1 class="text-4xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-pink-400 to-rose-600 mb-2">{{ product.name }}</h1>
+                    <p class="text-slate-400 font-mono tracking-widest text-sm uppercase">SKU: {{ product.sku }}</p>
+                </div>
+
+                <div class="bg-slate-900/50 p-6 rounded-2xl border border-pink-500/10">
+                    <p class="text-slate-300 leading-relaxed">{{ product.description }}</p>
+                </div>
+
+                <div class="space-y-4">
+                    <div>
+                        <label class="block text-pink-400 font-semibold mb-2" for="size-select">Select Size</label>
+                        {% if product.sizes %}
+                        <select id="size-select" class="w-full bg-slate-900 border border-pink-500/30 rounded-xl p-3 text-white focus:ring-2 focus:ring-pink-500 transition">
+                            {% for size in product.sizes.split(',') %}
+                            <option value="{{ size|trim }}">{{ size|trim }}</option>
+                            {% endfor %}
+                        </select>
+                        {% else %}
+                        <input type="text" class="w-full bg-slate-900 border border-pink-500/30 rounded-xl p-3 text-white" value="N/A" readonly aria-label="No size options">
+                        {% endif %}
+                    </div>
+
+                    <div>
+                        <label class="block text-pink-400 font-semibold mb-2" for="qty-select">Wholesale Quantity Tier</label>
+                        <select id="qty-select" class="w-full bg-slate-900 border border-pink-500/30 rounded-xl p-3 text-white focus:ring-2 focus:ring-pink-500 transition">
+                            {% for tier in price_tiers %}
+                            <option value="{{ tier.price }}" data-qty="{{ tier.qty }}">
+                                {{ tier.qty }} Units (@ ₹{{ tier.price|round(2) }})
+                            </option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                </div>
+
+                <div id="action-area-detail" class="pt-4">
+                    <button onclick="initDetailAddToCart('{{ product.sku }}', '{{ product.name }}')" 
+                            class="rose-btn w-full py-4 rounded-2xl font-bold text-xl shadow-lg glow-pink transform active:scale-95 transition"
+                            aria-label="Add {{ product.name }} to Wholesale Quote">
+                        Add to Quote
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+function initDetailAddToCart(sku, name) {
+    const qtyEl = document.getElementById('qty-select');
+    const sizeEl = document.getElementById('size-select');
+    const selectedOption = qtyEl.options[qtyEl.selectedIndex];
+    
+    const price = parseFloat(qtyEl.value);
+    const qtyPerSet = parseInt(selectedOption.getAttribute('data-qty'));
+    const size = sizeEl.value;
+
+    // LOCK: Prevent changing selection
+    qtyEl.disabled = true;
+    sizeEl.disabled = true;
+    qtyEl.setAttribute('aria-disabled', 'true');
+    sizeEl.setAttribute('aria-disabled', 'true');
+
+    // Save to LocalStorage
+    let cart = JSON.parse(localStorage.getItem('cart') || '[]');
+    cart.push({ sku, name, Fixed_Qty: qtyPerSet, Fixed_Price: price, size, Sets_Count: 1 });
+    localStorage.setItem('cart', JSON.stringify(cart));
+
+    renderDetailCounter(sku, 1, name);
+    if (typeof updateCartCounter === "function") updateCartCounter();
+}
+
+function renderDetailCounter(sku, count, name) {
+    const container = document.getElementById('action-area-detail');
+    container.innerHTML = `
+        <div class="flex items-center justify-between bg-slate-900 border border-pink-500 rounded-2xl p-2 glow-pink" role="group" aria-label="Quantity controls">
+            <button onclick="updateDetailSets('${sku}', -1, '${name}')" 
+                    class="w-12 h-12 flex items-center justify-center text-pink-400 font-bold text-3xl hover:bg-pink-500/10 rounded-xl transition"
+                    aria-label="Decrease quantity">-</button>
+            <span class="text-white font-extrabold text-2xl" aria-live="polite">${count} Set(s)</span>
+            <button onclick="updateDetailSets('${sku}', 1, '${name}')" 
+                    class="w-12 h-12 flex items-center justify-center text-pink-400 font-bold text-3xl hover:bg-pink-500/10 rounded-xl transition"
+                    aria-label="Increase quantity">+</button>
+        </div>`;
+}
+
+function updateDetailSets(sku, delta, name) {
+    let cart = JSON.parse(localStorage.getItem('cart') || '[]');
+    const idx = cart.findIndex(item => item.sku === sku);
+    
+    if (idx > -1) {
+        cart[idx].Sets_Count += delta;
+        if (cart[idx].Sets_Count <= 0) {
+            cart.splice(idx, 1);
+            localStorage.setItem('cart', JSON.stringify(cart));
+            location.reload(); // Unlocks the dropdowns
+        } else {
+            localStorage.setItem('cart', JSON.stringify(cart));
+            renderDetailCounter(sku, cart[idx].Sets_Count, name);
+        }
+        if (typeof updateCartCounter === "function") updateCartCounter();
+    }
+}
+</script>
+
+<style>
+.glow-pink { box-shadow: 0 0 20px rgba(219, 39, 119, 0.2); }
+.rose-btn { background: linear-gradient(45deg, #be185d, #e11d48); color: white; }
+</style>
+{% endblock %}

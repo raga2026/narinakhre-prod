@@ -1,0 +1,276 @@
+{% extends "base.html" %}
+{% block title %}Your Cart - NariNakhre{% endblock %}
+{% block content %}
+<div class="container mx-auto py-8">
+    <h1 class="text-3xl font-extrabold rose-accent mb-6 tracking-wide drop-shadow-lg">Wholesale Quote Summary</h1>
+    
+    <div class="bg-slate-800/50 backdrop-blur-xl rounded-3xl shadow-xl p-8 border border-pink-500/20">
+        <div id="cart-container">
+            <table class="w-full mb-6">
+                <thead>
+                    <tr class="text-pink-400 text-left border-b border-pink-900/30">
+                        <th class="py-4 px-2"><input type="checkbox" id="select-all-cart"></th>
+                        <th class="py-4 px-2">Item Name</th>
+                        <th class="py-4 px-2">Tier Choice</th>
+                        <th class="py-4 px-2">Total Units</th>
+                        <th class="py-4 px-2 text-right">Final Price</th>
+                    </tr>
+                </thead>
+                <tbody id="cart-items-list" class="text-slate-200">
+                </tbody>
+            </table>
+
+            <div class="flex justify-end text-2xl font-bold rose-accent border-t border-pink-900/30 pt-4">
+                Grand Total: <span id="grand-total-display" class="ml-4 text-white">₹0.00</span>
+                <button id="delete-selected-btn" class="rose-btn ml-8 px-6 py-2 rounded-xl font-bold shadow-lg bg-red-600 hover:bg-red-700" aria-label="Delete Selected Items">Delete Selected</button>
+                <button id="download-pdf-btn" class="rose-btn ml-4 px-6 py-2 rounded-xl font-bold shadow-lg glow-pink" aria-label="Download PDF Copy">Download PDF Copy</button>
+            </div>
+
+            <form id="quote-submission-form" class="mt-12 space-y-4 max-w-lg ml-auto">
+                <h2 class="text-xl font-bold text-pink-400">Finalize Your Inquiry</h2>
+                <input type="text" id="cust-name" placeholder="Full Name" required class="w-full bg-slate-900 border border-pink-500/30 rounded-xl p-3 text-white">
+                <input type="text" id="cust-whatsapp" placeholder="WhatsApp Number (e.g. +91 9876543210)" required pattern="[+0-9\s-]{10,18}" maxlength="18" class="w-full bg-slate-900 border border-pink-500/30 rounded-xl p-3 text-white" inputmode="tel" oninput="this.value=this.value.replace(/[^+\d\s-]/g,'').slice(0,18)">
+                <input type="email" id="cust-email" placeholder="Email Address" required class="w-full bg-slate-900 border border-pink-500/30 rounded-xl p-3 text-white">
+                <textarea id="cust-address" placeholder="Delivery Address" required class="w-full bg-slate-900 border border-pink-500/30 rounded-xl p-3 text-white"></textarea>
+                <div id="password-section">
+                    <label for="cust-password" id="password-label" class="block text-white font-semibold mb-1">Set a Password (optional)</label>
+                    <input type="password" id="cust-password" aria-labelledby="password-label" placeholder="Set a Password (min 6 chars)" minlength="6" class="w-full bg-slate-900 border border-pink-500/30 rounded-xl p-3 text-white" aria-describedby="password-desc">
+                    <span id="password-desc" class="sr-only">If you want to create an account for order history, set a password. Otherwise, leave blank.</span>
+                </div>
+                <div class="mt-2">
+                    <a href="#" id="show-login-link" class="text-pink-400 underline">Returning User? Log in to see history</a>
+                </div>
+                <div id="login-section" class="hidden mt-2">
+                    <label for="login-password" id="login-password-label" class="block text-white font-semibold mb-1">Password</label>
+                    <input type="password" id="login-password" aria-labelledby="login-password-label" placeholder="Enter your password to view history" minlength="6" class="w-full bg-slate-900 border border-pink-500/30 rounded-xl p-3 text-white" aria-describedby="login-password-desc">
+                    <span id="login-password-desc" class="sr-only">Enter your password to view your previous quotes and order history.</span>
+                </div>
+                <button type="submit" class="rose-btn w-full py-4 rounded-2xl font-bold text-xl shadow-lg glow-pink">
+                    Submit Wholesale Quote
+                </button>
+            </form>
+        </div>
+
+        <div id="empty-state" class="hidden text-center py-20">
+            <svg width="64" height="64" fill="none" viewBox="0 0 24 24" stroke="#be185d" class="mx-auto mb-4 drop-shadow-lg">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 3h2l.4 2M7 13h10l4-8H5.4M7 13l-1.35 2.7A2 2 0 0 0 7.5 19h9a2 2 0 0 0 1.85-1.3L17 13M7 13V6a1 1 0 0 1 1-1h9a1 1 0 0 1 1 1v7" />
+            </svg>
+            <h2 class="text-2xl text-slate-400 mb-4">Your cart is currently empty.</h2>
+            <a href="/" class="rose-btn px-8 py-3 rounded-full font-bold">Start Browsing</a>
+        </div>
+    </div>
+</div>
+
+<script>
+function renderCart() {
+    let cart = JSON.parse(localStorage.getItem('cart') || '[]');
+    cart = cart.filter(item => item.Sets_Count && item.Sets_Count > 0);
+    const list = document.getElementById('cart-items-list');
+    const grandTotalEl = document.getElementById('grand-total-display');
+    const container = document.getElementById('cart-container');
+    const emptyState = document.getElementById('empty-state');
+
+    if (cart.length === 0) {
+        container.classList.add('hidden');
+        emptyState.classList.remove('hidden');
+        return;
+    }
+
+    let total = 0;
+    list.innerHTML = cart.map((item, idx) => {
+        const subtotal = item.Fixed_Price * item.Fixed_Qty * item.Sets_Count;
+        total += subtotal;
+        return `
+            <tr class="border-b border-slate-700/50">
+                <td class="py-6 text-center">
+                    <input type="checkbox" class="cart-item-checkbox" data-idx="${idx}">
+                </td>
+                <td class="py-6 flex items-center gap-4">
+                    <img src="/static/assets/products/${item.sku}_1.jpg" class="w-16 h-16 rounded-lg object-cover border border-pink-500/20">
+                    <div>
+                        <p class="font-bold text-lg">${item.name}</p>
+                        <p class="text-xs text-pink-400 uppercase tracking-widest">${item.sku} | Size: ${item.size}</p>
+                    </div>
+                </td>
+                <td class="py-6">${item.Fixed_Qty} Units @ ₹${item.Fixed_Price.toFixed(2)}<br><span class="text-xs text-slate-400">Total Units: ${item.Fixed_Qty * item.Sets_Count}</span></td>
+                <td class="py-6 font-bold text-white">${item.Sets_Count} Set(s)</td>
+                <td class="py-6 text-right font-bold text-pink-500">₹${subtotal.toLocaleString()}</td>
+            </tr>`;
+    }).join('');
+
+    grandTotalEl.textContent = `₹${total.toLocaleString()}`;
+    // Accessible update for JAWS
+    const grandTotalRegion = document.getElementById('grand-total-display');
+    grandTotalRegion.setAttribute('aria-live', 'polite');
+    grandTotalRegion.textContent = `₹${total.toLocaleString()}`;
+}
+
+// Handle final submission
+document.getElementById('quote-submission-form').addEventListener('submit', function(e) {
+    e.preventDefault();
+    const cart = JSON.parse(localStorage.getItem('cart') || '[]');
+    let whatsapp = document.getElementById('cust-whatsapp').value.replace(/\s|-/g, '');
+    const password = document.getElementById('cust-password').value;
+    const email = document.getElementById('cust-email') ? document.getElementById('cust-email').value : '';
+    // Password is optional for new users
+    if (password && password.length > 0 && password.length < 6) {
+        alert('If you set a password, it must be at least 6 characters.');
+        return;
+    }
+    const payload = {
+        name: document.getElementById('cust-name').value,
+        whatsapp: whatsapp,
+        address: document.getElementById('cust-address').value,
+        password: password,
+        email: email,
+        cart: cart
+    };
+    fetch('/submit-quote', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+    })
+    .then(res => res.json())
+    // Show/hide password field for returning users
+    document.getElementById('show-login-link').addEventListener('click', function(e) {
+        e.preventDefault();
+        document.getElementById('login-section').classList.toggle('hidden');
+        document.getElementById('cust-password').focus();
+    });
+    .then(data => {
+        if (data.success) {
+            localStorage.removeItem('cart');
+            document.getElementById('cart-container').innerHTML = `
+                <div class="text-center py-12">
+                    <h2 class="text-2xl text-pink-400 font-bold mb-4">Your quotation was sent successfully!</h2>
+                    <p class="text-lg text-slate-200 mb-6">Contact us directly for faster response. Your cart has been emptied.</p>
+                    <div class="mb-6 text-left max-w-md mx-auto bg-slate-900/60 rounded-xl p-6">
+                        <div><span class="font-bold text-pink-400">Name:</span> ${data.name}</div>
+                        <div><span class="font-bold text-pink-400">WhatsApp:</span> ${data.whatsapp}</div>
+                        <div><span class="font-bold text-pink-400">Email:</span> ${data.email || 'N/A'}</div>
+                        <div><span class="font-bold text-pink-400">Address:</span> ${data.address}</div>
+                        <div><span class="font-bold text-pink-400">Total Amount:</span> ₹${data.total_amount.toLocaleString()}</div>
+                    </div>
+                    <button id="download-pdf-after-submit" class="rose-btn px-6 py-3 rounded-xl font-bold shadow-lg glow-pink mt-4">Download PDF Copy</button>
+                </div>
+            `;
+            if (typeof updateCartCounter === "function") updateCartCounter();
+            document.getElementById('download-pdf-after-submit').addEventListener('click', function() {
+                let pdfDiv = document.createElement('div');
+                pdfDiv.style.background = '#fff';
+                pdfDiv.style.color = '#222';
+                pdfDiv.style.padding = '32px';
+                pdfDiv.innerHTML = `
+                    <div style="text-align:center;margin-bottom:24px;">
+                        <img src="/static/assets/logoquote.jpg" alt="Mohini Cosmetics Logo" style="height:64px;width:auto;margin-bottom:8px;">
+                        <h1 style="color:#be185d;font-size:2em;font-weight:bold;margin-bottom:0;">Mohini Cosmetics</h1>
+                        <div style="font-size:1em;color:#333;margin-bottom:2px;">GSTIN: 23JFGPS7650J1ZV</div>
+                        <div style="font-size:1em;color:#333;margin-bottom:2px;">136, Dharhai Rd, Kotwali, Jabalpur, Madhya Pradesh 482001</div>
+                        <div style="font-size:1em;color:#333;margin-bottom:2px;">Mob: +91 71572310, email: mohinicosmetics.india@gmail.com</div>
+                        <div style="font-size:1em;color:#333;margin-bottom:12px;">website: narinakhre.com / wholesale.narinakhre.com</div>
+                        <h2 style="color:#be185d;font-size:1.3em;font-weight:bold;margin-bottom:0;">Wholesale Quote</h2>
+                    </div>
+                    <div style="margin-bottom:16px;text-align:left;">
+                        <div><b>Name:</b> ${data.name}</div>
+                        <div><b>WhatsApp:</b> ${data.whatsapp}</div>
+                        <div><b>Email:</b> ${data.email || 'N/A'}</div>
+                        <div><b>Address:</b> ${data.address}</div>
+                        <div><b>Total Amount:</b> ₹${data.total_amount.toLocaleString()}</div>
+                    </div>
+                `;
+                document.body.appendChild(pdfDiv);
+                html2pdf().set({
+                    margin: 0.5,
+                    filename: 'NariNakhre_Quote.pdf',
+                    html2canvas: { scale: 2 },
+                    jsPDF: { orientation: 'portrait' }
+                }).from(pdfDiv).save().then(() => {
+                    document.body.removeChild(pdfDiv);
+                });
+            });
+        }
+    });
+});
+
+document.addEventListener('DOMContentLoaded', renderCart);
+// Delete selected items logic
+document.addEventListener('DOMContentLoaded', function() {
+    const deleteBtn = document.getElementById('delete-selected-btn');
+    const selectAll = document.getElementById('select-all-cart');
+    if (deleteBtn) {
+        deleteBtn.addEventListener('click', function(e) {
+            e.preventDefault();
+            let cart = JSON.parse(localStorage.getItem('cart') || '[]');
+            const checkboxes = document.querySelectorAll('.cart-item-checkbox:checked');
+            const idxsToDelete = Array.from(checkboxes).map(cb => parseInt(cb.getAttribute('data-idx')));
+            // Remove items in reverse order to avoid index shift
+            idxsToDelete.sort((a,b) => b-a).forEach(idx => cart.splice(idx, 1));
+            localStorage.setItem('cart', JSON.stringify(cart));
+            renderCart();
+            if (typeof updateCartCounter === "function") updateCartCounter();
+        });
+    }
+    if (selectAll) {
+        selectAll.addEventListener('change', function() {
+            const checkboxes = document.querySelectorAll('.cart-item-checkbox');
+            for (const cb of checkboxes) {
+                cb.checked = selectAll.checked;
+            }
+        });
+    }
+});
+// PDF generation logic
+document.addEventListener('DOMContentLoaded', function() {
+    if (document.getElementById('download-pdf-btn')) {
+        document.getElementById('download-pdf-btn').addEventListener('click', function() {
+            let cart = JSON.parse(localStorage.getItem('cart') || '[]');
+            let pdfDiv = document.createElement('div');
+            pdfDiv.style.background = '#fff';
+            pdfDiv.style.color = '#222';
+            pdfDiv.style.padding = '32px';
+            pdfDiv.innerHTML = `
+                <div style="text-align:center;margin-bottom:24px;">
+                    <img src="/static/assets/logoquote.jpg" alt="Mohini Cosmetics Logo" style="height:64px;width:auto;margin-bottom:8px;">
+                    <h1 style="color:#be185d;font-size:2em;font-weight:bold;margin-bottom:0;">Mohini Cosmetics</h1>
+                    <div style="font-size:1em;color:#333;margin-bottom:2px;">GSTIN: 23JFGPS7650J1ZV</div>
+                    <div style="font-size:1em;color:#333;margin-bottom:2px;">136, Dharhai Rd, Kotwali, Jabalpur, Madhya Pradesh 482001</div>
+                    <div style="font-size:1em;color:#333;margin-bottom:2px;">Mob: +91 71572310, email: mohinicosmetics.india@gmail.com</div>
+                    <div style="font-size:1em;color:#333;margin-bottom:12px;">website: narinakhre.com / wholesale.narinakhre.com</div>
+                    <h2 style="color:#be185d;font-size:1.3em;font-weight:bold;margin-bottom:0;">Wholesale Quote</h2>
+                </div>
+                <table style="width:100%;border-collapse:collapse;margin-bottom:24px;">
+                    <thead style="background:#be185d;color:#fff;">
+                        <tr>
+                            <th style="padding:8px;border:1px solid #be185d;">Item Name</th>
+                            <th style="padding:8px;border:1px solid #be185d;">Tier Choice</th>
+                            <th style="padding:8px;border:1px solid #be185d;">Total Units</th>
+                            <th style="padding:8px;border:1px solid #be185d;">Final Price</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${cart.map(item => `
+                            <tr>
+                                <td style="padding:8px;border:1px solid #be185d;">${item.name}</td>
+                                <td style="padding:8px;border:1px solid #be185d;">${item.Fixed_Qty} Units @ ₹${item.Fixed_Price.toFixed(2)}</td>
+                                <td style="padding:8px;border:1px solid #be185d;">${item.Fixed_Qty * item.Sets_Count}</td>
+                                <td style="padding:8px;border:1px solid #be185d;">₹${(item.Fixed_Price * item.Fixed_Qty * item.Sets_Count).toLocaleString()}</td>
+                            </tr>
+                        `).join('')}
+                    </tbody>
+                </table>
+                <div style="font-size:1.2em;font-weight:bold;margin-top:16px;">Grand Total: ₹${cart.reduce((sum, item) => sum + (item.Fixed_Price * item.Fixed_Qty * item.Sets_Count), 0).toLocaleString()}</div>
+            `;
+            document.body.appendChild(pdfDiv);
+            html2pdf().set({
+                margin: 0.5,
+                filename: 'NariNakhre_Quote.pdf',
+                html2canvas: { scale: 2 },
+                jsPDF: { orientation: 'portrait' }
+            }).from(pdfDiv).save().then(() => {
+                document.body.removeChild(pdfDiv);
+            });
+        });
+    }
+});
+</script>"http://127.0.0.1:5000/" when i 
+{% endblock %}
