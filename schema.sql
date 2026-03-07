@@ -54,13 +54,14 @@ CREATE TABLE IF NOT EXISTS users (
     password TEXT
 );
 
+
 CREATE TABLE IF NOT EXISTS quotes (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    customer_name TEXT NOT NULL,
+    request_id TEXT NOT NULL,
+    name TEXT NOT NULL,
     whatsapp TEXT NOT NULL,
     email TEXT,
-    address TEXT,
-    total_amount REAL NOT NULL,
-    cart_json TEXT NOT NULL,
+    items_json TEXT NOT NULL,
+    total_amount REAL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );

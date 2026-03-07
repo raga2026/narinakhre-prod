@@ -1,128 +1,143 @@
 {% extends "base.html" %}
-{% block title %}Checkout - NariNakhre{% endblock %}
+{% block title %}Your Quote Cart{% endblock %}
 {% block content %}
-<h1 class="text-3xl font-extrabold rose-accent mb-8 text-center tracking-wide drop-shadow-lg">Checkout Summary</h1>
-<div class="overflow-x-auto">
-    <table class="w-full text-left rounded-2xl shadow-lg bg-slate-900/60">
-        <thead class="bg-slate-900 text-slate-200">
-            <tr>
-                <th class="py-3 px-4">Image</th>
-                <th class="py-3 px-4">Name</th>
-                <th class="py-3 px-4">SKU</th>
-                <th class="py-3 px-4">Size</th>
-                <th class="py-3 px-4">Quantity</th>
-                <th class="py-3 px-4">Wholesale Price</th>
-                <th class="py-3 px-4">Subtotal</th>
-            </tr>
-        </thead>
-        <tbody id="cart-summary-body" class="bg-slate-800/50 text-slate-200">
-            <!-- JS will populate rows -->
-        </tbody>
-    </table>
-</div>
-<div class="mt-8 flex flex-col md:flex-row justify-end gap-4">
-    <div class="text-2xl font-bold rose-accent">Tentative Grand Total: <span id="grand-total">₹0.00</span></div>
-    <button onclick="downloadPDF()" class="rose-btn px-6 py-3 rounded-2xl font-bold text-lg shadow hover:shadow-xl transition glow-pink">Download PDF Quote</button>
-    <a href="/contact" class="rose-btn px-6 py-3 rounded-2xl font-bold text-lg shadow hover:shadow-xl transition">Proceed to Contact</a>
-</div>
-
-<!-- Hidden PDF Template -->
-<div id="pdf-quote" class="hidden" style="background:#fff;color:#222;padding:32px 24px;max-width:700px;margin:auto;font-family:sans-serif;">
-    <div style="text-align:center;margin-bottom:24px;">
-        <img src="/static/assets/logo.png" alt="NariNakhre Logo" style="height:60px;margin-bottom:8px;">
-        <h2 style="font-size:2rem;font-weight:800;color:#be185d;margin:0;">Wholesale Inquiry Summary</h2>
-        <div style="color:#888;font-size:1rem;">Date: <span id="pdf-date"></span> | Ref: <span id="pdf-ref"></span></div>
-    </div>
-    <table style="width:100%;border-collapse:collapse;margin-bottom:24px;">
-        <thead>
-            <tr style="background:#f3f4f6;color:#be185d;">
-                <th style="padding:8px 6px;border:1px solid #eee;">Name</th>
-                <th style="padding:8px 6px;border:1px solid #eee;">SKU</th>
-                <th style="padding:8px 6px;border:1px solid #eee;">Size</th>
-                <th style="padding:8px 6px;border:1px solid #eee;">Qty</th>
-                <th style="padding:8px 6px;border:1px solid #eee;">Unit Price</th>
-                <th style="padding:8px 6px;border:1px solid #eee;">Subtotal</th>
-            </tr>
-        </thead>
-        <tbody id="pdf-cart-body"></tbody>
-    </table>
-    <div style="text-align:right;font-size:1.2rem;font-weight:700;color:#be185d;">Tentative Grand Total: ₹<span id="pdf-grand-total"></span></div>
+<div class="max-w-4xl mx-auto">
+  <h1 class="text-3xl font-extrabold rose-accent mb-8 text-center tracking-wide drop-shadow-lg">Your Quote Cart</h1>
+  <div class="flex justify-center gap-4 mb-8">
+    <button id="clear-quote-btn" class="rose-btn py-2 px-8 rounded-2xl font-bold text-lg transition bg-rose-600 text-white hover:bg-rose-700 shadow-xl">Clear Quote</button>
+    <a href="/" class="py-2 px-8 rounded-2xl font-bold text-lg bg-slate-800 text-gray-300 hover:bg-slate-700 transition shadow-xl">Continue Shopping</a>
+  </div>
+  <div id="quote-cart-container"></div>
 </div>
 
 <script>
-const cart = JSON.parse(localStorage.getItem('cart') || '[]');
-let orderId = localStorage.getItem('order_id') || '';
-function getWholesalePrice(sku, qty) {
-    const tiers = window.priceTiers && window.priceTiers[sku] ? window.priceTiers[sku] : [];
-    let price = tiers.length ? tiers[0].price : 0;
-    for (let i = 0; i < tiers.length; i++) {
-        if (qty >= tiers[i].min_qty) price = tiers[i].price;
-    }
-    return price;
+document.getElementById('clear-quote-btn').onclick = function() {
+  if(confirm("Are you sure you want to clear your quote?")) {
+    localStorage.removeItem('quoteCart');
+    renderCheckoutCart();
+  }
+};
+
+function getQuoteCart() {
+  try {
+    return JSON.parse(localStorage.getItem('quoteCart') || '{}');
+  } catch { return {}; }
 }
-function renderCartSummary() {
-    const tbody = document.getElementById('cart-summary-body');
-    tbody.innerHTML = '';
-    let grandTotal = 0;
-    cart.forEach(item => {
-        const price = getWholesalePrice(item.sku, item.quantity);
-        const subtotal = price * item.quantity;
-        grandTotal += subtotal;
-        const row = `<tr>
-            <td class="py-2 px-4"><img src="${item.thumbnail}" alt="${item.sku}" class="w-16 h-16 object-cover rounded-xl border border-[#be185d55]"></td>
-            <td class="py-2 px-4">${item.name}</td>
-            <td class="py-2 px-4">${item.sku}</td>
-            <td class="py-2 px-4">${item.size}</td>
-            <td class="py-2 px-4">${item.quantity}</td>
-            <td class="py-2 px-4">₹${price.toFixed(2)}</td>
-            <td class="py-2 px-4">₹${subtotal.toFixed(2)}</td>
-        </tr>`;
-        tbody.insertAdjacentHTML('beforeend', row);
+
+function renderCheckoutCart() {
+  const cartObj = getQuoteCart();
+  const cart = Object.values(cartObj);
+  const container = document.getElementById('quote-cart-container');
+
+  if (!cart.length) {
+    container.innerHTML = `<div class="bg-slate-800 text-center py-12 rounded-xl text-pink-300 font-bold text-lg mb-8">Your quote cart is currently empty.</div>`;
+    return;
+  }
+
+  let subtotal = 0;
+  let totalGST = 0;
+  const gstTable = {
+    'BNG-001': 3,
+    'BNG-002': 3,
+    'BNG-003': 3
+  };
+
+  let html = `
+    <div class="overflow-x-auto shadow-2xl rounded-3xl border border-pink-900/20 bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900">
+      <table class="w-full mb-8 text-center bg-transparent">
+        <thead>
+          <tr class="bg-rose-500/10 text-rose-400 uppercase text-xs tracking-widest">
+            <th class="py-4 px-4">SKU</th>
+            <th class="py-4 px-4 text-left">Product</th>
+            <th class="py-4 px-4">Size</th>
+            <th class="py-4 px-4">Wholesale Pieces (Tier)</th>
+            <th class="py-4 px-4">Units (Packs)</th>
+            <th class="py-4 px-4">Unit Price</th>
+            <th class="py-4 px-4">Total</th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-pink-900/10">`;
+
+  cart.forEach(item => {
+    const userUnits = parseInt(item.userUnits) || 1;
+    const price = parseFloat(item.price) || 0;
+    const rowTotal = price * userUnits;
+    subtotal += rowTotal;
+    const gstRate = gstTable[item.sku] || 0;
+    const gstAmount = rowTotal * gstRate / 100;
+    totalGST += gstAmount;
+    html += `
+      <tr class="text-white hover:bg-slate-800/50 transition">
+        <td class="py-4 px-4 font-mono text-xs text-gray-400">${item.sku}</td>
+        <td class="py-4 px-4 text-left font-semibold">${item.name}</td>
+        <td class="py-4 px-4">
+            <span class="px-2 py-1 bg-rose-600/20 rounded text-rose-300 text-xs">${item.size || 'N/A'}</span>
+        </td>
+        <td class="py-4 px-4 text-rose-100">${item.qty} Pcs/Pack</td>
+        <td class="py-4 px-4 font-bold text-white">${userUnits}</td>
+        <td class="py-4 px-4">₹${price.toFixed(2)}</td>
+        <td class="py-4 px-4 font-bold text-rose-400">₹${rowTotal.toLocaleString('en-IN')}</td>
+      </tr>`;
+  });
+  const grandTotal = subtotal + totalGST;
+
+  html += `
+        </tbody>
+      </table>
+    </div>
+
+    <div class="mt-8 flex flex-col items-end gap-2 pr-4">
+      <div class="text-pink-300 text-base">Subtotal: <span class="text-white font-bold">₹${subtotal.toLocaleString('en-IN')}</span></div>
+      <div class="text-pink-300 text-base">GST (per product): <span class="text-white font-bold">₹${totalGST.toLocaleString('en-IN')}</span></div>
+      <div class="text-3xl text-rose-500 font-extrabold mt-2 border-t border-pink-500/30 pt-4">
+        Grand Total: ₹${grandTotal.toLocaleString('en-IN')}
+      </div>
+    </div>
+
+    <div class="mt-12 flex justify-center">
+      <form id="submit-quote-form" method="POST" action="/submit_quote" class="bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 p-10 rounded-3xl shadow-2xl max-w-lg w-full border border-pink-900/20">
+        <h2 class="text-rose-500 font-extrabold text-2xl mb-8 text-center tracking-wide">Finalize Quote Request</h2>
+        <div class="mb-6">
+          <label class="block text-pink-300 font-bold mb-2">Full Name</label>
+          <input type="text" name="name" required placeholder="Enter your full name" class="w-full bg-slate-800 border border-slate-700 rounded-2xl p-4 text-white focus:border-rose-500 outline-none text-lg">
+        </div>
+        <div class="mb-6">
+          <label class="block text-pink-300 font-bold mb-2">WhatsApp Number</label>
+          <input type="text" name="whatsapp" required placeholder="Enter number for quote delivery" class="w-full bg-slate-800 border border-slate-700 rounded-2xl p-4 text-white focus:border-rose-500 outline-none text-lg">
+        </div>
+        <div class="mb-6">
+          <label class="block text-pink-300 font-bold mb-2">Email Address</label>
+          <input type="email" name="email" required placeholder="Enter your email address" class="w-full bg-slate-800 border border-slate-700 rounded-2xl p-4 text-white focus:border-rose-500 outline-none text-lg">
+        </div>
+        <div class="mb-8">
+          <label class="block text-pink-300 font-bold mb-2">Shipping Address</label>
+          <textarea name="address" rows="3" required class="w-full bg-slate-800 border border-slate-700 rounded-2xl p-4 text-white focus:border-rose-500 outline-none text-lg"></textarea>
+        </div>
+        <input type="hidden" name="cart_data" id="cart_data_input">
+        <button type="submit" class="w-full py-4 rounded-2xl font-bold text-2xl transition bg-rose-600 text-white hover:bg-rose-700 shadow-xl">
+          Submit Quote Request
+        </button>
+      </form>
+    </div>`;
+
+  container.innerHTML = html;
+
+  // Inject cart data into hidden input before form submit
+  const submitForm = document.getElementById('submit-quote-form');
+  if (submitForm) {
+    submitForm.addEventListener('submit', function(e) {
+      document.getElementById('cart_data_input').value = JSON.stringify(cartObj);
     });
-    document.getElementById('grand-total').textContent = '₹' + grandTotal.toFixed(2);
+  }
 }
-// PDF rendering logic
-function renderPDFQuote() {
-    // Date and Ref
-    const now = new Date();
-    document.getElementById('pdf-date').textContent = now.toLocaleDateString();
-    let ref = orderId || now.getTime();
-    document.getElementById('pdf-ref').textContent = ref;
-    // Cart
-    let grandTotal = 0;
-    let html = '';
-    cart.forEach(item => {
-        const price = getWholesalePrice(item.sku, item.quantity);
-        const subtotal = price * item.quantity;
-        grandTotal += subtotal;
-        html += `<tr>
-            <td style='padding:8px 6px;border:1px solid #eee;'>${item.name}</td>
-            <td style='padding:8px 6px;border:1px solid #eee;'>${item.sku}</td>
-            <td style='padding:8px 6px;border:1px solid #eee;'>${item.size}</td>
-            <td style='padding:8px 6px;border:1px solid #eee;'>${item.quantity}</td>
-            <td style='padding:8px 6px;border:1px solid #eee;'>₹${price.toFixed(2)}</td>
-            <td style='padding:8px 6px;border:1px solid #eee;'>₹${subtotal.toFixed(2)}</td>
-        </tr>`;
-    });
-    document.getElementById('pdf-cart-body').innerHTML = html;
-    document.getElementById('pdf-grand-total').textContent = grandTotal.toFixed(2);
-}
-function downloadPDF() {
-    renderPDFQuote();
-    const pdfDiv = document.getElementById('pdf-quote');
-    pdfDiv.classList.remove('hidden');
-    html2pdf()
-        .set({
-            margin: 0.5,
-            filename: 'NariNakhre_Quote.pdf',
-            html2canvas: { scale: 2 },
-            jsPDF: { unit: 'in', format: 'a4', orientation: 'portrait' }
-        })
-        .from(pdfDiv)
-        .save()
-        .then(() => pdfDiv.classList.add('hidden'));
-}
-window.priceTiers = {};
-fetch('/api/price-tiers').then(r => r.json()).then(data => { window.priceTiers = data; renderCartSummary(); });
+
+document.addEventListener('DOMContentLoaded', renderCheckoutCart);
 </script>
+
+<style>
+  .rose-accent { color: #e11d48; }
+  .rose-btn { background: #e11d48; color: white; }
+  .monaco-scrollbar::-webkit-scrollbar { height: 6px; background: #1a1a1a; }
+  .monaco-scrollbar::-webkit-scrollbar-thumb { background: #e11d48; border-radius: 10px; }
+</style>
 {% endblock %}

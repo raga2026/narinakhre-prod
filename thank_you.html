@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Thank You for Your Quote Request!</title>
+    <link rel="stylesheet" href="/static/style.css">
+    <style>
+        body { font-family: 'Segoe UI', Arial, sans-serif; background: #f8f9fa; margin: 0; }
+        .thankyou-container { max-width: 500px; margin: 80px auto; background: #fff; border-radius: 12px; box-shadow: 0 2px 16px rgba(0,0,0,0.08); padding: 40px 32px; text-align: center; }
+        h1 { color: #d63384; margin-bottom: 16px; }
+        p { color: #333; font-size: 1.1em; margin-bottom: 24px; }
+        .btn-home { display: inline-block; background: #d63384; color: #fff; padding: 12px 32px; border-radius: 6px; text-decoration: none; font-weight: 500; transition: background 0.2s; }
+        .btn-home:hover { background: #b0256b; }
+        .icon { font-size: 48px; color: #d63384; margin-bottom: 16px; }
+    </style>
+</head>
+<body>
+    <div class="thankyou-container">
+        <div class="icon">&#10004;</div>
+        <h1>Thank You!</h1>
+        <p>Your quote request has been received.<br>
+        Our team will review your details and get in touch via WhatsApp or Email soon.<br>
+        For urgent queries, please contact us directly.</p>
+        {% if display_cart and display_cart|length > 0 %}
+        <div style="margin-top:32px;">
+            <table style="width:100%;border-collapse:collapse;margin-bottom:24px;">
+                <thead style="background:#bfa14a;color:#fff;">
+                    <tr>
+                        <th style="padding:8px;border:1px solid #bfa14a;">Name</th>
+                        <th style="padding:8px;border:1px solid #bfa14a;">Quantity</th>
+                        <th style="padding:8px;border:1px solid #bfa14a;">Pieces</th>
+                        <th style="padding:8px;border:1px solid #bfa14a;">Price</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for item in display_cart %}
+                    <tr>
+                        <td style="padding:8px;border:1px solid #bfa14a;">{{ item.name }}</td>
+                        <td style="padding:8px;border:1px solid #bfa14a;">{{ item.units }}</td>
+                        <td style="padding:8px;border:1px solid #bfa14a;">{{ item.qty if item.qty is defined else item.tier }}</td>
+                        <td style="padding:8px;border:1px solid #bfa14a;">₹{{ item.price }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+            <div style="color:#bfa14a;font-size:1.1em;font-weight:bold;">Grand Total: ₹{{ grand_total }}</div>
+        </div>
+        {% endif %}
+        <a href="/" class="btn-home">Back to Home</a>
+    </div>
+</body>
+</html>

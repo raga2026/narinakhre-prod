@@ -9,15 +9,15 @@ def migrate_quotes_table(conn):
     cur.execute("""
         CREATE TABLE quotes (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            customer_name TEXT NOT NULL,
+            request_id TEXT NOT NULL,
+            name TEXT NOT NULL,
             whatsapp TEXT NOT NULL,
-            address TEXT,
-            cart_json TEXT NOT NULL,
-            total_amount REAL NOT NULL,
+            email TEXT,
+            items_json TEXT NOT NULL,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     """)
-    print("Quotes table migrated.")
+    print("Quotes table migrated to new schema.")
 
 def migrate_products_table(conn):
     cur = conn.cursor()

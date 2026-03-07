@@ -1,0 +1,53 @@
+dump() shows all variables in the frame
+dump(obj) dumps all that's known about the object
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Nari Nakhre Quote PDF</title>
+    <style>
+        body { font-family: 'Segoe UI', Arial, sans-serif; margin: 40px; }
+        .header { text-align: center; margin-bottom: 20px; }
+        .logo { height: 60px; }
+        .contact { font-size: 1.1em; margin-bottom: 10px; }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <img src="/static/assets/logo.jpg" alt="Mohini Cosmetics Logo" class="logo">
+        <div class="contact">
+            <strong>Mohini Cosmetics</strong><br>
+            Phone: +91 71572310<br>
+            Email: mohinicosmetics.india@gmail.com<br>
+            Address: 136, Dharhai Rd, Kotwali, Jabalpur, Madhya Pradesh 482001
+        </div>
+    </div>
+    <div>
+        <strong>Customer Name:</strong> {{ user.name }}<br>
+        <strong>WhatsApp:</strong> {{ user.whatsapp }}<br>
+        <strong>Email:</strong> {{ user.email }}
+    </div>
+    <table style="width:100%;margin-top:32px;border-collapse:collapse;">
+        <thead>
+            <tr style="background:#f8f5e6;color:#bfa14a;">
+                <th style="border:1px solid #bfa14a;padding:8px;">SKU</th>
+                <th style="border:1px solid #bfa14a;padding:8px;">Quantity</th>
+                <th style="border:1px solid #bfa14a;padding:8px;">Price</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for item in cart %}
+            <tr>
+                <td style="border:1px solid #bfa14a;padding:8px;">{{ item.sku }}</td>
+                <td style="border:1px solid #bfa14a;padding:8px;">{{ item.units }}</td>
+                <td style="border:1px solid #bfa14a;padding:8px;">₹{{ item.price }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    <div style="margin-top:32px;color:#bfa14a;font-size:1.1em;">
+        Thank you for choosing Mohini Cosmetics. Our team will contact you soon.
+    </div>
+</body>
+</html>
+Would you like me to insert this block automatically at the top of your file?Would you like me to insert this block automatically at the top of your file?"

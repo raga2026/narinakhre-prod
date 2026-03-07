@@ -1,22 +1,20 @@
-{% extends "base.html" %}
+setx PATH "$env:PATH;C:\weasyprint-deps\bin"{% extends "base.html" %}
 {% block title %}Contact - NariNakhre{% endblock %}
 {% block content %}
 <h1 class="text-3xl font-extrabold rose-accent mb-8 text-center tracking-wide drop-shadow-lg">Contact & Submit Quote</h1>
 <form id="contact-form" class="max-w-xl mx-auto bg-slate-900/60 rounded-2xl shadow-lg p-8 flex flex-col gap-6">
-    <label class="font-semibold text-slate-200">Name
-        <input type="text" name="name" class="w-full mt-2 px-4 py-2 rounded-lg bg-slate-800/50 text-slate-200 border border-[#be185d] focus:border-[#be185d] focus:ring-rose-500" required>
-    </label>
-    <label class="font-semibold text-slate-200">WhatsApp
-        <input type="text" name="whatsapp" class="w-full mt-2 px-4 py-2 rounded-lg bg-slate-800/50 text-slate-200 border border-[#be185d] focus:border-[#be185d] focus:ring-rose-500" required>
-    </label>
-    <label class="font-semibold text-slate-200">Email (optional)
-        <input type="email" name="email" class="w-full mt-2 px-4 py-2 rounded-lg bg-slate-800/50 text-slate-200 border border-[#be185d] focus:border-[#be185d] focus:ring-rose-500">
-    </label>
-    <div class="mt-8 flex justify-end">
-        <div class="text-2xl font-bold rose-accent">Tentative Grand Total: <span id="grand-total">₹0.00</span></div>
-    </div>
-    <button type="submit" class="rose-btn px-6 py-3 rounded-2xl font-bold text-lg shadow hover:shadow-xl transition">Submit Inquiry</button>
-</form>
+    <form method="POST" action="/contact" class="max-w-xl mx-auto bg-slate-900/60 rounded-2xl shadow-lg p-8 flex flex-col gap-6">
+        <label class="font-semibold text-slate-200">Name
+            <input type="text" name="name" class="w-full mt-2 px-4 py-2 rounded-lg bg-slate-800/50 text-slate-200 border border-[#be185d] focus:border-[#be185d] focus:ring-rose-500" required>
+        </label>
+        <label class="font-semibold text-slate-200">WhatsApp
+            <input type="text" name="whatsapp" class="w-full mt-2 px-4 py-2 rounded-lg bg-slate-800/50 text-slate-200 border border-[#be185d] focus:border-[#be185d] focus:ring-rose-500" required>
+        </label>
+        <label class="font-semibold text-slate-200">Email
+            <input type="email" name="email" class="w-full mt-2 px-4 py-2 rounded-lg bg-slate-800/50 text-slate-200 border border-[#be185d] focus:border-[#be185d] focus:ring-rose-500" required>
+        </label>
+        <button type="submit" class="rose-btn px-6 py-3 rounded-2xl font-bold text-lg shadow hover:shadow-xl transition">Submit Inquiry</button>
+    </form>
 <script>
 const cart = JSON.parse(localStorage.getItem('cart') || '[]');
 const tentativeTotal = localStorage.getItem('tentative_total') || '0.00';

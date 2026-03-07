@@ -8,12 +8,15 @@
 </head>
 <body class="bg-gray-100 min-h-screen flex items-center justify-center">
     <div class="w-full max-w-md p-8 bg-white rounded shadow">
-        <h2 class="text-2xl font-bold mb-6 text-center">Upload Product Excel</h2>
+        <div class="flex justify-between items-center mb-6">
+          <h2 class="text-2xl font-bold text-center">Upload Product Excel</h2>
+          <a href="{{ url_for('admin_logout') }}" class="rose-btn px-4 py-2 rounded-lg font-bold shadow hover:scale-105 transition">Logout</a>
+        </div>
         <div class="mb-6">
           <h3 class="text-xl font-semibold mb-2 text-gray-800">Manage Inventory</h3>
           <a href="{{ url_for('admin_delete_products') }}" class="inline-flex items-center bg-gray-900 text-white px-4 py-2 rounded shadow hover:bg-gray-700 transition relative">
             Bulk Delete Products
-            <span class="ml-2 inline-block bg-pink-600 text-xs font-bold px-2 py-0.5 rounded-full">{{ product_count }}</span>
+            <span class="ml-2 inline-block bg-pink-600 text-xs font-bold px-2 py-0.5 rounded-full">{{ products|length }}</span>
           </a>
         </div>
         {% with messages = get_flashed_messages() %}
@@ -25,10 +28,13 @@
             </div>
           {% endif %}
         {% endwith %}
-        <form method="post" enctype="multipart/form-data">
+        <div class="mb-4 flex justify-start">
+          <a href="/" class="rose-btn px-4 py-2 rounded-lg font-bold shadow hover:scale-105 transition" style="background:#be185d; color:#fff;">Go to Home Page</a>
+        </div>
+        <form method="post" action="{{ url_for('import_excel') }}" enctype="multipart/form-data">
             <div class="mb-4">
                 <label class="block text-gray-700 mb-2" for="file">Excel File (.xlsx)</label>
-                <input class="w-full px-3 py-2 border rounded" type="file" name="file" id="file" accept=".xlsx" required>
+              <input class="w-full px-3 py-2 border rounded" type="file" name="excel_file" id="file" accept=".xlsx" required>
             </div>
             <button type="submit" class="w-full bg-blue-500 text-white py-2 rounded hover:bg-blue-600 transition">Upload</button>
         </form>

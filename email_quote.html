@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Nari Nakhre Wholesale Quote</title>
+    <style>
+        body { font-family: 'Segoe UI', Arial, sans-serif; background: #f8f9fa; margin: 0; }
+        .container { max-width: 600px; margin: 40px auto; background: #fff; border-radius: 16px; box-shadow: 0 2px 16px rgba(0,0,0,0.08); padding: 40px 32px; }
+        h1 { color: #be185d; margin-bottom: 16px; }
+        table { width: 100%; border-collapse: collapse; margin-bottom: 24px; }
+        th, td { padding: 8px; border: 1px solid #be185d; }
+        th { background: #be185d; color: #fff; }
+        .footer { margin-top: 32px; text-align: center; color: #be185d; }
+        .logo { height: 60px; margin-bottom: 16px; }
+        .social { margin-top: 24px; }
+        .social img { height: 24px; vertical-align: middle; margin-right: 8px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- Inline SVG Main Logo -->
+        <svg class="logo" width="60" height="60" viewBox="0 0 60 60" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <circle cx="30" cy="30" r="30" fill="#be185d"/>
+            <text x="30" y="36" text-anchor="middle" font-size="24" fill="#fff" font-family="Arial, sans-serif">NN</text>
+        </svg>
+        <h1>Dear {{ name }},</h1>
+        <p>Thank you for choosing <strong>Nari Nakhre</strong>! Please find your quote below:</p>
+        {% if display_cart and display_cart|length > 0 %}
+        <table>
+            <thead>
+                <tr>
+                    <th>Name</th>
+                    <th>Units</th>
+                    <th>Tier</th>
+                    <th>Price</th>
+                    <th>Total</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for item in display_cart %}
+                <tr>
+                    <td>{{ item.name }}</td>
+                    <td>{{ item.units }}</td>
+                    <td>{{ item.tier }}</td>
+                    <td>{{ item.price }}</td>
+                    <td>{{ item.row_total }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        <div style="color:#be185d;font-size:1.1em;font-weight:bold;">Grand Total: {{ grand_total }}</div>
+        {% else %}
+        <div style="color:#be185d;font-weight:bold;">No items found in your quote cart.</div>
+        {% endif %}
+        <div class="footer">
+            <div style="font-size:1.2em;font-weight:bold;margin-bottom:8px;">Mohini Cosmetics</div>
+            <div>GSTIN: 23JFGPS7650J1ZV</div>
+            <div>136, Dharhai Rd, Kotwali, Jabalpur, Madhya Pradesh 482001</div>
+            <div>Mob: +91 71572310, email: mohinicosmetics.india@gmail.com</div>
+            <div>website: <a href="https://narinakhre.com" style="color:#be185d;text-decoration:none;">narinakhre.com</a> / <a href="https://wholesale.narinakhre.com" style="color:#be185d;text-decoration:none;">wholesale.narinakhre.com</a></div>
+            <div class="social">
+                <a href="https://fb.com/narinakhre" target="_blank">
+                  <!-- Inline SVG Facebook Icon -->
+                  <svg width="24" height="24" viewBox="0 0 24 24" fill="#3b5998" xmlns="http://www.w3.org/2000/svg">
+                    <rect width="24" height="24" rx="4" fill="#3b5998"/>
+                    <path d="M16 8h-2a1 1 0 0 0-1 1v2h3v2h-3v6h-2v-6H8v-2h2V9a3 3 0 0 1 3-3h3v2z" fill="#fff"/>
+                  </svg>
+                </a>
+                <a href="https://instagram.com/narinakhre" target="_blank">
+                  <!-- Inline SVG Instagram Icon -->
+                  <svg width="24" height="24" viewBox="0 0 24 24" fill="#E1306C" xmlns="http://www.w3.org/2000/svg">
+                    <rect width="24" height="24" rx="4" fill="#E1306C"/>
+                    <circle cx="12" cy="12" r="5" fill="#fff"/>
+                    <circle cx="12" cy="12" r="3" fill="#E1306C"/>
+                    <circle cx="17" cy="7" r="1" fill="#fff"/>
+                  </svg>
+                </a>
+                <a href="https://narinakhre.com" target="_blank">
+                  <!-- Inline SVG Main Logo -->
+                  <svg width="24" height="24" viewBox="0 0 24 24" fill="#be185d" xmlns="http://www.w3.org/2000/svg">
+                    <circle cx="12" cy="12" r="12" fill="#be185d"/>
+                    <text x="12" y="16" text-anchor="middle" font-size="10" fill="#fff" font-family="Arial, sans-serif">NN</text>
+                  </svg>
+                </a>
+            </div>
+        </div>
+    </div>
+</body>
+</html>

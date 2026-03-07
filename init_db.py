@@ -8,9 +8,7 @@ def initialize():
     
     conn = sqlite3.connect('narinakhre.db')
     with open('schema.sql', 'r') as f:
-        conn.executescript(f.read())
-    
-    conn.commit()
+        conn.execut )
     conn.close()
     print("Database 'narinakhre.db' initialized successfully.")
 
