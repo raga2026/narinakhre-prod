@@ -3,18 +3,47 @@
 
 {% block content %}
 <style>
-  /* Monaco UI core styles */
-  .monaco-menu { background: #1e1e1e; color: #d4d4d4; border-radius: 8px; box-shadow: 0 2px 8px #0004; }
-  .monaco-action-bar { display: flex; gap: 8px; align-items: center; }
-  .monaco-scrollbar { scrollbar-width: thin; scrollbar-color: #007acc #222; }
-  .monaco-scrollbar::-webkit-scrollbar { height: 8px; background: #222; }
-  .monaco-scrollbar::-webkit-scrollbar-thumb { background: #007acc; border-radius: 4px; }
-  .action-item { background: #252526; color: #d4d4d4; border-radius: 5px; font-size: 13px; padding: 4px 10px; margin: 2px 0; border: 1px solid #333; cursor: pointer; transition: background 0.2s; }
-  .action-item.selected, .action-item:hover { background: #007acc; color: #fff; }
-  .action-label { font-size: 13px; font-weight: 500; color: #007acc; margin-right: 8px; }
-  .monaco-tag { display: inline-block; background: #252526; color: #d4d4d4; border-radius: 5px; font-size: 13px; padding: 2px 8px; margin: 0 4px 4px 0; border: 1px solid #333; }
-  .monaco-badge { position: absolute; top: 8px; right: 8px; background: #007acc; color: #fff; font-size: 12px; border-radius: 10px; padding: 2px 8px; font-weight: bold; }
-  /* ...existing code... */
+  .product-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 32px;
+    margin-bottom: 32px;
+  }
+  @media (max-width: 1200px) {
+    .product-grid { grid-template-columns: repeat(3, 1fr); }
+  }
+  @media (max-width: 900px) {
+    .product-grid { grid-template-columns: repeat(2, 1fr); }
+  }
+  @media (max-width: 768px) {
+    .product-grid { grid-template-columns: 1fr; }
+    .product-card { width: 90%; margin: 0 auto; }
+  }
+  .floating-quote-btn {
+    position: fixed;
+    bottom: 24px;
+    right: 24px;
+    z-index: 999;
+    background: linear-gradient(90deg, #bfa14a 0%, #e6c97a 100%);
+    color: #fff;
+    border-radius: 50px;
+    padding: 16px 32px;
+    font-size: 1.2rem;
+    font-weight: bold;
+    box-shadow: 0 4px 24px rgba(191,161,74,0.15);
+    border: none;
+    transition: background 0.2s, color 0.2s;
+    cursor: pointer;
+  }
+  .floating-quote-btn .cart-count {
+    background: #fff;
+    color: #bfa14a;
+    border-radius: 50%;
+    padding: 2px 8px;
+    margin-left: 8px;
+    font-size: 1rem;
+    font-weight: bold;
+  }
 </style>
 
 <h1 class="text-4xl font-extrabold text-center rose-accent mb-10 tracking-wide drop-shadow-lg">Nari Nakhre Catalog</h1>
@@ -32,177 +61,33 @@
   {% for category, products in grouped_products.items() %}
   <section class="mb-8">
     <h2 class="text-2xl font-bold text-rose-500 mb-4 border-b border-rose-500/30 pb-2">{{ category }}</h2>
-    <div class="flex overflow-x-auto gap-6 pb-8 snap-x" style="background:#0f0f0f;">
+    <div class="product-grid">
       {% for product in products %}
-      <div class="flex-none w-80 product-card" style="background:#161616; border-radius:1.5rem; box-shadow:0 2px 16px #0008; border:2px solid #e11d48; overflow:hidden; position:relative;">
-        <div class="flex flex-col items-center p-5">
-          <div class="w-full mb-2 relative">
-            <img id="gallery-img-{{ product.id }}" src="{{ product.images[0] }}" alt="{{ product.name }}" class="rounded-xl w-full h-48 object-cover border border-rose-500 shadow-lg" onmouseover="hoverGallery('{{ product.id }}')" onmouseout="unhoverGallery('{{ product.id }}')" />
-            <span class="absolute top-2 left-2 bg-rose-500 text-white text-xs font-bold px-3 py-1 rounded-full shadow">{{ product.sku }}</span>
-          </div>
-          <div class="w-full text-left mt-2">
-            <h3 class="text-lg font-bold text-white mb-1">
-              <a href="{{ url_for('product_detail', product_id=product.id) }}" class="underline hover:text-pink-400 focus:text-pink-400 focus:outline-none">{{ product.name }}</a>
-            </h3>
-            <div class="uppercase text-xs text-gray-400 mb-2">{{ product.material }}{% if product.material and product.color %} / {% endif %}{{ product.color }}</div>
-          </div>
-          <div class="w-full mb-3">
-            <label class="block text-xs font-semibold text-gray-400 mb-1">Size</label>
-            {% set size_list = product.sizes.split(',') if product.sizes else [] %}
-            {% if size_list %}
-              <div class="flex gap-2">
-                {% for size in size_list %}
-                  <label class="inline-flex items-center">
-                    <input type="radio" name="size-{{ product.id }}" value="{{ size|trim }}" {% if loop.first %}checked{% endif %} class="form-radio accent-rose-500" />
-                    <span class="ml-1 text-xs text-white">{{ size|trim }}</span>
-                  </label>
-                {% endfor %}
-              </div>
-            {% else %}
-              <span class="text-xs text-gray-500">None</span>
-            {% endif %}
-          </div>
-          <div class="w-full mb-3">
-            <label class="block text-xs font-semibold text-gray-400 mb-1">Select Quantity</label>
-            <select class="w-full rounded-lg px-2 py-1 bg-[#161616] text-white border border-rose-500" onchange="updatePremiumPrice('{{ product.id }}', this)">
-              {% if product.quantity1 and product.price1 %}
-              <option value="{{ product.quantity1 }}" data-qty="{{ product.quantity1 }}" data-price="{{ product.price1 }}" selected>{{ product.quantity1 }} Pieces - ₹{{ product.price1 }}</option>
-              {% endif %}
-              {% if product.quantity2 and product.price2 %}
-              <option value="{{ product.quantity2 }}" data-qty="{{ product.quantity2 }}" data-price="{{ product.price2 }}">{{ product.quantity2 }} Pieces - ₹{{ product.price2 }}</option>
-              {% endif %}
-              {% if product.quantity3 and product.price3 %}
-              <option value="{{ product.quantity3 }}" data-qty="{{ product.quantity3 }}" data-price="{{ product.price3 }}">{{ product.quantity3 }} Pieces - ₹{{ product.price3 }}</option>
-              {% endif %}
+      <div class="product-card">
+        <img id="gallery-img-{{ product.id }}" src="{{ product.images[0] }}" alt="{{ product.name }}" class="rounded-xl w-full h-48 object-cover border border-rose-500 shadow-lg mb-2" onmouseover="hoverGallery('{{ product.id }}')" onmouseout="unhoverGallery('{{ product.id }}')" />
+        <h3 class="product-title mb-1">
+          <a href="{{ url_for('product_detail', product_id=product.id) }}" class="underline hover:text-pink-400 focus:text-pink-400 focus:outline-none">{{ product.name }}</a>
+        </h3>
+        <div class="product-price mb-2">₹{{ product.price1 }}</div>
+        <div class="mb-2">
+          <label for="size-{{ product.id }}" class="block text-xs font-semibold text-gray-400 mb-1">Size</label>
+          {% set size_list = product.sizes.split(',') if product.sizes else [] %}
+          {% if size_list %}
+            <select id="size-{{ product.id }}" class="product-size" aria-label="Select size">
+              {% for size in size_list %}
+                <option value="{{ size|trim }}">{{ size|trim }}</option>
+              {% endfor %}
             </select>
-          </div>
-          <div id="premium-price-{{ product.id }}" class="w-full text-center text-lg font-bold text-rose-500 mb-3">₹{{ product.price1 }}</div>
-          <div id="quote-action-{{ product.id }}"></div>
+          {% else %}
+            <span class="text-xs text-gray-500">None</span>
+          {% endif %}
         </div>
-        <script>
-          window['carouselImgs_{{ product.id }}'] = {{ product.images|tojson }};
-        </script>
-          <script>
-          // --- Add to Quote Dynamic Cart ---
-          function getQuoteCart() {
-            try {
-              return JSON.parse(localStorage.getItem('quoteCart') || '{}');
-            } catch { return {}; }
-          }
-          function setQuoteCart(cart) {
-            localStorage.setItem('quoteCart', JSON.stringify(cart));
-          }
-          function renderQuoteAction(product) {
-            const actionDiv = document.getElementById('quote-action-' + product.id);
-            const cart = getQuoteCart();
-            const item = cart[product.id];
-            actionDiv.innerHTML = '';
-            // Get selected tier and size
-            const card = document.getElementById('quote-action-' + product.id).closest('.product-card');
-            const select = card.querySelector('select');
-            const selectedOption = select.options[select.selectedIndex];
-            const selectedQty = parseInt(selectedOption.getAttribute('data-qty'));
-            const selectedPrice = parseFloat(selectedOption.getAttribute('data-price'));
-            let selectedSize = '';
-            const sizeInput = card.querySelector('input[type="radio"]:checked');
-            if (sizeInput) selectedSize = sizeInput.value;
-            if (item && item.userUnits > 0) {
-              // Show quantity selector
-              const sel = document.createElement('div');
-              sel.className = 'flex items-center justify-center gap-2';
-              sel.innerHTML = `
-                <button class="px-3 py-1 rounded-full bg-rose-500 text-white font-bold text-lg" onclick="updateQuoteQty('${product.id}', -1)">-</button>
-                <span class="font-bold text-lg text-rose-500">${item.userUnits} pack(s)</span>
-                <button class="px-3 py-1 rounded-full bg-rose-500 text-white font-bold text-lg" onclick="updateQuoteQty('${product.id}', 1)">+</button>
-              `;
-              actionDiv.appendChild(sel);
-              // Listen for tier change
-              select.onchange = function() {
-                item.qty = parseInt(select.options[select.selectedIndex].getAttribute('data-qty'));
-                item.price = parseFloat(select.options[select.selectedIndex].getAttribute('data-price'));
-                setQuoteCart(cart);
-                renderQuoteAction(product);
-              };
-            } else {
-              // Show Add to Quote button
-              const btn = document.createElement('button');
-              btn.className = 'w-full py-2 rounded-full font-bold transition bg-white text-rose-500 hover:bg-rose-500 hover:text-white shadow-lg';
-              btn.textContent = 'Add to Quote';
-              btn.onclick = function() {
-                // Merge new item into cart, preserving other items
-                const newItem = {
-                  id: product.id,
-                  sku: product.sku,
-                  name: product.name,
-                  size: selectedSize,
-                  qty: selectedQty,
-                  userUnits: 1,
-                  price: selectedPrice
-                };
-                const updatedCart = Object.assign({}, cart, { [product.id]: newItem });
-                setQuoteCart(updatedCart);
-                renderQuoteAction(product);
-                updateQuoteBadge();
-                // Listen for tier change
-                select.onchange = function() {
-                  const item = updatedCart[product.id];
-                  item.qty = parseInt(select.options[select.selectedIndex].getAttribute('data-qty'));
-                  item.price = parseFloat(select.options[select.selectedIndex].getAttribute('data-price'));
-                  setQuoteCart(updatedCart);
-                  renderQuoteAction(product);
-                };
-              };
-              actionDiv.appendChild(btn);
-            }
-          }
-          function updateQuoteQty(productId, delta) {
-            const cart = getQuoteCart();
-            if (!cart[productId]) return;
-            cart[productId].userUnits = (cart[productId].userUnits || 1) + delta;
-            if (cart[productId].userUnits < 1) {
-              delete cart[productId];
-            } else {
-              // Always update qty and price from selected tier
-              const card = document.getElementById('quote-action-' + productId).closest('.product-card');
-              const select = card.querySelector('select');
-              cart[productId].qty = parseInt(select.options[select.selectedIndex].getAttribute('data-qty'));
-              cart[productId].price = parseFloat(select.options[select.selectedIndex].getAttribute('data-price'));
-            }
-            setQuoteCart(cart);
-            const product = window['productData_' + productId];
-            renderQuoteAction(product);
-            updateQuoteBadge();
-          }
-          function updateQuoteBadge() {
-            // Optionally update a badge showing total items in quote
-            let total = 0;
-            const cart = getQuoteCart();
-            Object.values(cart).forEach(item => total += item.qty);
-            let badge = document.getElementById('quote-badge');
-            if (!badge) {
-              badge = document.createElement('div');
-              badge.id = 'quote-badge';
-              badge.className = 'monaco-badge';
-              document.body.appendChild(badge);
-            }
-            badge.textContent = total > 0 ? total : '';
-          }
-          document.addEventListener('DOMContentLoaded', function() {
-            document.querySelectorAll('.product-card').forEach(function(card) {
-              const productId = card.querySelector('button, [id^="quote-action-"]').getAttribute('onclick')?.match(/'(\d+)'/)?.[1] || card.querySelector('script')?.id?.replace('carouselImgs_', '');
-              // Build product data from DOM
-              const product = {
-                id: card.querySelector('img').id.replace('gallery-img-', ''),
-                name: card.querySelector('h3 a').textContent,
-                price1: card.querySelector('select option[selected]')?.getAttribute('data-price') || card.querySelector('select option')?.getAttribute('data-price'),
-                sku: card.querySelector('span').textContent
-              };
-              window['productData_' + product.id] = product;
-              renderQuoteAction(product);
-            });
-            updateQuoteBadge();
-          });
-          </script>
+        <div class="mb-2">
+          <label for="qty-{{ product.id }}" class="block text-xs font-semibold text-gray-400 mb-1">Quantity</label>
+          <input id="qty-{{ product.id }}" class="product-qty" type="number" min="1" value="1" aria-label="Select quantity" />
+        </div>
+        <button class="add-to-quote-btn" data-product-id="{{ product.id }}" onclick="addToQuote(this)">Add to Quote</button>
+        <div id="quote-action-{{ product.id }}"></div>
       </div>
       {% endfor %}
     </div>
@@ -210,8 +95,11 @@
   {% endfor %}
 </div>
 
+<button class="floating-quote-btn" onclick="window.location.href='{{ url_for('checkout') }}'">
+  View Quote Request <span class="cart-count" id="floating-cart-count">0</span>
+</button>
+
 <script>
-// Carousel hover feature for product images
 function hoverGallery(productId) {
   const imgs = window['carouselImgs_' + productId];
   if (Array.isArray(imgs) && imgs.length > 1) {
@@ -228,19 +116,14 @@ function unhoverGallery(productId) {
   if (imgEl._carouselInterval) {
     clearInterval(imgEl._carouselInterval);
     imgEl._carouselInterval = null;
-    // Reset to first image
     const imgs = window['carouselImgs_' + productId];
     if (Array.isArray(imgs) && imgs.length > 0) imgEl.src = imgs[0];
   }
 }
-</script>
 
-<script>
-// Product search filter
 function filterProducts() {
   const search = document.getElementById('product-search').value.toLowerCase();
   document.querySelectorAll('.product-card').forEach(function(card) {
-    // Find product name inside card
     const nameEl = card.querySelector('h3 a, .product-name');
     const name = nameEl ? nameEl.textContent.toLowerCase() : '';
     if (name.includes(search)) {
@@ -250,5 +133,39 @@ function filterProducts() {
     }
   });
 }
-// ...existing code...
+
+function addToQuote(btn) {
+  const productId = btn.getAttribute('data-product-id');
+  const size = document.getElementById('size-' + productId)?.value || '';
+  const qty = parseInt(document.getElementById('qty-' + productId)?.value || 1);
+  btn.disabled = true;
+  btn.textContent = 'Adding...';
+  fetch('/add_to_cart', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ product_id: productId, size: size, qty: qty })
+  })
+  .then(res => res.json())
+  .then(data => {
+    btn.classList.add('added');
+    btn.textContent = 'Added to Quote';
+    btn.disabled = false;
+    updateFloatingCartCount(data.cart_count);
+  })
+  .catch(() => {
+    btn.textContent = 'Error';
+    btn.disabled = false;
+  });
+}
+
+function updateFloatingCartCount(count) {
+  document.getElementById('floating-cart-count').textContent = count;
+}
+
+document.addEventListener('DOMContentLoaded', function() {
+  fetch('/cart_count').then(res => res.json()).then(data => {
+    updateFloatingCartCount(data.cart_count);
+  });
+});
+</script>
 {% endblock %}
