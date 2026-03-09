@@ -29,7 +29,7 @@ def render_quote_email(name, address, display_cart, grand_total):
         grand_total_num = 0
     body = f"""
     <div style='padding:32px 0;text-align:center;'>
-        <img src='https://narinakhre.com/static/assets/logo.jpg' alt='Nari Nakhre Logo' style='height:60px;margin-bottom:16px;'>
+        <img src='https://narinakhre.com/static/assets/logo.png' alt='Nari Nakhre Logo' style='height:60px;margin-bottom:16px;'>
     </div>
     <h2 style='color:#be185d;'>Dear {name},</h2>
     <p style='font-size:1.1em;'>Thank you for choosing <strong>Nari Nakhre</strong>! Please find your quote below:</p>
@@ -47,7 +47,7 @@ def render_quote_email(name, address, display_cart, grand_total):
         <div style='margin-top:24px;font-size:1.1em;font-weight:bold;color:#be185d;'>Visit Us At:</div>
         <a href='https://fb.com/narinakhre' target='_blank'><img src='https://narinakhre.com/static/facebook-logo.png' alt='Facebook' style='height:24px;vertical-align:middle;margin-right:8px;'></a>
         <a href='https://instagram.com/narinakhre' target='_blank'><img src='https://narinakhre.com/static/instagram-logo.jpg' alt='Instagram' style='height:24px;vertical-align:middle;margin-right:8px;'></a>
-        <a href='https://narinakhre.com' target='_blank'><img src='https://narinakhre.com/static/assets/logo.jpg' alt='Nari Nakhre Logo' style='height:24px;vertical-align:middle;margin-right:8px;'></a>
+        <a href='https://narinakhre.com' target='_blank'><img src='https://narinakhre.com/static/assets/logo.png' alt='Nari Nakhre Logo' style='height:24px;vertical-align:middle;margin-right:8px;'></a>
     </div>
     """
     return body
