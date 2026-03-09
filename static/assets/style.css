@@ -135,25 +135,69 @@ body {
         padding: 12px 8px;
     }
     .header-logo {
-        width: 150px;
+        width: 120px;
     }
     .header-icons {
-        gap: 12px;
+        gap: 8px;
+    }
+    .rose-accent, .text-2xl {
+        display: none !important;
     }
     .product-gallery {
         grid-template-columns: 1fr;
         gap: 20px;
     }
     .product-card {
-        width: 90%;
+        width: 95%;
         margin: 0 auto;
-        gap: 10px;
+        gap: 14px;
+        padding: 18px;
+        border-radius: 12px;
+        box-shadow: 0 4px 24px rgba(191,161,74,0.18);
     }
-    .product-title,
-    .product-price,
+    .product-title {
+        font-size: 1.1rem;
+        color: #bfa14a;
+        margin-bottom: 4px;
+    }
+    .product-price {
+        font-size: 1rem;
+        color: #333;
+        margin-bottom: 6px;
+    }
     .product-size,
-    .product-qty,
+    .product-qty {
+        width: 100%;
+        font-size: 1rem;
+        border-radius: 8px;
+        margin-bottom: 8px;
+        background: #fffbe6;
+        border: 1px solid #e6c97a;
+    }
     .add-to-quote-btn {
         width: 100%;
+        font-size: 1.05rem;
+        padding: 14px;
+        border-radius: 10px;
+        margin-top: 8px;
+        background: linear-gradient(90deg, #bfa14a 0%, #e6c97a 100%);
+        color: #fff;
+        box-shadow: 0 2px 8px rgba(191,161,74,0.12);
+    }
+    .add-to-quote-btn.added {
+        background: linear-gradient(90deg, #4caf50 0%, #81c784 100%);
+        color: #fff;
+    }
+    .product-card img {
+        border-radius: 10px;
+        box-shadow: 0 2px 12px rgba(191,161,74,0.12);
+        margin-bottom: 8px;
+    }
+    .floating-quote-btn {
+        font-size: 1rem;
+        padding: 12px 24px;
+        border-radius: 40px;
+        bottom: 12px;
+        right: 12px;
     }
 }

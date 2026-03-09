@@ -4,6 +4,8 @@
 <div class="max-w-4xl mx-auto mt-12 bg-slate-900 rounded-2xl shadow-xl p-8">
     <div class="grid grid-cols-1 md:grid-cols-2 gap-10 items-start">
         <div class="flex flex-col items-center justify-center">
+            <a href="/" class="block mb-6 text-pink-400 font-bold text-lg underline hover:text-pink-600 focus:outline-none focus:ring-2 focus:ring-pink-500 rounded-xl" title="Link: Back to Home Page Collection">&larr; Back to Collection</a>
+            <h1 class="text-3xl md:text-4xl font-extrabold rose-accent mb-4 text-center" style="letter-spacing:0.04em;">{{ product['name'] }}</h1>
             <div class="flex flex-col items-center">
                 <div id="main-image-container" class="mb-4">
                         <img id="main-product-image" src="{% if image_urls and image_urls|length > 0 %}/{{ image_urls[0] }}{% else %}/static/assets/products/{{ product['sku'] }}_1.jpg{% endif %}" alt="{{ product['name'] }}" class="rounded-2xl shadow-lg border border-[#be185d55] w-full max-w-md h-auto object-cover cursor-zoom-in" style="max-height:350px;" onerror="this.onerror=null;this.src='/static/assets/products/default.jpg';" />
@@ -22,40 +24,52 @@
             </div>
         </div>
         <div class="flex flex-col gap-6 justify-center">
-            <h1 class="text-4xl font-extrabold rose-accent mb-2">{{ product['name'] }}</h1>
             <div class="mb-2 text-pink-400 font-bold text-lg">SKU: {{ product['sku'] }}</div>
-                        <div>
-                                <label for="tier-select-{{ product['sku'] }}" class="block mb-2 font-semibold">Select Wholesale Pack</label>
-                                <select id="tier-select-{{ product['sku'] }}" aria-label="Select Wholesale Pack" class="w-full py-2 px-3 rounded-lg border border-pink-500 font-bold text-lg">
-                                        {% if product['quantity1'] and product['price1'] %}
-                                        <option value="{{ product['quantity1'] }}" data-price="{{ product['price1'] }}" selected>{{ product['quantity1'] }} Pieces - ₹{{ product['price1'] }}</option>
-                                        {% endif %}
-                                        {% if product['quantity2'] and product['price2'] %}
-                                        <option value="{{ product['quantity2'] }}" data-price="{{ product['price2'] }}">{{ product['quantity2'] }} Pieces - ₹{{ product['price2'] }}</option>
-                                        {% endif %}
-                                        {% if product['quantity3'] and product['price3'] %}
-                                        <option value="{{ product['quantity3'] }}" data-price="{{ product['price3'] }}">{{ product['quantity3'] }} Pieces - ₹{{ product['price3'] }}</option>
-                                        {% endif %}
-                                </select>
-                                {% if product['sizes'] %}
-                                <div class="mt-2 text-pink-300 text-sm">Sizes:</div>
-                                <div class="flex gap-2 mt-2">
-                                    {% for size in product['sizes'].split(',') %}
-                                        <label class="inline-flex items-center">
-                                            <input type="checkbox" name="size" value="{{ size|trim }}" class="form-checkbox accent-rose-500" />
-                                            <span class="ml-1 text-xs text-white">{{ size|trim }}</span>
-                                        </label>
-                                    {% endfor %}
-                                </div>
-                                {% endif %}
-                        </div>
+            <div>
+                <label for="tier-select-{{ product['sku'] }}" class="block mb-2 font-semibold">Select Wholesale Pack</label>
+                <select id="tier-select-{{ product['sku'] }}" aria-label="Select Wholesale Pack" class="w-full py-2 px-3 rounded-lg border border-pink-500 font-bold text-lg">
+                    {% if product['quantity1'] and product['price1'] %}
+                    <option value="{{ product['quantity1'] }}" data-price="{{ product['price1'] }}" selected>{{ product['quantity1'] }} Pieces - ₹{{ product['price1'] }}</option>
+                    {% endif %}
+                    {% if product['quantity2'] and product['price2'] %}
+                    <option value="{{ product['quantity2'] }}" data-price="{{ product['price2'] }}">{{ product['quantity2'] }} Pieces - ₹{{ product['price2'] }}</option>
+                    {% endif %}
+                    {% if product['quantity3'] and product['price3'] %}
+                    <option value="{{ product['quantity3'] }}" data-price="{{ product['price3'] }}">{{ product['quantity3'] }} Pieces - ₹{{ product['price3'] }}</option>
+                    {% endif %}
+                </select>
+                {% if product['sizes'] %}
+                <div class="mt-2 text-pink-300 text-sm">Sizes:</div>
+                <div class="flex gap-2 mt-2">
+                    {% for size in product['sizes'].split(',') %}
+                        <label class="inline-flex items-center">
+                            <input type="checkbox" name="size" value="{{ size|trim }}" class="form-checkbox accent-rose-500" />
+                            <span class="ml-1 text-xs text-white">{{ size|trim }}</span>
+                        </label>
+                    {% endfor %}
+                </div>
+                {% endif %}
+            </div>
             <div id="price-display-{{ product['sku'] }}" class="text-2xl font-bold mb-4 text-pink-500">
                 ₹{{ product['price1'] }}
+            </div>
+            <div class="mb-4">
+                <h2 class="text-xl font-bold mb-2 text-pink-400">Product Description</h2>
+                <div class="mb-2 text-slate-200">{{ product['description'] }}</div>
+                {% if product['color'] or product['material'] %}
+                <div class="mb-2">
+                    {% if product['color'] %}
+                        <span class="inline-block px-3 py-1 rounded-full bg-yellow-100 text-yellow-800 font-semibold mr-2">Color: {{ product['color'] }}</span>
+                    {% endif %}
+                    {% if product['material'] %}
+                        <span class="inline-block px-3 py-1 rounded-full bg-blue-100 text-blue-800 font-semibold">Material: {{ product['material'] }}</span>
+                    {% endif %}
+                </div>
+                {% endif %}
             </div>
             <div id="quote-action-{{ product['sku'] }}">
                 <div id="main-quote-action"></div>
             </div>
-            <a href="/" class="block mt-8 text-pink-400 font-bold text-lg underline hover:text-pink-600 focus:outline-none focus:ring-2 focus:ring-pink-500 rounded-xl" title="Link: Back to Home Page Collection">&larr; Back to Collection</a>
         </div>
     </div>
     <div class="mt-10">
