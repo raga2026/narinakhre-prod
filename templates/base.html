@@ -6,84 +6,43 @@
     <title>{% block title %}NariNakhre{% endblock %}</title>
     <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
     <style>
-        body { background: #0f172a !important; color: #e2e8f0 !important; }
-        .rose-accent { color: #be185d; }
-        .rose-btn {
-            background: linear-gradient(90deg, #be185d 0%, #f43f5e 100%);
-            color: #fff;
-            box-shadow: 0 0 12px 2px #be185d55, 0 2px 8px #0004;
-            transition: box-shadow 0.2s, transform 0.2s;
+        body { background: #0f172a; color: #e2e8f0; font-family: sans-serif; }
+        .rose-accent { color: #f472b6; }
+        .nav-btn {
+            background: #be185d;
+            color: white;
+            padding: 8px 16px;
+            border-radius: 8px;
+            font-size: 14px;
+            font-weight: bold;
         }
-        .rose-btn:hover, .rose-btn:focus {
-            box-shadow: 0 0 24px 4px #be185d99, 0 4px 16px #0008;
-            transform: translateY(-2px) scale(1.03);
-        }
-        .rose-bg, .bg-white, .rounded-xl, .rounded-lg, .rounded-2xl, .shadow-lg, .shadow, .shadow-sm, .shadow-xl {
-            background: #1e293b !important;
-            color: #e2e8f0 !important;
-            border-color: #334155 !important;
-        }
-        input, select, textarea {
+        header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 1rem 5%;
             background: #1e293b;
-            color: #e2e8f0;
-            border-color: #334155;
+            border-bottom: 1px solid #334155;
         }
-        input:focus, select:focus, textarea:focus {
-            border-color: #be185d;
-            outline: none;
+        @media (max-width: 768px) {
+            header { flex-direction: column; gap: 10px; text-align: center; }
         }
-        table, th, td {
-            border-color: #334155 !important;
-        }
-        th { color: #f472b6 !important; }
-        .text-3xl, .text-2xl, .font-extrabold, .font-semibold { color: #f1f5f9 !important; letter-spacing: 0.04em; }
-        .text-lg, .text-xl, .font-bold { color: #e2e8f0 !important; }
     </style>
 </head>
-<body class="min-h-screen bg-slate-900">
-    <header class="flex justify-between items-center px-8 py-6 bg-slate-900 shadow-lg">
-        <a href="/" class="flex items-center gap-3">
-            <img src="/static/assets/logo.png" alt="NariNakhre Logo" class="h-12 w-auto rounded-lg shadow-lg" style="background:#fff;object-fit:contain;">
-            <span class="text-2xl rose-accent font-extrabold tracking-widest">NariNakhre</span>
+<body>
+    <header>
+        <a href="/" class="flex items-center gap-2">
+            <img src="/static/assets/logo.png" alt="Logo" style="height:40px; background:white; padding:2px; border-radius:4px;">
+            <span class="text-xl font-bold rose-accent">NariNakhre</span>
         </a>
-        <div class="flex gap-4 items-center">
-            <a href="{{ url_for('admin_login') }}" class="rose-btn px-4 py-1 rounded-lg text-xs font-bold shadow hover:scale-105 transition" style="background:#be185d; color:#fff;">Admin Login</a>
-            <a href="{{ url_for('checkout') }}" class="rose-btn px-4 py-1 rounded-lg text-xs font-bold shadow hover:scale-105 transition" style="background:#be185d; color:#fff;">Cart <span id="nav-cart-count">({{ cart_count }})</span></a>
-            <a href="{{ url_for('checkout') }}" class="rose-btn px-4 py-1 rounded-lg text-xs font-bold shadow hover:scale-105 transition" style="background:#be185d; color:#fff;">View Quote</a>
-        </div>
+        <nav class="flex gap-3">
+            <a href="{{ url_for('admin_login') }}" class="nav-btn">Admin</a>
+            <a href="{{ url_for('checkout') }}" class="nav-btn">Cart</a>
+        </nav>
     </header>
-    <main class="px-4 md:px-12 py-8">
+
+    <main class="container mx-auto p-4">
         {% block content %}{% endblock %}
     </main>
-    <footer class="mt-12 py-8 text-center text-xs text-slate-400 bg-slate-900 border-t border-pink-900/30">
-        <div class="mb-2 font-bold text-pink-300">Mohini Cosmetics</div>
-        <div>GSTIN: 23JFGPS7650J1ZV</div>
-        <div>136, Dharhai Rd, Kotwali, Jabalpur, Madhya Pradesh 482001</div>
-        <div>Mob: +91 71572310, email: mohinicosmetics.india@gmail.com</div>
-        <div>website: narinakhre.com / wholesale.narinakhre.com</div>
-        <!-- Removed View Quote button for safety cleanup -->
-    </footer>
-    <style>
-    .view-quote-btn {
-        border: 2px solid gold;
-        color: #FFD700 !important;
-        background: #1e293b !important;
-        font-family: 'Georgia', serif;
-        font-size: 1.2rem;
-        letter-spacing: 0.04em;
-        box-shadow: 0 0 16px 2px #FFD70055, 0 2px 8px #0004;
-        transition: box-shadow 0.2s, transform 0.2s;
-    }
-    .view-quote-btn:hover, .view-quote-btn:focus {
-        box-shadow: 0 0 32px 4px #FFD70099, 0 4px 16px #0008;
-        background: #FFD70022 !important;
-        color: #fff !important;
-        transform: translateY(-2px) scale(1.03);
-    }
-    </style>
-    <script src="{{ url_for('static', filename='js/cart_global.js') }}"></script>
-    <style>
-    /* Removed .view-quote-btn styles for safety cleanup */
-</style>
 </body>
 </html>

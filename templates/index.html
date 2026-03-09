@@ -1,171 +1,162 @@
 {% extends "base.html" %}
-{% block title %}NariNakhre Wholesale - Product Index{% endblock %}
-
 {% block content %}
+
 <style>
-  .product-grid {
-    display: grid;
-    grid-template-columns: repeat(4, 1fr);
-    gap: 32px;
-    margin-bottom: 32px;
-  }
-  @media (max-width: 1200px) {
-    .product-grid { grid-template-columns: repeat(3, 1fr); }
-  }
-  @media (max-width: 900px) {
-    .product-grid { grid-template-columns: repeat(2, 1fr); }
-  }
-  @media (max-width: 768px) {
-    .product-grid { grid-template-columns: 1fr; }
-    .product-card { width: 90%; margin: 0 auto; }
-  }
-  .floating-quote-btn {
-    position: fixed;
-    bottom: 24px;
-    right: 24px;
-    z-index: 999;
-    background: linear-gradient(90deg, #bfa14a 0%, #e6c97a 100%);
-    color: #fff;
-    border-radius: 50px;
-    padding: 16px 32px;
-    font-size: 1.2rem;
-    font-weight: bold;
-    box-shadow: 0 4px 24px rgba(191,161,74,0.15);
-    border: none;
-    transition: background 0.2s, color 0.2s;
-    cursor: pointer;
-  }
-  .floating-quote-btn .cart-count {
-    background: #fff;
-    color: #bfa14a;
-    border-radius: 50%;
-    padding: 2px 8px;
-    margin-left: 8px;
-    font-size: 1rem;
-    font-weight: bold;
-  }
+    .search-section { text-align: center; margin: 20px 0; }
+    .search-bar {
+        width: 90%;
+        max-width: 500px;
+        padding: 12px;
+        border-radius: 25px;
+        border: 2px solid #be185d;
+        background: #1e293b;
+        color: white;
+    }
+
+    /* The Product Grid */
+    .product-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+        gap: 20px;
+        padding: 20px 0;
+    }
+
+    .product-card {
+        background: #1e293b;
+        border: 1px solid #334155;
+        border-radius: 12px;
+        padding: 15px;
+        display: flex;
+        flex-direction: column;
+    }
+
+    .product-image {
+        width: 100%;
+        height: 250px;
+        object-fit: cover;
+        border-radius: 8px;
+        margin-bottom: 15px;
+    }
+
+    .product-title { font-size: 1.2rem; font-weight: bold; margin-bottom: 5px; color: #f472b6; }
+    .product-price { font-size: 1.3rem; font-weight: 800; margin-bottom: 15px; }
+
+    .input-group { margin-bottom: 12px; }
+    .input-group label { display: block; font-size: 0.8rem; color: #94a3b8; margin-bottom: 4px; }
+    .input-field {
+        width: 100%;
+        padding: 8px;
+        background: #0f172a;
+        border: 1px solid #334155;
+        color: white;
+        border-radius: 6px;
+    }
+
+    .add-btn {
+        background: #be185d;
+        color: white;
+        font-weight: bold;
+        padding: 12px;
+        border-radius: 8px;
+        width: 100%;
+        margin-top: auto;
+    }
+
+    .specs {
+        margin-top: 15px;
+        padding-top: 10px;
+        border-top: 1px solid #334155;
+        font-size: 0.85rem;
+        color: #cbd5e1;
+    }
 </style>
 
-<h1 class="text-4xl font-extrabold text-center rose-accent mb-10 tracking-wide drop-shadow-lg">Nari Nakhre Catalog</h1>
-
-<div class="flex justify-between items-center mb-8">
-  <input type="text" id="product-search" class="border-2 border-pink-400 rounded-lg px-4 py-2 w-96 text-lg" placeholder="Search products by name..." oninput="filterProducts()">
-  <div class="flex gap-2 items-center">
-    <a href="{{ url_for('admin_login') }}" class="rose-btn px-4 py-2 rounded-lg font-bold shadow hover:scale-105 transition">Admin Login</a>
-    <a href="{{ url_for('checkout') }}" class="rose-btn px-4 py-2 rounded-lg font-bold shadow hover:scale-105 transition">Cart</a>
-    <a href="{{ url_for('checkout') }}" id="view-quote-btn" class="rose-btn px-4 py-2 rounded-lg font-bold shadow hover:scale-105 transition">View Quote</a>
-  </div>
+<div class="search-section">
+    <h1 class="text-3xl font-bold mb-4">Nari Nakhre Catalog</h1>
+    <input type="text" class="search-bar" id="search" placeholder="Search products..." oninput="filterProducts()">
 </div>
 
-<div class="space-y-12">
-  {% for category, products in grouped_products.items() %}
-  <section class="mb-8">
-    <h2 class="text-2xl font-bold text-rose-500 mb-4 border-b border-rose-500/30 pb-2">{{ category }}</h2>
+{% for category, products in grouped_products.items() %}
+    <h2 class="text-2xl font-bold rose-accent mt-8 mb-4 border-b border-gray-700 pb-2">{{ category }}</h2>
     <div class="product-grid">
-      {% for product in products %}
-      <div class="product-card">
-        <img id="gallery-img-{{ product.id }}" src="{{ product.images[0] }}" alt="{{ product.name }}" class="rounded-xl w-full h-48 object-cover border border-rose-500 shadow-lg mb-2" onmouseover="hoverGallery('{{ product.id }}')" onmouseout="unhoverGallery('{{ product.id }}')" />
-        <h3 class="product-title mb-1">
-          <a href="{{ url_for('product_detail', product_id=product.id) }}" class="underline hover:text-pink-400 focus:text-pink-400 focus:outline-none">{{ product.name }}</a>
-        </h3>
-        <div class="product-price mb-2">₹{{ product.price1 }}</div>
-        <div class="mb-2">
-          <label for="size-{{ product.id }}" class="block text-xs font-semibold text-gray-400 mb-1">Size</label>
-          {% set size_list = product.sizes.split(',') if product.sizes else [] %}
-          {% if size_list %}
-            <select id="size-{{ product.id }}" class="product-size" aria-label="Select size">
-              {% for size in size_list %}
-                <option value="{{ size|trim }}">{{ size|trim }}</option>
-              {% endfor %}
-            </select>
-          {% else %}
-            <span class="text-xs text-gray-500">None</span>
-          {% endif %}
-        </div>
-        <div class="mb-2">
-          <label for="qty-{{ product.id }}" class="block text-xs font-semibold text-gray-400 mb-1">Quantity</label>
-          <input id="qty-{{ product.id }}" class="product-qty" type="number" min="1" value="1" aria-label="Select quantity" />
-        </div>
-        <button class="add-to-quote-btn" data-product-id="{{ product.id }}" onclick="addToQuote(this)">Add to Quote</button>
-        <div id="quote-action-{{ product.id }}"></div>
-      </div>
-      {% endfor %}
-    </div>
-  </section>
-  {% endfor %}
-</div>
+        {% for product in products %}
+        <div class="product-card">
+            <div class="carousel-container" style="position:relative;">
+                <img src="{{ product.images[0] }}" class="product-image" alt="{{ product.name }}" id="carousel-img-{{ product.id }}">
+            </div>
+            
+            <a class="product-title" href="{{ url_for('product_detail', product_id=product.id) }}" style="text-decoration:underline; color:#f472b6;">{{ product.name }}</a>
+            <div class="product-price">₹{{ product.price1 }}</div>
 
-<button class="floating-quote-btn" onclick="window.location.href='{{ url_for('checkout') }}'">
-  View Quote Request <span class="cart-count" id="floating-cart-count">0</span>
-</button>
+            <div class="product-attributes" style="margin-bottom: 10px; font-size: 0.95rem; color: #cbd5e1;">
+                {% if product.color or product.material %}
+                    <span>
+                        {% if product.color %}Color: <strong>{{ product.color }}</strong>{% endif %}
+                        {% if product.color and product.material %} | {% endif %}
+                        {% if product.material %}Material: <strong>{{ product.material }}</strong>{% endif %}
+                    </span>
+                {% endif %}
+            </div>
+
+            <div class="input-group">
+                <label>Size</label>
+                <select id="size-{{ product.id }}" class="input-field">
+                    {% for size in product.sizes.split(',') %}
+                        <option value="{{ size|trim }}">{{ size|trim }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <div class="input-group">
+                <label>Quantity</label>
+                <input type="number" id="qty-{{ product.id }}" class="input-field" value="1" min="1">
+            </div>
+
+            <button class="add-btn" onclick="addToQuote('{{ product.id }}')">Add to Quote</button>
+            <!-- specs section removed as color/material now shown above -->
+        </div>
+        {% endfor %}
+    </div>
+{% endfor %}
 
 <script>
-function hoverGallery(productId) {
-  const imgs = window['carouselImgs_' + productId];
-  if (Array.isArray(imgs) && imgs.length > 1) {
-    let idx = 0;
-    const imgEl = document.getElementById('gallery-img-' + productId);
-    imgEl._carouselInterval = setInterval(function() {
-      idx = (idx + 1) % imgs.length;
-      imgEl.src = imgs[idx];
-    }, 1200);
-  }
-}
-function unhoverGallery(productId) {
-  const imgEl = document.getElementById('gallery-img-' + productId);
-  if (imgEl._carouselInterval) {
-    clearInterval(imgEl._carouselInterval);
-    imgEl._carouselInterval = null;
-    const imgs = window['carouselImgs_' + productId];
-    if (Array.isArray(imgs) && imgs.length > 0) imgEl.src = imgs[0];
-  }
-}
-
 function filterProducts() {
-  const search = document.getElementById('product-search').value.toLowerCase();
-  document.querySelectorAll('.product-card').forEach(function(card) {
-    const nameEl = card.querySelector('h3 a, .product-name');
-    const name = nameEl ? nameEl.textContent.toLowerCase() : '';
-    if (name.includes(search)) {
-      card.style.display = '';
-    } else {
-      card.style.display = 'none';
-    }
-  });
+    let val = document.getElementById('search').value.toLowerCase();
+    document.querySelectorAll('.product-card').forEach(card => {
+        let title = card.querySelector('.product-title').innerText.toLowerCase();
+        card.style.display = title.includes(val) ? 'flex' : 'none';
+    });
 }
 
-function addToQuote(btn) {
-  const productId = btn.getAttribute('data-product-id');
-  const size = document.getElementById('size-' + productId)?.value || '';
-  const qty = parseInt(document.getElementById('qty-' + productId)?.value || 1);
-  btn.disabled = true;
-  btn.textContent = 'Adding...';
-  fetch('/add_to_cart', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ product_id: productId, size: size, qty: qty })
-  })
-  .then(res => res.json())
-  .then(data => {
-    btn.classList.add('added');
-    btn.textContent = 'Added to Quote';
-    btn.disabled = false;
-    updateFloatingCartCount(data.cart_count);
-  })
-  .catch(() => {
-    btn.textContent = 'Error';
-    btn.disabled = false;
-  });
+function addToQuote(id) {
+    let size = document.getElementById('size-'+id).value;
+    let qty = document.getElementById('qty-'+id).value;
+    fetch('/add_to_cart', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({product_id: id, size: size, qty: qty})
+    }).then(res => res.json()).then(data => {
+        alert("Added to Quote!");
+    });
 }
 
-function updateFloatingCartCount(count) {
-  document.getElementById('floating-cart-count').textContent = count;
-}
-
+// --- Auto Carousel for Product Images ---
 document.addEventListener('DOMContentLoaded', function() {
-  fetch('/cart_count').then(res => res.json()).then(data => {
-    updateFloatingCartCount(data.cart_count);
-  });
+    {% for category, products in grouped_products.items() %}
+        {% for product in products %}
+            (function() {
+                var images = {{ product.images|tojson }};
+                var idx = 0;
+                var imgEl = document.getElementById('carousel-img-{{ product.id }}');
+                if (!imgEl || images.length < 2) return;
+                setInterval(function() {
+                    idx = (idx + 1) % images.length;
+                    imgEl.src = images[idx];
+                }, 2000);
+            })();
+        {% endfor %}
+    {% endfor %}
 });
 </script>
+
 {% endblock %}
