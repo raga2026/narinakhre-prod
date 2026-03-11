@@ -20,6 +20,30 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 
 app = Flask(__name__)
+    # ...existing code...
+
+@app.route('/category/<category>')
+def category_products(category):
+    db = get_db()
+    products = db.execute('SELECT * FROM products WHERE category = ?', (category,)).fetchall()
+    product_list = []
+    for product in products:
+        product = dict(product)
+        product['images'] = []
+        for i in range(1,6):
+            img_path = os.path.join('static', 'assets', 'products', f"{product['sku']}_{i}.jpg")
+            if os.path.exists(img_path):
+                product['images'].append(url_for('static', filename=f"assets/products/{product['sku']}_{i}.jpg"))
+        if not product['images']:
+            product['images'] = [url_for('static', filename='assets/products/default.jpg')]
+        product['tiers'] = [
+            {'tier': 1, 'qty': product.get('quantity1'), 'price': product.get('price1')},
+            {'tier': 2, 'qty': product.get('quantity2'), 'price': product.get('price2')},
+            {'tier': 3, 'qty': product.get('quantity3'), 'price': product.get('price3')},
+        ]
+        product['sizes'] = product.get('sizes', '')
+        product_list.append(product)
+    return render_template('category_products.html', category=category, products=product_list)
 app.config['UPLOAD_FOLDER'] = 'static/assets/uploads'
 app.config['DATABASE'] = 'narinakhre.db'
 app.secret_key = 'supersecretkey'  # Static string, not os.urandom(24)
@@ -154,6 +178,7 @@ def admin_login_redirect():
 
 @app.route('/')
 def index():
+    # ...existing code...
     db = get_db()
     products = db.execute('SELECT * FROM products').fetchall()
     session['cart'] = session.get('cart', {})
@@ -185,9 +210,8 @@ def index():
 def update_cart():
     data = request.get_json()
     print('[Add to Quote] Received:', data)
-    sku = str(data.get('product_id'))
+    product_id = int(data.get('product_id'))
     qty = int(data.get('qty'))
-    # Patch: handle tier as float string or int
     try:
         tier_val = data.get('tier')
         tier = int(float(tier_val))
@@ -199,7 +223,12 @@ def update_cart():
     if not size:
         print('[Add to Quote] Error: Size is required.')
         return jsonify({'status': 'error', 'message': 'Size is required.'}), 400
-    # Use a composite key for uniqueness
+    db = get_db()
+    product = db.execute('SELECT sku, name FROM products WHERE id = ?', (product_id,)).fetchone()
+    if not product:
+        return jsonify({'status': 'error', 'message': 'Product not found.'}), 404
+    sku = product['sku']
+    name = product['name']
     product_key = f"{sku}_{tier}_{size}"
     cart = session.get('cart', {})
     item_key = f"{sku}_{tier}_{size}"
@@ -209,10 +238,10 @@ def update_cart():
         'tier': tier,
         'price': price,
         'size': size,
-        'sku': sku
+        'sku': sku,
+        'name': name
     }
     if new_qty > 0:
-        # Always set the quantity to the latest value
         cart[item_key] = new_item_data
         print(f'[Add to Quote] Added/Updated item: {item_key} -> {new_item_data}')
     else:
