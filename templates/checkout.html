@@ -4,51 +4,24 @@
 <div class="max-w-4xl mx-auto">
   <h1 class="text-3xl font-extrabold rose-accent mb-8 text-center tracking-wide drop-shadow-lg">Your Quote Cart</h1>
   <div class="flex justify-center gap-4 mb-8">
-    <button id="clear-quote-btn" class="rose-btn py-2 px-8 rounded-2xl font-bold text-lg transition bg-rose-600 text-white hover:bg-rose-700 shadow-xl">Clear Quote</button>
+    <form method="POST" action="/clear_quote" style="display:inline;" id="clear-quote-form">
+      <button type="submit" id="clear-quote-btn" class="rose-btn py-2 px-8 rounded-2xl font-bold text-lg transition bg-rose-600 text-white hover:bg-rose-700 shadow-xl">Clear Quote</button>
+    </form>
+    <script>
+      document.getElementById('clear-quote-form').addEventListener('submit', function() {
+        setTimeout(function() { window.location.reload(); }, 200);
+      });
+    </script>
     <a href="/" class="py-2 px-8 rounded-2xl font-bold text-lg bg-slate-800 text-gray-300 hover:bg-slate-700 transition shadow-xl">Continue Shopping</a>
   </div>
-  <div id="quote-cart-container"></div>
-</div>
-
-<script>
-document.getElementById('clear-quote-btn').onclick = function() {
-  if(confirm("Are you sure you want to clear your quote?")) {
-    localStorage.removeItem('quoteCart');
-    renderCheckoutCart();
-  }
-};
-
-function getQuoteCart() {
-  try {
-    return JSON.parse(localStorage.getItem('quoteCart') || '{}');
-  } catch { return {}; }
-}
-
-function renderCheckoutCart() {
-  const cartObj = getQuoteCart();
-  const cart = Object.values(cartObj);
-  const container = document.getElementById('quote-cart-container');
-
-  if (!cart.length) {
-    container.innerHTML = `<div class="bg-slate-800 text-center py-12 rounded-xl text-pink-300 font-bold text-lg mb-8">Your quote cart is currently empty.</div>`;
-    return;
-  }
-
-  let subtotal = 0;
-  let totalGST = 0;
-  const gstTable = {
-    'BNG-001': 3,
-    'BNG-002': 3,
-    'BNG-003': 3
-  };
-
-  let html = `
+  {% set cart = session['cart'] %}
+  {% if cart and cart|length > 0 %}
     <div class="overflow-x-auto shadow-2xl rounded-3xl border border-pink-900/20 bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900">
       <table class="w-full mb-8 text-center bg-transparent">
         <thead>
           <tr class="bg-rose-500/10 text-rose-400 uppercase text-xs tracking-widest">
             <th class="py-4 px-4">SKU</th>
-            <th class="py-4 px-4 text-left">Product</th>
+            <th class="py-4 px-4">Title</th>
             <th class="py-4 px-4">Size</th>
             <th class="py-4 px-4">Wholesale Pieces (Tier)</th>
             <th class="py-4 px-4">Units (Packs)</th>
@@ -56,44 +29,34 @@ function renderCheckoutCart() {
             <th class="py-4 px-4">Total</th>
           </tr>
         </thead>
-        <tbody class="divide-y divide-pink-900/10">`;
-
-  cart.forEach(item => {
-    const userUnits = parseInt(item.userUnits) || 1;
-    const price = parseFloat(item.price) || 0;
-    const rowTotal = price * userUnits;
-    subtotal += rowTotal;
-    const gstRate = gstTable[item.sku] || 0;
-    const gstAmount = rowTotal * gstRate / 100;
-    totalGST += gstAmount;
-    html += `
-      <tr class="text-white hover:bg-slate-800/50 transition">
-        <td class="py-4 px-4 font-mono text-xs text-gray-400">${item.sku}</td>
-        <td class="py-4 px-4 text-left font-semibold">${item.name}</td>
-        <td class="py-4 px-4">
-            <span class="px-2 py-1 bg-rose-600/20 rounded text-rose-300 text-xs">${item.size || 'N/A'}</span>
-        </td>
-        <td class="py-4 px-4 text-rose-100">${item.qty} Pcs/Pack</td>
-        <td class="py-4 px-4 font-bold text-white">${userUnits}</td>
-        <td class="py-4 px-4">₹${price.toFixed(2)}</td>
-        <td class="py-4 px-4 font-bold text-rose-400">₹${rowTotal.toLocaleString('en-IN')}</td>
-      </tr>`;
-  });
-  const grandTotal = subtotal + totalGST;
-
-  html += `
+        <tbody class="divide-y divide-pink-900/10">
+          {% set subtotal = 0 %}
+          {% for key, item in cart.items() %}
+            {% set price = item.price|float %}
+            {% set units = item.qty|int %}
+            {% set row_total = price * units %}
+            {% set subtotal = subtotal + row_total %}
+            <tr class="text-white hover:bg-slate-800/50 transition">
+              <td class="py-4 px-4 font-mono text-xs text-gray-400">{{ item.sku }}</td>
+              <td class="py-4 px-4">{{ item.name }}</td>
+              <td class="py-4 px-4">
+                <span class="px-2 py-1 bg-rose-600/20 rounded text-rose-300 text-xs">{{ item.size or 'N/A' }}</span>
+              </td>
+              <td class="py-4 px-4 text-rose-100">{{ item.tier }} Pcs/Pack</td>
+              <td class="py-4 px-4 font-bold text-white">{{ units }}</td>
+              <td class="py-4 px-4">₹{{ price|round(2) }}</td>
+              <td class="py-4 px-4 font-bold text-rose-400">₹{{ row_total|round(2) }}</td>
+            </tr>
+          {% endfor %}
         </tbody>
       </table>
     </div>
-
     <div class="mt-8 flex flex-col items-end gap-2 pr-4">
-      <div class="text-pink-300 text-base">Subtotal: <span class="text-white font-bold">₹${subtotal.toLocaleString('en-IN')}</span></div>
-      <div class="text-pink-300 text-base">GST (per product): <span class="text-white font-bold">₹${totalGST.toLocaleString('en-IN')}</span></div>
+      <div class="text-pink-300 text-base">Subtotal: <span class="text-white font-bold">₹{{ subtotal|round(2) }}</span></div>
       <div class="text-3xl text-rose-500 font-extrabold mt-2 border-t border-pink-500/30 pt-4">
-        Grand Total: ₹${grandTotal.toLocaleString('en-IN')}
+        Grand Total: ₹{{ subtotal|round(2) }}
       </div>
     </div>
-
     <div class="mt-12 flex justify-center">
       <form id="submit-quote-form" method="POST" action="/submit_quote" class="bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 p-10 rounded-3xl shadow-2xl max-w-lg w-full border border-pink-900/20">
         <h2 class="text-rose-500 font-extrabold text-2xl mb-8 text-center tracking-wide">Finalize Quote Request</h2>
@@ -113,26 +76,15 @@ function renderCheckoutCart() {
           <label class="block text-pink-300 font-bold mb-2">Shipping Address</label>
           <textarea name="address" rows="3" required class="w-full bg-slate-800 border border-slate-700 rounded-2xl p-4 text-white focus:border-rose-500 outline-none text-lg"></textarea>
         </div>
-        <input type="hidden" name="cart_data" id="cart_data_input">
         <button type="submit" class="w-full py-4 rounded-2xl font-bold text-2xl transition bg-rose-600 text-white hover:bg-rose-700 shadow-xl">
           Submit Quote Request
         </button>
       </form>
-    </div>`;
-
-  container.innerHTML = html;
-
-  // Inject cart data into hidden input before form submit
-  const submitForm = document.getElementById('submit-quote-form');
-  if (submitForm) {
-    submitForm.addEventListener('submit', function(e) {
-      document.getElementById('cart_data_input').value = JSON.stringify(cartObj);
-    });
-  }
-}
-
-document.addEventListener('DOMContentLoaded', renderCheckoutCart);
-</script>
+    </div>
+  {% else %}
+    <div class="bg-slate-800 text-center py-12 rounded-xl text-pink-300 font-bold text-lg mb-8">Your quote cart is currently empty.</div>
+  {% endif %}
+</div>
 
 <style>
   .rose-accent { color: #e11d48; }

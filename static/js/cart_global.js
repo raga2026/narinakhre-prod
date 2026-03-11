@@ -79,21 +79,27 @@ document.addEventListener('click', function(e) {
         const tier = tierSelect ? tierSelect.value : btn.getAttribute('data-tier') || 1;
         const price = tierSelect ? tierSelect.options[tierSelect.selectedIndex].getAttribute('data-price') : btn.getAttribute('data-price');
         const size = container.querySelector('.size-select') ? container.querySelector('.size-select').value : '';
+        const payload = {
+            product_id: sku,
+            qty: 1,
+            tier: tier,
+            price: price,
+            size: size
+        };
+        console.log('[Add to Quote] Sending:', payload);
         fetch('/update-cart', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                product_id: sku,
-                qty: 1,
-                tier: tier,
-                price: price,
-                size: size
-            })
+            body: JSON.stringify(payload)
         })
         .then(res => res.json())
         .then(data => {
+            console.log('[Add to Quote] Response:', data);
             insertUnitControls(btn, sku, tier, price, 1);
             updateCartUI(data.new_total);
+        })
+        .catch(err => {
+            console.error('[Add to Quote] Error:', err);
         });
     }
 });

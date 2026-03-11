@@ -1,0 +1,123 @@
+{% extends "base.html" %}
+{% block content %}
+<style>
+    .search-section { text-align: center; margin: 20px 0; }
+    .search-bar {
+        width: 90%;
+        max-width: 500px;
+        padding: 12px;
+        border-radius: 25px;
+        border: 2px solid #be185d;
+        background: #1e293b;
+        color: white;
+    }
+    .product-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+        gap: 20px;
+        padding: 20px 0;
+    }
+    .product-card {
+        background: #1e293b;
+        border: 1px solid #334155;
+        border-radius: 12px;
+        padding: 15px;
+        display: flex;
+        flex-direction: column;
+    }
+    .product-image {
+        width: 100%;
+        height: 250px;
+        object-fit: cover;
+        border-radius: 8px;
+        margin-bottom: 15px;
+    }
+    .product-title { font-size: 1.2rem; font-weight: bold; margin-bottom: 5px; color: #f472b6; }
+    .product-price { font-size: 1.3rem; font-weight: 800; margin-bottom: 15px; }
+    .input-group { margin-bottom: 12px; }
+    .input-group label { display: block; font-size: 0.8rem; color: #94a3b8; margin-bottom: 4px; }
+    .input-field {
+        width: 100%;
+        padding: 8px;
+        background: #0f172a;
+        border: 1px solid #334155;
+        color: white;
+        border-radius: 6px;
+    }
+    .add-btn {
+        background: #be185d;
+        color: white;
+        font-weight: bold;
+        padding: 12px;
+        border-radius: 8px;
+        width: 100%;
+        margin-top: auto;
+    }
+    .specs {
+        margin-top: 15px;
+        padding-top: 10px;
+        border-top: 1px solid #334155;
+        font-size: 0.85rem;
+        color: #cbd5e1;
+    }
+</style>
+<div class="search-section">
+    <h1 class="text-3xl font-bold mb-4">{{ category }} Products</h1>
+    <input type="text" class="search-bar" id="search" placeholder="Search products..." oninput="filterProducts()">
+</div>
+<div class="product-grid">
+    {% for product in products %}
+    <div class="product-card">
+        <div class="carousel-container" style="position:relative;">
+            <img src="{{ product.images[0] }}" class="product-image" alt="{{ product.name }}" id="carousel-img-{{ product.id }}">
+        </div>
+        <a class="product-title" href="{{ url_for('product_detail', product_id=product.id) }}" style="text-decoration:underline; color:#f472b6;">{{ product.name }}</a>
+        <div class="product-price">₹{{ product.price1 }}</div>
+        <div class="product-attributes" style="margin-bottom: 10px; font-size: 0.95rem; color: #cbd5e1;">
+            {% if product.color or product.material %}
+                <span>
+                    {% if product.color %}Color: <strong>{{ product.color }}</strong>{% endif %}
+                    {% if product.color and product.material %} | {% endif %}
+                    {% if product.material %}Material: <strong>{{ product.material }}</strong>{% endif %}
+                </span>
+            {% endif %}
+        </div>
+        <div class="input-group">
+            <label>Size</label>
+            <select id="size-{{ product.id }}" class="input-field size-select">
+                {% for size in product.sizes.split(',') %}
+                    <option value="{{ size|trim }}">{{ size|trim }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="input-group">
+            <label>Tier</label>
+            <select id="tier-select-{{ product.id }}" class="input-field tier-select">
+                {% for tier in product.tiers %}
+                    {% if tier.qty and tier.price %}
+                        <option value="{{ tier.qty }}" data-price="{{ tier.price }}">{{ tier.qty }} units @ ₹{{ tier.price }}</option>
+                    {% endif %}
+                {% endfor %}
+            </select>
+        </div>
+        <button class="add-to-quote-btn add-btn"
+            data-sku="{{ product.id }}"
+            data-tier="{{ product.tiers[0].qty if product.tiers and product.tiers[0].qty else 1 }}"
+            data-price="{{ product.tiers[0].price if product.tiers and product.tiers[0].price else product.price1 }}"
+            data-size="{{ product.sizes.split(',')[0]|trim if product.sizes else '' }}"
+            onclick="addToQuoteDirect(this, '{{ product.id }}')"
+        >Add to Quote</button>
+        <!-- Toggle controls will be inserted by cart_global.js -->
+    </div>
+    {% endfor %}
+</div>
+<script>
+function filterProducts() {
+    let val = document.getElementById('search').value.toLowerCase();
+    document.querySelectorAll('.product-card').forEach(card => {
+        let title = card.querySelector('.product-title').innerText.toLowerCase();
+        card.style.display = title.includes(val) ? 'flex' : 'none';
+    });
+}
+</script>
+{% endblock %}

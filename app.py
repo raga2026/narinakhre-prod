@@ -1,4 +1,12 @@
+"""
+Route for category filter page. Move this below app = Flask(__name__)
+"""
+# --- Checkout Route ---
+# Place this after app = Flask(__name__)
+# --- Clear Quote Route ---
+# --- Clear Quote Route ---
 # --- Flask & Core Imports ---
+
 from flask import Flask, render_template, request, redirect, url_for, flash, session, jsonify, send_from_directory, g
 import sqlite3
 import os
@@ -15,6 +23,14 @@ app = Flask(__name__)
 app.config['UPLOAD_FOLDER'] = 'static/assets/uploads'
 app.config['DATABASE'] = 'narinakhre.db'
 app.secret_key = 'supersecretkey'  # Static string, not os.urandom(24)
+
+# --- Clear Quote Route ---
+@app.route('/clear_quote', methods=['POST'])
+def clear_quote():
+    session.pop('cart', None)
+    session.modified = True
+    # Stay on checkout page after clearing
+    return redirect(url_for('checkout'))
 
 # --- Database Connection Utility ---
 
@@ -55,7 +71,6 @@ def create_tables():
             quantity1 INTEGER,
             price1 REAL,
             quantity2 INTEGER,
-            price2 REAL,
             quantity3 INTEGER,
             price3 REAL,
             image_url TEXT
@@ -169,12 +184,20 @@ def index():
 @app.route('/update-cart', methods=['POST'])
 def update_cart():
     data = request.get_json()
+    print('[Add to Quote] Received:', data)
     sku = str(data.get('product_id'))
     qty = int(data.get('qty'))
-    tier = int(data.get('tier'))
+    # Patch: handle tier as float string or int
+    try:
+        tier_val = data.get('tier')
+        tier = int(float(tier_val))
+    except Exception as e:
+        print(f'[Add to Quote] Tier conversion error: {e}, value: {data.get("tier")}')
+        tier = 1
     price = float(data.get('price'))
     size = data.get('size', '')
     if not size:
+        print('[Add to Quote] Error: Size is required.')
         return jsonify({'status': 'error', 'message': 'Size is required.'}), 400
     # Use a composite key for uniqueness
     product_key = f"{sku}_{tier}_{size}"
@@ -191,22 +214,59 @@ def update_cart():
     if new_qty > 0:
         # Always set the quantity to the latest value
         cart[item_key] = new_item_data
+        print(f'[Add to Quote] Added/Updated item: {item_key} -> {new_item_data}')
     else:
         cart.pop(item_key, None)
+        print(f'[Add to Quote] Removed item: {item_key}')
     session['cart'] = cart
     session.modified = True
-    print("[BUG DEBUG] Cart after update:", session['cart'])
-    return jsonify({'status': 'success', 'cart_count': len(session['cart'])})
+    print("[Add to Quote] Cart after update:", session['cart'])
+    return jsonify({'status': 'success', 'cart_count': len(session['cart']), 'new_total': len(session['cart'])})
 
 @app.route('/product/<int:product_id>')
 def product_detail(product_id):
     db = get_db()
     product = db.execute('SELECT * FROM products WHERE id = ?', (product_id,)).fetchone()
-    images = db.execute('SELECT image_path FROM product_images WHERE product_id = ? ORDER BY image_index', (product_id,)).fetchall()
-    image_urls = [img['image_path'] for img in images] if images else []
     if product is None:
         return "Product not found", 404
-    related_products = db.execute('SELECT * FROM products WHERE id != ? ORDER BY RANDOM() LIMIT 3', (product_id,)).fetchall()
+    product = dict(product)
+    # Set tiers like homepage
+    product['tiers'] = [
+        {'tier': 1, 'qty': product.get('quantity1'), 'price': product.get('price1')},
+        {'tier': 2, 'qty': product.get('quantity2'), 'price': product.get('price2')},
+        {'tier': 3, 'qty': product.get('quantity3'), 'price': product.get('price3')},
+    ]
+    # Set sizes as string (for dropdown)
+    product['sizes'] = product.get('sizes', '')
+    images = db.execute('SELECT image_path FROM product_images WHERE product_id = ? ORDER BY image_index', (product_id,)).fetchall()
+    # Normalize image paths to be relative to static folder
+    image_urls = []
+    for img in images:
+        path = img['image_path']
+        # Remove leading slashes and static/ if present
+        if path.startswith('static/'):
+            path = path[len('static/'):]
+        path = path.lstrip('/')
+        image_urls.append(path)
+    if not image_urls:
+        # Fallback: check for up to 5 images in static/assets/products/
+        for i in range(1, 6):
+            img_path = f"static/assets/products/{product['sku']}_{i}.jpg"
+            if os.path.exists(img_path):
+                image_urls.append(f"assets/products/{product['sku']}_{i}.jpg")
+        if not image_urls:
+            image_urls = [f"assets/products/{product['sku']}_1.jpg"]
+    related_products_raw = db.execute('SELECT * FROM products WHERE id != ? ORDER BY RANDOM() LIMIT 3', (product_id,)).fetchall()
+    related_products = []
+    for rel in related_products_raw:
+        rel = dict(rel)
+        rel['tiers'] = [
+            {'tier': 1, 'qty': rel.get('quantity1'), 'price': rel.get('price1')},
+            {'tier': 2, 'qty': rel.get('quantity2'), 'price': rel.get('price2')},
+            {'tier': 3, 'qty': rel.get('quantity3'), 'price': rel.get('price3')},
+        ]
+        rel['sizes'] = rel.get('sizes', '')
+        related_products.append(rel)
     return render_template('product_detail.html', product=product, image_urls=image_urls, related_products=related_products)
 
 @app.route('/admin')
@@ -370,18 +430,20 @@ def checkout():
     if request.method == 'POST':
         name = request.form.get('name')
         session['user_name'] = name
-    for p_id, item in cart_data.items():
+    for key, item in cart_data.items():
         if isinstance(item, dict):
             qty = int(item.get('qty', 1))
             tier = int(item.get('tier', 1))
             price = float(item.get('price', 0))
             size = item.get('size', '')
+            sku = item.get('sku')
         else:
             qty = int(item)
             tier = 1
             price = 0.0
             size = ''
-        product = db.execute('SELECT * FROM products WHERE id = ?', (p_id,)).fetchone()
+            sku = key
+        product = db.execute('SELECT * FROM products WHERE sku = ?', (sku,)).fetchone()
         if product:
             gst_rate = product['gst'] or 0.0
             item_subtotal = price * qty
@@ -391,13 +453,25 @@ def checkout():
             display_cart.append({
                 'id': product['id'],
                 'sku': product['sku'],
-                'name': product['name'],
+                'name': product['name'] if product['name'] else product['sku'],
                 'units': qty,
                 'tier': tier,
                 'size': size,
                 'price': price,
                 'tax': item_tax,
                 'total': item_subtotal + item_tax
+            })
+        else:
+            display_cart.append({
+                'id': sku,
+                'sku': sku,
+                'name': sku,
+                'units': qty,
+                'tier': tier,
+                'size': size,
+                'price': price,
+                'tax': 0,
+                'total': price * qty
             })
     grand_total = subtotal + total_tax
     if request.method == 'POST':

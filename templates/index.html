@@ -79,7 +79,7 @@
 {% for category, products in grouped_products.items() %}
     <h2 class="text-2xl font-bold rose-accent mt-8 mb-4 border-b border-gray-700 pb-2">{{ category }}</h2>
     <div class="product-grid">
-        {% for product in products %}
+        {% for product in products[:5] %}
         <div class="product-card">
             <div class="carousel-container" style="position:relative;">
                 <img src="{{ product.images[0] }}" class="product-image" alt="{{ product.name }}" id="carousel-img-{{ product.id }}">
@@ -100,7 +100,7 @@
 
             <div class="input-group">
                 <label>Size</label>
-                <select id="size-{{ product.id }}" class="input-field">
+                <select id="size-{{ product.id }}" class="input-field size-select">
                     {% for size in product.sizes.split(',') %}
                         <option value="{{ size|trim }}">{{ size|trim }}</option>
                     {% endfor %}
@@ -108,15 +108,113 @@
             </div>
 
             <div class="input-group">
-                <label>Quantity</label>
-                <input type="number" id="qty-{{ product.id }}" class="input-field" value="1" min="1">
+                <label>Tier</label>
+                <select id="tier-select-{{ product.id }}" class="input-field tier-select">
+                    {% for tier in product.tiers %}
+                        {% if tier.qty and tier.price %}
+                            <option value="{{ tier.qty }}" data-price="{{ tier.price }}">{{ tier.qty }} units @ ₹{{ tier.price }}</option>
+                        {% endif %}
+                    {% endfor %}
+                </select>
             </div>
 
-            <button class="add-btn" onclick="addToQuote('{{ product.id }}')">Add to Quote</button>
-            <!-- specs section removed as color/material now shown above -->
+            <button class="add-to-quote-btn add-btn"
+                data-sku="{{ product.id }}"
+                data-tier="{{ product.tiers[0].qty if product.tiers and product.tiers[0].qty else 1 }}"
+                data-price="{{ product.tiers[0].price if product.tiers and product.tiers[0].price else product.price1 }}"
+                data-size="{{ product.sizes.split(',')[0]|trim if product.sizes else '' }}"
+                onclick="addToQuoteDirect(this, '{{ product.id }}')"
+            >Add to Quote</button>
+            <!-- Toggle controls will be inserted by cart_global.js -->
+<script>
+function addToQuoteDirect(btn, id) {
+    const size = document.getElementById('size-'+id).value;
+    const tier = document.getElementById('tier-select-'+id).value;
+    const price = document.getElementById('tier-select-'+id).selectedOptions[0].getAttribute('data-price');
+    btn.setAttribute('data-size', size);
+    btn.setAttribute('data-tier', tier);
+    btn.setAttribute('data-price', price);
+    const payload = {
+        product_id: id,
+        qty: 1,
+        tier: tier,
+        price: price,
+        size: size
+    };
+    console.log('[Add to Quote Direct] Sending:', payload);
+    fetch('/update-cart', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+    })
+    .then(res => res.json())
+    .then(data => {
+        console.log('[Add to Quote Direct] Response:', data);
+        // Toggle controls
+        btn.style.display = 'none';
+        let container = btn.closest('.product-card') || btn.closest('.product-container') || btn.parentElement;
+        let controls = document.createElement('div');
+        controls.className = 'qty-controls flex items-center gap-2';
+        controls.innerHTML = `
+            <button class='rose-btn px-3 py-1 rounded-lg minus-btn' aria-label='Decrease quantity' tabindex="0">-</button>
+            <span id='units-${id}-${tier}' tabindex="0" aria-label="Current quantity">1</span>
+            <button class='rose-btn px-3 py-1 rounded-lg plus-btn' aria-label='Increase quantity' tabindex="0">+</button>
+        `;
+        container.appendChild(controls);
+        controls.querySelector('.minus-btn').onclick = function() {
+            if (parseInt(controls.querySelector(`#units-${id}-${tier}`).innerText) > 1) {
+                updateUnitsDirect(id, tier, parseInt(controls.querySelector(`#units-${id}-${tier}`).innerText) - 1, container, btn, price, size);
+            } else {
+                controls.querySelector('.minus-btn').disabled = true;
+                updateUnitsDirect(id, tier, 0, container, btn, price, size);
+            }
+        };
+        controls.querySelector('.plus-btn').onclick = function() {
+            updateUnitsDirect(id, tier, parseInt(controls.querySelector(`#units-${id}-${tier}`).innerText) + 1, container, btn, price, size);
+        };
+    })
+    .catch(err => {
+        console.error('[Add to Quote Direct] Error:', err);
+    });
+}
+function updateUnitsDirect(sku, tier, units, parent, btn, price, size) {
+    fetch('/update-cart', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            product_id: sku,
+            qty: units,
+            tier: tier,
+            price: price,
+            size: size
+        })
+    })
+    .then(res => res.json())
+    .then(data => {
+        if (units > 0) {
+            parent.querySelector(`#units-${sku}-${tier}`).innerText = units;
+        } else {
+            parent.querySelector('.minus-btn').disabled = false;
+            parent.querySelector('.plus-btn').disabled = false;
+            parent.querySelector('.minus-btn').remove();
+            parent.querySelector('.plus-btn').remove();
+            parent.querySelector(`#units-${sku}-${tier}`).remove();
+            btn.style.display = '';
+        }
+        if (typeof updateCartUI === 'function') updateCartUI(data.new_total);
+    });
+}
+</script>
+            <!-- Toggle controls will be inserted by cart_global.js -->
+            <!-- Toggle controls will be inserted by cart_global.js -->
         </div>
         {% endfor %}
     </div>
+    {% if products|length > 5 %}
+        <div style="text-align:center; margin-top:16px;">
+            <a href="{{ url_for('category_products', category=category) }}" class="view-more-btn" style="display:inline-block; background:#be185d; color:white; font-weight:bold; padding:12px 32px; border-radius:24px; font-size:1.1rem; text-decoration:none; box-shadow:0 2px 8px rgba(191,161,74,0.12); transition:background 0.2s;">View More</a>
+        </div>
+    {% endif %}
 {% endfor %}
 
 <script>

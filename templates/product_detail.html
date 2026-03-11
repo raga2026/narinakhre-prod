@@ -1,480 +1,322 @@
 {% extends "base.html" %}
 {% block title %}Product Details - {{ product['name'] }}{% endblock %}
 {% block content %}
-<div class="max-w-4xl mx-auto mt-12 bg-slate-900 rounded-2xl shadow-xl p-8">
-    <div class="grid grid-cols-1 md:grid-cols-2 gap-10 items-start">
-        <div class="flex flex-col items-center justify-center">
-            <a href="/" class="block mb-6 text-pink-400 font-bold text-lg underline hover:text-pink-600 focus:outline-none focus:ring-2 focus:ring-pink-500 rounded-xl" title="Link: Back to Home Page Collection">&larr; Back to Collection</a>
-            <h1 class="text-3xl md:text-4xl font-extrabold rose-accent mb-4 text-center" style="letter-spacing:0.04em;">{{ product['name'] }}</h1>
-            <div class="flex flex-col items-center">
-                <div id="main-image-container" class="mb-4">
-                        <img id="main-product-image" src="{% if image_urls and image_urls|length > 0 %}/{{ image_urls[0] }}{% else %}/static/assets/products/{{ product['sku'] }}_1.jpg{% endif %}" alt="{{ product['name'] }}" class="rounded-2xl shadow-lg border border-[#be185d55] w-full max-w-md h-auto object-cover cursor-zoom-in" style="max-height:350px;" onerror="this.onerror=null;this.src='/static/assets/products/default.jpg';" />
+
+<style>
+    /* Theme matching index.html */
+    body { background-color: #0f172a; color: white; margin: 0; font-family: sans-serif; }
+    .pdp-bg { background: #0f172a; min-height: 100vh; padding: 20px; }
+    .pdp-container { max-width: 1200px; margin: 0 auto; }
+    
+    .back-nav { margin-bottom: 20px; }
+    .back-link { color: #be185d; text-decoration: none; font-weight: bold; font-size: 1.1rem; border: 1px solid #be185d; padding: 8px 15px; border-radius: 20px; transition: 0.3s; }
+    .back-link:hover { background: #be185d; color: white; }
+
+    /* Main Product Layout */
+    .pdp-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(350px, 1fr)); gap: 40px; margin-bottom: 60px; }
+    
+    /* Image Gallery Section */
+    .pdp-image-section { display: flex; flex-direction: column; gap: 15px; }
+    .main-img-container { background: #1e293b; border: 1px solid #334155; border-radius: 12px; overflow: hidden; height: 450px; display: flex; align-items: center; justify-content: center; }
+    .main-img-container img { max-width: 100%; max-height: 100%; object-fit: contain; cursor: pointer; }
+    
+    .thumb-grid { display: flex; gap: 10px; justify-content: center; overflow-x: auto; }
+    .thumb-grid img { width: 80px; height: 80px; object-fit: cover; border-radius: 8px; cursor: pointer; border: 2px solid #334155; opacity: 0.7; transition: 0.3s; }
+    .thumb-grid img:hover { opacity: 1; border-color: #be185d; }
+
+    /* Product Info Card */
+    .pdp-info-card { background: #1e293b; border: 1px solid #334155; border-radius: 12px; padding: 30px; height: fit-content; }
+    .pdp-title { font-size: 2.2rem; color: #f8fafc; margin-bottom: 10px; }
+    .pdp-price { font-size: 1.8rem; color: #be185d; font-weight: bold; margin-bottom: 20px; border-bottom: 1px solid #334155; padding-bottom: 15px; }
+    
+    .detail-item { margin-bottom: 12px; font-size: 1.1rem; }
+    .detail-label { color: #94a3b8; font-weight: bold; min-width: 100px; display: inline-block; }
+    .product-desc { margin-top: 25px; line-height: 1.7; color: #cbd5e1; background: #0f172a; padding: 15px; border-radius: 8px; }
+
+    /* Controls & Buttons (Home Page Style) */
+    .pdp-field { margin-bottom: 20px; }
+    .pdp-field label { display: block; margin-bottom: 8px; color: #94a3b8; font-size: 0.9rem; }
+    .pdp-input, .pdp-select { 
+        width: 100%; padding: 12px; border-radius: 8px; border: 2px solid #be185d; 
+        background: #1e293b; color: white; font-size: 1rem;
+    }
+    .pdp-actions { display: flex; gap: 15px; margin-top: 25px; }
+    .btn-add { flex: 2; background: #be185d; color: white; border: none; padding: 15px; border-radius: 30px; cursor: pointer; font-weight: bold; font-size: 1rem; }
+    .btn-quote { flex: 1; background: transparent; border: 2px solid #be185d; color: #be185d; padding: 15px; border-radius: 30px; cursor: pointer; font-weight: bold; font-size: 1rem; }
+
+    /* "You May Also Like" (Home Page Card Style) */
+    .carousel-section { border-top: 2px solid #334155; padding-top: 50px; margin-top: 50px; }
+    .carousel-title { font-size: 1.8rem; margin-bottom: 30px; color: #f8fafc; }
+    .product-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 20px; }
+    .product-card { background: #1e293b; border: 1px solid #334155; border-radius: 12px; padding: 15px; display: flex; flex-direction: column; transition: 0.3s; }
+    .product-card:hover { transform: translateY(-5px); border-color: #be185d; }
+    .product-image { width: 100%; height: 250px; object-fit: cover; border-radius: 8px; margin-bottom: 15px; }
+    .mini-title { color: white; text-decoration: none; font-size: 1.2rem; font-weight: bold; margin-bottom: 10px; display: block; }
+    .mini-price { color: #be185d; font-weight: bold; font-size: 1.1rem; margin-bottom: 15px; }
+
+    /* Lightbox Modal */
+    #lightbox { display: none; position: fixed; z-index: 10000; left: 0; top: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.95); }
+    .close-lb { position: absolute; top: 20px; right: 40px; color: #be185d; font-size: 50px; cursor: pointer; font-weight: bold; }
+    .lb-content { height: 100%; display: flex; align-items: center; justify-content: center; }
+    #lightbox-img { max-width: 90%; max-height: 85%; border-radius: 5px; border: 2px solid #334155; }
+    .nav-lb { position: absolute; top: 50%; transform: translateY(-50%); color: white; font-size: 60px; cursor: pointer; padding: 30px; transition: 0.3s; }
+    .nav-lb:hover { color: #be185d; }
+    .prev-lb { left: 20px; }
+    .next-lb { right: 20px; }
+</style>
+
+<div class="pdp-bg">
+    <div class="pdp-container">
+        <nav class="back-nav">
+            <a href="/" class="back-link">← Back to Collection</a>
+        </nav>
+
+        <div class="pdp-grid">
+            <div class="pdp-image-section">
+                <div class="main-img-container" style="background:#0f172a; border:2px solid #334155; border-radius:16px; display:flex; align-items:center; justify-content:center; height:420px; overflow-x:auto;">
+                    <img id="main-view" src="{{ url_for('static', filename=image_urls[0]) }}" alt="{{ product['name'] }} main image" onclick="openLightbox(0)" style="max-width:350px; max-height:380px; border-radius:12px; cursor:pointer; box-shadow:0 4px 32px #334155; border:2px solid #334155; background:#1e293b;">
                 </div>
-                <div class="flex gap-2 justify-center">
-                        {% if image_urls and image_urls|length > 0 %}
-                            {% for img in image_urls %}
-                                <img src="/{{ img }}" alt="{{ product['name'] }}" class="rounded-lg border border-[#be185d55] w-16 h-16 object-cover cursor-pointer hover:ring-2 hover:ring-pink-500 product-thumb" onclick="setMainImage('/{{ img }}', {{ loop.index0 }})" onerror="this.style.display='none';" />
-                            {% endfor %}
-                        {% else %}
-                            {% for i in range(1,6) %}
-                                <img src="/static/assets/products/{{ product['sku'] }}_{{ i }}.jpg" alt="{{ product['name'] }}" class="rounded-lg border border-[#be185d55] w-16 h-16 object-cover cursor-pointer hover:ring-2 hover:ring-pink-500 product-thumb" onclick="setMainImage('/static/assets/products/{{ product['sku'] }}_{{ i }}.jpg', {{ loop.index0 }})" onerror="this.style.display='none';" />
-                            {% endfor %}
-                        {% endif %}
-                </div>
-            </div>
-        </div>
-        <div class="flex flex-col gap-6 justify-center">
-            <div class="mb-2 text-pink-400 font-bold text-lg">SKU: {{ product['sku'] }}</div>
-            <div>
-                <label for="tier-select-{{ product['sku'] }}" class="block mb-2 font-semibold">Select Wholesale Pack</label>
-                <select id="tier-select-{{ product['sku'] }}" aria-label="Select Wholesale Pack" class="w-full py-2 px-3 rounded-lg border border-pink-500 font-bold text-lg">
-                    {% if product['quantity1'] and product['price1'] %}
-                    <option value="{{ product['quantity1'] }}" data-price="{{ product['price1'] }}" selected>{{ product['quantity1'] }} Pieces - ₹{{ product['price1'] }}</option>
-                    {% endif %}
-                    {% if product['quantity2'] and product['price2'] %}
-                    <option value="{{ product['quantity2'] }}" data-price="{{ product['price2'] }}">{{ product['quantity2'] }} Pieces - ₹{{ product['price2'] }}</option>
-                    {% endif %}
-                    {% if product['quantity3'] and product['price3'] %}
-                    <option value="{{ product['quantity3'] }}" data-price="{{ product['price3'] }}">{{ product['quantity3'] }} Pieces - ₹{{ product['price3'] }}</option>
-                    {% endif %}
-                </select>
-                {% if product['sizes'] %}
-                <div class="mt-2 text-pink-300 text-sm">Sizes:</div>
-                <div class="flex gap-2 mt-2">
-                    {% for size in product['sizes'].split(',') %}
-                        <label class="inline-flex items-center">
-                            <input type="checkbox" name="size" value="{{ size|trim }}" class="form-checkbox accent-rose-500" />
-                            <span class="ml-1 text-xs text-white">{{ size|trim }}</span>
-                        </label>
+                <div class="thumb-grid" style="display:flex; gap:10px; justify-content:center; margin-top:18px; overflow-x:auto;">
+                    {% for img in image_urls %}
+                        <img src="{{ url_for('static', filename=img) }}" class="thumb-img{% if loop.index0 == 0 %} active-thumb{% endif %}" data-idx="{{ loop.index0 }}" style="width:80px; height:80px; object-fit:cover; border-radius:8px; border:2px solid #334155; opacity:0.85; cursor:pointer; transition:0.2s;" onclick="setMainImage({{ loop.index0 }})">
                     {% endfor %}
                 </div>
-                {% endif %}
             </div>
-            <div id="price-display-{{ product['sku'] }}" class="text-2xl font-bold mb-4 text-pink-500">
-                ₹{{ product['price1'] }}
-            </div>
-            <div class="mb-4">
-                <h2 class="text-xl font-bold mb-2 text-pink-400">Product Description</h2>
-                <div class="mb-2 text-slate-200">{{ product['description'] }}</div>
-                {% if product['color'] or product['material'] %}
-                <div class="mb-2">
-                    {% if product['color'] %}
-                        <span class="inline-block px-3 py-1 rounded-full bg-yellow-100 text-yellow-800 font-semibold mr-2">Color: {{ product['color'] }}</span>
-                    {% endif %}
-                    {% if product['material'] %}
-                        <span class="inline-block px-3 py-1 rounded-full bg-blue-100 text-blue-800 font-semibold">Material: {{ product['material'] }}</span>
-                    {% endif %}
+            <!-- Fullscreen Lightbox Modal -->
+            <div id="lightbox-modal" class="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-80 backdrop-blur" style="display:none;">
+                <div class="relative flex flex-col items-center justify-center w-full h-full">
+                    <button class="absolute top-8 right-12 text-4xl text-pink-500 font-bold" onclick="closeLightbox()" style="background:none; border:none; cursor:pointer;">&times;</button>
+                    <button id="lightbox-prev" class="absolute left-8 top-1/2 transform -translate-y-1/2 text-5xl text-white hover:text-pink-500" style="background:none; border:none; cursor:pointer;">&#10094;</button>
+                    <img id="lightbox-img" src="" class="rounded-xl border-4 border-[#be185d] shadow-2xl" style="max-width:80vw; max-height:80vh; background:#1e293b;">
+                    <button id="lightbox-next" class="absolute right-8 top-1/2 transform -translate-y-1/2 text-5xl text-white hover:text-pink-500" style="background:none; border:none; cursor:pointer;">&#10095;</button>
+                    <!-- Thumbnails below fullscreen image -->
+                    <div class="thumb-grid" id="lb-thumb-grid" style="position:absolute; bottom:40px; left:50%; transform:translateX(-50%); display:flex; gap:10px; justify-content:center; background:rgba(30,41,59,0.8); padding:12px 24px; border-radius:12px;">
+                        {% for img in image_urls %}
+                            <img src="{{ url_for('static', filename=img) }}" class="lb-thumb-img" data-idx="{{ loop.index0 }}" style="width:60px; height:60px; object-fit:cover; border-radius:8px; border:2px solid #334155; opacity:0.85; cursor:pointer; transition:0.2s;">
+                        {% endfor %}
+                    </div>
                 </div>
-                {% endif %}
             </div>
-            <div id="quote-action-{{ product['sku'] }}">
-                <div id="main-quote-action"></div>
-            </div>
-        </div>
-    </div>
-    <div class="mt-10">
-        <!-- Fullscreen Lightbox Gallery -->
-        <div id="nn-lightbox" class="nn-lightbox-overlay" tabindex="-1" aria-modal="true" role="dialog" style="display:none;">
-            <button class="nn-lightbox-close" id="nn-lightbox-close" aria-label="Close Gallery">&times;</button>
-            <div class="nn-lightbox-img-container">
-                <img id="nn-lightbox-img" class="nn-lightbox-img" src="" alt="Product Image" />
-            </div>
-            <div class="nn-lightbox-thumbs" id="nn-lightbox-thumbs"></div>
-        </div>
-        <style>
-            .nn-lightbox-overlay {
-                position: fixed; inset: 0; z-index: 9999;
-                background: rgba(10,10,10,0.95);
-                display: none; align-items: center; justify-content: center;
-                flex-direction: column;
-                transition: opacity 0.2s;
+            <script>
+            // --- Dynamic Gallery Logic ---
+            const imageUrls = [{% for img in image_urls %}'{{ url_for('static', filename=img) }}'{% if not loop.last %}, {% endif %}{% endfor %}];
+            let currentIdx = 0;
+            const mainView = document.getElementById('main-view');
+            const thumbImgs = document.querySelectorAll('.thumb-img');
+            function setMainImage(idx) {
+                currentIdx = idx;
+                mainView.src = imageUrls[idx];
+                thumbImgs.forEach((img, i) => {
+                    img.classList.toggle('active-thumb', i === idx);
+                    img.style.borderColor = i === idx ? '#be185d' : '#334155';
+                    img.style.opacity = i === idx ? '1' : '0.85';
+                });
             }
-            .nn-lightbox-overlay.active { display: flex; }
-            .nn-lightbox-img-container { position: relative; max-width: 90vw; max-height: 80vh; display: flex; align-items: center; justify-content: center; }
-            .nn-lightbox-img { max-width: 100%; max-height: 80vh; border-radius: 1.5rem; box-shadow: 0 2px 32px #be185d88; cursor: zoom-in; transition: transform 0.2s; }
-            .nn-lightbox-img.zoomed { cursor: zoom-out; transform: scale(2); }
-            .nn-lightbox-close { position: absolute; top: 32px; right: 48px; font-size: 3rem; color: #fff; background: none; border: none; z-index: 10001; cursor: pointer; font-weight: bold; text-shadow: 0 2px 16px #000; }
-            .nn-lightbox-thumbs { position: absolute; bottom: 32px; left: 50%; transform: translateX(-50%); display: flex; gap: 12px; z-index: 10001; }
-            .nn-lightbox-thumb { width: 64px; height: 64px; object-fit: cover; border-radius: 0.75rem; border: 3px solid transparent; cursor: pointer; box-shadow: 0 2px 8px #0006; transition: border 0.2s; }
-            .nn-lightbox-thumb.active { border-color: #be185d; }
-            @media (max-width: 600px) {
-                .nn-lightbox-img-container { max-width: 100vw; max-height: 60vh; }
-                .nn-lightbox-img { max-height: 60vh; }
-                .nn-lightbox-thumbs { bottom: 16px; }
-                .nn-lightbox-close { top: 12px; right: 16px; font-size: 2.2rem; }
-            }
-        </style>
-        <script>
-        // --- Add to Quote Dynamic Cart for Main Product ---
-        function getQuoteCart() {
-            try { return JSON.parse(localStorage.getItem('quoteCart') || '{}'); } catch { return {}; }
-        }
-        function setQuoteCart(cart) {
-            localStorage.setItem('quoteCart', JSON.stringify(cart));
-        }
-        function renderMainQuoteAction() {
-            const actionDiv = document.getElementById('main-quote-action');
-            const cart = getQuoteCart();
-            const item = cart['{{ product['id'] }}'];
-            actionDiv.innerHTML = '';
-            const select = document.getElementById('tier-select-{{ product['sku'] }}');
-            const selectedOption = select.options[select.selectedIndex];
-            const selectedQty = parseInt(selectedOption.getAttribute('data-qty'));
-            const selectedPrice = parseFloat(selectedOption.getAttribute('data-price'));
-            let selectedSize = '';
-            const sizeInput = document.querySelector('input[name="size"]:checked');
-            if (sizeInput) selectedSize = sizeInput.value;
-            if (item && item.userUnits > 0) {
-                const sel = document.createElement('div');
-                sel.className = 'flex items-center justify-center gap-4 bg-slate-800 p-2 rounded-xl';
-                sel.innerHTML = '<button onclick="updateMainQuoteQty(-1)" class="text-rose-500 text-xl font-bold"> - </button>' +
-                    '<span class="text-white font-bold">' + item.userUnits + ' pack(s)</span>' +
-                    '<button onclick="updateMainQuoteQty(1)" class="text-rose-500 text-xl font-bold"> + </button>';
-                actionDiv.appendChild(sel);
-                select.onchange = function() {
-                    item.qty = parseInt(select.options[select.selectedIndex].getAttribute('data-qty'));
-                    item.price = parseFloat(select.options[select.selectedIndex].getAttribute('data-price'));
-                    setQuoteCart(cart);
-                    renderMainQuoteAction();
-                };
-            } else {
-                const btn = document.createElement('button');
-                btn.className = 'rose-btn w-full py-3 rounded-xl font-bold text-lg shadow-lg transition';
-                btn.textContent = 'Add to Quote';
-                btn.onclick = function() {
-                    // Merge new item into cart, preserving other items
-                    const newItem = {
-                        id: '{{ product['id'] }}',
-                        sku: '{{ product['sku'] }}',
-                        name: '{{ product['name'] }}',
-                        size: selectedSize,
-                        qty: selectedQty,
-                        userUnits: 1,
-                        price: selectedPrice
-                    };
-                    // Merge instead of replace
-                    const updatedCart = Object.assign({}, cart, { ['{{ product['id'] }}']: newItem });
-                    setQuoteCart(updatedCart);
-                    renderMainQuoteAction();
-                    if(window.updateQuoteBadge) window.updateQuoteBadge();
-                    select.onchange = function() {
-                        const item = updatedCart['{{ product['id'] }}'];
-                        item.qty = parseInt(select.options[select.selectedIndex].getAttribute('data-qty'));
-                        item.price = parseFloat(select.options[select.selectedIndex].getAttribute('data-price'));
-                        setQuoteCart(updatedCart);
-                        renderMainQuoteAction();
-                    };
-                };
-                actionDiv.appendChild(btn);
-            }
-        }
-        function updateMainQuoteQty(delta) {
-            const cart = getQuoteCart();
-            if (!cart['{{ product['id'] }}']) return;
-            cart['{{ product['id'] }}'].userUnits = (cart['{{ product['id'] }}'].userUnits || 1) + delta;
-            if (cart['{{ product['id'] }}'].userUnits < 1) {
-                delete cart['{{ product['id'] }}'];
-            } else {
-                const select = document.getElementById('tier-select-{{ product['sku'] }}');
-                cart['{{ product['id'] }}'].qty = parseInt(select.options[select.selectedIndex].getAttribute('data-qty'));
-                cart['{{ product['id'] }}'].price = parseFloat(select.options[select.selectedIndex].getAttribute('data-price'));
-            }
-            setQuoteCart(cart);
-            renderMainQuoteAction();
-            if(window.updateQuoteBadge) window.updateQuoteBadge();
-        }
-        document.addEventListener('DOMContentLoaded', function() {
-            renderMainQuoteAction();
-        });
-        // --- Lightbox State ---
-        let nnLightboxOpen = false;
-        let nnLightboxImgs = [];
-        let nnLightboxIdx = 0;
-        let nnLightboxZoom = false;
-
-        function openNNLightbox(idx=0) {
-            nnLightboxImgs = Array.from(document.querySelectorAll('.product-thumb')).map(img => img.src);
-            nnLightboxIdx = idx;
-            nnLightboxZoom = false;
-            if (!Array.isArray(nnLightboxImgs) || nnLightboxImgs.length === 0) return;
-            document.getElementById('nn-lightbox-img').src = nnLightboxImgs[idx];
-            renderNNLightboxThumbs();
-            document.getElementById('nn-lightbox').classList.add('active');
-            document.getElementById('nn-lightbox').style.display = 'flex';
-            document.body.style.overflow = 'hidden';
-            nnLightboxOpen = true;
-        }
-
-        function closeNNLightbox() {
-            document.getElementById('nn-lightbox').classList.remove('active');
-            document.getElementById('nn-lightbox').style.display = 'none';
-            document.body.style.overflow = '';
-            nnLightboxOpen = false;
-            nnLightboxZoom = false;
-            document.getElementById('nn-lightbox-img').classList.remove('zoomed');
-        }
-
-        function renderNNLightboxThumbs() {
-            const thumbsDiv = document.getElementById('nn-lightbox-thumbs');
-            thumbsDiv.innerHTML = '';
-            if (!Array.isArray(nnLightboxImgs)) return;
-            nnLightboxImgs.forEach((src, idx) => {
-                const thumb = document.createElement('img');
-                thumb.src = src;
-                thumb.className = 'nn-lightbox-thumb' + (idx === nnLightboxIdx ? ' active' : '');
-                thumb.onclick = () => setNNLightboxIdx(idx);
-                thumbsDiv.appendChild(thumb);
+            thumbImgs.forEach((img, idx) => {
+                img.addEventListener('mouseenter', () => setMainImage(idx));
+                img.addEventListener('click', () => setMainImage(idx));
             });
-        }
-
-        function setNNLightboxIdx(idx) {
-            nnLightboxIdx = idx;
-            document.getElementById('nn-lightbox-img').src = nnLightboxImgs[idx];
-            renderNNLightboxThumbs();
-            nnLightboxZoom = false;
-            document.getElementById('nn-lightbox-img').classList.remove('zoomed');
-        }
-
-        function setMainImage(src, idx) {
-            document.getElementById('main-product-image').src = src;
-            openNNLightbox(idx);
-        }
-
-        document.getElementById('nn-lightbox-close').onclick = closeNNLightbox;
-        document.getElementById('nn-lightbox').onclick = function(e) {
-            if (e.target === this) closeNNLightbox();
-        };
-
-        document.getElementById('nn-lightbox-img').onclick = function(e) {
-            nnLightboxZoom = !nnLightboxZoom;
-            this.classList.toggle('zoomed', nnLightboxZoom);
-        };
-
-        // --- Keyboard Navigation ---
-        document.addEventListener('keydown', function(e) {
-            if (!nnLightboxOpen) return;
-            if (e.key === 'Escape' || e.key === 'Backspace') {
-                closeNNLightbox();
-            } else if (e.key === 'ArrowRight') {
-                if (nnLightboxIdx < nnLightboxImgs.length - 1) setNNLightboxIdx(nnLightboxIdx + 1);
-            } else if (e.key === 'ArrowLeft') {
-                if (nnLightboxIdx > 0) setNNLightboxIdx(nnLightboxIdx - 1);
+            // --- Lightbox Modal ---
+            const lightboxModal = document.getElementById('lightbox-modal');
+            const lightboxImg = document.getElementById('lightbox-img');
+            const lightboxPrev = document.getElementById('lightbox-prev');
+            const lightboxNext = document.getElementById('lightbox-next');
+            function openLightbox(idx = currentIdx) {
+                currentIdx = idx;
+                lightboxModal.style.display = 'flex';
+                lightboxImg.src = imageUrls[currentIdx];
+                document.body.style.overflow = 'hidden';
+                window.history.pushState({lightbox: true}, '', '#lightbox');
             }
-        });
-
-        // --- Mobile Swipe Support ---
-        let nnTouchStartX = null;
-        document.getElementById('nn-lightbox-img').addEventListener('touchstart', function(e) {
-            if (e.touches.length === 1) nnTouchStartX = e.touches[0].clientX;
-        });
-        document.getElementById('nn-lightbox-img').addEventListener('touchend', function(e) {
-            if (nnTouchStartX === null) return;
-            const dx = e.changedTouches[0].clientX - nnTouchStartX;
-            if (Math.abs(dx) > 40) {
-                if (dx < 0 && nnLightboxIdx < nnLightboxImgs.length - 1) setNNLightboxIdx(nnLightboxIdx + 1);
-                else if (dx > 0 && nnLightboxIdx > 0) setNNLightboxIdx(nnLightboxIdx - 1);
-            }
-            nnTouchStartX = null;
-        });
-
-        // --- Pinch-to-Zoom (Mobile) ---
-        let nnPinchStartDist = null;
-        let nnPinchZooming = false;
-        document.getElementById('nn-lightbox-img').addEventListener('touchstart', function(e) {
-            if (e.touches.length === 2) {
-                nnPinchStartDist = Math.abs(e.touches[0].clientX - e.touches[1].clientX);
-                nnPinchZooming = true;
-            }
-        });
-        document.getElementById('nn-lightbox-img').addEventListener('touchmove', function(e) {
-            if (nnPinchZooming && e.touches.length === 2) {
-                const dist = Math.abs(e.touches[0].clientX - e.touches[1].clientX);
-                if (dist > nnPinchStartDist + 30) {
-                    this.classList.add('zoomed');
-                    nnLightboxZoom = true;
-                } else if (dist < nnPinchStartDist - 30) {
-                    this.classList.remove('zoomed');
-                    nnLightboxZoom = false;
+            function closeLightbox() {
+                lightboxModal.style.display = 'none';
+                document.body.style.overflow = '';
+                if (window.location.hash === '#lightbox') {
+                    window.history.back();
                 }
             }
-        });
-        document.getElementById('nn-lightbox-img').addEventListener('touchend', function(e) {
-            nnPinchZooming = false;
-            nnPinchStartDist = null;
-        });
-
-        // --- Mobile Back Button Support ---
-        window.addEventListener('popstate', function() {
-            if (nnLightboxOpen) {
-                closeNNLightbox();
-                history.pushState(null, '', location.href);
-            }
-        });
-
-        // --- Attach Lightbox Trigger to Main Image ---
-        document.addEventListener('DOMContentLoaded', function() {
-            document.getElementById('main-product-image').onclick = function() {
-                // Find the index of the current main image in the thumbnails
-                let idx = 0;
-                const mainSrc = this.src;
-                const thumbs = Array.from(document.querySelectorAll('.product-thumb'));
-                thumbs.forEach((img, i) => { if (img.src === mainSrc) idx = i; });
-                openNNLightbox(idx);
-                history.pushState(null, '', location.href);
+            lightboxPrev.onclick = function() {
+                currentIdx = (currentIdx - 1 + imageUrls.length) % imageUrls.length;
+                lightboxImg.src = imageUrls[currentIdx];
+                setMainImage(currentIdx);
             };
-        });
-        </script>
-        <h2 class="text-xl rose-accent font-bold mb-2">Product Description</h2>
-        <p class="text-slate-200">{{ product['description'] }}</p>
+            lightboxNext.onclick = function() {
+                currentIdx = (currentIdx + 1) % imageUrls.length;
+                lightboxImg.src = imageUrls[currentIdx];
+                setMainImage(currentIdx);
+            };
+            lightboxModal.onclick = function(e) {
+                if (e.target === lightboxModal) closeLightbox();
+            };
+            // ESC and arrow keys for lightbox
+            document.addEventListener('keydown', function(e) {
+                if (lightboxModal.style.display === 'flex') {
+                    if (e.key === 'Escape' || e.key === 'Esc') {
+                        closeLightbox();
+                    } else if (e.key === 'ArrowRight') {
+                        lightboxNext.onclick();
+                    } else if (e.key === 'ArrowLeft') {
+                        lightboxPrev.onclick();
+                    }
+                }
+            });
+            // Browser back closes lightbox
+            window.addEventListener('popstate', function(e) {
+                if (lightboxModal.style.display === 'flex') {
+                    closeLightbox();
+                }
+            });
+            // Lightbox thumbnail click
+            document.querySelectorAll('.lb-thumb-img').forEach((img, idx) => {
+                img.addEventListener('click', () => {
+                    currentIdx = idx;
+                    lightboxImg.src = imageUrls[currentIdx];
+                    setMainImage(currentIdx);
+                });
+            });
+            // Highlight active thumbnail on load
+            setMainImage(0);
+            </script>
+
+            <div class="pdp-info-card">
+                <h1 class="pdp-title">{{ product['name'] }}</h1>
+                <div class="pdp-price">₹{{ product['price1'] }}</div>
+
+                <div class="detail-item"><span class="detail-label">Color:</span> {{ product['color'] or 'N/A' }}</div>
+                <div class="detail-item"><span class="detail-label">Material:</span> {{ product['material'] or 'N/A' }}</div>
+                
+                <div class="product-desc">
+                    <strong style="color:#be185d; display:block; margin-bottom:10px;">Product Description:</strong>
+                    <span style="color:#cbd5e1;">{{ product['description'] or 'No description available for this product.' }}</span>
+                </div>
+
+                <div class="pdp-field">
+                    <label>Select Size</label>
+                    <select id="size-{{ product.id }}" class="pdp-select size-select">
+                        {% for s in product['sizes'].split(',') %}
+                            <option value="{{ s|trim }}">{{ s|trim }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="pdp-field">
+                    <label for="tier">Tier</label>
+                    <select id="tier-select-{{ product.id }}" class="pdp-input tier-select">
+                        {% for tier in product['tiers'] %}
+                            {% if tier.qty and tier.price %}
+                                <option value="{{ tier.qty }}" data-price="{{ tier.price }}">{{ tier.qty }} units @ ₹{{ tier.price }}</option>
+                            {% endif %}
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="pdp-actions">
+                    <button class="add-to-quote-btn btn-add"
+                        data-sku="{{ product.id }}"
+                        data-tier="{{ product.tiers[0].qty if product.tiers and product.tiers[0].qty else 1 }}"
+                        data-price="{{ product.tiers[0].price if product.tiers and product.tiers[0].price else product.price1 }}"
+                        data-size="{{ product.sizes.split(',')[0]|trim if product.sizes else '' }}"
+                        onclick="addToQuoteDirect(this, '{{ product.id }}')"
+                    >Add to Quote</button>
+                    <!-- Toggle controls will be inserted by cart_global.js -->
+                </div>
+                <script>
+                function addToQuoteDirect(btn, id) {
+                    const size = document.getElementById('size-'+id).value;
+                    const tier = document.getElementById('tier-select-'+id).value;
+                    const price = document.getElementById('tier-select-'+id).selectedOptions[0].getAttribute('data-price');
+                    btn.setAttribute('data-size', size);
+                    btn.setAttribute('data-tier', tier);
+                    btn.setAttribute('data-price', price);
+                    const payload = {
+                        product_id: id,
+                        qty: 1,
+                        tier: tier,
+                        price: price,
+                        size: size
+                    };
+                    fetch('/update-cart', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(payload)
+                    })
+                    .then(res => res.json())
+                    .then(data => {
+                        btn.style.display = 'none';
+                        let container = btn.closest('.pdp-info-card') || btn.closest('.product-container') || btn.parentElement;
+                        let controls = document.createElement('div');
+                        controls.className = 'qty-controls flex items-center gap-2';
+                        controls.innerHTML = `
+                            <button class='rose-btn px-3 py-1 rounded-lg minus-btn' aria-label='Decrease quantity' tabindex="0">-</button>
+                            <span id='units-${id}-${tier}' tabindex="0" aria-label="Current quantity">1</span>
+                            <button class='rose-btn px-3 py-1 rounded-lg plus-btn' aria-label='Increase quantity' tabindex="0">+</button>
+                        `;
+                        container.appendChild(controls);
+                        controls.querySelector('.minus-btn').onclick = function() {
+                            let units = parseInt(controls.querySelector(`#units-${id}-${tier}`).innerText);
+                            if (units > 1) {
+                                updateUnits(id, tier, units - 1, container, btn, price);
+                            } else {
+                                controls.querySelector('.minus-btn').disabled = true;
+                                updateUnits(id, tier, 0, container, btn, price);
+                            }
+                        };
+                        controls.querySelector('.plus-btn').onclick = function() {
+                            let units = parseInt(controls.querySelector(`#units-${id}-${tier}`).innerText);
+                            updateUnits(id, tier, units + 1, container, btn, price);
+                        };
+                    });
+                }
+                </script>
+            </div>
+        </div>
+
+        {% if related_products %}
+        <section class="carousel-section">
+            <h2 class="carousel-title">You May Also Like</h2>
+            <div class="product-grid">
+                {% for rel in related_products %}
+                <div class="product-card">
+                    <a href="/product/{{ rel.id }}">
+                        <img class="product-image" src="/static/assets/products/{{ rel.sku }}_1.jpg" alt="{{ rel.name }}" onerror="this.src='/static/assets/products/default.jpg'">
+                    </a>
+                    <a href="/product/{{ rel.id }}" class="mini-title">{{ rel.name }}</a>
+                    <div class="mini-price">₹{{ rel.price1 }}</div>
+                    
+                    <div class="pdp-field">
+                        <label>Select Size</label>
+                        <select id="size-{{ rel.id }}" class="pdp-select size-select">
+                            {% for s in rel.sizes.split(',') %}
+                                <option value="{{ s|trim }}">{{ s|trim }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="pdp-field">
+                        <label for="tier">Tier</label>
+                        <select id="tier-select-{{ rel.id }}" class="pdp-input tier-select">
+                            {% for tier in rel.tiers %}
+                                {% if tier.qty and tier.price %}
+                                    <option value="{{ tier.qty }}" data-price="{{ tier.price }}">{{ tier.qty }} units @ ₹{{ tier.price }}</option>
+                                {% endif %}
+                            {% endfor %}
+                        </select>
+                    </div>
+
+                    <div class="pdp-actions">
+                        <button class="add-to-quote-btn btn-add"
+                            data-sku="{{ rel.id }}"
+                            data-tier="{{ rel.tiers[0].qty if rel.tiers and rel.tiers[0].qty else 1 }}"
+                            data-price="{{ rel.tiers[0].price if rel.tiers and rel.tiers[0].price else rel.price1 }}"
+                            data-size="{{ rel.sizes.split(',')[0]|trim if rel.sizes else '' }}"
+                            onclick="addToQuoteDirect(this, '{{ rel.id }}')"
+                        >Add to Quote</button>
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+        </section>
+        {% endif %}
     </div>
 </div>
-    <!-- Only one View Quote button in base.html footer -->
-<hr class="my-12 border-pink-900/30">
-<section aria-label="Related Luxury Jewelry" class="mt-12">
-    <h3 class="text-2xl rose-accent font-bold mb-4">You May Also Like</h3>
-    <div class="you-may-also-like-row" style="display: flex; flex-direction: row; flex-wrap: nowrap; gap: 1.5rem; overflow-x: auto; width: 100%; scroll-snap-type: x mandatory; scrollbar-width: thin;">
-    <style>
-    .you-may-also-like-row::-webkit-scrollbar {
-        height: 10px;
-        background: #222;
-    }
-    .you-may-also-like-row::-webkit-scrollbar-thumb {
-        background: #be185d;
-        border-radius: 6px;
-    }
-    .product-card {
-        scroll-snap-align: start;
-        transition: transform 0.2s;
-    }
-    .product-card:hover {
-        transform: scale(1.04);
-        z-index: 2;
-    }
-    </style>
-        {% for rel_prod in related_products %}
-        {% set rel_images = [] %}
-        {% for i in range(1,6) %}
-            {% set img_path = 'static/assets/products/' ~ rel_prod['sku'] ~ '_' ~ i ~ '.jpg' %}
-            {% set _ = rel_images.append(url_for('static', filename='assets/products/' ~ rel_prod['sku'] ~ '_' ~ i ~ '.jpg')) %}
-        {% endfor %}
-        {% set rel_images = rel_images|select('string')|list %}
-        {% if rel_images|length == 0 %}
-            {% set rel_images = [url_for('static', filename='assets/products/default.jpg')] %}
-        {% endif %}
-            <div class="product-card rose-bg rounded-2xl shadow-lg border border-[#be185d55] p-4 flex flex-col items-center" id="product-card-{{ rel_prod['sku'] }}" style="min-width:240px; max-width:260px; flex: 0 0 auto; scroll-snap-align: start;">
-                        <a href="{{ url_for('product_detail', product_id=rel_prod['id']) }}" style="width:100%" class="block text-center">
-                                <img id="rel-gallery-img-{{ rel_prod['sku'] }}" src="{{ rel_images[0] }}" alt="{{ rel_prod['name'] }}" class="rounded-xl shadow-lg border border-[#be185d55] mb-2 w-full h-48 object-cover hover:scale-105 transition" onmouseover="hoverRelGallery('{{ rel_prod['sku'] }}')" onmouseout="unhoverRelGallery('{{ rel_prod['sku'] }}')" onerror="this.onerror=null;this.src='{{ url_for('static', filename='assets/products/default.jpg') }}';" />
-                                <div class="font-bold text-pink-400">{{ rel_prod['name'] }}</div>
-                        </a>
-                        <script>
-                            window['relCarouselImgs_{{ rel_prod['sku'] }}'] = {{ rel_images|tojson }};
-                        </script>
-                        <div class="text-xs text-slate-300 mb-2">SKU: {{ rel_prod['sku'] }}</div>
-                        <select class="tier-select mb-2" id="rel-tier-select-{{ rel_prod['id'] }}">
-                                {% if rel_prod['quantity1'] and rel_prod['price1'] %}
-                                <option value="{{ rel_prod['price1'] }}" data-qty="{{ rel_prod['quantity1'] }}">{{ rel_prod['quantity1'] }} Pieces - ₹{{ rel_prod['price1'] }}</option>
-                                {% endif %}
-                                {% if rel_prod['quantity2'] and rel_prod['price2'] %}
-                                <option value="{{ rel_prod['price2'] }}" data-qty="{{ rel_prod['quantity2'] }}">{{ rel_prod['quantity2'] }} Pieces - ₹{{ rel_prod['price2'] }}</option>
-                                {% endif %}
-                                {% if rel_prod['quantity3'] and rel_prod['price3'] %}
-                                <option value="{{ rel_prod['price3'] }}" data-qty="{{ rel_prod['quantity3'] }}">{{ rel_prod['quantity3'] }} Pieces - ₹{{ rel_prod['price3'] }}</option>
-                                {% endif %}
-                        </select>
-                        <div class="font-bold text-pink-500 mb-2">₹{{ rel_prod['price1'] }}</div>
-                        <div id="quote-action-rel-{{ rel_prod['id'] }}"></div>
-        {% endfor %}
-<script>
-// --- Add to Quote Dynamic Cart for Related Products ---
-function getQuoteCart() {
-    try { return JSON.parse(localStorage.getItem('quoteCart') || '{}'); } catch { return {}; }
-}
-function setQuoteCart(cart) {
-    localStorage.setItem('quoteCart', JSON.stringify(cart));
-}
-function renderQuoteActionRel(p) {
-    const actionDiv = document.getElementById('quote-action-rel-' + p.id);
-    const cart = getQuoteCart();
-    const item = cart[p.id];
-    actionDiv.innerHTML = '';
-    if (item && item.qty > 0) {
-        const sel = document.createElement('div');
-        sel.className = 'flex items-center justify-center gap-4 bg-slate-800 p-2 rounded-xl';
-        sel.innerHTML = '<button onclick="updateQuoteQtyRel(' + p.id + ', -1)" class="text-rose-500 text-xl font-bold"> - </button>' +
-            '<span class="text-white font-bold">' + item.qty + ' in Quote</span>' +
-            '<button onclick="updateQuoteQtyRel(' + p.id + ', 1)" class="text-rose-500 text-xl font-bold"> + </button>';
-        actionDiv.appendChild(sel);
-    } else {
-        const btn = document.createElement('button');
-        btn.className = 'w-full py-2 rounded-xl font-bold transition bg-white text-rose-500 hover:bg-rose-500 hover:text-white shadow-lg';
-        btn.textContent = 'Add to Quote';
-        btn.onclick = function() {
-            const select = document.getElementById('rel-tier-select-' + p.id);
-            const cart = getQuoteCart();
-            const newItem = {
-                qty: parseInt(select.options[select.selectedIndex].getAttribute('data-qty')),
-                price: select.value,
-                pack_qty: select.options[select.selectedIndex].getAttribute('data-qty'),
-                name: p.name,
-                sku: p.sku
-            };
-            // Merge instead of replace
-            const updatedCart = Object.assign({}, cart, { [p.id]: newItem });
-            setQuoteCart(updatedCart);
-            renderQuoteActionRel(p);
-            if(window.updateQuoteBadge) window.updateQuoteBadge();
-        };
-        actionDiv.appendChild(btn);
-    }
-}
-function updateQuoteQtyRel(productId, delta) {
-    const cart = getQuoteCart();
-    if (!cart[productId]) return;
-    cart[productId].qty += delta;
-    // Always update pack_qty from the selected tier
-    const select = document.getElementById('rel-tier-select-' + productId);
-    cart[productId].pack_qty = select.options[select.selectedIndex].getAttribute('data-qty');
-    if (cart[productId].qty < 1) delete cart[productId];
-    setQuoteCart(cart);
-    renderQuoteActionRel(window['productDataRel_' + productId]);
-    if(window.updateQuoteBadge) window.updateQuoteBadge();
-}
-document.addEventListener('DOMContentLoaded', function() {
-    {% for rel_prod in related_products %}
-    window['productDataRel_{{ rel_prod.id }}'] = {
-        id: '{{ rel_prod.id }}',
-        name: '{{ rel_prod.name }}',
-        price1: '{{ rel_prod.price1 }}',
-        sku: '{{ rel_prod.sku }}'
-    };
-    renderQuoteActionRel(window['productDataRel_{{ rel_prod.id }}']);
-    {% endfor %}
-});
-</script>
-    <script>
-    // Carousel hover feature for related products
-    function hoverRelGallery(sku) {
-        const imgs = window['relCarouselImgs_' + sku];
-        if (Array.isArray(imgs) && imgs.length > 1) {
-            let idx = 0;
-            const imgEl = document.getElementById('rel-gallery-img-' + sku);
-            imgEl._carouselInterval = setInterval(function() {
-                idx = (idx + 1) % imgs.length;
-                imgEl.src = imgs[idx];
-            }, 1200);
-        }
-    }
-    function unhoverRelGallery(sku) {
-        const imgEl = document.getElementById('rel-gallery-img-' + sku);
-        if (imgEl._carouselInterval) {
-            clearInterval(imgEl._carouselInterval);
-            imgEl._carouselInterval = null;
-            // Reset to first image
-            const imgs = window['relCarouselImgs_' + sku];
-            if (Array.isArray(imgs) && imgs.length > 0) imgEl.src = imgs[0];
-        }
-    }
-    </script>
-    </div>
-</section>
+
+
+
 {% endblock %}
