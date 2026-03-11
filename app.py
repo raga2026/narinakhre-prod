@@ -595,8 +595,8 @@ def submit_quote():
     quote_id = cursor.lastrowid
     for item_key, item in cart.items():
         # Get number of packs (units) and pieces per pack (tier)
-        units = int(item.get('userUnits', item.get('units', 1)))
-        tier = int(item.get('qty', item.get('tier', 1)))
+        tier = int(item.get('tier', 1))  # pieces per unit (pack)
+        units = int(item.get('qty', 1))  # number of packs
         price = float(item.get('price', 0))
         size = item.get('size', '')
         sku = item.get('sku', '')
@@ -612,8 +612,8 @@ def submit_quote():
                 'sku': sku,
                 'name': prod_name or product['name'],
                 'size': size,
-                'tier': tier,
-                'units': units,
+                'tier': tier,  # pieces per unit (pack)
+                'units': units,  # number of packs
                 'price': f"₹{price:,.2f}",
                 'row_total': f"₹{row_total:,.2f}"
             })
