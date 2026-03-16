@@ -36,4 +36,21 @@ def organize_images():
         print(f"Done! Successfully processed {found_skus} SKUs.")
 
 if __name__ == "__main__":
-    organize_images()
+    organize_images()    <head>
+        <meta charset="UTF-8">
+        <title>Nari Nakhre | Premium Ethnic Jewelry & Accessories Wholesaler</title>
+        <link rel="icon" type="image/png" href="{{ url_for('static', filename='assets/logo.png') }}">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <meta name="description" content="Wholesale Indian jewelry, bridal sets, and traditional bangles. Shop premium ethnic accessories for weddings, festivals, and special occasions.">
+        <!-- Open Graph / Facebook / WhatsApp -->
+        <meta property="og:title" content="Nari Nakhre | Premium Ethnic Jewelry & Accessories Wholesaler">
+        <meta property="og:description" content="Wholesale Indian jewelry, bridal sets, and traditional bangles. Shop premium ethnic accessories for weddings, festivals, and special occasions.">
+        <meta property="og:image" content="https://raga2026.pythonanywhere.com/static/assets/logo.png">
+        <meta property="og:url" content="https://raga2026.pythonanywhere.com">
+        <meta property="og:type" content="website">
+        <!-- Twitter Card -->
+        <meta name="twitter:card" content="summary_large_image">
+        <meta name="twitter:title" content="Nari Nakhre | Premium Ethnic Jewelry & Accessories Wholesaler">
+        <meta name="twitter:description" content="Wholesale Indian jewelry, bridal sets, and traditional bangles. Shop premium ethnic accessories for weddings, festivals, and special occasions.">
+        <meta name="twitter:image" content="https://raga2026.pythonanywhere.com/static/assets/logo.png">
+    </head>
