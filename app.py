@@ -739,6 +739,14 @@ def delete_product_ajax():
         return jsonify({"status": "deleted", "sku": data['sku']})
     except Exception as e:
         return jsonify({"status": "error", "message": str(e)}), 500
+@app.route('/admin/organize_images', methods=['POST'])
+def admin_organize_images():
+    if not session.get('admin_logged_in'):
+        return redirect(url_for('admin_login'))
+    from organize_images import organize_images
+    organize_images()
+    flash('Images have been organized from uploads_q to static/assets/products.', 'success')
+    return redirect(url_for('admin_delete_products') )
 if __name__ == '__main__':
     create_tables()
     with app.app_context():
