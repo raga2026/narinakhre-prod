@@ -431,21 +431,27 @@ def import_excel():
 
 @app.route('/admin/delete_products', methods=['GET', 'POST'])
 def admin_delete_products():
-    if not session.get('admin_logged_in'):
-        return redirect(url_for('admin_login'))
     db = get_db()
     if request.method == 'POST':
-        ids = request.form.getlist('product_ids')
-        if ids:
-            db.executemany('DELETE FROM products WHERE id = ?', [(pid,) for pid in ids])
+        product_ids = request.form.getlist('product_ids')
+        if product_ids:
+            # This handles the old 'Delete Selected' button logic if you still use it
+            db.executemany('DELETE FROM products WHERE id = ?', [(pid,) for pid in product_ids])
             db.commit()
-            flash(f"Deleted {len(ids)} products.", "success")
-        else:
-            flash("No products selected for deletion.", "warning")
-        return redirect(url_for('admin'))
-    products = db.execute('SELECT id, sku, name FROM products').fetchall()
-    product_count = len(products)
-    return render_template('admin_delete_products.html', products=products, product_count=product_count)
+            flash(f"Successfully deleted {len(product_ids)} products.")
+        return redirect(url_for('admin_delete_products'))
+
+    # THE CRITICAL CHANGE: We now SELECT every column needed for the bulk table
+    products = db.execute('''
+        SELECT id, sku, name, category, 
+               quantity1, price1, 
+               quantity2, price2, 
+               quantity3, price3 
+        FROM products
+    ''').fetchall()
+    
+    return render_template('admin_delete_products.html', products=products)
+    
 
 
 @app.route('/checkout', methods=['GET', 'POST'])
@@ -662,9 +668,10 @@ def submit_quote():
 @app.route('/thank_you')
 def thank_you():
     user_name = session.get('user_name', 'Valued Customer')
+    user_email = session.get('user_email', '')
     display_cart = session.get('quote_display_cart', [])
     grand_total = session.get('quote_grand_total', 0)
-    return render_template('thank_you.html', user={'name': user_name}, display_cart=display_cart, grand_total=grand_total)
+    return render_template('thank_you.html', user={'name': user_name, 'email': user_email}, display_cart=display_cart, grand_total=grand_total)
 
 @app.route('/thank-you')
 def thank_you_dash():
@@ -698,6 +705,40 @@ def auto_migrate_products_table():
         cursor.execute("ALTER TABLE products ADD COLUMN image_url TEXT")
         conn.commit()
 
+# --- AJAX Routes for Bulk Management ---
+
+
+# --- AJAX Routes for Bulk Management ---
+
+@app.route('/update_bulk_product', methods=['POST'])
+def update_bulk_product():
+    """Updates a single product's pricing tiers via AJAX."""
+    data = request.get_json()
+    db = get_db()
+    try:
+        db.execute('''
+            UPDATE products 
+            SET quantity1 = ?, price1 = ?, 
+                quantity2 = ?, price2 = ?, 
+                quantity3 = ?, price3 = ?
+            WHERE sku = ?
+        ''', (data['qty1'], data['p1'], data['qty2'], data['p2'], data['qty3'], data['p3'], data['sku']))
+        db.commit()
+        return jsonify({"status": "success", "message": "Product updated"})
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+@app.route('/delete_product_ajax', methods=['POST'])
+def delete_product_ajax():
+    """Deletes a single product via AJAX."""
+    data = request.get_json()
+    db = get_db()
+    try:
+        db.execute('DELETE FROM products WHERE sku = ?', (data['sku'],))
+        db.commit()
+        return jsonify({"status": "deleted", "sku": data['sku']})
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
 if __name__ == '__main__':
     create_tables()
     with app.app_context():
