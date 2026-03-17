@@ -14,8 +14,18 @@
     <div class="max-w-md mx-auto bg-slate-800/50 rounded-2xl shadow-xl p-8 border border-pink-500/20">
         <h1 class="text-2xl font-extrabold rose-accent mb-6 text-center">Admin Login</h1>
         <form method="POST" action="/admin/login" class="space-y-6">
-              <input type="text" name="username" placeholder="Username" required class="w-full bg-slate-900 border border-pink-500/30 rounded-xl p-3 text-white">
-            <input type="password" name="password" placeholder="Password" required class="w-full bg-slate-900 border border-pink-500/30 rounded-xl p-3 text-white">
+                            <input type="text" name="username" placeholder="Username" required class="w-full bg-slate-900 border border-pink-500/30 rounded-xl p-3 text-gray-900 placeholder-gray-400">
+                            <div class="relative">
+                                <input id="admin-password" type="password" name="password" placeholder="Password" required class="w-full bg-slate-900 border border-pink-500/30 rounded-xl p-3 text-gray-900 placeholder-gray-400 pr-12">
+                                <button type="button" id="toggle-password" tabindex="-1" class="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-pink-500 focus:outline-none" onclick="togglePassword()">
+                                    <svg id="eye-icon" xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0zm6 0c0 3.866-4.477 7-10 7S1 15.866 1 12 5.477 5 11 5s10 3.134 10 7z" />
+                                    </svg>
+                                    <svg id="eye-off-icon" xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 hidden" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.875 18.825A10.05 10.05 0 0111 19c-5.523 0-10-3.134-10-7a9.956 9.956 0 013.422-5.746M6.634 6.634A9.956 9.956 0 0111 5c5.523 0 10 3.134 10 7 0 1.306-.417 2.534-1.175 3.617M15 12a3 3 0 11-6 0 3 3 0 016 0zm-6 0a3 3 0 016 0" />
+                                    </svg>
+                                </button>
+                            </div>
             <button type="submit" class="rose-btn w-full py-4 rounded-2xl font-bold text-xl shadow-lg glow-pink">Login</button>
         </form>
         {% with messages = get_flashed_messages(with_categories=true) %}
@@ -29,4 +39,20 @@
         {% endwith %}
     </div>
 </body>
+<script>
+function togglePassword() {
+    const pwd = document.getElementById('admin-password');
+    const eye = document.getElementById('eye-icon');
+    const eyeOff = document.getElementById('eye-off-icon');
+    if (pwd.type === 'password') {
+        pwd.type = 'text';
+        eye.classList.add('hidden');
+        eyeOff.classList.remove('hidden');
+    } else {
+        pwd.type = 'password';
+        eye.classList.remove('hidden');
+        eyeOff.classList.add('hidden');
+    }
+}
+</script>
 </html>
