@@ -556,11 +556,18 @@ def send_quote_emails(name, email, whatsapp, address, display_cart, subtotal, to
     admin_msg['To'] = admin_email
     admin_msg['Subject'] = f"New Quote from {name}"
     admin_msg.attach(MIMEText(body, 'html'))
+    # Add forwarding to mohinicosmetics.india@gmail.com
+    forward_msg = MIMEMultipart()
+    forward_msg['From'] = sender_email
+    forward_msg['To'] = 'mohinicosmetcs.in@gmail.com'
+    forward_msg['Subject'] = f"Forwarded Quote from {name}"
+    forward_msg.attach(MIMEText(body, 'html'))
     try:
         server = smtplib.SMTP_SSL(MAIL_SERVER, MAIL_PORT)
         server.login(sender_email, sender_password)
         server.send_message(msg)
         server.send_message(admin_msg)
+        server.send_message(forward_msg)
         server.quit()
         print("Quote email sent successfully.")
     except Exception as e:
@@ -633,13 +640,15 @@ def submit_quote():
         # 5. Send email using Zoho SMTP
         sender_email = 'info@narinakhre.com'
         sender_password = MAIL_PASSWORD
-        admin_email = sender_email
+        admin_email = 'mohinicosmetics.india@gmail.com'
         subject = f"Nari Nakhre Quote #{quote_id} for {name}"
+        # User email
         msg = MIMEMultipart()
         msg['From'] = sender_email
         msg['To'] = email
         msg['Subject'] = subject
         msg.attach(MIMEText(html_body, 'html'))
+        # Admin email
         admin_msg = MIMEMultipart()
         admin_msg['From'] = sender_email
         admin_msg['To'] = admin_email

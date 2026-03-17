@@ -210,62 +210,15 @@
                 </div>
                 <div class="pdp-actions">
                     <button class="add-to-quote-btn btn-add"
+                        id="btn-{{ product.id }}"
                         data-sku="{{ product.id }}"
                         data-tier="{{ product.tiers[0].qty if product.tiers and product.tiers[0].qty else 1 }}"
                         data-price="{{ product.tiers[0].price if product.tiers and product.tiers[0].price else product.price1 }}"
                         data-size="{{ product.sizes.split(',')[0]|trim if product.sizes else '' }}"
-                        onclick="addToQuoteDirect(this, '{{ product.id }}')"
+                        onclick="addToQuoteDirect('{{ product.id }}')"
                     >Add to Quote</button>
                     <!-- Toggle controls will be inserted by cart_global.js -->
                 </div>
-                <script>
-                function addToQuoteDirect(btn, id) {
-                    const size = document.getElementById('size-'+id).value;
-                    const tier = document.getElementById('tier-select-'+id).value;
-                    const price = document.getElementById('tier-select-'+id).selectedOptions[0].getAttribute('data-price');
-                    btn.setAttribute('data-size', size);
-                    btn.setAttribute('data-tier', tier);
-                    btn.setAttribute('data-price', price);
-                    const payload = {
-                        product_id: id,
-                        qty: 1,
-                        tier: tier,
-                        price: price,
-                        size: size
-                    };
-                    fetch('/update-cart', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify(payload)
-                    })
-                    .then(res => res.json())
-                    .then(data => {
-                        btn.style.display = 'none';
-                        let container = btn.closest('.pdp-info-card') || btn.closest('.product-container') || btn.parentElement;
-                        let controls = document.createElement('div');
-                        controls.className = 'qty-controls flex items-center gap-2';
-                        controls.innerHTML = `
-                            <button class='rose-btn px-3 py-1 rounded-lg minus-btn' aria-label='Decrease quantity' tabindex="0">-</button>
-                            <span id='units-${id}-${tier}' tabindex="0" aria-label="Current quantity">1</span>
-                            <button class='rose-btn px-3 py-1 rounded-lg plus-btn' aria-label='Increase quantity' tabindex="0">+</button>
-                        `;
-                        container.appendChild(controls);
-                        controls.querySelector('.minus-btn').onclick = function() {
-                            let units = parseInt(controls.querySelector(`#units-${id}-${tier}`).innerText);
-                            if (units > 1) {
-                                updateUnits(id, tier, units - 1, container, btn, price);
-                            } else {
-                                controls.querySelector('.minus-btn').disabled = true;
-                                updateUnits(id, tier, 0, container, btn, price);
-                            }
-                        };
-                        controls.querySelector('.plus-btn').onclick = function() {
-                            let units = parseInt(controls.querySelector(`#units-${id}-${tier}`).innerText);
-                            updateUnits(id, tier, units + 1, container, btn, price);
-                        };
-                    });
-                }
-                </script>
             </div>
         </div>
 
@@ -306,7 +259,7 @@
                             data-tier="{{ rel.tiers[0].qty if rel.tiers and rel.tiers[0].qty else 1 }}"
                             data-price="{{ rel.tiers[0].price if rel.tiers and rel.tiers[0].price else rel.price1 }}"
                             data-size="{{ rel.sizes.split(',')[0]|trim if rel.sizes else '' }}"
-                            onclick="addToQuoteDirect(this, '{{ rel.id }}')"
+                            onclick="addToQuoteDirect('{{ rel.id }}')"
                         >Add to Quote</button>
                     </div>
                 </div>

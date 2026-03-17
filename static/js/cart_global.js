@@ -67,18 +67,71 @@ function updateUnits(sku, tier, units, parent, btn, price) {
     });
 }
 
+function addToQuoteDirect(sku) {
+    const btn = document.getElementById('btn-' + sku);
+    console.log('[BUGLOG] addToQuoteDirect called with SKU:', sku);
+    if (!btn) {
+        console.error('[BUGLOG] Button not found for SKU:', sku);
+        return;
+    }
+    console.log('[BUGLOG] Button found:', btn);
+    const card = btn.closest('.product-card');
+    console.log('[BUGLOG] Closest product-card:', card);
+    const tierSelect = card ? card.querySelector('.tier-select') : document.getElementById('tier-select-' + sku);
+    if (!tierSelect) {
+        console.error('[BUGLOG] tierSelect not found for SKU:', sku);
+        return;
+    }
+    console.log('[BUGLOG] tierSelect:', tierSelect);
+    const tier = tierSelect ? tierSelect.value : btn.getAttribute('data-tier') || 1;
+    const price = tierSelect && tierSelect.selectedIndex >= 0 ? tierSelect.options[tierSelect.selectedIndex].getAttribute('data-price') : btn.getAttribute('data-price');
+    const sizeSelect = card ? card.querySelector('.size-select') : null;
+    if (!sizeSelect) {
+        console.error('[BUGLOG] sizeSelect not found for SKU:', sku);
+        return;
+    }
+    const size = sizeSelect ? sizeSelect.value : '';
+    console.log('[BUGLOG] tier:', tier, 'price:', price, 'size:', size);
+    const payload = {
+        product_id: sku,
+        qty: 1,
+        tier: tier,
+        price: price,
+        size: size
+    };
+    console.log('[BUGLOG] addToQuoteDirect payload:', payload);
+    fetch('/update-cart', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+    })
+    .then(res => res.json())
+    .then(data => {
+        console.log('[BUGLOG] Response from /update-cart:', data);
+        insertUnitControls(btn, sku, tier, price, 1);
+        updateCartUI(data.new_total);
+    })
+    .catch(err => {
+        console.error('[BUGLOG] Error in fetch /update-cart:', err);
+    });
+}
+
 document.addEventListener('click', function(e) {
     if (e.target.classList.contains('add-to-quote-btn')) {
         const btn = e.target;
         const sku = btn.getAttribute('data-sku');
+        console.log('[BUGLOG] Add to Quote clicked:', {btn, sku});
         let container = btn.closest('.product-card');
         if (!container) {
+            // fallback for product page
             container = btn.closest('.product-info') || btn.closest('.product-container') || btn.parentElement;
         }
+        console.log('[BUGLOG] Container found:', container);
         const tierSelect = container.querySelector('.tier-select') || document.getElementById('tier-select-' + sku);
         const tier = tierSelect ? tierSelect.value : btn.getAttribute('data-tier') || 1;
-        const price = tierSelect ? tierSelect.options[tierSelect.selectedIndex].getAttribute('data-price') : btn.getAttribute('data-price');
+        const price = tierSelect && tierSelect.selectedIndex >= 0 ? tierSelect.options[tierSelect.selectedIndex].getAttribute('data-price') : btn.getAttribute('data-price');
         const size = container.querySelector('.size-select') ? container.querySelector('.size-select').value : '';
+        console.log('[BUGLOG] tierSelect:', tierSelect, 'tier:', tier, 'price:', price, 'size:', size);
         const payload = {
             product_id: sku,
             qty: 1,
@@ -86,7 +139,7 @@ document.addEventListener('click', function(e) {
             price: price,
             size: size
         };
-        console.log('[Add to Quote] Sending:', payload);
+        console.log('[BUGLOG] Sending payload to /update-cart:', payload);
         fetch('/update-cart', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -94,47 +147,39 @@ document.addEventListener('click', function(e) {
         })
         .then(res => res.json())
         .then(data => {
-            console.log('[Add to Quote] Response:', data);
+            console.log('[BUGLOG] Response from /update-cart:', data);
             insertUnitControls(btn, sku, tier, price, 1);
             updateCartUI(data.new_total);
         })
         .catch(err => {
-            console.error('[Add to Quote] Error:', err);
+            console.error('[BUGLOG] Error in fetch /update-cart:', err);
         });
     }
 });
 
-            if (!container) {
-                // fallback for product page
-                container = btn.closest('.product-info') || btn.closest('.product-container') || btn.parentElement;
-            }
-
-
 function syncButtonStates() {
-    // On page load, check session cart and show controls for added items
     fetch('/cart', { method: 'GET' })
-        .then(res => res.text())
-        .then(html => {
-            const parser = new DOMParser();
-            const doc = parser.parseFromString(html, 'text/html');
-            const items = Array.from(doc.querySelectorAll('[data-sku]'));
-            items.forEach(item => {
-                const sku = item.getAttribute('data-sku');
-                const tier = item.getAttribute('data-tier') || 1;
-                const units = item.getAttribute('data-units') || 1;
-                // Try both .product-card and .product-info containers
-                let btn = document.querySelector(`.product-card .add-to-quote-btn[data-sku='${sku}']`);
-                if (!btn) {
-                    btn = document.querySelector(`.product-info .add-to-quote-btn[data-sku='${sku}']`);
-                }
-                if (!btn) {
-                    btn = document.querySelector(`.add-to-quote-btn[data-sku='${sku}']`);
-                }
+        .then(res => res.json())
+        .then(cart => {
+            Object.keys(cart).forEach(key => {
+                const item = cart[key];
+                const btn = document.getElementById('btn-' + item.sku);
                 if (btn) {
-                    insertUnitControls(btn, sku, tier, '', units);
+                    const card = btn.closest('.product-card');
+                    const tier = item.tier;
+                    const price = item.price;
+                    const units = item.qty;
+                    insertUnitControls(btn, item.sku, tier, price, units);
                 }
             });
+        })
+        .catch(err => {
+            console.error('[BUGLOG] Error syncing button states:', err);
         });
 }
+
+document.addEventListener('DOMContentLoaded', function() {
+    syncButtonStates();
+});
 
 window.onload = syncButtonStates;

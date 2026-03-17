@@ -118,93 +118,17 @@
                 </select>
             </div>
 
-            <button class="add-to-quote-btn add-btn"
+            <button
+                id="btn-{{ product.id }}"
+                class="add-to-quote-btn add-btn"
                 data-sku="{{ product.id }}"
-                data-tier="{{ product.tiers[0].qty if product.tiers and product.tiers[0].qty else 1 }}"
-                data-price="{{ product.tiers[0].price if product.tiers and product.tiers[0].price else product.price1 }}"
-                data-size="{{ product.sizes.split(',')[0]|trim if product.sizes else '' }}"
-                onclick="addToQuoteDirect(this, '{{ product.id }}')"
-            >Add to Quote</button>
+                data-name="{{ product.name }}"
+                data-price="{{ product.price1 }}"
+                onclick="addToQuoteDirect('{{ product.id }}')"
+            >
+                Add to Quote
+            </button>
             <!-- Toggle controls will be inserted by cart_global.js -->
-<script>
-function addToQuoteDirect(btn, id) {
-    const size = document.getElementById('size-'+id).value;
-    const tier = document.getElementById('tier-select-'+id).value;
-    const price = document.getElementById('tier-select-'+id).selectedOptions[0].getAttribute('data-price');
-    btn.setAttribute('data-size', size);
-    btn.setAttribute('data-tier', tier);
-    btn.setAttribute('data-price', price);
-    const payload = {
-        product_id: id,
-        qty: 1,
-        tier: tier,
-        price: price,
-        size: size
-    };
-    console.log('[Add to Quote Direct] Sending:', payload);
-    fetch('/update-cart', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-    })
-    .then(res => res.json())
-    .then(data => {
-        console.log('[Add to Quote Direct] Response:', data);
-        // Toggle controls
-        btn.style.display = 'none';
-        let container = btn.closest('.product-card') || btn.closest('.product-container') || btn.parentElement;
-        let controls = document.createElement('div');
-        controls.className = 'qty-controls flex items-center gap-2';
-        controls.innerHTML = `
-            <button class='rose-btn px-3 py-1 rounded-lg minus-btn' aria-label='Decrease quantity' tabindex="0">-</button>
-            <span id='units-${id}-${tier}' tabindex="0" aria-label="Current quantity">1</span>
-            <button class='rose-btn px-3 py-1 rounded-lg plus-btn' aria-label='Increase quantity' tabindex="0">+</button>
-        `;
-        container.appendChild(controls);
-        controls.querySelector('.minus-btn').onclick = function() {
-            if (parseInt(controls.querySelector(`#units-${id}-${tier}`).innerText) > 1) {
-                updateUnitsDirect(id, tier, parseInt(controls.querySelector(`#units-${id}-${tier}`).innerText) - 1, container, btn, price, size);
-            } else {
-                controls.querySelector('.minus-btn').disabled = true;
-                updateUnitsDirect(id, tier, 0, container, btn, price, size);
-            }
-        };
-        controls.querySelector('.plus-btn').onclick = function() {
-            updateUnitsDirect(id, tier, parseInt(controls.querySelector(`#units-${id}-${tier}`).innerText) + 1, container, btn, price, size);
-        };
-    })
-    .catch(err => {
-        console.error('[Add to Quote Direct] Error:', err);
-    });
-}
-function updateUnitsDirect(sku, tier, units, parent, btn, price, size) {
-    fetch('/update-cart', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-            product_id: sku,
-            qty: units,
-            tier: tier,
-            price: price,
-            size: size
-        })
-    })
-    .then(res => res.json())
-    .then(data => {
-        if (units > 0) {
-            parent.querySelector(`#units-${sku}-${tier}`).innerText = units;
-        } else {
-            parent.querySelector('.minus-btn').disabled = false;
-            parent.querySelector('.plus-btn').disabled = false;
-            parent.querySelector('.minus-btn').remove();
-            parent.querySelector('.plus-btn').remove();
-            parent.querySelector(`#units-${sku}-${tier}`).remove();
-            btn.style.display = '';
-        }
-        if (typeof updateCartUI === 'function') updateCartUI(data.new_total);
-    });
-}
-</script>
             <!-- Toggle controls will be inserted by cart_global.js -->
             <!-- Toggle controls will be inserted by cart_global.js -->
         </div>
