@@ -1,3 +1,14 @@
+
+# --- Admin Dashboard Route ---
+# Place this after app = Flask(__name__)
+
+"""
+Route for category filter page. Move this below app = Flask(__name__)
+"""
+# --- Checkout Route ---
+# Place this after app = Flask(__name__)
+# --- Clear Quote Route ---
+# --- Clear Quote Route ---
 """
 Route for category filter page. Move this below app = Flask(__name__)
 """
@@ -14,13 +25,26 @@ import json
 import uuid
 from werkzeug.utils import secure_filename
 from PIL import Image
+
 import pandas as pd
+
 import smtplib
 from email.mime.multipart import MIMEMultipart
+
 from email.mime.text import MIMEText
 
+
 app = Flask(__name__)
-    # ...existing code...
+
+# --- Admin Dashboard Route ---
+@app.route('/admin')
+def admin():
+    if not session.get('admin_logged_in'):
+        return redirect(url_for('admin_login'))
+    db = get_db()
+    products = db.execute('SELECT * FROM products').fetchall()
+    categories = get_categories()
+    return render_template('admin.html', products=products, categories=categories, monaco_ui=True)
 
 @app.route('/category/<category>')
 def category_products(category):
@@ -296,10 +320,117 @@ def product_detail(product_id):
         ]
         rel['sizes'] = rel.get('sizes', '')
         related_products.append(rel)
+
     return render_template('product_detail.html', product=product, image_urls=image_urls, related_products=related_products)
 
-@app.route('/admin')
-def admin():
+@app.route('/admin/bulk_update_products', methods=['POST'])
+def bulk_update_products():
+    if not session.get('admin_logged_in'):
+        return redirect(url_for('admin_login'))
+    if 'excel_file' not in request.files:
+        flash("No file part", "danger")
+        return redirect(url_for('admin'))
+    file = request.files['excel_file']
+    if file.filename == '':
+        flash("No selected file", "danger")
+        return redirect(url_for('admin'))
+    if file:
+        try:
+            df = pd.read_excel(file)
+            df.columns = df.columns.str.strip().str.lower()
+            db = get_db()
+            update_count = 0
+            for index, row in df.iterrows():
+                sku_val = str(row.get('sku', '')).strip()
+                if not sku_val or sku_val == 'nan':
+                    continue
+                # Only update existing products
+                exists = db.execute('SELECT id FROM products WHERE sku = ?', (sku_val,)).fetchone()
+                if not exists:
+                    continue
+                # Update all columns present in the Excel
+                update_fields = []
+                update_values = []
+                for col in df.columns:
+                    if col != 'sku':
+                        update_fields.append(f"{col} = ?")
+                        update_values.append(row.get(col))
+                if update_fields:
+                    update_values.append(sku_val)
+                    db.execute(f"UPDATE products SET {', '.join(update_fields)} WHERE sku = ?", update_values)
+                    update_count += 1
+            db.commit()
+            flash(f'Bulk update successful! {update_count} products updated.', 'success')
+        except Exception as e:
+            db.rollback()
+            flash(f"Error in bulk update: {str(e)}", "danger")
+    return redirect(url_for('admin'))
+
+    # ...existing code...
+    # ...existing code...
+@app.route('/admin/manage_images', methods=['GET'])
+def admin_manage_images():
+    if not session.get('admin_logged_in'):
+        return redirect(url_for('admin_login'))
+    sku_search = request.args.get('sku_search', '').strip()
+    db = get_db()
+    if sku_search:
+        products = db.execute('SELECT sku, name FROM products WHERE sku LIKE ?', (f'%{sku_search}%',)).fetchall()
+    else:
+        products = db.execute('SELECT sku, name FROM products').fetchall()
+    product_list = []
+    for product in products:
+        sku = product['sku']
+        images = []
+        for i in range(1, 6):
+            img_path = f"assets/products/{sku}_{i}.jpg"
+            full_path = os.path.join('static', img_path)
+            if os.path.exists(full_path):
+                images.append(img_path)
+        product_list.append({'sku': sku, 'name': product['name'], 'images': images})
+    return render_template('admin_manage_images.html', products=product_list, sku_search=sku_search)
+
+@app.route('/admin/delete_image', methods=['POST'])
+def admin_delete_image():
+    if not session.get('admin_logged_in'):
+        return redirect(url_for('admin_login'))
+    sku = request.form.get('sku')
+    img_url = request.form.get('img_url')
+    img_path = os.path.join('static', img_url)
+    if os.path.exists(img_path):
+        os.remove(img_path)
+        flash('Image deleted.', 'success')
+    else:
+        flash('Image not found.', 'danger')
+    return redirect(url_for('admin_manage_images'))
+
+@app.route('/admin/upload_images', methods=['POST'])
+def admin_upload_images():
+    if not session.get('admin_logged_in'):
+        return redirect(url_for('admin_login'))
+    sku = request.form.get('sku')
+    files = request.files.getlist('images')
+    count = 0
+    for i in range(1, 6):
+        img_path = os.path.join('static', 'assets', 'products', f"{sku}_{i}.jpg")
+        if os.path.exists(img_path):
+            count += 1
+    available_slots = 5 - count
+    uploaded = 0
+    for file in files:
+        if uploaded >= available_slots:
+            break
+        if file and file.filename:
+            idx = count + uploaded + 1
+            filename = f"{sku}_{idx}.jpg"
+            save_path = os.path.join('static', 'assets', 'products', filename)
+            file.save(save_path)
+            uploaded += 1
+    if uploaded:
+        flash(f'{uploaded} image(s) uploaded.', 'success')
+    else:
+        flash('No images uploaded (max 5 per SKU).', 'warning')
+    return redirect(url_for('admin_manage_images'))
     if not session.get('admin_logged_in'):
         return redirect(url_for('admin_login'))
     db = get_db()
@@ -756,6 +887,66 @@ def admin_organize_images():
     organize_images()
     flash('Images have been organized from uploads_q to static/assets/products.', 'success')
     return redirect(url_for('admin_delete_products') )
+
+# --- Excel Download Routes ---
+@app.route('/admin/edit_product_details', methods=['GET', 'POST'])
+def admin_edit_product_details():
+    if not session.get('admin_logged_in'):
+        return redirect(url_for('admin_login'))
+    db = get_db()
+    categories = [c['name'] for c in db.execute('SELECT name FROM categories').fetchall()]
+    subcategories = [row['subcategory'] for row in db.execute('SELECT DISTINCT subcategory FROM products WHERE subcategory IS NOT NULL AND subcategory != ""').fetchall()]
+    products = db.execute('SELECT * FROM products').fetchall()
+    if request.method == 'POST':
+        sku = request.form.get('sku')
+        name = request.form.get('name')
+        description = request.form.get('description')
+        hsn = request.form.get('hsn')
+        gst = request.form.get('gst')
+        category = request.form.get('category')
+        subcategory = request.form.get('subcategory')
+        sizes = request.form.get('sizes')
+        material = request.form.get('material')
+        color = request.form.get('color')
+        db.execute('''UPDATE products SET name=?, description=?, hsn=?, gst=?, category=?, subcategory=?, sizes=?, material=?, color=? WHERE sku=?''',
+            (name, description, hsn, gst, category, subcategory, sizes, material, color, sku))
+        db.commit()
+        flash(f'Product {sku} details updated!', 'success')
+        return redirect(url_for('admin_edit_product_details'))
+    return render_template('admin_edit_product_details.html', products=products, categories=categories, subcategories=subcategories)
+
+from io import BytesIO
+from flask import send_file
+
+@app.route('/download_users_excel')
+def download_users_excel():
+    db = get_db()
+    users = db.execute('SELECT name, whatsapp, email FROM quotes').fetchall()
+    df = pd.DataFrame(users, columns=['name', 'whatsapp', 'email'])
+    output = BytesIO()
+    df.to_excel(output, index=False)
+    output.seek(0)
+    return send_file(output, download_name='users.xlsx', as_attachment=True, mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+
+@app.route('/download_quotes_excel')
+def download_quotes_excel():
+    db = get_db()
+    quotes = db.execute('SELECT id, name, whatsapp, email, address, subtotal, total_tax, grand_total, created_at FROM quotes').fetchall()
+    df = pd.DataFrame(quotes, columns=['id', 'name', 'whatsapp', 'email', 'address', 'subtotal', 'total_tax', 'grand_total', 'created_at'])
+    output = BytesIO()
+    df.to_excel(output, index=False)
+    output.seek(0)
+    return send_file(output, download_name='quotes.xlsx', as_attachment=True, mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+
+@app.route('/download_products_excel')
+def download_products_excel():
+    db = get_db()
+    products = db.execute('SELECT sku, name, category, subcategory, description, material, color, sizes, hsn, gst, quantity1, price1, quantity2, price2, quantity3, price3, image_url FROM products').fetchall()
+    df = pd.DataFrame(products, columns=['sku', 'name', 'category', 'subcategory', 'description', 'material', 'color', 'sizes', 'hsn', 'gst', 'quantity1', 'price1', 'quantity2', 'price2', 'quantity3', 'price3', 'image_url'])
+    output = BytesIO()
+    df.to_excel(output, index=False)
+    output.seek(0)
+    return send_file(output, download_name='products.xlsx', as_attachment=True, mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
 if __name__ == '__main__':
     create_tables()
     with app.app_context():
