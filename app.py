@@ -36,6 +36,13 @@ from email.mime.text import MIMEText
 
 app = Flask(__name__)
 
+# --- Cart API for JS Sync ---
+@app.route('/cart', methods=['GET'])
+def get_cart():
+    """Return the current session cart in the same structure as used by the main app."""
+    cart = session.get('cart', {})
+    return jsonify(cart)
+
 # --- Admin Dashboard Route ---
 @app.route('/admin')
 def admin():
@@ -234,7 +241,10 @@ def index():
 def update_cart():
     data = request.get_json()
     print('[Add to Quote] Received:', data)
-    product_id = int(data.get('product_id'))
+    product_id = data.get('product_id')
+    if product_id is None or str(product_id).lower() == 'none' or str(product_id).strip() == '':
+        print('[Add to Quote] ERROR: product_id is missing or None! Data:', data)
+        return jsonify({'status': 'error', 'message': 'Product ID (SKU) is required.'}), 400
     qty = int(data.get('qty'))
     try:
         tier_val = data.get('tier')
@@ -248,9 +258,9 @@ def update_cart():
         print('[Add to Quote] Error: Size is required.')
         return jsonify({'status': 'error', 'message': 'Size is required.'}), 400
     db = get_db()
-    product = db.execute('SELECT sku, name FROM products WHERE id = ?', (product_id,)).fetchone()
+    product = db.execute('SELECT sku, name FROM products WHERE sku = ?', (product_id,)).fetchone()
     if not product:
-        return jsonify({'status': 'error', 'message': 'Product not found.'}), 404
+        return jsonify({'status': 'error', 'message': f'Product with SKU {product_id} not found.'}), 404
     sku = product['sku']
     name = product['name']
     product_key = f"{sku}_{tier}_{size}"
@@ -590,6 +600,9 @@ def admin_delete_products():
 @app.route('/checkout', methods=['GET', 'POST'])
 def checkout():
     print("[BUG DEBUG] session['cart'] at checkout:", session.get('cart', {}))
+    import pprint
+    pprint.pprint(session.get('cart', {}))
+    # After display_cart is built, print it for debugging
     cart_data = session.get('cart', {})
     db = get_db()
     display_cart = []
@@ -622,7 +635,7 @@ def checkout():
                 'id': product['id'],
                 'sku': product['sku'],
                 'name': product['name'] if product['name'] else product['sku'],
-                'units': qty,
+                'units': qty,  # This is the correct number of units
                 'tier': tier,
                 'size': size,
                 'price': price,
@@ -634,7 +647,7 @@ def checkout():
                 'id': sku,
                 'sku': sku,
                 'name': sku,
-                'units': qty,
+                'units': qty,  # This is the correct number of units
                 'tier': tier,
                 'size': size,
                 'price': price,
@@ -642,6 +655,8 @@ def checkout():
                 'total': price * qty
             })
     grand_total = subtotal + total_tax
+    print("[BUG DEBUG] display_cart at checkout:")
+    pprint.pprint(display_cart)
     if request.method == 'POST':
         try:
             # PDF/email logic here (if any)

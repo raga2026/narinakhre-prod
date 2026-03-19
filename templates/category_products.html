@@ -70,6 +70,9 @@
     <div class="product-card">
         <div class="carousel-container" style="position:relative;">
             <img src="{{ product.images[0] }}" class="product-image" alt="{{ product.name }}" id="carousel-img-{{ product.id }}">
+            <button class="share-btn-float" title="Share this product" onclick="shareProduct('{{ product['name']|escape }}', '{{ url_for('product_detail', product_id=product.id, _external=True) }}')">
+                <img src="{{ url_for('static', filename='assets/share.svg') }}" alt="Share" style="width:18px;height:18px;vertical-align:middle;">
+            </button>
         </div>
         <a class="product-title" href="{{ url_for('product_detail', product_id=product.id) }}" style="text-decoration:underline; color:#f472b6;">{{ product.name }}</a>
         <div class="product-price">₹{{ product.price1 }}</div>
@@ -101,16 +104,38 @@
             </select>
         </div>
         <button class="add-to-quote-btn add-btn"
-            id="btn-{{ product.id }}"
-            data-product-id="{{ product.id }}"
+            id="btn-{{ product.sku }}"
+            data-product-id="{{ product.sku }}"
             data-tier="{{ product.tiers[0].qty if product.tiers and product.tiers[0].qty else 1 }}"
             data-price="{{ product.tiers[0].price if product.tiers and product.tiers[0].price else product.price1 }}"
             data-size="{{ product.sizes.split(',')[0]|trim if product.sizes else '' }}"
         >Add to Quote</button>
-        <!-- Social Share Button -->
-        <button class="share-btn add-btn" style="background:#fff;color:#be185d;border:1px solid #be185d;display:flex;align-items:center;gap:8px;margin-top:8px;" title="Share this product" onclick="shareProduct('{{ product['name']|escape }}', '{{ url_for('product_detail', product_id=product.id, _external=True) }}')">
-            <img src="{{ url_for('static', filename='assets/share.svg') }}" alt="Share" style="width:20px;height:20px;vertical-align:middle;"> Share
-        </button>
+
+    <style>
+        .share-btn-float {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            background: #fff;
+            color: #be185d;
+            border: 1px solid #be185d;
+            border-radius: 50%;
+            padding: 4px;
+            width: 32px;
+            height: 32px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            box-shadow: 0 2px 8px rgba(190,24,93,0.12);
+            z-index: 2;
+            cursor: pointer;
+            transition: box-shadow 0.2s;
+        }
+        .share-btn-float:hover {
+            box-shadow: 0 4px 16px rgba(190,24,93,0.18);
+            background: #fdf2f8;
+        }
+    </style>
     </div>
     {% endfor %}
 </div>

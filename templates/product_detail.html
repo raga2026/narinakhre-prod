@@ -210,8 +210,8 @@
                 </div>
                 <div class="pdp-actions">
                     <button class="add-to-quote-btn btn-add"
-                        id="btn-{{ product.id }}"
-                        data-product-id="{{ product.id }}"
+                        id="btn-{{ product.sku }}"
+                        data-product-id="{{ product.sku }}"
                         data-tier="{{ product.tiers[0].qty if product.tiers and product.tiers[0].qty else 1 }}"
                         data-price="{{ product.tiers[0].price if product.tiers and product.tiers[0].price else product.price1 }}"
                         data-size="{{ product.sizes.split(',')[0]|trim if product.sizes else '' }}"
@@ -251,7 +251,6 @@
                     </a>
                     <a href="/product/{{ rel.id }}" class="mini-title">{{ rel.name }}</a>
                     <div class="mini-price">₹{{ rel.price1 }}</div>
-                    
                     <div class="pdp-field">
                         <label>Select Size</label>
                         <select id="size-{{ rel.id }}" class="pdp-select size-select">
@@ -270,14 +269,13 @@
                             {% endfor %}
                         </select>
                     </div>
-
                     <div class="pdp-actions">
                         <button class="add-to-quote-btn btn-add"
-                            data-sku="{{ rel.id }}"
+                            id="btn-{{ rel.sku }}"
+                            data-product-id="{{ rel.sku }}"
                             data-tier="{{ rel.tiers[0].qty if rel.tiers and rel.tiers[0].qty else 1 }}"
                             data-price="{{ rel.tiers[0].price if rel.tiers and rel.tiers[0].price else rel.price1 }}"
                             data-size="{{ rel.sizes.split(',')[0]|trim if rel.sizes else '' }}"
-                            onclick="addToQuoteDirect('{{ rel.id }}')"
                         >Add to Quote</button>
                     </div>
                 </div>

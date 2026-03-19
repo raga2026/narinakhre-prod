@@ -38,9 +38,9 @@
                 <span class="px-2 py-1 bg-rose-600/20 rounded text-rose-300 text-xs">{{ item.size or 'N/A' }}</span>
               </td>
               <td class="py-4 px-4 text-rose-100">{{ item.tier }} Pcs/Pack</td>
-              <td class="py-4 px-4 font-bold text-white">{{ item.units }}</td>
+              <td class="py-4 px-4 font-bold text-white">{{ item.units|int }}</td>
               <td class="py-4 px-4">₹{{ item.price|round(2) }}</td>
-              <td class="py-4 px-4 font-bold text-rose-400">₹{{ item.total|round(2) }}</td>
+              <td class="py-4 px-4 font-bold text-rose-400">₹{{ (item.price * item.units)|round(2) }}</td>
             </tr>
           {% endfor %}
         </tbody>
@@ -48,8 +48,9 @@
     </div>
     <div class="mt-8 flex flex-col items-end gap-2 pr-4">
       <div class="text-pink-300 text-base">Subtotal: <span class="text-white font-bold">₹{{ subtotal|round(2) }}</span></div>
+      <div class="text-pink-300 text-base">Taxes: <span class="text-white font-bold">₹{{ total_tax|round(2) }}</span></div>
       <div class="text-3xl text-rose-500 font-extrabold mt-2 border-t border-pink-500/30 pt-4">
-        Grand Total: ₹{{ subtotal|round(2) }}
+        Grand Total: ₹{{ grand_total|round(2) }}
       </div>
     </div>
     <div class="mt-12 flex justify-center">
@@ -105,4 +106,21 @@
   .monaco-scrollbar::-webkit-scrollbar { height: 6px; background: #1a1a1a; }
   .monaco-scrollbar::-webkit-scrollbar-thumb { background: #e11d48; border-radius: 10px; }
 </style>
+<script>
+// --- Auto-refresh checkout page if cart is updated in another tab or after unit update ---
+window.addEventListener('storage', function(event) {
+  if (event.key === 'cart_updated') {
+    // Only reload if not already reloading
+    if (!window.__cartReloading) {
+      window.__cartReloading = true;
+      location.reload();
+    }
+  }
+});
+// Also, trigger a check on page load in case cart was updated before load
+if (window.localStorage.getItem('cart_updated')) {
+  window.localStorage.removeItem('cart_updated');
+  location.reload();
+}
+</script>
 {% endblock %}

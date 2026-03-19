@@ -148,11 +148,13 @@
             </div>
 
             <button
-                id="btn-{{ product.id }}"
+                id="btn-{{ product.sku }}"
                 class="add-to-quote-btn add-btn"
-                data-product-id="{{ product.id }}"
+                data-product-id="{{ product.sku }}"
                 data-name="{{ product.name }}"
                 data-price="{{ product.price1 }}"
+                data-tier="{{ product.tiers[0].qty if product.tiers and product.tiers[0].qty else 1 }}"
+                data-size="{{ product.sizes.split(',')[0]|trim if product.sizes else '' }}"
             >
                 Add to Quote
             </button>
