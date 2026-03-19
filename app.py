@@ -137,8 +137,15 @@ def create_tables():
 # --- Helpers ---
 def get_categories():
     db = get_db()
-    categories = db.execute('SELECT DISTINCT category FROM products WHERE category IS NOT NULL AND TRIM(category) != ""').fetchall()
-    return [c['category'] for c in categories]
+    categories = db.execute('SELECT category FROM products WHERE category IS NOT NULL AND TRIM(category) != ""').fetchall()
+    seen = set()
+    unique = []
+    for c in categories:
+        key = c['category'].replace(' ', '').lower()
+        if key and key not in seen:
+            seen.add(key)
+            unique.append(c['category'])
+    return unique
 
 # --- EMAIL CONFIG FOR GODADDY/OFFICE365 ---
 MAIL_SERVER = 'smtp.zoho.in'
