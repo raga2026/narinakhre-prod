@@ -146,7 +146,7 @@
         <div class="bg-white text-black rounded-2xl shadow-2xl p-8 max-w-lg w-full relative">
             <button onclick="closeContactModal()" class="absolute top-3 right-3 text-rose-600 hover:text-rose-800 text-2xl font-bold">&times;</button>
             <h2 class="text-2xl font-extrabold rose-accent mb-6 text-center">Contact Us</h2>
-            <form id="contact-form" method="POST" action="/contact">
+            <form id="contact-form" method="POST" action="/contact" class="relative">
                 <div class="mb-4">
                     <label class="block text-rose-600 font-bold mb-2">Full Name</label>
                     <input type="text" name="name" required class="w-full border border-rose-300 rounded-lg p-3 focus:border-rose-500 outline-none">
@@ -163,7 +163,26 @@
                     <label class="block text-rose-600 font-bold mb-2">Message</label>
                     <textarea name="message" rows="3" required class="w-full border border-rose-300 rounded-lg p-3 focus:border-rose-500 outline-none"></textarea>
                 </div>
-                <button type="submit" class="w-full py-3 rounded-lg font-bold text-xl bg-rose-600 text-white hover:bg-rose-700 transition">Send Message</button>
+                <button type="submit" class="w-full py-3 rounded-lg font-bold text-xl bg-rose-600 text-white hover:bg-rose-700 transition block md:hidden fixed top-4 right-6 z-50" style="max-width:160px;box-shadow:0 2px 12px #be185d44;">Send Message</button>
+                <button type="submit" class="w-full py-3 rounded-lg font-bold text-xl bg-rose-600 text-white hover:bg-rose-700 transition hidden md:block mt-4">Send Message</button>
+                <style>
+                @media (max-width: 768px) {
+                    #contact-modal form .fixed.top-4.right-6 {
+                        display: block !important;
+                    }
+                    #contact-modal form .hidden.md\:block {
+                        display: none !important;
+                    }
+                }
+                @media (min-width: 769px) {
+                    #contact-modal form .fixed.top-4.right-6 {
+                        display: none !important;
+                    }
+                    #contact-modal form .hidden.md\:block {
+                        display: block !important;
+                    }
+                }
+                </style>
             </form>
         </div>
     </div>
