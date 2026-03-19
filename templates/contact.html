@@ -1,49 +1,37 @@
-setx PATH "$env:PATH;C:\weasyprint-deps\bin"{% extends "base.html" %}
+{% extends "base.html" %}
 {% block title %}Contact - NariNakhre{% endblock %}
 {% block content %}
-<h1 class="text-3xl font-extrabold rose-accent mb-8 text-center tracking-wide drop-shadow-lg">Contact & Submit Quote</h1>
-<form id="contact-form" class="max-w-xl mx-auto bg-slate-900/60 rounded-2xl shadow-lg p-8 flex flex-col gap-6">
-    <form method="POST" action="/contact" class="max-w-xl mx-auto bg-slate-900/60 rounded-2xl shadow-lg p-8 flex flex-col gap-6">
-        <label class="font-semibold text-slate-200">Name
-            <input type="text" name="name" class="w-full mt-2 px-4 py-2 rounded-lg bg-slate-800/50 text-slate-200 border border-[#be185d] focus:border-[#be185d] focus:ring-rose-500" required>
-        </label>
-        <label class="font-semibold text-slate-200">WhatsApp
-            <input type="text" name="whatsapp" class="w-full mt-2 px-4 py-2 rounded-lg bg-slate-800/50 text-slate-200 border border-[#be185d] focus:border-[#be185d] focus:ring-rose-500" required>
-        </label>
-        <label class="font-semibold text-slate-200">Email
-            <input type="email" name="email" class="w-full mt-2 px-4 py-2 rounded-lg bg-slate-800/50 text-slate-200 border border-[#be185d] focus:border-[#be185d] focus:ring-rose-500" required>
-        </label>
-        <button type="submit" class="rose-btn px-6 py-3 rounded-2xl font-bold text-lg shadow hover:shadow-xl transition">Submit Inquiry</button>
-    </form>
-<script>
-const cart = JSON.parse(localStorage.getItem('cart') || '[]');
-const tentativeTotal = localStorage.getItem('tentative_total') || '0.00';
-document.getElementById('grand-total').textContent = '₹' + tentativeTotal;
-
-document.getElementById('contact-form').addEventListener('submit', function(e) {
-    e.preventDefault();
-    const formData = new FormData(e.target);
-    const payload = {
-        name: formData.get('name'),
-        whatsapp: formData.get('whatsapp'),
-        email: formData.get('email'),
-        cart: cart,
-        tentative_total: tentativeTotal
-    };
-    fetch('/submit-quote', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-    }).then(r => r.json()).then(data => {
-        if (data.success) {
-            alert('Inquiry submitted successfully!');
-            localStorage.removeItem('cart');
-            localStorage.removeItem('tentative_total');
-            window.location.href = '/';
-        } else {
-            alert('Submission failed: ' + (data.error || 'Unknown error'));
-        }
-    });
-});
-</script>
+<h1 class="text-3xl font-extrabold rose-accent mb-8 text-center tracking-wide drop-shadow-lg">Contact &amp; Submit Quote</h1>
+<form id="contact-form" method="POST" action="/contact" class="max-w-xl mx-auto bg-slate-900/80 rounded-2xl shadow-lg p-8 flex flex-col gap-6">
+    <label class="font-semibold text-rose-200">Full Name
+        <input type="text" name="name" required class="w-full mt-2 px-4 py-3 rounded-lg bg-slate-800 text-rose-100 border border-rose-500 focus:border-rose-400 focus:ring-rose-500 placeholder-rose-400 text-lg" placeholder="Enter your name">
+    </label>
+    <label class="font-semibold text-rose-200">WhatsApp Number
+        <input type="text" name="whatsapp" required class="w-full mt-2 px-4 py-3 rounded-lg bg-slate-800 text-rose-100 border border-rose-500 focus:border-rose-400 focus:ring-rose-500 placeholder-rose-400 text-lg" placeholder="Enter WhatsApp number">
+    </label>
+    <label class="font-semibold text-rose-200">Email Address
+        <input type="email" name="email" required class="w-full mt-2 px-4 py-3 rounded-lg bg-slate-800 text-rose-100 border border-rose-500 focus:border-rose-400 focus:ring-rose-500 placeholder-rose-400 text-lg" placeholder="Enter your email">
+    </label>
+    <label class="font-semibold text-rose-200">Message
+        <textarea name="message" rows="3" required class="w-full mt-2 px-4 py-3 rounded-lg bg-slate-800 text-rose-100 border border-rose-500 focus:border-rose-400 focus:ring-rose-500 placeholder-rose-400 text-lg" placeholder="Type your message here..."></textarea>
+    </label>
+    <button type="submit" class="w-full py-3 rounded-lg font-bold text-xl bg-rose-600 text-white hover:bg-rose-700 transition">Send Message</button>
+</form>
+<style>
+    #contact-form input, #contact-form textarea {
+        background: #1e293b !important;
+        color: #f472b6 !important;
+        border-color: #be185d !important;
+    }
+    #contact-form input:focus, #contact-form textarea:focus {
+        outline: none;
+        border-color: #f472b6 !important;
+        box-shadow: 0 0 0 2px #be185d44;
+        color: #fff !important;
+    }
+    #contact-form ::placeholder {
+        color: #f472b6 !important;
+        opacity: 1;
+    }
+</style>
 {% endblock %}

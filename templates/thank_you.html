@@ -55,11 +55,19 @@
         <img src="/static/assets/logo.png" alt="Nari Nakhre Logo" class="logo">
         <img src="/static/assets/bouquet.webp" alt="Bouquet" class="bouquet">
         <div class="thank-you-title" style="color:#be185d;text-shadow:0 2px 8px #f43f5e44;">Thank you, {{ user.name }}!</div>
+        {% if contact_only %}
+        <div class="thank-you-message" style="color:#222;font-size:1.2em;margin-top:16px;background:#fffbe6;padding:12px 0;border-radius:8px;">
+            <span style="color:#be185d;font-weight:bold;">Your message has been received.</span><br>
+            <span style="color:#222;">We appreciate you reaching out. Our team will contact you soon.</span><br>
+            <span style="color:#222;">For more information or assistance, please contact <a href="mailto:info@narinakhre.com" style="color:#be185d;text-decoration:underline;font-weight:bold;">info@narinakhre.com</a>.</span>
+        </div>
+        {% else %}
         <div class="thank-you-message" style="color:#222;font-size:1.2em;margin-top:16px;background:#fffbe6;padding:12px 0;border-radius:8px;">
             <span style="color:#be185d;font-weight:bold;">Your quote request has been received.</span><br>
             <span style="color:#222;">An email with the details of your quote has been sent to <span style="color:#be185d;font-weight:bold;">{{ user.email }}</span>.</span><br>
             <span style="color:#222;">For more information or assistance, please contact <a href="mailto:info@narinakhre.com" style="color:#be185d;text-decoration:underline;font-weight:bold;">info@narinakhre.com</a>.</span>
         </div>
+        {% endif %}
         <a href="/" class="rose-btn" style="margin-top:32px;display:inline-block;padding:14px 36px;font-size:1.2rem;font-weight:bold;border-radius:12px;background:linear-gradient(90deg,#be185d 0%,#f43f5e 100%);color:#fff;box-shadow:0 2px 12px #be185d44;text-decoration:none;">Shop More</a>
     </div>
     <script>

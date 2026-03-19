@@ -55,29 +55,64 @@
         </a>
         <nav class="flex gap-3 items-center relative">
             <div class="relative group">
-                <button class="nav-btn" id="categories-dropdown-btn" aria-haspopup="true" aria-expanded="false">
-                    Categories
-                    <svg class="inline ml-1" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M19 9l-7 7-7-7"/></svg>
+                <button class="nav-btn rose-accent-dropdown" id="categories-dropdown-btn" aria-haspopup="true" aria-expanded="false">
+                    <span class="inline-flex items-center gap-1">
+                        <svg class="inline" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" stroke="#be185d" stroke-width="2" fill="#1e293b"/><path d="M19 9l-7 7-7-7" stroke="#be185d" stroke-width="2"/></svg>
+                        <span>Categories</span>
+                    </span>
                 </button>
-                <div class="hidden group-hover:block group-focus-within:block absolute z-50 mt-2 w-48 bg-white text-black rounded-lg shadow-lg border border-gray-200 transition-all duration-150" id="categories-dropdown-menu">
+                <div class="hidden group-hover:block group-focus-within:block absolute z-50 mt-2 w-56 bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 text-rose-300 rounded-2xl shadow-2xl border border-rose-700/30 transition-all duration-200" id="categories-dropdown-menu">
                     {% for cat in categories %}
-                        <a href="{{ url_for('category_products', category=cat) }}" class="block px-4 py-2 hover:bg-rose-100 hover:text-rose-600 transition">{{ cat }}</a>
+                        <a href="{{ url_for('category_products', category=cat) }}" class="block px-5 py-3 rounded-xl font-semibold hover:bg-rose-600/20 hover:text-rose-400 transition-all duration-150">{{ cat }}</a>
                     {% endfor %}
                 </div>
             </div>
-            <a href="{{ url_for('admin_login') }}" class="nav-btn">Admin</a>
             <a href="{{ url_for('checkout') }}" class="nav-btn">Cart</a>
+            <button id="contact-us-btn" class="nav-btn ml-2 flex items-center gap-1 bg-rose-600 hover:bg-rose-700 text-white font-bold px-4 py-2 rounded-lg text-sm">
+                <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M21 10.5V6a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h7.5"/><path d="M16 3v4a1 1 0 0 0 1 1h4"/><path d="M21 15v4a2 2 0 0 1-2 2h-7.5"/><path d="M16 21v-4a1 1 0 0 1 1-1h4"/></svg>
+                Contact Us
+            </button>
         </nav>
         <style>
-            /* Dropdown styles */
+            /* Dropdown styles - beautified */
+            .rose-accent-dropdown {
+                background: linear-gradient(90deg, #be185d 0%, #f472b6 100%);
+                color: #fff;
+                border: none;
+                border-radius: 1rem;
+                font-weight: bold;
+                box-shadow: 0 2px 8px rgba(190,24,93,0.10);
+                padding: 10px 24px;
+                font-size: 1rem;
+                transition: background 0.2s, color 0.2s;
+            }
+            .rose-accent-dropdown:hover, .rose-accent-dropdown:focus {
+                background: linear-gradient(90deg, #f472b6 0%, #be185d 100%);
+                color: #fff;
+            }
             #categories-dropdown-btn:focus + #categories-dropdown-menu,
             #categories-dropdown-menu:hover,
             #categories-dropdown-menu:focus-within {
                 display: block !important;
             }
+            #categories-dropdown-menu {
+                min-width: 12rem;
+                border-radius: 1rem;
+                box-shadow: 0 8px 32px 0 rgba(190,24,93,0.18);
+                border: 1px solid #be185d33;
+            }
+            #categories-dropdown-menu a {
+                font-size: 1.05rem;
+                letter-spacing: 0.01em;
+            }
+            #categories-dropdown-menu a:hover {
+                background: #be185d22;
+                color: #f472b6;
+            }
             @media (max-width: 768px) {
                 .group:hover .group-hover\:block { display: none !important; }
                 .group:focus-within .group-hover\:block { display: block !important; }
+                #categories-dropdown-menu { left: 0; right: auto; }
             }
         </style>
     </header>
@@ -87,5 +122,60 @@
     </main>
     <script src="{{ url_for('static', filename='js/cart_global.js') }}"></script>
     <script src="{{ url_for('static', filename='js/quote-actions.js') }}"></script>
+
+
+
+    <!-- Contact Us Modal -->
+    <div id="contact-modal" class="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-60 hidden">
+        <div class="bg-white text-black rounded-2xl shadow-2xl p-8 max-w-lg w-full relative">
+            <button onclick="closeContactModal()" class="absolute top-3 right-3 text-rose-600 hover:text-rose-800 text-2xl font-bold">&times;</button>
+            <h2 class="text-2xl font-extrabold rose-accent mb-6 text-center">Contact Us</h2>
+            <form id="contact-form" method="POST" action="/contact">
+                <div class="mb-4">
+                    <label class="block text-rose-600 font-bold mb-2">Full Name</label>
+                    <input type="text" name="name" required class="w-full border border-rose-300 rounded-lg p-3 focus:border-rose-500 outline-none">
+                </div>
+                <div class="mb-4">
+                    <label class="block text-rose-600 font-bold mb-2">WhatsApp Number</label>
+                    <input type="text" name="whatsapp" required class="w-full border border-rose-300 rounded-lg p-3 focus:border-rose-500 outline-none">
+                </div>
+                <div class="mb-4">
+                    <label class="block text-rose-600 font-bold mb-2">Email Address</label>
+                    <input type="email" name="email" required class="w-full border border-rose-300 rounded-lg p-3 focus:border-rose-500 outline-none">
+                </div>
+                <div class="mb-6">
+                    <label class="block text-rose-600 font-bold mb-2">Message</label>
+                    <textarea name="message" rows="3" required class="w-full border border-rose-300 rounded-lg p-3 focus:border-rose-500 outline-none"></textarea>
+                </div>
+                <button type="submit" class="w-full py-3 rounded-lg font-bold text-xl bg-rose-600 text-white hover:bg-rose-700 transition">Send Message</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- Footer with company details and Admin button below address -->
+    <footer class="w-full bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 text-rose-200 py-8 mt-16 border-t border-rose-900/20">
+        <div class="max-w-4xl mx-auto flex flex-col items-center gap-2 px-4">
+            <div class="text-center">
+                <div class="text-lg font-bold rose-accent mb-1">Mohini Cosmetics</div>
+                <div>Shop No 136, Dharhai R Kotwali, Jabalpur, Maya Prash, Ina 482001</div>
+                <div class="text-sm mt-2">Mob: +91 99941 44994, Email: <a href="mailto:info@narinakhre.com" class="underline text-rose-300 hover:text-rose-400">info@narinakhre.com</a></div>
+                <div class="text-sm">Website: <a href="https://narinakhre.com" class="underline text-rose-300 hover:text-rose-400">Retail: narinakhre.com</a>, <a href="https://wholesale.narinakhre.com" class="underline text-rose-300 hover:text-rose-400">Wholesale: wholesale.narinakhre.com</a></div>
+                <a href="{{ url_for('admin_login') }}" class="mt-4 inline-block px-4 py-1 text-xs bg-slate-700 text-rose-200 rounded font-semibold hover:bg-slate-800 transition">Admin</a>
+            </div>
+        </div>
+        <div class="text-xs text-rose-300 mt-4 text-center opacity-80">
+            &copy; 2026 Mohini Cosmetics. All rights reserved.
+        </div>
+    </footer>
+
+    <script>
+        // Contact Us modal logic
+        const contactBtn = document.getElementById('contact-us-btn');
+        const contactModal = document.getElementById('contact-modal');
+        function closeContactModal() { contactModal.classList.add('hidden'); }
+        contactBtn.addEventListener('click', function() { contactModal.classList.remove('hidden'); });
+        contactModal.addEventListener('click', function(e) { if (e.target === contactModal) closeContactModal(); });
+        document.addEventListener('keydown', function(e) { if (e.key === 'Escape') closeContactModal(); });
+    </script>
 </body>
 </html>

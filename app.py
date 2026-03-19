@@ -155,37 +155,68 @@ def contact():
         name = request.form.get('name')
         whatsapp = request.form.get('whatsapp')
         email = request.form.get('email')
-        # Compose email body
-        body = f"""
-        <h2>Contact Inquiry from NariNakhre</h2>
-        <p><strong>Name:</strong> {name}</p>
-        <p><strong>WhatsApp:</strong> {whatsapp}</p>
-        <p><strong>Email:</strong> {email}</p>
+        message = request.form.get('message', '')
+        # Compose email body for user
+        user_body = f"""
+        <h2>Thank you for contacting Mohini Cosmetics!</h2>
+        <p>Dear {name},</p>
+        <p>We have received your inquiry and will get in touch with you soon.</p>
+        <hr>
+        <p><strong>Your Message:</strong></p>
+        <div style='background:#f9f9f9;padding:12px 18px;border-radius:8px;color:#be185d;font-size:1.1em;margin:12px 0 18px 0;'>{message}</div>
+        <div style='margin-top:18px;font-size:0.98em;color:#888;'>
+            Mohini Cosmetics, Shop No 136, Dharhai R Kotwali, Jabalpur, Maya Prash, Ina 482001<br>
+            Mob: +91 99941 44994, Email: info@narinakhre.com<br>
+            Website: Retail: <a href='https://narinakhre.com' style='color:#be185d;'>narinakhre.com</a>, Wholesale: <a href='https://wholesale.narinakhre.com' style='color:#be185d;'>wholesale.narinakhre.com</a>
+        </div>
+        """
+        # Compose email body for admin
+        admin_body = f"""
+        <h2>New Contact Inquiry from NariNakhre</h2>
+        <ul>
+            <li><strong>Name:</strong> {name}</li>
+            <li><strong>WhatsApp:</strong> {whatsapp}</li>
+            <li><strong>Email:</strong> {email}</li>
+            <li><strong>Message:</strong> {message}</li>
+        </ul>
         """
         sender_email = MAIL_USERNAME
         sender_password = MAIL_PASSWORD
         admin_email = sender_email
+        extra_admin_email = "hello@mohinicosmetics.com"
         subject = "Nari Nakhre Contact Inquiry"
+        # User email
         msg = MIMEMultipart()
         msg['From'] = sender_email
         msg['To'] = email
         msg['Subject'] = subject
-        msg.attach(MIMEText(body, 'html'))
+        msg.attach(MIMEText(user_body, 'html'))
+        # Admin email
         admin_msg = MIMEMultipart()
         admin_msg['From'] = sender_email
         admin_msg['To'] = admin_email
         admin_msg['Subject'] = f"New Contact Inquiry from {name}"
-        admin_msg.attach(MIMEText(body, 'html'))
+        admin_msg.attach(MIMEText(admin_body, 'html'))
+        # Extra admin email
+        extra_admin_msg = MIMEMultipart()
+        extra_admin_msg['From'] = sender_email
+        extra_admin_msg['To'] = extra_admin_email
+        extra_admin_msg['Subject'] = f"New Contact Inquiry from {name}"
+        extra_admin_msg.attach(MIMEText(admin_body, 'html'))
         try:
             server = smtplib.SMTP_SSL(MAIL_SERVER, MAIL_PORT)
             server.login(sender_email, sender_password)
             server.send_message(msg)
             server.send_message(admin_msg)
+            server.send_message(extra_admin_msg)
             server.quit()
             flash("Contact inquiry submitted and email sent!", "success")
         except Exception as e:
             print(f"Contact email error: {e}")
             flash("Contact submitted, but email could not be sent.", "warning")
+        session['contact_only'] = True
+        session['user_name'] = name
+        session['user_email'] = email
         return redirect(url_for('thank_you'))
     return render_template('contact.html')
 # Redirect /admin-login to /admin/login for user convenience
@@ -659,7 +690,8 @@ def send_quote_emails(name, email, whatsapp, address, display_cart, subtotal, to
     from email.mime.text import MIMEText
     sender_email = 'info@narinakhre.com'
     sender_password = MAIL_PASSWORD
-    admin_email = sender_email
+    admin_email = 'mohinicosmetics.india@gmail.com'
+    extra_admin_email = 'narinakhre@gmail.com'
     receiver_email = email
     subject = "Nari Nakhre Wholesale Quote"
     from flask import render_template
@@ -695,18 +727,17 @@ def send_quote_emails(name, email, whatsapp, address, display_cart, subtotal, to
     admin_msg['To'] = admin_email
     admin_msg['Subject'] = f"New Quote from {name}"
     admin_msg.attach(MIMEText(body, 'html'))
-    # Add forwarding to mohinicosmetics.india@gmail.com
-    forward_msg = MIMEMultipart()
-    forward_msg['From'] = sender_email
-    forward_msg['To'] = 'mohinicosmetcs.in@gmail.com'
-    forward_msg['Subject'] = f"Forwarded Quote from {name}"
-    forward_msg.attach(MIMEText(body, 'html'))
+    extra_admin_msg = MIMEMultipart()
+    extra_admin_msg['From'] = sender_email
+    extra_admin_msg['To'] = extra_admin_email
+    extra_admin_msg['Subject'] = f"New Quote from {name}"
+    extra_admin_msg.attach(MIMEText(body, 'html'))
     try:
         server = smtplib.SMTP_SSL(MAIL_SERVER, MAIL_PORT)
         server.login(sender_email, sender_password)
         server.send_message(msg)
         server.send_message(admin_msg)
-        server.send_message(forward_msg)
+        server.send_message(extra_admin_msg)
         server.quit()
         print("Quote email sent successfully.")
     except Exception as e:
@@ -817,9 +848,10 @@ def submit_quote():
 def thank_you():
     user_name = session.get('user_name', 'Valued Customer')
     user_email = session.get('user_email', '')
+    contact_only = session.pop('contact_only', False)
     display_cart = session.get('quote_display_cart', [])
     grand_total = session.get('quote_grand_total', 0)
-    return render_template('thank_you.html', user={'name': user_name, 'email': user_email}, display_cart=display_cart, grand_total=grand_total)
+    return render_template('thank_you.html', user={'name': user_name, 'email': user_email}, display_cart=display_cart, grand_total=grand_total, contact_only=contact_only)
 
 @app.route('/thank-you')
 def thank_you_dash():
