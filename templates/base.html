@@ -54,14 +54,14 @@
             <span class="text-xl font-bold rose-accent">NariNakhre</span>
         </a>
         <nav class="flex gap-3 items-center relative">
-            <div class="relative group">
-                <button class="nav-btn rose-accent-dropdown" id="categories-dropdown-btn" aria-haspopup="true" aria-expanded="false">
+            <div class="relative" id="categories-dropdown-wrapper">
+                <button type="button" class="nav-btn rose-accent-dropdown" id="categories-dropdown-btn" aria-haspopup="true" aria-expanded="false">
                     <span class="inline-flex items-center gap-1">
                         <svg class="inline" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" stroke="#be185d" stroke-width="2" fill="#1e293b"/><path d="M19 9l-7 7-7-7" stroke="#be185d" stroke-width="2"/></svg>
                         <span>Categories</span>
                     </span>
                 </button>
-                <div class="hidden group-hover:block group-focus-within:block absolute z-50 mt-2 w-56 bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 text-rose-300 rounded-2xl shadow-2xl border border-rose-700/30 transition-all duration-200" id="categories-dropdown-menu">
+                <div class="hidden absolute z-50 mt-2 w-56 text-rose-300 rounded-2xl shadow-2xl border border-rose-700/30 transition-all duration-200" id="categories-dropdown-menu">
                     {% for cat in categories %}
                         <a href="{{ url_for('category_products', category=cat) }}" class="block px-5 py-3 rounded-xl font-semibold hover:bg-rose-600/20 hover:text-rose-400 transition-all duration-150">{{ cat }}</a>
                     {% endfor %}
@@ -90,18 +90,12 @@
                 background: linear-gradient(90deg, #f472b6 0%, #be185d 100%);
                 color: #fff;
             }
-            #categories-dropdown-btn:focus + #categories-dropdown-menu,
-            #categories-dropdown-menu:hover,
-            #categories-dropdown-menu:focus-within {
-                display: block !important;
-            }
             #categories-dropdown-menu {
                 min-width: 12rem;
                 border-radius: 1rem;
                 box-shadow: 0 8px 32px 0 rgba(190,24,93,0.18);
                 border: 1px solid #be185d33;
                 background: #1e293b !important;
-                /* Remove any gradient or transparency for solid look */
             }
             #categories-dropdown-menu a {
                 font-size: 1.05rem;
@@ -112,11 +106,31 @@
                 color: #f472b6;
             }
             @media (max-width: 768px) {
-                .group:hover .group-hover\:block { display: none !important; }
-                .group:focus-within .group-hover\:block { display: block !important; }
                 #categories-dropdown-menu { left: 0; right: auto; }
             }
         </style>
+        <script>
+        // Toggle categories dropdown on click
+        document.addEventListener('DOMContentLoaded', function() {
+            const btn = document.getElementById('categories-dropdown-btn');
+            const menu = document.getElementById('categories-dropdown-menu');
+            let open = false;
+            btn.addEventListener('click', function(e) {
+                e.stopPropagation();
+                open = !open;
+                menu.classList.toggle('hidden', !open);
+                btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+            });
+            // Close dropdown when clicking outside
+            document.addEventListener('click', function(e) {
+                if (open && !document.getElementById('categories-dropdown-wrapper').contains(e.target)) {
+                    menu.classList.add('hidden');
+                    btn.setAttribute('aria-expanded', 'false');
+                    open = false;
+                }
+            });
+        });
+        </script>
     </header>
 
     <main class="container mx-auto p-4">
