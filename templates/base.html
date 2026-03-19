@@ -53,10 +53,33 @@
             <img src="/static/assets/logo.png" alt="Logo" style="height:40px; background:white; padding:2px; border-radius:4px;">
             <span class="text-xl font-bold rose-accent">NariNakhre</span>
         </a>
-        <nav class="flex gap-3">
+        <nav class="flex gap-3 items-center relative">
+            <div class="relative group">
+                <button class="nav-btn" id="categories-dropdown-btn" aria-haspopup="true" aria-expanded="false">
+                    Categories
+                    <svg class="inline ml-1" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M19 9l-7 7-7-7"/></svg>
+                </button>
+                <div class="hidden group-hover:block group-focus-within:block absolute z-50 mt-2 w-48 bg-white text-black rounded-lg shadow-lg border border-gray-200 transition-all duration-150" id="categories-dropdown-menu">
+                    {% for cat in categories %}
+                        <a href="{{ url_for('category_products', category=cat) }}" class="block px-4 py-2 hover:bg-rose-100 hover:text-rose-600 transition">{{ cat }}</a>
+                    {% endfor %}
+                </div>
+            </div>
             <a href="{{ url_for('admin_login') }}" class="nav-btn">Admin</a>
             <a href="{{ url_for('checkout') }}" class="nav-btn">Cart</a>
         </nav>
+        <style>
+            /* Dropdown styles */
+            #categories-dropdown-btn:focus + #categories-dropdown-menu,
+            #categories-dropdown-menu:hover,
+            #categories-dropdown-menu:focus-within {
+                display: block !important;
+            }
+            @media (max-width: 768px) {
+                .group:hover .group-hover\:block { display: none !important; }
+                .group:focus-within .group-hover\:block { display: block !important; }
+            }
+        </style>
     </header>
 
     <main class="container mx-auto p-4">

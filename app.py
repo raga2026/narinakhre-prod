@@ -1,23 +1,6 @@
 
-# --- Admin Dashboard Route ---
-# Place this after app = Flask(__name__)
 
-"""
-Route for category filter page. Move this below app = Flask(__name__)
-"""
-# --- Checkout Route ---
-# Place this after app = Flask(__name__)
-# --- Clear Quote Route ---
-# --- Clear Quote Route ---
-"""
-Route for category filter page. Move this below app = Flask(__name__)
-"""
-# --- Checkout Route ---
-# Place this after app = Flask(__name__)
-# --- Clear Quote Route ---
-# --- Clear Quote Route ---
 # --- Flask & Core Imports ---
-
 from flask import Flask, render_template, request, redirect, url_for, flash, session, jsonify, send_from_directory, g
 import sqlite3
 import os
@@ -30,11 +13,14 @@ import pandas as pd
 
 import smtplib
 from email.mime.multipart import MIMEMultipart
-
 from email.mime.text import MIMEText
 
-
 app = Flask(__name__)
+
+# --- Context Processor for Categories Dropdown ---
+@app.context_processor
+def inject_categories():
+    return {'categories': get_categories()}
 
 # --- Cart API for JS Sync ---
 @app.route('/cart', methods=['GET'])
@@ -151,8 +137,8 @@ def create_tables():
 # --- Helpers ---
 def get_categories():
     db = get_db()
-    categories = db.execute('SELECT * FROM categories').fetchall()
-    return [c['name'] for c in categories]
+    categories = db.execute('SELECT DISTINCT category FROM products WHERE category IS NOT NULL AND TRIM(category) != ""').fetchall()
+    return [c['category'] for c in categories]
 
 # --- EMAIL CONFIG FOR GODADDY/OFFICE365 ---
 MAIL_SERVER = 'smtp.zoho.in'
