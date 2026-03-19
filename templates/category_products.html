@@ -101,13 +101,16 @@
             </select>
         </div>
         <button class="add-to-quote-btn add-btn"
-            data-sku="{{ product.id }}"
+            id="btn-{{ product.id }}"
+            data-product-id="{{ product.id }}"
             data-tier="{{ product.tiers[0].qty if product.tiers and product.tiers[0].qty else 1 }}"
             data-price="{{ product.tiers[0].price if product.tiers and product.tiers[0].price else product.price1 }}"
             data-size="{{ product.sizes.split(',')[0]|trim if product.sizes else '' }}"
-            onclick="addToQuoteDirect(this, '{{ product.id }}')"
         >Add to Quote</button>
-        <!-- Toggle controls will be inserted by cart_global.js -->
+        <!-- Social Share Button -->
+        <button class="share-btn add-btn" style="background:#fff;color:#be185d;border:1px solid #be185d;display:flex;align-items:center;gap:8px;margin-top:8px;" title="Share this product" onclick="shareProduct('{{ product['name']|escape }}', '{{ url_for('product_detail', product_id=product.id, _external=True) }}')">
+            <img src="{{ url_for('static', filename='assets/share.svg') }}" alt="Share" style="width:20px;height:20px;vertical-align:middle;"> Share
+        </button>
     </div>
     {% endfor %}
 </div>
@@ -118,6 +121,20 @@ function filterProducts() {
         let title = card.querySelector('.product-title').innerText.toLowerCase();
         card.style.display = title.includes(val) ? 'flex' : 'none';
     });
+}
+function shareProduct(name, url) {
+    const shareData = {
+        title: name,
+        text: 'Check out this product on Nari Nakhre: ' + name,
+        url: url
+    };
+    if (navigator.share) {
+        navigator.share(shareData).catch(()=>{});
+    } else {
+        // WhatsApp fallback
+        const msg = encodeURIComponent(`${shareData.text} ${shareData.url}`);
+        window.open(`https://wa.me/?text=${msg}`, '_blank');
+    }
 }
 </script>
 {% endblock %}

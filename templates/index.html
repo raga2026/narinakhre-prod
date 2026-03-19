@@ -30,6 +30,30 @@
         flex-direction: column;
     }
 
+    .share-btn-float {
+        position: absolute;
+        top: 10px;
+        right: 10px;
+        background: #fff;
+        color: #be185d;
+        border: 1px solid #be185d;
+        border-radius: 50%;
+        padding: 4px;
+        width: 32px;
+        height: 32px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        box-shadow: 0 2px 8px rgba(190,24,93,0.12);
+        z-index: 2;
+        cursor: pointer;
+        transition: box-shadow 0.2s;
+    }
+    .share-btn-float:hover {
+        box-shadow: 0 4px 16px rgba(190,24,93,0.18);
+        background: #fdf2f8;
+    }
+
     .product-image {
         width: 100%;
         height: 250px;
@@ -84,9 +108,13 @@
         <div class="product-card">
             <div class="carousel-container" style="position:relative;">
                 <img src="{{ product.images[0] }}" class="product-image" alt="{{ product.name }}" id="carousel-img-{{ product.id }}">
+                <button class="share-btn-float" title="Share this product" onclick="shareProduct('{{ product['name']|escape }}', '{{ url_for('product_detail', product_id=product.id, _external=True) }}')">
+                    <img src="{{ url_for('static', filename='assets/share.svg') }}" alt="Share" style="width:18px;height:18px;vertical-align:middle;">
+                </button>
             </div>
-            
-            <a class="product-title" href="{{ url_for('product_detail', product_id=product.id) }}" style="text-decoration:underline; color:#f472b6;">{{ product.name }}</a>
+            <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:5px;">
+                <a class="product-title" href="{{ url_for('product_detail', product_id=product.id) }}" style="text-decoration:underline; color:#f472b6; flex:1;">{{ product.name }}</a>
+            </div>
             <div class="product-price">₹{{ product.price1 }}</div>
 
             <div class="product-attributes" style="margin-bottom: 10px; font-size: 0.95rem; color: #cbd5e1;">
@@ -122,16 +150,12 @@
             <button
                 id="btn-{{ product.id }}"
                 class="add-to-quote-btn add-btn"
-                data-sku="{{ product.id }}"
+                data-product-id="{{ product.id }}"
                 data-name="{{ product.name }}"
                 data-price="{{ product.price1 }}"
-                onclick="addToQuoteDirect('{{ product.id }}')"
             >
                 Add to Quote
             </button>
-            <!-- Toggle controls will be inserted by cart_global.js -->
-            <!-- Toggle controls will be inserted by cart_global.js -->
-            <!-- Toggle controls will be inserted by cart_global.js -->
         </div>
         {% endfor %}
     </div>
@@ -180,6 +204,20 @@ document.addEventListener('DOMContentLoaded', function() {
         {% endfor %}
     {% endfor %}
 });
+function shareProduct(name, url) {
+    const shareData = {
+        title: name,
+        text: 'Check out this product on Nari Nakhre: ' + name,
+        url: url
+    };
+    if (navigator.share) {
+        navigator.share(shareData).catch(()=>{});
+    } else {
+        // WhatsApp fallback
+        const msg = encodeURIComponent(`${shareData.text} ${shareData.url}`);
+        window.open(`https://wa.me/?text=${msg}`, '_blank');
+    }
+}
 </script>
 
 {% endblock %}

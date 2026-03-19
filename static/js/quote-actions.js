@@ -29,10 +29,16 @@ function replaceWithUnitSelector(parent, sku, name, tier, price, units) {
     };
 }
 function updateUnits(sku, tier, units, parent, name, price) {
-    fetch('/update_cart_units', {
+    fetch('/update-cart', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sku, tier, units })
+        body: JSON.stringify({
+            product_id: sku,
+            qty: units,
+            tier: tier,
+            price: price,
+            size: '' // Add size if available from UI
+        })
     })
     .then(res => res.json())
     .then(data => {
@@ -45,10 +51,16 @@ function updateUnits(sku, tier, units, parent, name, price) {
     });
 }
 function addToQuote(sku, name, tier, price, parent) {
-    fetch('/add_to_cart', {
+    fetch('/update-cart', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sku, tier, price, units: 1 })
+        body: JSON.stringify({
+            product_id: sku,
+            qty: 1,
+            tier: tier,
+            price: price,
+            size: '' // Add size if available from UI
+        })
     })
     .then(res => res.json())
     .then(data => {

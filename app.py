@@ -274,7 +274,9 @@ def update_cart():
     session['cart'] = cart
     session.modified = True
     print("[Add to Quote] Cart after update:", session['cart'])
-    return jsonify({'status': 'success', 'cart_count': len(session['cart']), 'new_total': len(session['cart'])})
+    # Return the updated quantity for this item (0 if removed)
+    updated_qty = cart[item_key]['qty'] if item_key in cart else 0
+    return jsonify({'status': 'success', 'cart_count': len(session['cart']), 'new_total': len(session['cart']), 'new_qty': updated_qty})
 
 @app.route('/product/<int:product_id>')
 def product_detail(product_id):
@@ -667,12 +669,17 @@ def send_quote_emails(name, email, whatsapp, address, display_cart, subtotal, to
     print("grand_total:", grand_total)
     print("subtotal:", subtotal)
     print("total_tax:", total_tax)
+    formatted_subtotal = f"₹{subtotal:,.2f}"
+    formatted_gst = f"₹{total_tax:,.2f}"
+    formatted_grand_total = f"₹{grand_total:,.2f}"
     try:
         body = render_template('email_quote.html',
             name=name,
             address=address,
             display_cart=display_cart,
-            grand_total=grand_total if grand_total > 0 else subtotal if subtotal > 0 else 'N/A')
+            subtotal=formatted_subtotal,
+            gst=formatted_gst,
+            grand_total=formatted_grand_total)
         print("[DEBUG] Email template rendered successfully.")
     except Exception as e:
         print("[DEBUG] Error rendering email_quote.html:", e)
