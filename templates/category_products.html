@@ -111,7 +111,7 @@
         <span>&gt;</span>
         <span class="font-bold">{{ category }}</span>
     </nav>
-    <div id="products" class="grid grid-cols-2 md:grid-cols-4 gap-5">
+    <div id="products" class="grid grid-cols-2 gap-5">
     {% for product in products %}
     <div class="bg-white rounded-xl shadow p-3 flex flex-col items-center relative product-card">
         <button class="absolute top-2 right-2 bg-rose-100 hover:bg-rose-200 rounded-full p-2 shadow"
@@ -139,7 +139,7 @@
         {% if product.tiers and product.tiers|length > 0 %}
         <div class="w-full mb-2">
             <label for="tier-select-{{ product.sku }}" class="block text-xs font-semibold text-rose-500 mb-1 ml-1">Tier</label>
-            <select class="input-field tier-select w-full" style="font-size:0.95rem;" id="tier-select-{{ product.sku }}">
+            <select class="input-field tier-select w-full" style="font-size:0.92rem; padding:7px 8px; min-height:unset;" id="tier-select-{{ product.sku }}">
                 {% for tier in product.tiers %}
                     {% if tier.price %}
                         <option value="{{ tier.tier }}" data-price="{{ tier.price }}">Tier {{ tier.tier }} - ₹{{ tier.price }} / {{ tier.qty }} pcs</option>
@@ -151,7 +151,7 @@
         {% if product.sizes %}
         <div class="w-full mb-2">
             <label for="size-{{ product.sku }}" class="block text-xs font-semibold text-rose-500 mb-1 ml-1">Size</label>
-            <select class="input-field size-select w-full" style="font-size:0.95rem;" id="size-{{ product.sku }}">
+            <select class="input-field size-select w-full" style="font-size:0.92rem; padding:7px 8px; min-height:unset;" id="size-{{ product.sku }}">
                 {% for size in product.sizes.split(',') %}
                     {% set size_val = size|trim %}
                     <option value="{{ size_val }}">{{ size_val }}</option>
