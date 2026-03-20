@@ -89,7 +89,7 @@
                     <select class="input-field tier-select w-full" style="font-size:0.95rem;" id="tier-select-{{ product.sku }}">
                         {% for tier in product.tiers %}
                             {% if tier.price %}
-                                <option value="{{ tier.tier }}" data-price="{{ tier.price }}">Tier {{ tier.tier }} - ₹{{ tier.price }} / {{ tier.qty }} pcs</option>
+                                <option value="{{ tier.qty }}" data-price="{{ tier.price }}">{{ tier.qty }} units @ ₹{{ tier.price }}</option>
                             {% endif %}
                         {% endfor %}
                     </select>
