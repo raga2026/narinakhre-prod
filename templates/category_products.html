@@ -158,8 +158,7 @@
             {% endif %}
         </div>
         <div class="mt-3 w-full flex justify-center items-center gap-2" id="quote-controls-{{ product.sku }}">
-            <button class="w-full py-2 bg-rose-600 text-white rounded-xl font-bold hover:bg-rose-700 transition add-to-quote-btn"
-                onclick="addToCart('{{ product.sku }}')">Add to Quote</button>
+            <button class="w-full py-2 bg-rose-600 text-white rounded-xl font-bold hover:bg-rose-700 transition add-to-quote-btn" data-product-id="{{ product.sku }}">Add to Quote</button>
         </div>
     </div>
     {% endfor %}
