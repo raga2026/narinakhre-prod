@@ -101,18 +101,17 @@
     }
 </style>
 
-<div class="search-section">
-    <h1 class="category-heading">{{ category }} Products</h1>
-    <input type="text" class="search-bar" id="search" placeholder="Search products..." oninput="filterProducts()">
-</div>
-
-<nav class="text-sm text-rose-600 mb-6 flex items-center gap-2">
-    <a href="{{ url_for('index') }}" class="hover:underline">Home</a>
-    <span>&gt;</span>
-    <span class="font-bold">{{ category }}</span>
-</nav>
-
-<div id="products" class="grid grid-cols-2 md:grid-cols-4 gap-5">
+<div class="container mx-auto px-2">
+    <div class="search-section">
+        <h1 class="category-heading">{{ category }} Products</h1>
+        <input type="text" class="search-bar" id="search" placeholder="Search products..." oninput="filterProducts()">
+    </div>
+    <nav class="text-sm text-rose-600 mb-6 flex items-center gap-2">
+        <a href="{{ url_for('index') }}" class="hover:underline">Home</a>
+        <span>&gt;</span>
+        <span class="font-bold">{{ category }}</span>
+    </nav>
+    <div id="products" class="grid grid-cols-2 md:grid-cols-4 gap-5">
     {% for product in products %}
     <div class="bg-white rounded-xl shadow p-3 flex flex-col items-center relative product-card">
         <button class="absolute top-2 right-2 bg-rose-100 hover:bg-rose-200 rounded-full p-2 shadow"
@@ -166,6 +165,7 @@
         </div>
     </div>
     {% endfor %}
+    </div>
 </div>
 
 <script>
