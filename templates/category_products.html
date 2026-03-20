@@ -132,26 +132,26 @@
                 ₹{{ product.price1 }} / Unit
             {% endif %}
         </div>
-        <div class="w-full flex flex-row gap-2 mb-2">
+        <div class="w-full mb-2">
+            {% if product.sizes %}
+            <div class="mb-2">
+                <label for="size-{{ product.sku }}" class="block text-xs font-semibold text-rose-500 mb-1 ml-1">Size</label>
+                <select class="input-field size-select w-full" style="font-size:0.92rem; padding:7px 8px; min-height:unset;" id="size-{{ product.sku }}">
+                    {% for size in product.sizes.split(',') %}
+                        {% set size_val = size|trim %}
+                        <option value="{{ size_val }}">{{ size_val }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            {% endif %}
             {% if product.tiers and product.tiers|length > 0 %}
-            <div class="w-1/2">
+            <div>
                 <label for="tier-select-{{ product.sku }}" class="block text-xs font-semibold text-rose-500 mb-1 ml-1">Tier</label>
                 <select class="input-field tier-select w-full" style="font-size:0.92rem; padding:7px 8px; min-height:unset;" id="tier-select-{{ product.sku }}">
                     {% for tier in product.tiers %}
                         {% if tier.price %}
                             <option value="{{ tier.tier }}" data-price="{{ tier.price }}">Tier {{ tier.tier }} - ₹{{ tier.price }} / {{ tier.qty }} pcs</option>
                         {% endif %}
-                    {% endfor %}
-                </select>
-            </div>
-            {% endif %}
-            {% if product.sizes %}
-            <div class="w-1/2">
-                <label for="size-{{ product.sku }}" class="block text-xs font-semibold text-rose-500 mb-1 ml-1">Size</label>
-                <select class="input-field size-select w-full" style="font-size:0.92rem; padding:7px 8px; min-height:unset;" id="size-{{ product.sku }}">
-                    {% for size in product.sizes.split(',') %}
-                        {% set size_val = size|trim %}
-                        <option value="{{ size_val }}">{{ size_val }}</option>
                     {% endfor %}
                 </select>
             </div>
