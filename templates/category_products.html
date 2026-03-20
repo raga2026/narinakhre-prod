@@ -21,6 +21,19 @@
         text-decoration: underline;
         font-family: 'Merriweather', serif;
     }
+    .category-heading {
+        color: #fff !important;
+        background: #be185d;
+        padding: 0.5rem 1.2rem;
+        border-radius: 1rem;
+        display: inline-block;
+        margin-bottom: 1.2rem;
+        font-size: 2rem;
+        font-family: 'Playfair Display', serif;
+        font-weight: bold;
+        letter-spacing: 0.01em;
+        box-shadow: 0 2px 8px #be185d22;
+    }
     .product-price {
         color: #be185d;
         font-weight: bold;
@@ -84,7 +97,7 @@
 </style>
 
 <div class="search-section">
-    <h1 class="text-3xl font-bold mb-4">{{ category }} Products</h1>
+    <h1 class="category-heading">{{ category }} Products</h1>
     <input type="text" class="search-bar" id="search" placeholder="Search products..." oninput="filterProducts()">
 </div>
 
@@ -111,7 +124,7 @@
         <div class="mt-2 w-full text-center font-semibold text-slate-800 truncate product-title" style="font-family:'Playfair Display',serif;">{{ product.name }}</div>
         <div class="mt-3 w-full flex justify-center items-center gap-2" id="quote-controls-{{ product.sku }}">
             <button class="w-full py-2 bg-rose-600 text-white rounded-xl font-bold hover:bg-rose-700 transition add-to-quote-btn"
-                onclick="addToCart('{{ product.sku }}')">Add to Quote +</button>
+                onclick="addToCart('{{ product.sku }}')">Add to Quote</button>
         </div>
     </div>
     {% endfor %}

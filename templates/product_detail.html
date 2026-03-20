@@ -23,7 +23,10 @@
     .pdp-price { font-size: 1.7rem; color: #be185d; font-weight: bold; margin-bottom: 18px; border-bottom: 1px solid #f472b6; padding-bottom: 12px; font-family: 'Merriweather', serif; }
     .detail-item { margin-bottom: 10px; font-size: 1.08rem; color: #312e2e; }
     .detail-label { color: #be185d; font-weight: 600; min-width: 100px; display: inline-block; font-family: 'Merriweather', serif; }
-    .product-desc { margin-top: 22px; line-height: 1.7; color: #6b7280; background: #fdf2f8; padding: 15px; border-radius: 10px; font-size: 1.05rem; }
+    .product-desc { margin-top: 22px; line-height: 1.7; color: #22223b; background: #fdf2f8; padding: 15px; border-radius: 10px; font-size: 1.05rem; font-family: 'Merriweather', serif; }
+    .pdp-info-card, .detail-item, .detail-label, .pdp-title, .pdp-price, .mini-title, .mini-price, .pdp-field label, .pdp-input, .pdp-select {
+        color: #22223b !important;
+    }
     .pdp-field { margin-bottom: 18px; }
     .pdp-field label { display: block; margin-bottom: 7px; color: #be185d; font-size: 0.98rem; font-family: 'Merriweather', serif; }
     .pdp-input, .pdp-select { width: 100%; padding: 12px; border-radius: 8px; border: 2px solid #f472b6; background: #fff; color: #312e2e; font-size: 1rem; font-family: 'Merriweather', serif; }
@@ -58,7 +61,9 @@
             <a href="/" class="back-link">← Back to Collection</a>
         </nav>
 
+
         <div class="pdp-grid">
+            <!-- Images Left -->
             <div class="pdp-image-section">
                 <div class="main-img-container" style="background:#0f172a; border:2px solid #334155; border-radius:16px; display:flex; align-items:center; justify-content:center; height:420px; overflow-x:auto;">
                     <img id="main-view" src="{{ url_for('static', filename=image_urls[0]) }}" alt="{{ product['name'] }} main image" onclick="openLightbox(0)" style="max-width:350px; max-height:380px; border-radius:12px; cursor:pointer; box-shadow:0 4px 32px #334155; border:2px solid #334155; background:#1e293b;">
@@ -69,112 +74,16 @@
                     {% endfor %}
                 </div>
             </div>
-            <div id="lightbox-modal" class="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-80 backdrop-blur" style="display:none;">
-                <div class="relative flex flex-col items-center justify-center w-full h-full">
-                    <button class="absolute top-8 right-12 text-4xl text-pink-500 font-bold" onclick="closeLightbox()" style="background:none; border:none; cursor:pointer;">&times;</button>
-                    <button id="lightbox-prev" class="absolute left-8 top-1/2 transform -translate-y-1/2 text-5xl text-white hover:text-pink-500" style="background:none; border:none; cursor:pointer;">&#10094;</button>
-                    <img id="lightbox-img" src="" class="rounded-xl border-4 border-[#be185d] shadow-2xl" style="max-width:80vw; max-height:80vh; background:#1e293b;">
-                    <button id="lightbox-next" class="absolute right-8 top-1/2 transform -translate-y-1/2 text-5xl text-white hover:text-pink-500" style="background:none; border:none; cursor:pointer;">&#10095;</button>
-                    <div class="thumb-grid" id="lb-thumb-grid" style="position:absolute; bottom:40px; left:50%; transform:translateX(-50%); display:flex; gap:10px; justify-content:center; background:rgba(30,41,59,0.8); padding:12px 24px; border-radius:12px;">
-                        {% for img in image_urls %}
-                            <img src="{{ url_for('static', filename=img) }}" class="lb-thumb-img" data-idx="{{ loop.index0 }}" style="width:60px; height:60px; object-fit:cover; border-radius:8px; border:2px solid #334155; opacity:0.85; cursor:pointer; transition:0.2s;">
-                        {% endfor %}
-                    </div>
-                </div>
-            </div>
-            <script>
-            // --- Dynamic Gallery Logic ---
-            const imageUrls = [{% for img in image_urls %}'{{ url_for('static', filename=img) }}'{% if not loop.last %}, {% endif %}{% endfor %}];
-            let currentIdx = 0;
-            const mainView = document.getElementById('main-view');
-            const thumbImgs = document.querySelectorAll('.thumb-img');
-            function setMainImage(idx) {
-                currentIdx = idx;
-                mainView.src = imageUrls[idx];
-                thumbImgs.forEach((img, i) => {
-                    img.classList.toggle('active-thumb', i === idx);
-                    img.style.borderColor = i === idx ? '#be185d' : '#334155';
-                    img.style.opacity = i === idx ? '1' : '0.85';
-                });
-            }
-            thumbImgs.forEach((img, idx) => {
-                img.addEventListener('mouseenter', () => setMainImage(idx));
-                img.addEventListener('click', () => setMainImage(idx));
-            });
-            // --- Lightbox Modal ---
-            const lightboxModal = document.getElementById('lightbox-modal');
-            const lightboxImg = document.getElementById('lightbox-img');
-            const lightboxPrev = document.getElementById('lightbox-prev');
-            const lightboxNext = document.getElementById('lightbox-next');
-            function openLightbox(idx = currentIdx) {
-                currentIdx = idx;
-                lightboxModal.style.display = 'flex';
-                lightboxImg.src = imageUrls[currentIdx];
-                document.body.style.overflow = 'hidden';
-                window.history.pushState({lightbox: true}, '', '#lightbox');
-            }
-            function closeLightbox() {
-                lightboxModal.style.display = 'none';
-                document.body.style.overflow = '';
-                if (window.location.hash === '#lightbox') {
-                    window.history.back();
-                }
-            }
-            lightboxPrev.onclick = function() {
-                currentIdx = (currentIdx - 1 + imageUrls.length) % imageUrls.length;
-                lightboxImg.src = imageUrls[currentIdx];
-                setMainImage(currentIdx);
-            };
-            lightboxNext.onclick = function() {
-                currentIdx = (currentIdx + 1) % imageUrls.length;
-                lightboxImg.src = imageUrls[currentIdx];
-                setMainImage(currentIdx);
-            };
-            lightboxModal.onclick = function(e) {
-                if (e.target === lightboxModal) closeLightbox();
-            };
-            // ESC and arrow keys for lightbox
-            document.addEventListener('keydown', function(e) {
-                if (lightboxModal.style.display === 'flex') {
-                    if (e.key === 'Escape' || e.key === 'Esc') {
-                        closeLightbox();
-                    } else if (e.key === 'ArrowRight') {
-                        lightboxNext.onclick();
-                    } else if (e.key === 'ArrowLeft') {
-                        lightboxPrev.onclick();
-                    }
-                }
-            });
-            // Browser back closes lightbox
-            window.addEventListener('popstate', function(e) {
-                if (lightboxModal.style.display === 'flex') {
-                    closeLightbox();
-                }
-            });
-            // Lightbox thumbnail click
-            document.querySelectorAll('.lb-thumb-img').forEach((img, idx) => {
-                img.addEventListener('click', () => {
-                    currentIdx = idx;
-                    lightboxImg.src = imageUrls[currentIdx];
-                    setMainImage(currentIdx);
-                });
-            });
-            // Highlight active thumbnail on load
-            setMainImage(0);
-            </script>
-
-            <div class="pdp-info-card">
+            <!-- Info Right -->
+            <div class="pdp-info-card" style="flex:1; min-width:320px;">
                 <h1 class="pdp-title">{{ product['name'] }}</h1>
                 <div class="pdp-price">₹{{ product['price1'] }}</div>
-
                 <div class="detail-item"><span class="detail-label">Color:</span> {{ product['color'] or 'N/A' }}</div>
                 <div class="detail-item"><span class="detail-label">Material:</span> {{ product['material'] or 'N/A' }}</div>
-                
-                <div class="product-desc">
+                <div class="product-desc" style="margin-top:18px;">
                     <strong style="color:#be185d; display:block; margin-bottom:10px;">Product Description:</strong>
-                    <span style="color:#cbd5e1;">{{ product['description'] or 'No description available for this product.' }}</span>
+                    <span style="color:#22223b;">{{ product['description'] or 'No description available for this product.' }}</span>
                 </div>
-
                 <div class="pdp-field">
                     <label>Select Size</label>
                     <select id="size-{{ product.id }}" class="pdp-select size-select">
@@ -222,6 +131,23 @@
                 }
                 </script>
             </div>
+            <!-- Lightbox Modal (unchanged, keep outside grid for overlay) -->
+            <div id="lightbox-modal" class="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-80 backdrop-blur" style="display:none;">
+                <div class="relative flex flex-col items-center justify-center w-full h-full">
+                    <button class="absolute top-8 right-12 text-4xl text-pink-500 font-bold" onclick="closeLightbox()" style="background:none; border:none; cursor:pointer;">&times;</button>
+                    <button id="lightbox-prev" class="absolute left-8 top-1/2 transform -translate-y-1/2 text-5xl text-white hover:text-pink-500" style="background:none; border:none; cursor:pointer;">&#10094;</button>
+                    <img id="lightbox-img" src="" class="rounded-xl border-4 border-[#be185d] shadow-2xl" style="max-width:80vw; max-height:80vh; background:#1e293b;">
+                    <button id="lightbox-next" class="absolute right-8 top-1/2 transform -translate-y-1/2 text-5xl text-white hover:text-pink-500" style="background:none; border:none; cursor:pointer;">&#10095;</button>
+                    <div class="thumb-grid" id="lb-thumb-grid" style="position:absolute; bottom:40px; left:50%; transform:translateX(-50%); display:flex; gap:10px; justify-content:center; background:rgba(30,41,59,0.8); padding:12px 24px; border-radius:12px;">
+                        {% for img in image_urls %}
+                            <img src="{{ url_for('static', filename=img) }}" class="lb-thumb-img" data-idx="{{ loop.index0 }}" style="width:60px; height:60px; object-fit:cover; border-radius:8px; border:2px solid #334155; opacity:0.85; cursor:pointer; transition:0.2s;">
+                        {% endfor %}
+                    </div>
+                </div>
+            </div>
+            <script>
+            // ...existing code...
+            </script>
         </div>
 
         {% if related_products %}
