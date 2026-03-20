@@ -195,7 +195,6 @@ function syncButtonStates() {
     fetch('/cart', { method: 'GET' })
         .then(res => res.json())
         .then(cart => {
-            // For each product card, check if the current tier/size matches a cart item
             document.querySelectorAll('.product-card').forEach(card => {
                 const btn = card.querySelector('.add-to-quote-btn');
                 if (!btn) return;
@@ -204,21 +203,21 @@ function syncButtonStates() {
                 const sizeSelect = card.querySelector('.size-select');
                 const tier = tierSelect ? tierSelect.value : btn.getAttribute('data-tier') || 1;
                 const size = sizeSelect ? sizeSelect.value : btn.getAttribute('data-size') || '';
-                // Find cart item for this product, tier, and size
+                // Only show counter if there is an exact match in the cart
                 let found = false;
-                Object.keys(cart).forEach(key => {
+                for (const key in cart) {
                     const item = cart[key];
                     if ((item.product_id == productId || item.sku == productId || item.id == productId)
-                        && String(item.tier) == String(tier)
-                        && String(item.size) == String(size)) {
+                        && String(item.tier) === String(tier)
+                        && String(item.size) === String(size)
+                        && item.qty > 0) {
                         insertUnitControls(btn, productId, tier, item.price, item.qty, size);
                         found = true;
+                        break;
                     }
-                });
+                }
                 if (!found) {
-                    // If not in cart, show Add to Quote button
                     btn.style.display = '';
-                    // Remove any lingering qty-controls
                     let controls = card.querySelector('.qty-controls');
                     if (controls) controls.remove();
                 }

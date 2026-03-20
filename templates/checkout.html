@@ -7,11 +7,6 @@
     <form method="POST" action="/clear_quote" style="display:inline;" id="clear-quote-form">
       <button type="submit" id="clear-quote-btn" class="rose-btn py-2 px-8 rounded-2xl font-bold text-lg transition bg-rose-600 text-white hover:bg-rose-700 shadow-xl">Clear Quote</button>
     </form>
-    <script>
-      document.getElementById('clear-quote-form').addEventListener('submit', function() {
-        setTimeout(function() { window.location.reload(); }, 200);
-      });
-    </script>
     <a href="/" class="py-2 px-8 rounded-2xl font-bold text-lg bg-slate-800 text-gray-300 hover:bg-slate-700 transition shadow-xl">Continue Shopping</a>
   </div>
   {% set cart = session['cart'] %}
