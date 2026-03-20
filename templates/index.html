@@ -1,6 +1,19 @@
 {% extends "base.html" %}
 {% block content %}
 <style>
+        .product-title {
+            color: #be185d;
+            font-size: 1.08rem;
+            font-weight: bold;
+            margin-bottom: 7px;
+            text-decoration: underline;
+            font-family: 'Merriweather', serif;
+            max-height: 4.05em;
+            line-height: 1.35;
+            min-height: 2.7em;
+            overflow: hidden;
+            display: block;
+        }
     /* Smooth transition for the background image change */
     .hero-premium-bg {
         transition: background-image 1.5s ease-in-out;
@@ -61,6 +74,7 @@
                 <a href="{{ url_for('product_detail', product_id=product.id) }}" class="mt-2 w-full block text-center font-semibold text-slate-800 product-title whitespace-normal overflow-hidden text-ellipsis" style="font-family:'Playfair Display',serif; font-size:1.08rem; max-height:2.7em; line-height:1.35; min-height:2.7em;">
                     {{ product.name }}
                 </a>
+                <div style="height:0.5em;"></div>
                 <div class="w-full text-center product-price mb-1">
                     {% if product.tiers and product.tiers|length > 0 %}
                         {% set min_tier = (product.tiers | sort(attribute='price'))[0] %}
