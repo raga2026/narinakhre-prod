@@ -19,6 +19,11 @@ function insertUnitControls(btn, productId, tier, price, units, size) {
         console.warn('[Add to Quote] insertUnitControls: container is null! Button must be inside .product-card or .product-container.', { productId, tier, price, units, size, btn });
         return;
     }
+    // Remove any existing qty-controls to prevent duplicates
+    let existingControls = container.querySelector('.qty-controls');
+    if (existingControls) {
+        existingControls.remove();
+    }
     let controls = document.createElement('div');
     controls.className = 'qty-controls flex items-center gap-2';
     controls.setAttribute('aria-label', 'Adjust units for this item');

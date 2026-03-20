@@ -77,7 +77,14 @@
             <!-- Info Right -->
             <div class="pdp-info-card" style="flex:1; min-width:320px;">
                 <h1 class="pdp-title">{{ product['name'] }}</h1>
-                <div class="pdp-price">₹{{ product['price1'] }}</div>
+                <div class="pdp-price">
+                    {% if product['tiers'] and product['tiers']|length > 0 %}
+                        {% set min_tier = (product['tiers'] | sort(attribute='price'))[0] %}
+                        ₹{{ min_tier.price }} / Unit
+                    {% else %}
+                        ₹{{ product['price1'] }} / Unit
+                    {% endif %}
+                </div>
                 <div class="detail-item"><span class="detail-label">Color:</span> {{ product['color'] or 'N/A' }}</div>
                 <div class="detail-item"><span class="detail-label">Material:</span> {{ product['material'] or 'N/A' }}</div>
                 <div class="product-desc" style="margin-top:18px;">
