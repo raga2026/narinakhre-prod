@@ -3,63 +3,50 @@
 {% block content %}
 
 <style>
-    /* Theme matching index.html */
-    body { background-color: #0f172a; color: white; margin: 0; font-family: sans-serif; }
-    .pdp-bg { background: #0f172a; min-height: 100vh; padding: 20px; }
+    /* Premium Serif/Soft UI for Product Detail */
+    body { background: #f8fafc; color: #312e2e; font-family: 'Merriweather', 'Georgia', serif; }
+    .pdp-bg { background: #f8fafc; min-height: 100vh; padding: 20px 0; }
     .pdp-container { max-width: 1200px; margin: 0 auto; }
-    
     .back-nav { margin-bottom: 20px; }
-    .back-link { color: #be185d; text-decoration: none; font-weight: bold; font-size: 1.1rem; border: 1px solid #be185d; padding: 8px 15px; border-radius: 20px; transition: 0.3s; }
-    .back-link:hover { background: #be185d; color: white; }
-
-    /* Main Product Layout */
-    .pdp-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(350px, 1fr)); gap: 40px; margin-bottom: 60px; }
-    
-    /* Image Gallery Section */
+    .back-link { color: #be185d; text-decoration: none; font-weight: 600; font-size: 1.1rem; border: 1px solid #be185d; padding: 8px 15px; border-radius: 20px; background: #fff; transition: 0.3s; font-family: 'Merriweather', serif; }
+    .back-link:hover { background: #be185d; color: #fff; }
+    .pdp-grid { display: flex; flex-wrap: wrap; gap: 40px; margin-bottom: 60px; }
+    @media (max-width: 900px) { .pdp-grid { flex-direction: column; gap: 32px; } }
     .pdp-image-section { display: flex; flex-direction: column; gap: 15px; }
-    .main-img-container { background: #1e293b; border: 1px solid #334155; border-radius: 12px; overflow: hidden; height: 450px; display: flex; align-items: center; justify-content: center; }
-    .main-img-container img { max-width: 100%; max-height: 100%; object-fit: contain; cursor: pointer; }
-    
+    .main-img-container { background: #fff; border: 2px solid #f472b6; border-radius: 18px; overflow: hidden; height: 420px; display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 32px #f472b633; }
+    .main-img-container img { max-width: 100%; max-height: 100%; object-fit: contain; cursor: pointer; border-radius: 12px; }
     .thumb-grid { display: flex; gap: 10px; justify-content: center; overflow-x: auto; }
-    .thumb-grid img { width: 80px; height: 80px; object-fit: cover; border-radius: 8px; cursor: pointer; border: 2px solid #334155; opacity: 0.7; transition: 0.3s; }
-    .thumb-grid img:hover { opacity: 1; border-color: #be185d; }
-
-    /* Product Info Card */
-    .pdp-info-card { background: #1e293b; border: 1px solid #334155; border-radius: 12px; padding: 30px; height: fit-content; }
-    .pdp-title { font-size: 2.2rem; color: #f8fafc; margin-bottom: 10px; }
-    .pdp-price { font-size: 1.8rem; color: #be185d; font-weight: bold; margin-bottom: 20px; border-bottom: 1px solid #334155; padding-bottom: 15px; }
-    
-    .detail-item { margin-bottom: 12px; font-size: 1.1rem; }
-    .detail-label { color: #94a3b8; font-weight: bold; min-width: 100px; display: inline-block; }
-    .product-desc { margin-top: 25px; line-height: 1.7; color: #cbd5e1; background: #0f172a; padding: 15px; border-radius: 8px; }
-
-    /* Controls & Buttons (Home Page Style) */
-    .pdp-field { margin-bottom: 20px; }
-    .pdp-field label { display: block; margin-bottom: 8px; color: #94a3b8; font-size: 0.9rem; }
-    .pdp-input, .pdp-select { 
-        width: 100%; padding: 12px; border-radius: 8px; border: 2px solid #be185d; 
-        background: #1e293b; color: white; font-size: 1rem;
-    }
-    .pdp-actions { display: flex; gap: 15px; margin-top: 25px; }
-    .btn-add { flex: 2; background: #be185d; color: white; border: none; padding: 15px; border-radius: 30px; cursor: pointer; font-weight: bold; font-size: 1rem; }
-    .btn-quote { flex: 1; background: transparent; border: 2px solid #be185d; color: #be185d; padding: 15px; border-radius: 30px; cursor: pointer; font-weight: bold; font-size: 1rem; }
-
-    /* "You May Also Like" (Home Page Card Style) */
-    .carousel-section { border-top: 2px solid #334155; padding-top: 50px; margin-top: 50px; }
-    .carousel-title { font-size: 1.8rem; margin-bottom: 30px; color: #f8fafc; }
-    .product-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 20px; }
-    .product-card { background: #1e293b; border: 1px solid #334155; border-radius: 12px; padding: 15px; display: flex; flex-direction: column; transition: 0.3s; }
-    .product-card:hover { transform: translateY(-5px); border-color: #be185d; }
-    .product-image { width: 100%; height: 250px; object-fit: cover; border-radius: 8px; margin-bottom: 15px; }
-    .mini-title { color: white; text-decoration: none; font-size: 1.2rem; font-weight: bold; margin-bottom: 10px; display: block; }
-    .mini-price { color: #be185d; font-weight: bold; font-size: 1.1rem; margin-bottom: 15px; }
-
+    .thumb-grid img { width: 80px; height: 80px; object-fit: cover; border-radius: 8px; cursor: pointer; border: 2px solid #f472b6; opacity: 0.7; transition: 0.3s; background: #fff; }
+    .thumb-grid img:hover, .thumb-grid img.active-thumb { opacity: 1; border-color: #be185d; }
+    .pdp-info-card { background: #fff; border: 2px solid #f472b6; border-radius: 18px; padding: 32px 28px; box-shadow: 0 4px 32px #f472b633; height: fit-content; }
+    .pdp-title { font-size: 2.2rem; color: #be185d; margin-bottom: 10px; font-family: 'Merriweather', serif; font-weight: 700; }
+    .pdp-price { font-size: 1.7rem; color: #be185d; font-weight: bold; margin-bottom: 18px; border-bottom: 1px solid #f472b6; padding-bottom: 12px; font-family: 'Merriweather', serif; }
+    .detail-item { margin-bottom: 10px; font-size: 1.08rem; color: #312e2e; }
+    .detail-label { color: #be185d; font-weight: 600; min-width: 100px; display: inline-block; font-family: 'Merriweather', serif; }
+    .product-desc { margin-top: 22px; line-height: 1.7; color: #6b7280; background: #fdf2f8; padding: 15px; border-radius: 10px; font-size: 1.05rem; }
+    .pdp-field { margin-bottom: 18px; }
+    .pdp-field label { display: block; margin-bottom: 7px; color: #be185d; font-size: 0.98rem; font-family: 'Merriweather', serif; }
+    .pdp-input, .pdp-select { width: 100%; padding: 12px; border-radius: 8px; border: 2px solid #f472b6; background: #fff; color: #312e2e; font-size: 1rem; font-family: 'Merriweather', serif; }
+    .pdp-actions { display: flex; gap: 15px; margin-top: 22px; }
+    .btn-add { flex: 2; background: linear-gradient(90deg, #be185d 0%, #f472b6 100%); color: #fff; border: none; padding: 15px; border-radius: 30px; cursor: pointer; font-weight: bold; font-size: 1rem; font-family: 'Merriweather', serif; box-shadow: 0 2px 8px #be185d22; transition: background 0.2s; }
+    .btn-add:hover { background: linear-gradient(90deg, #f472b6 0%, #be185d 100%); }
+    .btn-quote { flex: 1; background: transparent; border: 2px solid #be185d; color: #be185d; padding: 15px; border-radius: 30px; cursor: pointer; font-weight: bold; font-size: 1rem; font-family: 'Merriweather', serif; transition: background 0.2s, color 0.2s; }
+    .btn-quote:hover { background: #be185d; color: #fff; }
+    /* You May Also Like */
+    .carousel-section { border-top: 2px solid #f472b6; padding-top: 40px; margin-top: 40px; }
+    .carousel-title { font-size: 1.5rem; margin-bottom: 24px; color: #be185d; font-family: 'Merriweather', serif; font-weight: 700; }
+    .product-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 18px; }
+    .product-card { background: #fff; border: 2px solid #f472b6; border-radius: 14px; padding: 14px; display: flex; flex-direction: column; transition: 0.3s; box-shadow: 0 2px 8px #be185d22; }
+    .product-card:hover { transform: translateY(-4px); border-color: #be185d; }
+    .product-image { width: 100%; height: 210px; object-fit: cover; border-radius: 8px; margin-bottom: 12px; background: #fdf2f8; transition: opacity 0.5s ease-in-out; }
+    .mini-title { color: #be185d; text-decoration: none; font-size: 1.08rem; font-weight: bold; margin-bottom: 7px; display: block; font-family: 'Merriweather', serif; }
+    .mini-price { color: #be185d; font-weight: bold; font-size: 1.05rem; margin-bottom: 10px; font-family: 'Merriweather', serif; }
     /* Lightbox Modal */
     #lightbox { display: none; position: fixed; z-index: 10000; left: 0; top: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.95); }
     .close-lb { position: absolute; top: 20px; right: 40px; color: #be185d; font-size: 50px; cursor: pointer; font-weight: bold; }
     .lb-content { height: 100%; display: flex; align-items: center; justify-content: center; }
-    #lightbox-img { max-width: 90%; max-height: 85%; border-radius: 5px; border: 2px solid #334155; }
-    .nav-lb { position: absolute; top: 50%; transform: translateY(-50%); color: white; font-size: 60px; cursor: pointer; padding: 30px; transition: 0.3s; }
+    #lightbox-img { max-width: 90%; max-height: 85%; border-radius: 5px; border: 2px solid #f472b6; }
+    .nav-lb { position: absolute; top: 50%; transform: translateY(-50%); color: #be185d; font-size: 60px; cursor: pointer; padding: 30px; transition: 0.3s; }
     .nav-lb:hover { color: #be185d; }
     .prev-lb { left: 20px; }
     .next-lb { right: 20px; }
@@ -82,14 +69,12 @@
                     {% endfor %}
                 </div>
             </div>
-            <!-- Fullscreen Lightbox Modal -->
             <div id="lightbox-modal" class="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-80 backdrop-blur" style="display:none;">
                 <div class="relative flex flex-col items-center justify-center w-full h-full">
                     <button class="absolute top-8 right-12 text-4xl text-pink-500 font-bold" onclick="closeLightbox()" style="background:none; border:none; cursor:pointer;">&times;</button>
                     <button id="lightbox-prev" class="absolute left-8 top-1/2 transform -translate-y-1/2 text-5xl text-white hover:text-pink-500" style="background:none; border:none; cursor:pointer;">&#10094;</button>
                     <img id="lightbox-img" src="" class="rounded-xl border-4 border-[#be185d] shadow-2xl" style="max-width:80vw; max-height:80vh; background:#1e293b;">
                     <button id="lightbox-next" class="absolute right-8 top-1/2 transform -translate-y-1/2 text-5xl text-white hover:text-pink-500" style="background:none; border:none; cursor:pointer;">&#10095;</button>
-                    <!-- Thumbnails below fullscreen image -->
                     <div class="thumb-grid" id="lb-thumb-grid" style="position:absolute; bottom:40px; left:50%; transform:translateX(-50%); display:flex; gap:10px; justify-content:center; background:rgba(30,41,59,0.8); padding:12px 24px; border-radius:12px;">
                         {% for img in image_urls %}
                             <img src="{{ url_for('static', filename=img) }}" class="lb-thumb-img" data-idx="{{ loop.index0 }}" style="width:60px; height:60px; object-fit:cover; border-radius:8px; border:2px solid #334155; opacity:0.85; cursor:pointer; transition:0.2s;">
@@ -216,7 +201,6 @@
                         data-price="{{ product.tiers[0].price if product.tiers and product.tiers[0].price else product.price1 }}"
                         data-size="{{ product.sizes.split(',')[0]|trim if product.sizes else '' }}"
                     >Add to Quote</button>
-                    <!-- Social Share Button -->
                     <button class="share-btn btn-quote" title="Share this product" onclick="shareProduct()" style="display:flex;align-items:center;gap:8px;">
                         <img src="{{ url_for('static', filename='assets/share.svg') }}" alt="Share" style="width:22px;height:22px;vertical-align:middle;"> Share
                     </button>
@@ -247,7 +231,12 @@
                 {% for rel in related_products %}
                 <div class="product-card">
                     <a href="/product/{{ rel.id }}">
-                        <img class="product-image" src="/static/assets/products/{{ rel.sku }}_1.jpg" alt="{{ rel.name }}" onerror="this.src='/static/assets/products/default.jpg'">
+                        <img id="rel-carousel-{{ rel.sku }}" 
+                             class="product-image" 
+                             src="/static/assets/products/{{ rel.sku }}_1.jpg" 
+                             alt="{{ rel.name }}" 
+                             data-images='{{ rel.images|default([])|tojson }}'
+                             onerror="this.src='/static/assets/products/default.jpg'">
                     </a>
                     <a href="/product/{{ rel.id }}" class="mini-title">{{ rel.name }}</a>
                     <div class="mini-price">₹{{ rel.price1 }}</div>
@@ -286,7 +275,28 @@
     </div>
 </div>
 
+<script>
+// --- Related Products Carousel Logic ---
+document.addEventListener('DOMContentLoaded', function() {
+    document.querySelectorAll('img[id^="rel-carousel-"]').forEach(function(imgEl) {
+        var imagesRaw = imgEl.getAttribute('data-images');
+        var images = [];
+        try {
+            images = JSON.parse(imagesRaw);
+        } catch (e) {
+            console.error('Related Carousel JSON parse error', e);
+        }
 
+        if (Array.isArray(images) && images.length > 1) {
+            var currentIdx = 0;
+            setInterval(function() {
+                currentIdx = (currentIdx + 1) % images.length;
+                imgEl.src = images[currentIdx];
+            }, 3000);
+        }
+    });
+});
+</script>
 
 {% block meta %}
     <meta property="og:title" content="{{ product['name'] }} | Nari Nakhre" />

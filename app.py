@@ -233,11 +233,12 @@ def admin_login_redirect():
 
 @app.route('/')
 def index():
-    # ...existing code...
     db = get_db()
     products = db.execute('SELECT * FROM products').fetchall()
     session['cart'] = session.get('cart', {})
     grouped_products = {}
+    bangle_images = []
+    bangle_count = 0
     for product in products:
         cat = product['category'].strip() if product['category'] else None
         if not cat:
@@ -246,20 +247,38 @@ def index():
             grouped_products[cat] = []
         # Add gallery images and tiered pricing to each product
         product = dict(product)
-        product['images'] = []
+        # --- Ensure product['images'] is always a list ---
+        images = []
         for i in range(1,6):
             img_path = os.path.join('static', 'assets', 'products', f"{product['sku']}_{i}.jpg")
             if os.path.exists(img_path):
-                product['images'].append(url_for('static', filename=f"assets/products/{product['sku']}_{i}.jpg"))
-        if not product['images']:
-            product['images'] = [url_for('static', filename='assets/products/default.jpg')]
+                images.append(url_for('static', filename=f"assets/products/{product['sku']}_{i}.jpg"))
+        if not images:
+            images = [url_for('static', filename='assets/products/default.jpg')]
+        # If product['images'] exists and is a string, try to parse as JSON/list
+        if 'images' in product and not isinstance(product['images'], list):
+            try:
+                parsed = json.loads(product['images'])
+                if isinstance(parsed, list):
+                    images = parsed
+            except Exception:
+                pass
+        product['images'] = images
         product['tiers'] = [
             {'tier': 1, 'qty': product.get('quantity1'), 'price': product.get('price1')},
             {'tier': 2, 'qty': product.get('quantity2'), 'price': product.get('price2')},
             {'tier': 3, 'qty': product.get('quantity3'), 'price': product.get('price3')},
         ]
+        # Collect first 4 bangle images for hero background
+        if bangle_count < 4 and 'bangle' in (product.get('category','').lower() + product.get('name','').lower()):
+            if product['images']:
+                bangle_images.append(product['images'][0])
+                bangle_count += 1
         grouped_products[cat].append(product)
-    return render_template('index.html', grouped_products=grouped_products, cart=session['cart'])
+    # Fallback: if less than 4, fill with default
+    while len(bangle_images) < 4:
+        bangle_images.append(url_for('static', filename='assets/products/default.jpg'))
+    return render_template('index.html', grouped_products=grouped_products, cart=session['cart'], hero_images=bangle_images)
 
 @app.route('/update-cart', methods=['POST'])
 def update_cart():
