@@ -114,7 +114,14 @@
         </div>
         {% if products|length > 4 %}
         <div class="text-center mt-4">
-            <a href="{{ url_for('category_products', category=category) }}" class="inline-block bg-rose-600 text-white font-bold py-3 px-8 rounded-2xl text-lg shadow hover:bg-rose-700 transition">View All</a>
+            <a href="{{ url_for('category_products', category=category) }}"
+               class="inline-block bg-black text-white font-bold py-3 px-8 rounded-2xl text-lg shadow hover:bg-gray-800 transition">
+                {% if category.lower() == 'bangles' %}
+                    View More Bangles
+                {% else %}
+                    View More {{ category }}
+                {% endif %}
+            </a>
         </div>
         {% endif %}
     {% endfor %}
