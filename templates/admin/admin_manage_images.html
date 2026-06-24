@@ -1,0 +1,46 @@
+{% extends 'base.html' %}
+{% block title %}Manage Product Images{% endblock %}
+{% block content %}
+<div style="margin-bottom: 20px; padding: 20px;">
+    <a href="{{ url_for('admin_dashboard') }}" class="btn-save" style="background:#be185d; color:white; padding:8px 18px; border-radius:8px; font-weight:bold; text-decoration:none;">Back to Admin</a>
+</div>
+
+<div style="padding: 0 20px; color: white;">
+    <h2>Manage Product Images</h2>
+    <p style="color: #94a3b8;">Images are automatically optimized, compressed to WebP, and saved to your Supabase Storage cloud bucket.</p>
+    
+    <form method="get" action="{{ url_for('admin_manage_images') }}" style="margin-bottom: 20px;">
+        <input type="text" name="sku_search" placeholder="Search SKU..." value="{{ sku_search|default('') }}" style="padding: 8px; border-radius: 6px; border: 1px solid #be185d; background: #1e293b; color: white;">
+        <button type="submit" style="padding: 8px 15px; border-radius: 6px; background: #be185d; color: white; border: none; cursor: pointer;">Search</button>
+    </form>
+
+    <table style="width:100%; border-collapse: collapse; background: #1e293b; border: 1px solid #334155;">
+        <tr style="background: #334155; text-align: left;">
+            <th style="padding: 12px;">SKU</th>
+            <th style="padding: 12px;">Name</th>
+            <th style="padding: 12px;">Current Preview</th>
+            <th style="padding: 12px;">Actions</th>
+        </tr>
+        {% for product in products %}
+        <tr style="border-bottom: 1px solid #334155;">
+            <td style="padding: 12px; color: #f472b6; font-weight: bold;">{{ product.sku }}</td>
+            <td style="padding: 12px;">{{ product.name }}</td>
+            <td style="padding: 12px;">
+                <img src="{% if product.image_field and product.image_field.startswith('http') %}{{ product.image_field }}{% else %}/static/assets/products/default.jpg{% endif %}" 
+                     onerror="this.src='/static/assets/products/default.jpg'" 
+                     width="80" 
+                     height="80" 
+                     style="border-radius: 6px; border: 1px solid #be185d; object-fit: cover;">
+            </td>
+            <td style="padding: 12px;">
+                <form method="post" action="{{ url_for('admin_upload_images') }}" enctype="multipart/form-data">
+                    <input type="hidden" name="sku" value="{{ product.sku }}">
+                    <input type="file" name="images" multiple accept="image/*" style="font-size: 0.8rem;" required>
+                    <button type="submit" style="background: #10b981; color: white; border: none; padding: 5px 10px; border-radius: 4px; cursor: pointer;">Upload to Cloud</button>
+                </form>
+            </td>
+        </tr>
+        {% endfor %}
+    </table>
+</div>
+{% endblock %}

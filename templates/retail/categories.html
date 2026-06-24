@@ -1,0 +1,13 @@
+{% extends "retail/base.html" %}
+{% block content %}
+<div class="container mx-auto py-12">
+    <h1 class="text-3xl font-extrabold rose-accent mb-8 text-center tracking-wide drop-shadow-lg">Browse Categories</h1>
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-8 max-w-3xl mx-auto">
+        {% for cat in categories %}
+        <a href="/retail/category/{{ cat }}" class="block bg-white border-2 border-rose-100 rounded-2xl shadow-lg p-8 text-center text-2xl font-bold text-rose-700 hover:bg-rose-50 hover:border-rose-400 transition">
+            {{ cat }}
+        </a>
+        {% endfor %}
+    </div>
+</div>
+{% endblock %}

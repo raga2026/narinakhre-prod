@@ -1,0 +1,454 @@
+{% extends "retail/base.html" %}
+{% block content %}
+<style>
+    /* Zoom & UI Styling */
+    .img-zoom-container { position: relative; }
+    .img-zoom-lens {
+        position: absolute; border: 1px solid #be185d;
+        width: 100px; height: 100px; background: rgba(190, 24, 93, 0.1);
+        cursor: crosshair; visibility: hidden; z-index: 20;
+    }
+    .img-zoom-result {
+        position: absolute; right: -440px; top: 0;
+        width: 400px; height: 400px; border: 2px solid #fbcfe8;
+        background-repeat: no-repeat; visibility: hidden;
+        z-index: 30; border-radius: 16px; box-shadow: 0 10px 25px rgba(0,0,0,0.1);
+    }
+    .active-thumb { border-color: #be185d !important; opacity: 1 !important; transform: scale(1.05); }
+    .carousel-img { transition: opacity 0.3s ease-in-out; }
+    @media (max-width: 1024px) { .img-zoom-result { display: none; } }
+</style>
+
+<div class="container mx-auto px-4 py-10">
+    <!-- Main Product Presentation Card -->
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-12 bg-white rounded-3xl p-10 shadow-xl border border-rose-100">
+        
+        <!-- Main Image Section -->
+        <div class="flex flex-col items-center">
+            <div class="relative img-zoom-container bg-slate-900 border-2 border-slate-700 rounded-2xl flex items-center justify-center h-[420px] w-full" style="max-width:420px;">
+                <button class="absolute top-2 right-2 bg-rose-100 hover:bg-rose-200 rounded-full p-2 shadow z-40" onclick="shareProduct({{ product.name|tojson|forceescape }}, {{ request.url|tojson|forceescape }}, {{ url_for('static', filename=image_urls[0], _external=True)|tojson|forceescape }})">
+                    <img src="{{ url_for('static', filename='assets/share.svg') }}" alt="Share" class="w-5 h-5" />
+                </button>
+                <button id="main-prev" class="absolute left-2 top-1/2 -translate-y-1/2 z-40 bg-white bg-opacity-70 hover:bg-rose-200 text-3xl rounded-full w-10 h-10 flex items-center justify-center shadow" style="border:none; cursor:pointer;">&#10094;</button>
+                <div id="lens" class="img-zoom-lens"></div>
+                <img id="main-view" src="{{ url_for('static', filename=image_urls[0]) }}" alt="{{ product.name }}" onclick="openLightbox(currentImgIdx)" class="max-w-[350px] max-h-[380px] rounded-xl cursor-pointer shadow-lg bg-slate-800 mx-auto z-10">
+                <div id="zoom-result" class="img-zoom-result"></div>
+                <button id="main-next" class="absolute right-2 top-1/2 -translate-y-1/2 z-40 bg-white bg-opacity-70 hover:bg-rose-200 text-3xl rounded-full w-10 h-10 flex items-center justify-center shadow" style="border:none; cursor:pointer;">&#10095;</button>
+            </div>
+            <div class="thumb-grid flex gap-3 justify-center mt-5 overflow-x-auto">
+                {% for img in image_urls %}
+                    <img src="{{ url_for('static', filename=img) }}" class="thumb-img{% if loop.index0 == 0 %} active-thumb{% endif %} w-20 h-20 object-cover rounded-lg border-2 border-slate-700 opacity-60 cursor-pointer transition" data-idx="{{ loop.index0 }}">
+                {% endfor %}
+            </div>
+        </div>
+
+        <!-- Product Details -->
+        <div class="flex flex-col">
+            <h1 class="text-4xl font-serif font-bold text-rose-900 mb-2">{{ product.name }}</h1>
+            <div class="text-4xl font-bold text-rose-600 mb-4">₹{{ product.retail_price }}</div>
+            
+            <div class="mb-2 text-lg"><span class="font-semibold text-rose-700">Color:</span> {{ product.color or 'N/A' }}</div>
+            <div class="mb-2 text-lg"><span class="font-semibold text-rose-700">Material:</span> {{ product.material or 'N/A' }}</div>
+            <div class="product-desc mt-4 p-4 bg-rose-50 rounded-lg text-slate-800 mb-6">
+                <strong class="text-rose-700 block mb-2">Description:</strong>
+                <span>{{ product.description or 'Handcrafted premium jewelry.' }}</span>
+            </div>
+
+            <!-- Size Selection -->
+
+            {% set is_bangle = 'bangle' in (product.category|lower if product.category else '') or 'bangle' in (product.name|lower if product.name else '') %}
+            {% if is_bangle %}
+            <div class="w-full mb-6">
+                <label for="size-main" class="block text-xs font-semibold text-rose-500 mb-1 ml-1 uppercase">Select Size</label>
+                <select id="size-main" class="w-full p-3 border-2 border-rose-100 rounded-xl outline-none focus:border-rose-400 bg-white font-semibold size-select">
+                    <option value="2.4" selected>2.4</option>
+                    <option value="2.6">2.6</option>
+                    <option value="2.8">2.8</option>
+                </select>
+            </div>
+            {% elif product.sizes %}
+            <div class="w-full mb-6">
+                <label for="size-main" class="block text-xs font-semibold text-rose-500 mb-1 ml-1 uppercase">Select Size</label>
+                <select id="size-main" class="w-full p-3 border-2 border-rose-100 rounded-xl outline-none focus:border-rose-400 bg-white font-semibold size-select">
+                    {% for size in product.sizes.split(',') %}
+                        <option value="{{ size|trim }}">{{ size|trim }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            {% endif %}
+            
+            <!-- Main Cart Container (Amazon Stack Order) -->
+            <div class="cart-container mt-auto space-y-3" id="cart-action-{{product.sku}}">
+                <!-- Order Quantity Dropdown (Max 5) -->
+                <div class="w-full flex items-center justify-between bg-slate-50 border border-slate-200 rounded-xl px-4 py-2">
+                    <span class="text-sm font-semibold text-slate-500 uppercase tracking-wider">Quantity</span>
+                    <select class="qty-select bg-transparent text-base font-bold text-slate-800 outline-none cursor-pointer">
+                        <option value="1" selected>1</option>
+                        <option value="2">2</option>
+                        <option value="3">3</option>
+                        <option value="4">4</option>
+                        <option value="5">5</option>
+                    </select>
+                </div>
+
+                <!-- Add to Cart Button (Top) -->
+                <button class="add-to-cart-btn w-full py-3.5 font-medium rounded-full shadow-lg antialiased transition-all duration-200 text-lg"
+                    data-sku="{{product.sku}}" data-price="{{product.retail_price}}" data-name="{{product.name}}"
+                    style="background: linear-gradient(180deg, #f7dfa5 0%, #f0c14b 100%); border: 1px solid #a88734; color: #111111; letter-spacing:0.02em;"
+                    onclick="retailAddToCart(this)">
+                    Add to Cart
+                </button>
+
+                <!-- Unit Counter (Hidden by default, replaces Add to Cart on click) -->
+                <div class="unit-counter border border-slate-200 bg-amber-50 rounded-full flex flex-row items-center justify-between px-4 py-1.5 shadow-sm hidden w-full h-12">
+                    <button class="decrement-btn px-3 py-1 text-xl font-bold text-gray-700 hover:text-amber-600 focus:outline-none">-</button>
+                    <span class="qty-display text-xl font-bold text-gray-900 mx-2 select-none">1</span>
+                    <button class="increment-btn px-3 py-1 text-xl font-bold text-gray-700 hover:text-amber-600 focus:outline-none">+</button>
+                </div>
+
+                <!-- Buy Now Button (Always at Bottom) -->
+                <button class="buy-now-btn w-full py-3.5 font-medium rounded-full shadow-lg antialiased transition-all duration-200 text-lg"
+                    data-sku="{{product.sku}}" data-price="{{product.retail_price}}" data-name="{{product.name}}"
+                    style="background: linear-gradient(180deg, #f5b186 0%, #df5f12 100%); border: 1px solid #b84c0c; color: #ffffff; letter-spacing:0.02em;"
+                    onclick="retailBuyNow(this)">
+                    Buy Now
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Full-Screen Lightbox Modal -->
+    <div id="lightbox-modal" class="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-95 backdrop-blur-sm" style="display:none;">
+        <button class="absolute top-8 right-12 text-5xl text-rose-500 font-bold" onclick="closeLightbox()" style="background:none; border:none; cursor:pointer;">&times;</button>
+        <button id="lightbox-prev" class="absolute left-8 top-1/2 transform -translate-y-1/2 text-5xl text-white hover:text-rose-500" style="background:none; border:none; cursor:pointer;">&#10094;</button>
+        <div class="flex items-center justify-center w-full h-full">
+            <div class="bg-white bg-opacity-10 rounded-[2.5rem] p-10 border-2 border-rose-200 flex items-center justify-center shadow-2xl">
+                <img id="lightbox-img" src="" class="max-w-[80vw] max-h-[80vh] object-contain rounded-[2rem] bg-rose-50 p-2 border border-rose-100">
+            </div>
+        </div>
+        <button id="lightbox-next" class="absolute right-8 top-1/2 transform -translate-y-1/2 text-5xl text-white hover:text-rose-500" style="background:none; border:none; cursor:pointer;">&#10095;</button>
+    </div>
+
+    <!-- "You May Also Like" Related Products Section (Full Width Outside Main Grid) -->
+    {% if related_products %}
+    <section class="mt-20">
+        <h2 class="text-2xl font-serif font-bold text-rose-800 mb-8 text-center uppercase tracking-widest">You May Also Like</h2>
+        <div class="flex gap-6 overflow-x-auto pb-8 scrollbar-hide px-2">
+            {% for rel in related_products %}
+            <div class="flex-shrink-0 bg-white rounded-2xl border border-rose-100 p-4 flex flex-col product-card" style="width:230px;">
+                <a href="/retail/product/{{ rel.id }}">
+                    <div class="carousel-container relative">
+                        {% if rel.images and rel.images|length > 0 %}
+                            <img id="carousel-img-{{ rel.id }}" src="{{ url_for('static', filename=rel.images[0]) }}" class="carousel-img w-full h-40 object-contain rounded-2xl" data-images='{{ rel.images|tojson }}'>
+                        {% else %}
+                            <img src="{{ url_for('static', filename='assets/products/default.jpg') }}" class="w-full h-40 object-contain rounded-2xl">
+                        {% endif %}
+                    </div>
+                </a>
+                <div class="mt-4 font-bold truncate text-center text-slate-800">{{ rel.name }}</div>
+                <div class="text-xl font-black text-rose-900 mb-4 text-center">₹{{ rel.retail_price }}</div>
+                
+                {% set is_bangle_rel = 'bangle' in (rel.category|lower if rel.category else '') or 'bangle' in (rel.name|lower if rel.name else '') %}
+                {% if is_bangle_rel %}
+                <div class="w-full mb-2">
+                    <select class="size-select w-full p-2 text-xs border border-slate-200 bg-slate-50 rounded-xl outline-none">
+                        <option value="2.4" selected>2.4</option>
+                        <option value="2.6">2.6</option>
+                        <option value="2.8">2.8</option>
+                    </select>
+                </div>
+                {% elif rel.sizes %}
+                <div class="w-full mb-2">
+                    <select class="size-select w-full p-2 text-xs border border-slate-200 bg-slate-50 rounded-xl outline-none">
+                        {% for size in rel.sizes.split(',') %}
+                            <option value="{{ size|trim }}">{{ size|trim }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                {% endif %}
+
+                <!-- Relative Item Quantity Dropdown -->
+                <div class="w-full mb-3 flex items-center justify-between bg-slate-50 border border-slate-200 rounded-xl px-2 py-1">
+                    <span class="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Qty</span>
+                    <select class="qty-select bg-transparent text-xs font-bold text-slate-800 outline-none cursor-pointer">
+                        <option value="1" selected>1</option>
+                        <option value="2">2</option>
+                        <option value="3">3</option>
+                        <option value="4">4</option>
+                        <option value="5">5</option>
+                    </select>
+                </div>
+
+                <!-- Related Product Cart Action Block -->
+                <div class="cart-container mt-auto space-y-2">
+                    <button class="add-to-cart-btn w-full py-2 text-xs font-medium rounded-full shadow-sm text-slate-900" 
+                        style="background: linear-gradient(180deg, #f7dfa5 0%, #f0c14b 100%); border: 1px solid #a88734;"
+                        data-sku="{{rel.sku}}" data-price="{{rel.retail_price}}" data-name="{{rel.name}}"
+                        onclick="retailAddToCart(this)">
+                        Add to Cart
+                    </button>
+                    
+                    <div class="unit-counter hidden items-center justify-between bg-amber-50 border border-amber-300 rounded-full p-0.5 h-8 w-full shadow-inner">
+                        <button class="decrement-btn w-6 h-6 flex items-center justify-center bg-white rounded-full text-slate-700 font-bold shadow-sm hover:bg-slate-50 text-xs">-</button>
+                        <span class="qty-display font-bold text-slate-800 text-xs">1</span>
+                        <button class="increment-btn w-6 h-6 flex items-center justify-center bg-white rounded-full text-slate-700 font-bold shadow-sm hover:bg-slate-50 text-xs">+</button>
+                    </div>
+
+                    <button class="buy-now-btn w-full py-2 text-xs font-medium rounded-full shadow-sm text-slate-900" 
+                        style="background: linear-gradient(180deg, #f5b186 0%, #df5f12 100%); border: 1px solid #b84c0c; color: white !important;"
+                        data-sku="{{rel.sku}}" data-price="{{rel.retail_price}}" data-name="{{rel.name}}"
+                        onclick="retailBuyNow(this)">
+                        Buy Now
+                    </button>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+    </section>
+    {% endif %}
+</div>
+
+<script>
+const staticPrefix = "{{ url_for('static', filename='') }}";
+var imageUrls = {{ image_urls|tojson|safe }};
+var currentImgIdx = 0;
+
+async function shareProduct(name, url, imageUrl) {
+    const shareData = {
+        title: name,
+        text: 'Check out this product on Nari Nakhre: ' + name,
+        url: url
+    };
+    const absoluteImageUrl = imageUrl ? new URL(imageUrl, window.location.origin).href : '';
+    if (absoluteImageUrl && navigator.canShare && window.File) {
+        try {
+            const response = await fetch(absoluteImageUrl, { mode: 'cors' });
+            if (response.ok) {
+                const blob = await response.blob();
+                const fileName = (name || 'product').replace(/[^a-z0-9]+/gi, '-').toLowerCase() + '.jpg';
+                const file = new File([blob], fileName, { type: blob.type || 'image/jpeg' });
+                const shareWithFiles = { ...shareData, files: [file] };
+                if (navigator.canShare(shareWithFiles)) {
+                    await navigator.share(shareWithFiles);
+                    return;
+                }
+            }
+        } catch (e) {}
+    }
+    if (navigator.share) {
+        navigator.share(shareData).catch(()=>{});
+    } else {
+        const msg = encodeURIComponent(`${shareData.text} ${shareData.url}${absoluteImageUrl ? ' ' + absoluteImageUrl : ''}`);
+        window.open(`https://wa.me/?text=${msg}`, '_blank');
+    }
+}
+
+// Image Zoom Logic
+function initZoom() {
+    const img = document.getElementById("main-view");
+    const result = document.getElementById("zoom-result");
+    const lens = document.getElementById("lens");
+    if (!img || !result || !lens) return;
+    const cx = result.offsetWidth / lens.offsetWidth;
+    const cy = result.offsetHeight / lens.offsetHeight;
+    result.style.backgroundImage = `url('${img.src}')`;
+    result.style.backgroundSize = (img.width * cx) + "px " + (img.height * cy) + "px";
+    const moveLens = (e) => {
+        let pos = getCursorPos(e);
+        let x = pos.x - (lens.offsetWidth / 2);
+        let y = pos.y - (lens.offsetHeight / 2);
+        if (x > img.width - lens.offsetWidth) x = img.width - lens.offsetWidth;
+        if (x < 0) x = 0;
+        if (y > img.height - lens.offsetHeight) y = img.height - lens.offsetHeight;
+        if (y < 0) y = 0;
+        lens.style.left = x + "px"; lens.style.top = y + "px";
+        result.style.backgroundPosition = "-" + (x * cx) + "px -" + (y * cy) + "px";
+    };
+    const getCursorPos = (e) => {
+        let a = img.getBoundingClientRect();
+        return { x: e.pageX - a.left - window.pageXOffset, y: e.pageY - a.top - window.pageYOffset };
+    };
+    img.addEventListener("mousemove", moveLens); lens.addEventListener("mousemove", moveLens);
+    img.addEventListener("mouseenter", () => { lens.style.visibility = "visible"; result.style.visibility = "visible"; });
+    img.addEventListener("mouseleave", () => { lens.style.visibility = "hidden"; result.style.visibility = "hidden"; });
+}
+
+function setMainImage(idx) {
+    currentImgIdx = idx;
+    const fullPath = staticPrefix + imageUrls[idx];
+    document.getElementById('main-view').src = fullPath;
+    document.getElementById('zoom-result').style.backgroundImage = `url('${fullPath}')`;
+    document.querySelectorAll('.thumb-img').forEach((el, i) => el.classList.toggle('active-thumb', i === idx));
+}
+
+function openLightbox(idx) {
+    document.getElementById('lightbox-modal').style.display = 'flex';
+    document.getElementById('lightbox-img').src = staticPrefix + imageUrls[idx];
+}
+
+function closeLightbox() { document.getElementById('lightbox-modal').style.display = 'none'; }
+
+// --- Consolidated Dynamic Counter & UI Handler Actions ---
+function updateGlobalBadge(count) {
+    const badge = document.getElementById('cart-count');
+    if (badge) {
+        badge.textContent = count;
+        if(count > 0) badge.classList.remove('hidden');
+        else badge.classList.add('hidden');
+    }
+}
+
+function getSelectionData(container) {
+    const card = container.closest('.product-card, .grid, .container');
+    const sizeSelect = card ? card.querySelector('.size-select') : null;
+    const qtySelect = card ? card.querySelector('.qty-select') : null;
+    return {
+        size: sizeSelect ? sizeSelect.value : 'Standard',
+        qty: qtySelect ? parseInt(qtySelect.value) : 1
+    };
+}
+
+function retailAddToCart(btn) {
+    const container = btn.parentElement;
+    const sku = btn.getAttribute('data-sku');
+    const price = btn.getAttribute('data-price');
+    const { size, qty } = getSelectionData(container);
+
+    fetch('/update-cart', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ product_id: sku, qty: qty, price: price, size: size })
+    })
+    .then(res => res.json())
+    .then(data => {
+        btn.style.display = 'none';
+        const counter = container.querySelector('.unit-counter');
+        const display = container.querySelector('.qty-display');
+        if (counter) counter.classList.remove('hidden');
+        if (display) display.textContent = qty;
+        if (data && typeof data.cart_count !== 'undefined') updateGlobalBadge(data.cart_count);
+    }).catch(err => console.error("Cart error:", err));
+}
+
+function retailBuyNow(btn) {
+    const container = btn.parentElement;
+    const sku = btn.getAttribute('data-sku');
+    const price = btn.getAttribute('data-price');
+    const { size, qty } = getSelectionData(container);
+
+    fetch('/update-cart', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ product_id: sku, qty: qty, price: price, size: size })
+    })
+    .then(() => { window.location.href = '/retail/checkout'; })
+    .catch(err => console.error("Buy Now failed:", err));
+}
+
+document.addEventListener('DOMContentLoaded', function() {
+    initZoom();
+    document.querySelectorAll('.thumb-img').forEach((img, idx) => img.addEventListener('click', () => setMainImage(idx)));
+    document.getElementById('main-prev').onclick = (e) => { e.stopPropagation(); setMainImage((currentImgIdx - 1 + imageUrls.length) % imageUrls.length); };
+    document.getElementById('main-next').onclick = (e) => { e.stopPropagation(); setMainImage((currentImgIdx + 1) % imageUrls.length); };
+    document.getElementById('lightbox-prev').onclick = () => { currentImgIdx = (currentImgIdx - 1 + imageUrls.length) % imageUrls.length; document.getElementById('lightbox-img').src = staticPrefix + imageUrls[currentImgIdx]; };
+    document.getElementById('lightbox-next').onclick = () => { currentImgIdx = (currentImgIdx + 1) % imageUrls.length; document.getElementById('lightbox-img').src = staticPrefix + imageUrls[currentImgIdx]; };
+
+    // Robust carousel for related products
+    document.querySelectorAll('.carousel-img[data-images]').forEach(imgEl => {
+        let images;
+        try { images = JSON.parse(imgEl.dataset.images); } catch (e) { images = []; }
+        if (Array.isArray(images) && images.length > 1) {
+            let i = 0;
+            setInterval(() => {
+                i = (i + 1) % images.length;
+                imgEl.src = staticPrefix + images[i];
+            }, 3000);
+        }
+    });
+
+    // Wire up listeners for Unit Counters (+ / -) across all containers
+    document.querySelectorAll('.cart-container').forEach(function(container) {
+        const addBtn = container.querySelector('.add-to-cart-btn');
+        const counter = container.querySelector('.unit-counter');
+        const display = container.querySelector('.qty-display');
+        const qtySelect = container.querySelector('.qty-select');
+        const plus = container.querySelector('.increment-btn');
+        const minus = container.querySelector('.decrement-btn');
+
+        if (!addBtn || !counter || !display || !qtySelect) return;
+
+        // Sync dropdown to display
+        qtySelect.addEventListener('change', function() {
+            display.textContent = qtySelect.value;
+        });
+
+        plus.addEventListener('click', function() {
+            let val = parseInt(display.textContent);
+            if (val < 5) {
+                val++;
+                display.textContent = val;
+                qtySelect.value = val;
+                const sku = addBtn.getAttribute('data-sku');
+                const price = addBtn.getAttribute('data-price');
+                const { size } = getSelectionData(container);
+                fetch('/update-cart', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ product_id: sku, qty: val, price: price, size: size })
+                })
+                .then(res => res.json())
+                .then(data => { if (data && typeof data.cart_count !== 'undefined') updateGlobalBadge(data.cart_count); });
+            } else {
+                alert('Maximum purchase limit is 5 units per single point of time.');
+            }
+        });
+
+        minus.addEventListener('click', function() {
+            let val = parseInt(display.textContent);
+            const sku = addBtn.getAttribute('data-sku');
+            const price = addBtn.getAttribute('data-price');
+            const { size } = getSelectionData(container);
+
+            if (val > 1) {
+                val--;
+                display.textContent = val;
+                qtySelect.value = val;
+                fetch('/update-cart', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ product_id: sku, qty: val, price: price, size: size })
+                })
+                .then(res => res.json())
+                .then(data => { if (data && typeof data.cart_count !== 'undefined') updateGlobalBadge(data.cart_count); });
+            } else {
+                // Drop to 0 -> Remove and clear state back to Add to Cart
+                fetch('/update-cart', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ product_id: sku, qty: 0, price: price, size: size })
+                })
+                .then(res => res.json())
+                .then(data => { 
+                    if (data && typeof data.cart_count !== 'undefined') updateGlobalBadge(data.cart_count); 
+                    counter.classList.add('hidden');
+                    addBtn.style.display = '';
+                    qtySelect.value = 1;
+                    display.textContent = 1;
+                });
+            }
+        });
+    });
+});
+</script>
+{% block meta %}
+    <meta property="og:title" content="{{ product.name }} | Nari Nakhre" />
+    <meta property="og:description" content="{{ product.description|default('Premium ethnic jewelry and accessories.')|striptags|truncate(120) }}" />
+    <meta property="og:image" content="{{ url_for('static', filename=image_urls[0], _external=True) }}" />
+    <meta property="og:url" content="{{ request.url }}" />
+    <meta property="og:type" content="product" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="{{ product.name }} | Nari Nakhre" />
+    <meta name="twitter:description" content="{{ product.description|default('Premium ethnic jewelry and accessories.')|striptags|truncate(120) }}" />
+    <meta name="twitter:image" content="{{ url_for('static', filename=image_urls[0], _external=True) }}" />
+{% endblock %}
+{% endblock %}

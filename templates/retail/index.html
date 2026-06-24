@@ -1,0 +1,283 @@
+{% extends "retail/base.html" %}
+{% block content %}
+
+<section class="bg-rose-50 py-16 text-center">
+    <h1 class="text-5xl font-serif font-black text-rose-900">Nari Nakhre™</h1>
+    <p class="italic text-pink-800">Premium Handcrafted Jewelry</p>
+    <a href="#shop-section" class="btn-retail-main mt-6 inline-block px-8 py-3 text-lg">Shop Now</a>
+</section>
+
+<div id="shop-section" class="container mx-auto px-4 py-12">
+    {% for category, products in grouped_products.items() %}
+    <div class="mb-16">
+        <h2 class="text-3xl font-serif font-bold text-rose-800 border-b mb-8">
+            <a href="/retail/category/{{ category }}" class="hover:underline">{{ category }}</a>
+        </h2>
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-8">
+            {% for product in products[:4] %}
+            <div class="bg-white rounded-3xl p-4 shadow-sm border border-rose-50 product-card flex flex-col relative">
+                <button class="absolute top-2 right-2 bg-rose-100 hover:bg-rose-200 rounded-full p-2 shadow" onclick="shareProduct({{ product.name|tojson|forceescape }}, {{ (request.url_root.rstrip('/') ~ '/retail/product/' ~ product.id)|tojson|forceescape }}, {{ product.images[0]|tojson|forceescape }})">
+                    <img src="{{ url_for('static', filename='assets/share.svg') }}" alt="Share" class="w-5 h-5" />
+                </button>
+                <a href="/retail/product/{{ product.id }}">
+                    <div class="carousel-container relative">
+                        {% set first_image = product.images[0] if product.images and product.images|length > 0 else '' %}
+                        {% set first_image_clean = first_image.replace('assets/products/', '') if first_image else '' %}
+                        {% set first_image_src = first_image if first_image and (first_image.startswith('http://') or first_image.startswith('https://') or first_image.startswith('/static/')) else (url_for('static', filename='assets/products/' ~ first_image_clean) if first_image_clean else url_for('static', filename='assets/products/default.jpg')) %}
+                        {% if product.images|length > 1 %}
+                            <img id="carousel-img-{{ product.id }}" src="{{ first_image_src }}" class="carousel-img w-full h-48 object-contain rounded-2xl" data-images='{{ product.images|tojson }}' data-index="0" onerror="this.src='{{ url_for('static', filename='assets/products/default.jpg') }}'">
+                        {% else %}
+                            <img src="{{ first_image_src }}" class="w-full h-48 object-contain rounded-2xl" onerror="this.src='{{ url_for('static', filename='assets/products/default.jpg') }}'">
+                        {% endif %}
+                    </div>
+                </a>
+                <div class="mt-4 font-bold truncate">{{ product.name }}</div>
+                <div class="text-xl font-black text-rose-900 mb-4">{{ product.price1 }}</div>
+                {% set is_bangle = 'bangle' in (product.category|lower if product.category else '') or 'bangle' in (product.name|lower if product.name else '') %}
+                {% if is_bangle %}
+                <div class="w-full mb-2">
+                    <label for="size-{{ product.sku }}" class="block text-xs font-semibold text-rose-500 mb-1 ml-1">Size</label>
+                    <select class="input-field size-select w-full" style="font-size:0.95rem;" id="size-{{ product.sku }}">
+                        <option value="2.4" selected>2.4</option>
+                        <option value="2.6">2.6</option>
+                        <option value="2.8">2.8</option>
+                    </select>
+                </div>
+                {% elif product.sizes %}
+                <div class="w-full mb-2">
+                    <label for="size-{{ product.sku }}" class="block text-xs font-semibold text-rose-500 mb-1 ml-1">Size</label>
+                    <select class="input-field size-select w-full" style="font-size:0.95rem;" id="size-{{ product.sku }}">
+                        {% for size in product.sizes.split(',') %}
+                            {% set size_val = size|trim %}
+                            <option value="{{ size_val }}">{{ size_val }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                {% endif %}
+                <div class="cart-container mt-auto" id="cart-action-{{product.sku}}">
+                    <div class="flex flex-col space-y-2">
+                        <!-- Quantity Dropdown -->
+                        <div class="w-full">
+                            <label for="qty-{{product.sku}}" class="block text-xs font-medium text-amber-700 mb-1 ml-1">Quantity</label>
+                            <select class="qty-select w-full rounded-full border border-slate-200 bg-white px-3 py-2 text-base font-medium antialiased" id="qty-{{product.sku}}">
+                                <option value="1" selected>1</option>
+                                <option value="2">2</option>
+                                <option value="3">3</option>
+                                <option value="4">4</option>
+                                <option value="5">5</option>
+                            </select>
+                        </div>
+                        <!-- Add to Cart Button (shown by default) -->
+                        <button class="add-to-cart-btn w-full py-2 font-medium rounded-full shadow-lg antialiased transition-all duration-200 text-base drop-shadow-lg"
+                            data-sku="{{product.sku}}" data-price="{{product.price1}}" data-name="{{product.name}}"
+                            style="background: linear-gradient(180deg, #f7dfa5 0%, #f0c14b 100%); border: 1px solid #a88734; color: #111111; letter-spacing:0.02em; box-shadow:0 4px 16px #f7dfa533;"
+                            onclick="retailAddToCart(this)">
+                            Add to Cart
+                        </button>
+                        <!-- Unit Counter (hidden by default, replaces Add to Cart) -->
+                        <div class="unit-counter border border-slate-200 bg-amber-50 rounded-full flex flex-row items-center justify-between px-3 py-1 shadow-sm hidden" style="min-width:120px;">
+                            <button class="decrement-btn px-2 py-1 text-lg font-medium text-gray-700 hover:text-amber-600 focus:outline-none">-</button>
+                            <span class="qty-display text-xl font-medium text-gray-900 mx-2 select-none">1</span>
+                            <button class="increment-btn px-2 py-1 text-lg font-medium text-gray-700 hover:text-amber-600 focus:outline-none">+</button>
+                        </div>
+                        <!-- Buy Now Button (always at bottom) -->
+                        <button class="buy-now-btn w-full py-2 font-medium rounded-full shadow-lg antialiased transition-all duration-200 text-base drop-shadow-lg"
+                            data-sku="{{product.sku}}" data-price="{{product.price1}}" data-name="{{product.name}}"
+                            style="background: linear-gradient(180deg, #f5b186 0%, #df5f12 100%); border: 1px solid #b84c0c; color: #ffffff; letter-spacing:0.02em; box-shadow:0 4px 16px #df5f1233;"
+                            onclick="retailBuyNow(this)">
+                            Buy Now
+                        </button>
+                    </div>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+        {% if products|length > 4 %}
+        <div class="text-center mt-6">
+            <a href="/retail/category/{{ category|urlencode }}" class="btn-retail-main px-8 py-3 text-lg">View {{ category }}</a>
+        </div>
+        {% endif %}
+    </div>
+    {% endfor %}
+    </div>
+</div>
+<script>
+async function shareProduct(name, url, imageUrl) {
+    const shareData = {
+        title: name,
+        text: 'Check out this product on Nari Nakhre: ' + name,
+        url: url
+    };
+    const absoluteImageUrl = imageUrl ? new URL(imageUrl, window.location.origin).href : '';
+    if (absoluteImageUrl && navigator.canShare && window.File) {
+        try {
+            const response = await fetch(absoluteImageUrl, { mode: 'cors' });
+            if (response.ok) {
+                const blob = await response.blob();
+                const fileName = (name || 'product').replace(/[^a-z0-9]+/gi, '-').toLowerCase() + '.jpg';
+                const file = new File([blob], fileName, { type: blob.type || 'image/jpeg' });
+                const shareWithFiles = { ...shareData, files: [file] };
+                if (navigator.canShare(shareWithFiles)) {
+                    await navigator.share(shareWithFiles);
+                    return;
+                }
+            }
+        } catch (e) {}
+    }
+    if (navigator.share) {
+        navigator.share(shareData).catch(()=>{});
+    } else {
+        const msg = encodeURIComponent(`${shareData.text} ${shareData.url}${absoluteImageUrl ? ' ' + absoluteImageUrl : ''}`);
+        window.open(`https://wa.me/?text=${msg}`, '_blank');
+    }
+}
+
+// Auto-advancing product image carousel (matches wholesale logic)
+document.addEventListener('DOMContentLoaded', function() {
+    document.querySelectorAll('.carousel-img[data-images]').forEach(function(imgEl) {
+        var imagesRaw = imgEl.getAttribute('data-images');
+        var images = [];
+        try {
+            images = JSON.parse(imagesRaw);
+        } catch (e) {
+            console.error('Carousel JSON parse error for', imgEl.id, e);
+        }
+        if (Array.isArray(images) && images.length > 1) {
+            var currentIdx = 0;
+            setInterval(function() {
+                currentIdx = (currentIdx + 1) % images.length;
+                imgEl.src = images[currentIdx];
+            }, 3000);
+        }
+    });
+
+    // --- Retail Cart UI Logic ---
+    function getSize(container) {
+        const sizeSel = container.querySelector('.size-select');
+        return sizeSel ? sizeSel.value : 'Standard';
+    }
+    function getQty(container) {
+        const qtySel = container.querySelector('.qty-select');
+        return qtySel ? parseInt(qtySel.value) : 1;
+    }
+    function updateCartCount(count) {
+        const cartCount = document.getElementById('cart-count');
+        if (cartCount) cartCount.textContent = count;
+    }
+    document.querySelectorAll('.cart-container').forEach(function(container) {
+        const addBtn = container.querySelector('.add-to-cart-btn');
+        const buyBtn = container.querySelector('.buy-now-btn');
+        const unitCounter = container.querySelector('.unit-counter');
+        const qtySel = container.querySelector('.qty-select');
+        const minusBtn = container.querySelector('.decrement-btn');
+        const plusBtn = container.querySelector('.increment-btn');
+        const qtyDisplay = container.querySelector('.qty-display');
+        // Add to Cart
+        if (addBtn) {
+            addBtn.addEventListener('click', function(e) {
+                e.preventDefault();
+                const sku = addBtn.getAttribute('data-sku');
+                const price = addBtn.getAttribute('data-price');
+                const name = addBtn.getAttribute('data-name');
+                const size = getSize(container);
+                const qty = getQty(container);
+                fetch('/update-cart', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ product_id: sku, qty: qty, price: price, size: size })
+                })
+                .then(res => res.json())
+                .then(data => {
+                    addBtn.style.display = 'none';
+                    if (unitCounter) {
+                        unitCounter.classList.remove('hidden');
+                        if (qtyDisplay) qtyDisplay.textContent = qty;
+                    }
+                    if (data && typeof data.cart_count !== 'undefined') updateCartCount(data.cart_count);
+                });
+            });
+        }
+        // Buy Now
+        if (buyBtn) {
+            buyBtn.addEventListener('click', function(e) {
+                e.preventDefault();
+                const sku = buyBtn.getAttribute('data-sku');
+                const price = buyBtn.getAttribute('data-price');
+                const name = buyBtn.getAttribute('data-name');
+                const size = getSize(container);
+                const qty = getQty(container);
+                fetch('/update-cart', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ product_id: sku, qty: qty, price: price, size: size })
+                })
+                .then(() => { window.location.href = '/retail/checkout'; });
+            });
+        }
+        // Unit Counter logic
+        if (minusBtn && plusBtn && qtyDisplay && qtySel) {
+            minusBtn.addEventListener('click', function() {
+                let val = parseInt(qtyDisplay.textContent);
+                if (val > 1) {
+                    val--;
+                    qtyDisplay.textContent = val;
+                    qtySel.value = val;
+                    // Update cart
+                    const sku = addBtn.getAttribute('data-sku');
+                    const price = addBtn.getAttribute('data-price');
+                    const size = getSize(container);
+                    fetch('/update-cart', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ product_id: sku, qty: val, price: price, size: size })
+                    })
+                    .then(res => res.json())
+                    .then(data => { if (data && typeof data.cart_count !== 'undefined') updateCartCount(data.cart_count); });
+                } else {
+                    // Remove from cart, reset UI
+                    const sku = addBtn.getAttribute('data-sku');
+                    const price = addBtn.getAttribute('data-price');
+                    const size = getSize(container);
+                    fetch('/update-cart', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ product_id: sku, qty: 0, price: price, size: size })
+                    })
+                    .then(res => res.json())
+                    .then(data => { if (data && typeof data.cart_count !== 'undefined') updateCartCount(data.cart_count); });
+                    unitCounter.classList.add('hidden');
+                    addBtn.style.display = '';
+                    qtySel.value = 1;
+                    qtyDisplay.textContent = 1;
+                }
+            });
+            plusBtn.addEventListener('click', function() {
+                let val = parseInt(qtyDisplay.textContent);
+                if (val < 5) {
+                    val++;
+                    qtyDisplay.textContent = val;
+                    qtySel.value = val;
+                    // Update cart
+                    const sku = addBtn.getAttribute('data-sku');
+                    const price = addBtn.getAttribute('data-price');
+                    const size = getSize(container);
+                    fetch('/update-cart', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ product_id: sku, qty: val, price: price, size: size })
+                    })
+                    .then(res => res.json())
+                    .then(data => { if (data && typeof data.cart_count !== 'undefined') updateCartCount(data.cart_count); });
+                }
+            });
+        }
+        // Sync dropdown and counter
+        if (qtySel && qtyDisplay && unitCounter) {
+            qtySel.addEventListener('change', function() {
+                qtyDisplay.textContent = qtySel.value;
+            });
+        }
+    });
+});
+</script>
+{% endblock %}

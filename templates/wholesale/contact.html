@@ -1,0 +1,68 @@
+{% extends "wholesale/base.html" %}
+{% block title %}Contact - NariNakhre{% endblock %}
+{% block content %}
+<h1 class="text-3xl font-extrabold rose-accent mb-8 text-center tracking-wide drop-shadow-lg">Contact &amp; Submit Quote</h1>
+<form id="contact-form" method="POST" action="{{ url_for('wholesale_contact') }}" class="max-w-xl mx-auto bg-slate-900 rounded-2xl shadow-2xl p-8 flex flex-col gap-6 contact-scroll-form" style="background:#181c2a;">
+    
+    <!-- Anti-Bot Cryptographic Honeypot Trap -->
+    <div class="security-honeypot-trap-wrapper" style="display: none !important; visibility: hidden !important;" aria-hidden="true">
+        <label for="system_verification_token">Security Handshake Token (LEAVE BLANK)</label>
+        <input type="text" id="system_verification_token" name="system_verification_token" autocomplete="off" tabindex="-1">
+    </div>
+
+    <label class="font-semibold text-rose-200">Full Name
+        <input type="text" name="name" required class="w-full mt-2 px-4 py-3 rounded-lg bg-slate-800 text-rose-100 border border-rose-500 focus:border-rose-400 focus:ring-rose-500 placeholder-rose-400 text-lg" placeholder="Enter your name">
+    </label>
+    <label class="font-semibold text-rose-200">WhatsApp Number
+        <input type="text" name="whatsapp" required class="w-full mt-2 px-4 py-3 rounded-lg bg-slate-800 text-rose-100 border border-rose-500 focus:border-rose-400 focus:ring-rose-500 placeholder-rose-400 text-lg" placeholder="Enter WhatsApp number">
+    </label>
+    <label class="font-semibold text-rose-200">Email Address
+        <input type="email" name="email" required class="w-full mt-2 px-4 py-3 rounded-lg bg-slate-800 text-rose-100 border border-rose-500 focus:border-rose-400 focus:ring-rose-500 placeholder-rose-400 text-lg" placeholder="Enter your email">
+    </label>
+    <label class="font-semibold text-rose-200">Message
+        <textarea name="message" rows="3" required class="w-full mt-2 px-4 py-3 rounded-lg bg-slate-800 text-rose-100 border border-rose-500 focus:border-rose-400 focus:ring-rose-500 placeholder-rose-400 text-lg resize-none message-box" placeholder="Type your message here..."></textarea>
+    </label>
+    <button type="submit" class="w-full py-3 rounded-lg font-bold text-xl bg-rose-500 text-white hover:bg-yellow-400 hover:text-rose-700 border-4 border-yellow-400 shadow-2xl transition" style="box-shadow:0 6px 24px #be185d66,0 1.5px 0 #fff;letter-spacing:0.03em;">Send Message</button>
+</form>
+
+<style>
+    body, #contact-form {
+        background: #181c2a !important;
+    }
+    #contact-form input, #contact-form textarea {
+        background: #23263a !important;
+        color: #f472b6 !important;
+        border-color: #be185d !important;
+    }
+    #contact-form input:focus, #contact-form textarea:focus {
+        outline: none;
+        border-color: #f472b6 !important;
+        box-shadow: 0 0 0 2px #be185d44;
+        color: #fff !important;
+    }
+    #contact-form ::placeholder {
+        color: #f472b6 !important;
+        opacity: 1;
+    }
+    .message-box {
+        min-height: 60px;
+        max-height: 120px;
+    }
+    @media (max-width: 600px) {
+        #contact-form, .contact-scroll-form {
+            padding: 1.2rem !important;
+            max-height: 90vh;
+            overflow-y: auto;
+        }
+        .message-box {
+            min-height: 36px;
+            max-height: 60px;
+            font-size: 1rem;
+        }
+        button[type="submit"] {
+            font-size: 1.1rem !important;
+            padding: 0.7rem 0 !important;
+        }
+    }
+</style>
+{% endblock %}

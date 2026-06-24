@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    {% block meta %}{% endblock %}
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% if g.site_type == 'retail' %}[RETAIL]{% else %}[WHOLESALE]{% endif %} Nari Nakhre</title>
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700;900&family=Merriweather:ital,wght@0,400;0,700;1,400&display=swap" rel="stylesheet">
+    
+    <style>
+        body { background: #fdf2f8; color: #312e2e; font-family: 'Merriweather', serif; scroll-behavior: smooth; }
+        .font-serif { font-family: 'Playfair Display', serif; }
+        .rose-accent { color: #be185d; }
+        .btn-retail-main {
+            background: linear-gradient(90deg, #be185d 0%, #f472b6 100%);
+            color: #fff !important; border-radius: 30px; font-weight: bold;
+            transition: all 0.3s ease; box-shadow: 0 4px 12px rgba(190, 24, 93, 0.2);
+            text-align: center; border: none; display: inline-block;
+        }
+        .btn-black { background: #000; color: #fff; border-radius: 12px; font-weight: bold; transition: 0.3s; }
+        .cart-count { background: #be185d; color: white; border-radius: 50%; padding: 2px 6px; font-size: 10px; position: absolute; top: -5px; right: -10px; }
+        .hidden { display: none; }
+    </style>
+</head>
+<body class="flex flex-col min-h-screen">
+
+
+    <!-- Retail Header -->
+    <header class="py-4 px-6 sticky top-0 z-50 shadow-md bg-white border-b-2 border-rose-700">
+        <div class="container mx-auto flex justify-between items-center">
+            <a href="/retail" class="flex items-center gap-2">
+                <img src="/static/assets/logo.png" alt="Nari Nakhre Logo" style="height:44px;max-width:160px;object-fit:contain;" />
+                <span class="text-3xl font-black rose-accent font-serif">Nari Nakhre</span>
+            </a>
+            <nav class="flex items-center gap-2 md:gap-6 font-bold relative bg-white rounded-full px-4 py-2 shadow border border-rose-100">
+                <a href="/retail" class="px-4 py-2 rounded-full hover:bg-rose-50 focus:bg-rose-100 transition text-rose-700 focus:outline-none">Home</a>
+                <div class="relative" id="categories-dropdown-wrapper">
+                    <button type="button" class="nav-btn rose-accent-dropdown flex items-center gap-1 px-4 py-2 rounded-full text-xs" id="categories-dropdown-btn" aria-haspopup="true" aria-expanded="false" style="font-size:15px;min-width:0;">
+                        <svg class="inline" width="14" height="14" fill="none" stroke="#be185d" stroke-width="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" stroke="#be185d" stroke-width="2" fill="#1e293b"/><path d="M19 9l-7 7-7-7" stroke="#be185d" stroke-width="2"/></svg>
+                        <span>Categories</span>
+                    </button>
+                    <div class="hidden absolute z-50 mt-2 w-56 rounded-2xl shadow-2xl border border-yellow-400 transition-all duration-200 bg-white" id="categories-dropdown-menu" style="box-shadow: 0 8px 32px rgba(190,24,93,0.12);">
+                        {% set cats = categories if categories and categories|length > 0 else (grouped_products.keys() if grouped_products is defined else []) %}
+                        {% if cats and cats|length > 0 %}
+                            {% for cat in cats %}
+                            <a href="/retail/category/{{ cat }}" class="block px-4 py-2 rounded-xl font-semibold text-rose-700 hover:bg-rose-700 hover:text-yellow-100 transition-all duration-150 text-base category-link" data-category="{{ cat }}" style="font-family: 'Playfair Display', serif; letter-spacing:0.02em;">{{ cat }}</a>
+                            {% endfor %}
+                        {% else %}
+                            <span class="block px-4 py-2 text-rose-700">No categories available</span>
+                        {% endif %}
+                    </div>
+                </div>
+                <a href="/retail/checkout" class="px-4 py-2 rounded-full hover:bg-rose-50 focus:bg-rose-100 transition text-rose-700 focus:outline-none relative">
+                    Cart <span id="cart-count" class="cart-count">{{ session.get('cart', {})|length }}</span>
+                </a>
+                <a href="/retail/contact" class="px-4 py-2 rounded-full hover:bg-rose-50 focus:bg-rose-100 transition text-rose-700 focus:outline-none">Contact Us</a>
+            </nav>
+        </div>
+        {% if g.site_type == 'retail' %}
+        <div class="w-full flex justify-end py-2 px-4 bg-rose-50">
+            <div class="flex items-center gap-2">
+                <input id="pincode-input" type="text" placeholder="Pincode" class="border p-1 rounded text-sm w-24">
+                <button class="btn-black px-3 py-1 text-xs" onclick="verifyService()">Check</button>
+                <span id="pincode-result" class="text-xs font-bold"></span>
+            </div>
+        </div>
+        {% endif %}
+    </header>
+
+
+    <main class="flex-grow">{% block content %}{% endblock %}</main>
+
+    <!-- Retail Footer -->
+    <footer class="bg-white border-t-2 border-rose-700 py-8 mt-10">
+        <div class="container mx-auto px-4 flex flex-col md:flex-row justify-between items-center gap-6">
+            <div class="flex flex-col md:flex-row gap-4 md:gap-8 items-center">
+                <a href="/retail" class="rose-accent font-bold hover:underline">Home</a>
+                <a href="/retail/categories" class="rose-accent font-bold hover:underline">Categories</a>
+                <a href="/retail/checkout" class="rose-accent font-bold hover:underline">Cart</a>
+                <a href="/retail/contact" class="rose-accent font-bold hover:underline">Contact Us</a>
+            </div>
+            <div class="text-center text-xs text-gray-500 mt-4 md:mt-0">
+                <div>Nari Nakhre Retail &copy; {{ 2026 }}. All Rights Reserved.</div>
+                <div>Handcrafted with <span style="color:#be185d">&#10084;</span> in India. | <a href="mailto:info@narinakhre.com" class="hover:underline text-rose-700">info@narinakhre.com</a></div>
+            </div>
+        </div>
+    </footer>
+
+    <script src="/static/js/cart_global.js"></script>
+        <script src="/static/js/retail_unit_counter.js"></script>
+        <script src="/static/js/retail_cart_state.js"></script>
+    <script>
+    // Categories Dropdown Toggle for Retail Header (mouseover version)
+    document.addEventListener('DOMContentLoaded', function() {
+        const btn = document.getElementById('categories-dropdown-btn');
+        const menu = document.getElementById('categories-dropdown-menu');
+        if (!btn || !menu) return;
+
+        // Show menu on mouseover
+        btn.addEventListener('mouseenter', function() {
+            menu.classList.remove('hidden');
+            btn.setAttribute('aria-expanded', 'true');
+        });
+        // Hide menu when mouse leaves both button and menu
+        btn.addEventListener('mouseleave', function(e) {
+            setTimeout(function() {
+                if (!btn.matches(':hover') && !menu.matches(':hover')) {
+                    menu.classList.add('hidden');
+                    btn.setAttribute('aria-expanded', 'false');
+                }
+            }, 100);
+        });
+        menu.addEventListener('mouseleave', function(e) {
+            setTimeout(function() {
+                if (!btn.matches(':hover') && !menu.matches(':hover')) {
+                    menu.classList.add('hidden');
+                    btn.setAttribute('aria-expanded', 'false');
+                }
+            }, 100);
+        });
+        // Also open on focus for accessibility
+        btn.addEventListener('focus', function() {
+            menu.classList.remove('hidden');
+            btn.setAttribute('aria-expanded', 'true');
+        });
+        // Close dropdown when clicking outside
+        document.addEventListener('click', function(e) {
+            if (!menu.classList.contains('hidden')) {
+                if (!menu.contains(e.target) && !btn.contains(e.target)) {
+                    menu.classList.add('hidden');
+                    btn.setAttribute('aria-expanded', 'false');
+                }
+            }
+        });
+    });
+    // ...existing code...
+    </script>
+                </div>
+        .then(res => res.json())
+        .then(data => {
+            if (data.status === 'success') {
+                document.getElementById('cart-count').innerText = data.new_total;
+                toggleCounterUI(container, qty);
+            }
+        });
+    }
+
+    function toggleCounterUI(container, qty) {
+        const btn = container.querySelector('.add-to-cart-btn');
+        const ctr = container.querySelector('.unit-counter');
+        const dpl = container.querySelector('.qty-display');
+        
+        if (qty > 0) {
+            btn.classList.add('hidden');
+            ctr.classList.remove('hidden');
+            ctr.classList.add('flex');
+            dpl.innerText = qty;
+        } else {
+            btn.classList.remove('hidden');
+            ctr.classList.add('hidden');
+            ctr.classList.remove('flex');
+        }
+    }
+
+    function verifyService() {
+        const pin = document.getElementById('pincode-input').value;
+        const res = document.getElementById('pincode-result');
+        fetch(`/api/delhivery/check/${pin}`).then(r => r.json()).then(data => {
+            res.innerText = data.status ? "Deliverable" : "Not Serviceable";
+            res.className = data.status ? "text-green-600" : "text-red-600";
+        });
+    }
+    </script>
+</body>
+</html>

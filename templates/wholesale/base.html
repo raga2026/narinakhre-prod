@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    {% block meta %}{% endblock %}
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Nari Nakhre | Premium Ethnic Jewelry & Accessories Wholesaler</title>
+    <link rel="icon" type="image/png" href="{{ url_for('static', filename='assets/logo.png') }}">
+    <meta name="description" content="Wholesale Indian jewelry, bridal sets, and traditional bangles. Shop premium ethnic accessories for weddings, festivals, and special occasions.">
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700;900&family=Lato:wght@400;700&display=swap" rel="stylesheet">
+    <style>
+        body { background: #f8fafc; color: #312e2e; font-family: 'Merriweather', 'Georgia', serif; }
+        .font-serif { font-family: 'Playfair Display', 'Merriweather', serif; }
+        .rose-accent { color: #f472b6; }
+        .nav-btn { background: #be185d; color: white; padding: 6px 10px; border-radius: 7px; font-size: 13px; font-weight: 600; min-width: 0; line-height: 1.2; margin: 0 2px; box-shadow: 0 1px 4px #be185d11; transition: background 0.18s, color 0.18s, box-shadow 0.18s; }
+        .nav-btn svg { margin-right: 3px; }
+    </style>
+</head>
+<body>
+    <header>
+        <div class="w-full header-main px-2 py-1">
+            <div class="flex items-center justify-center gap-2 mb-2 header-logo-mobile">
+                <a href="/" class="flex items-center gap-2">
+                    <img src="/static/assets/logo.png" alt="Logo" style="height:32px; background:white; padding:2px; border-radius:4px;">
+                    <span class="text-lg font-bold rose-accent font-serif">Nari Nakhre</span>
+                </a>
+            </div>
+            <div class="flex flex-row justify-between items-center header-btn-row-mobile">
+                <div class="flex flex-row items-start gap-2 wholesale-header-nav">
+                    <a href="/" class="nav-btn flex items-center gap-1 bg-rose-100 text-rose-700 hover:bg-rose-200 font-bold px-3 py-1 rounded-full text-xs shadow-sm" style="font-size:13px;min-width:0;">
+                        <svg width="16" height="16" fill="none" stroke="#be185d" stroke-width="2" viewBox="0 0 24 24" style="margin-right:2px;"><path d="M3 12L12 4l9 8"/><path d="M9 21V9h6v12"/></svg>
+                        Home
+                    </a>
+                    <div class="relative" id="categories-dropdown-wrapper">
+                        <button type="button" class="nav-btn rose-accent-dropdown flex items-center gap-1 px-3 py-1 rounded-full text-xs" id="categories-dropdown-btn" aria-haspopup="true" aria-expanded="false" style="font-size:13px;min-width:0;">
+                            <svg class="inline" width="14" height="14" fill="none" stroke="#be185d" stroke-width="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" stroke="#be185d" stroke-width="2" fill="#1e293b"/><path d="M19 9l-7 7-7-7" stroke="#be185d" stroke-width="2"/></svg>
+                            <span>Categories</span>
+                        </button>
+                        <div class="hidden absolute z-50 mt-2 w-44 text-rose-300 rounded-2xl shadow-2xl border border-rose-700/30 transition-all duration-200" id="categories-dropdown-menu">
+                            {% for cat in categories %}
+                                <a href="{{ url_for('category_products', category=cat) }}" class="block px-4 py-2 rounded-xl font-semibold hover:bg-rose-600/20 hover:text-rose-400 transition-all duration-150 text-xs">{{ cat }}</a>
+                            {% endfor %}
+                        </div>
+                    </div>
+                </div>
+                <style>
+                @media (max-width: 768px) {
+                    .wholesale-header-nav {
+                        flex-direction: column !important;
+                        align-items: flex-start !important;
+                        gap: 0.5rem !important;
+                    }
+                }
+                </style>
+                <div class="flex flex-row items-end gap-2 wholesale-header-btns">
+                    <a href="{{ url_for('checkout') }}" class="nav-btn flex items-center gap-1 bg-rose-100 text-rose-700 hover:bg-rose-200 font-bold px-3 py-1 rounded-full text-xs shadow-sm" style="font-size:13px;min-width:0;">
+                        <svg width="16" height="16" fill="none" stroke="#be185d" stroke-width="2" viewBox="0 0 24 24" style="margin-right:2px;"><circle cx="9" cy="21" r="1"/><circle cx="20" cy="21" r="1"/><path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"/></svg>
+                        Quote
+                    </a>
+                    <a href="{{ url_for('wholesale_contact') }}" class="nav-btn flex items-center gap-1 bg-rose-600 hover:bg-rose-700 text-white font-bold px-3 py-1 rounded-full text-xs" style="font-size:13px;min-width:0;">
+                        <svg width="14" height="14" fill="none" stroke="#fff" stroke-width="2" viewBox="0 0 24 24"><path d="M21 10.5V6a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h7.5"/><path d="M16 3v4a1 1 0 0 0 1 1h4"/><path d="M21 15v4a2 2 0 0 1-2 2h-7.5"/><path d="M16 21v-4a1 1 0 0 1 1-1h4"/></svg>
+                        Contact Us
+                    </a>
+                </div>
+                <style>
+                @media (max-width: 768px) {
+                    .wholesale-header-btns {
+                        flex-direction: column !important;
+                        align-items: flex-end !important;
+                        gap: 0.5rem !important;
+                    }
+                }
+                </style>
+            </div>
+        </div>
+    </header>
+    <main class="container mx-auto p-4">
+        {% block content %}{% endblock %}
+    </main>
+    <footer class="w-full bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 text-rose-200 py-8 mt-16 border-t border-rose-900/20">
+        <div class="max-w-4xl mx-auto flex flex-col items-center gap-2 px-4">
+            <div class="text-center">
+                <div class="mb-3">
+                    <span class="font-semibold text-rose-300">Follow Us :</span>
+                    <a href="https://fb.com/narinakhre" target="_blank" class="inline-block mx-1 align-middle" title="Facebook">
+                        <img src="https://img.icons8.com/color/32/facebook-new.png" alt="Facebook" style="display:inline;height:28px;vertical-align:middle;"/>
+                    </a>
+                    <a href="https://instagram.com/narinakhre" target="_blank" class="inline-block mx-1 align-middle" title="Instagram">
+                        <img src="https://img.icons8.com/color/32/instagram-new.png" alt="Instagram" style="display:inline;height:28px;vertical-align:middle;"/>
+                    </a>
+                </div>
+                <div class="text-lg font-bold rose-accent mb-1">Mohini Cosmetics</div>
+                <div>Shop No 136, Dharhai R Kotwali, Jabalpur, Maya Prash, Ina 482001</div>
+                <div class="text-sm mt-2">Mob: +91 99941 44994, Email: <a href="mailto:info@narinakhre.com" class="underline text-rose-300 hover:text-rose-400">info@narinakhre.com</a></div>
+                <div class="text-sm">Website: <a href="https://narinakhre.com" class="underline text-rose-300 hover:text-rose-400">Retail: narinakhre.com</a>, <a href="https://wholesale.narinakhre.com" class="underline text-rose-300 hover:text-rose-400">Wholesale: wholesale.narinakhre.com</a></div>
+            </div>
+        </div>
+        <div class="text-xs text-rose-300 mt-4 text-center opacity-80">
+            &copy; 2026 Mohini Cosmetics. All rights reserved.
+        </div>
+    </footer>
+</main>
+<script>
+// Categories Dropdown Toggle for Wholesale Header
+document.addEventListener('DOMContentLoaded', function() {
+    const btn = document.getElementById('categories-dropdown-btn');
+    const menu = document.getElementById('categories-dropdown-menu');
+    if (!btn || !menu) return;
+    btn.addEventListener('click', function(e) {
+        e.stopPropagation();
+        const expanded = btn.getAttribute('aria-expanded') === 'true';
+        btn.setAttribute('aria-expanded', !expanded);
+        menu.classList.toggle('hidden');
+    });
+    // Close dropdown when clicking outside
+    document.addEventListener('click', function(e) {
+        if (!menu.classList.contains('hidden')) {
+            if (!menu.contains(e.target) && !btn.contains(e.target)) {
+                menu.classList.add('hidden');
+                btn.setAttribute('aria-expanded', 'false');
+            }
+        }
+    });
+});
+</script>
+</body>
+</html>

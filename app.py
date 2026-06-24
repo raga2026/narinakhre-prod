@@ -1,1021 +1,1241 @@
 
-
-# --- Flask & Core Imports ---
-from flask import Flask, render_template, request, redirect, url_for, flash, session, jsonify, send_from_directory, g
-import sqlite3
 import os
 import json
-import uuid
-from werkzeug.utils import secure_filename
-from PIL import Image
-
-import pandas as pd
-
+import sqlite3
 import smtplib
+import requests
+import razorpay
+from datetime import datetime
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 
+from flask import Flask, g, jsonify, redirect, render_template, request, session, url_for, flash
+from flask_sqlalchemy import SQLAlchemy
+from werkzeug.routing import BuildError
+
+from utils.shipping_manager import get_shipping_provider
+
+
+def load_env_file(env_path):
+    if not os.path.exists(env_path):
+        return
+    with open(env_path, 'r', encoding='utf-8') as env_file:
+        for raw_line in env_file:
+            line = raw_line.strip()
+            if not line or line.startswith('#') or '=' not in line:
+                continue
+            key, value = line.split('=', 1)
+            os.environ.setdefault(key.strip(), value.strip().strip('"').strip("'"))
+
+
 app = Flask(__name__)
+load_env_file(os.path.join(os.path.dirname(os.path.abspath(__file__)), '.env'))
+app.secret_key = os.environ.get('FLASK_SECRET_KEY', 'nari-nakhre-dev-secret')
 
-# --- Context Processor for Categories Dropdown ---
-@app.context_processor
-def inject_categories():
-    return {'categories': get_categories()}
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+DATABASE = os.environ.get('DB_PATH', os.path.join(BASE_DIR, 'narinakhre.db'))
 
-# --- Cart API for JS Sync ---
-@app.route('/cart', methods=['GET'])
-def get_cart():
-    """Return the current session cart in the same structure as used by the main app."""
-    cart = session.get('cart', {})
-    return jsonify(cart)
+app.config['SHIPPING_PROVIDER'] = os.environ.get('SHIPPING_PROVIDER', 'mock')
+app.config['DELHIVERY_API_KEY'] = os.environ.get('DELHIVERY_API_KEY', '')
+app.config['WAREHOUSE_PIN'] = os.environ.get('WAREHOUSE_PIN', '400001')
+app.config['RAZORPAY_KEY_ID'] = os.environ.get('RAZORPAY_KEY_ID', '')
+app.config['RAZORPAY_KEY_SECRET'] = os.environ.get('RAZORPAY_KEY_SECRET', '')
+app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///' + DATABASE.replace('\\', '/')
+app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
-# --- Admin Dashboard Route ---
-@app.route('/admin')
-def admin():
-    if not session.get('admin_logged_in'):
-        return redirect(url_for('admin_login'))
-    db = get_db()
-    products = db.execute('SELECT * FROM products').fetchall()
-    categories = get_categories()
-    return render_template('admin.html', products=products, categories=categories, monaco_ui=True)
+db = SQLAlchemy(app)
 
-@app.route('/category/<category>')
-def category_products(category):
-    db = get_db()
-    products = db.execute('SELECT * FROM products WHERE category = ?', (category,)).fetchall()
-    product_list = []
-    for product in products:
-        product = dict(product)
-        product['images'] = []
-        for i in range(1,6):
-            img_path = os.path.join('static', 'assets', 'products', f"{product['sku']}_{i}.jpg")
-            if os.path.exists(img_path):
-                product['images'].append(url_for('static', filename=f"assets/products/{product['sku']}_{i}.jpg"))
-        if not product['images']:
-            product['images'] = [url_for('static', filename='assets/products/default.jpg')]
-        product['tiers'] = [
-            {'tier': 1, 'qty': product.get('quantity1'), 'price': product.get('price1')},
-            {'tier': 2, 'qty': product.get('quantity2'), 'price': product.get('price2')},
-            {'tier': 3, 'qty': product.get('quantity3'), 'price': product.get('price3')},
-        ]
-        product['sizes'] = product.get('sizes', '')
-        product_list.append(product)
-    return render_template('category_products.html', category=category, products=product_list)
-app.config['UPLOAD_FOLDER'] = 'static/assets/uploads'
-app.config['DATABASE'] = 'narinakhre.db'
-app.secret_key = 'supersecretkey'  # Static string, not os.urandom(24)
+DELHIVERY_API_TOKEN = os.environ.get('DELHIVERY_API_TOKEN', '')
+DELHIVERY_CLIENT_NAME = os.environ.get('DELHIVERY_CLIENT_NAME', '')
+DELHIVERY_PICKUP_LOCATION = os.environ.get('DELHIVERY_PICKUP_LOCATION', '')
+RAZORPAY_KEY_ID = os.environ.get('RAZORPAY_KEY_ID')
+RAZORPAY_KEY_SECRET = os.environ.get('RAZORPAY_KEY_SECRET')
+razorpay_client = razorpay.Client(auth=(os.environ.get("RAZORPAY_KEY_ID"), os.environ.get("RAZORPAY_KEY_SECRET")))
 
-# --- Clear Quote Route ---
-@app.route('/clear_quote', methods=['POST'])
-def clear_quote():
-    session.pop('cart', None)
-    session.modified = True
-    # Stay on checkout page after clearing
-    return redirect(url_for('checkout'))
 
-# --- Database Connection Utility ---
+class User(db.Model):
+    __tablename__ = 'users'
 
-# --- Improved Database Connection Utility ---
+    id = db.Column(db.Integer, primary_key=True)
+
+
+class Address(db.Model):
+    __tablename__ = 'order_shipping'
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
+    status = db.Column(db.String(32), nullable=False, default='pending')
+    consignee_name = db.Column(db.String(255), nullable=False)
+    consignee_phone = db.Column(db.String(32), nullable=False)
+    consignee_address = db.Column(db.String(500), nullable=False)
+    consignee_city = db.Column(db.String(120), nullable=False)
+    consignee_state = db.Column(db.String(120), nullable=False)
+    consignee_pincode = db.Column(db.String(12), nullable=False)
+    internal_order_id = db.Column(db.String(64), nullable=False, unique=True)
+    delhivery_waybill = db.Column(db.String(64), nullable=True)
+
+
+class Product(db.Model):
+    __tablename__ = 'products'
+
+    id = db.Column(db.Integer, primary_key=True)
+    sku = db.Column(db.String(128), nullable=False, unique=True)
+    name = db.Column(db.String(255), nullable=True)
+    slug = db.Column(db.String(255), nullable=True)
+    category = db.Column(db.String(255), nullable=True)
+    sub_category = db.Column(db.String(255), nullable=True)
+    collection = db.Column(db.String(255), nullable=True)
+    size = db.Column(db.String(255), nullable=True)
+
+    retail_price = db.Column(db.Float, default=0.0)
+    mrp_price = db.Column(db.Float, default=0.0)
+    retail_discount_percent = db.Column(db.Float, default=0.0)
+    wholesale_price = db.Column(db.Float, default=0.0)
+    min_wholesale_qty = db.Column(db.Integer, default=0)
+    sets_count = db.Column(db.Integer, default=0)
+
+    image_field = db.Column(db.String(1024), nullable=True)
+    quantity1 = db.Column(db.Integer, default=0)
+    price1 = db.Column(db.Float, default=0.0)
+    quantity2 = db.Column(db.Integer, default=0)
+    price2 = db.Column(db.Float, default=0.0)
+    quantity3 = db.Column(db.Integer, default=0)
+    price3 = db.Column(db.Float, default=0.0)
+
+    purchase_cost = db.Column(db.Float, default=0.0)
+    making_charges = db.Column(db.Float, default=0.0)
+    weight_grams = db.Column(db.Float, default=0.0)
+    material = db.Column(db.String(255), nullable=True)
+    hsn_code = db.Column(db.String(64), nullable=True)
+    gst_percent = db.Column(db.Float, default=0.0)
+
+    stock_total = db.Column(db.Integer, default=0)
+    box_packing_type = db.Column(db.String(255), nullable=True)
+    vendor_id = db.Column(db.String(128), nullable=True)
+    status = db.Column(db.String(64), nullable=True)
+    is_active = db.Column(db.Boolean, default=True)
+    is_featured = db.Column(db.Boolean, default=False)
+
+
+def upload_image_to_supabase(file_storage_object, filename):
+    supabase_url = (os.environ.get('SUPABASE_URL') or '').rstrip('/')
+    supabase_key = os.environ.get('SUPABASE_KEY')
+    bucket_name = os.environ.get('SUPABASE_BUCKET_NAME')
+
+    if not supabase_url or not supabase_key or not bucket_name:
+        app.logger.error('Supabase configuration missing for image upload.')
+        return None
+
+    try:
+        if hasattr(file_storage_object, 'stream') and hasattr(file_storage_object.stream, 'seek'):
+            file_storage_object.stream.seek(0)
+        elif hasattr(file_storage_object, 'seek'):
+            file_storage_object.seek(0)
+
+        binary_payload = file_storage_object.read()
+        upload_url = f"{supabase_url}/storage/v1/object/{bucket_name}/{filename}"
+        headers = {
+            'Authorization': f'Bearer {supabase_key}',
+            'apikey': supabase_key,
+            'Content-Type': getattr(file_storage_object, 'mimetype', 'application/octet-stream'),
+            'x-upsert': 'true',
+        }
+        response = requests.put(upload_url, headers=headers, data=binary_payload, timeout=30)
+
+        if response.status_code == 200:
+            return f"{supabase_url}/storage/v1/object/public/{bucket_name}/{filename}"
+
+        app.logger.error('Supabase upload failed: %s %s', response.status_code, response.text)
+        return None
+    except Exception as exc:
+        app.logger.error('Supabase upload exception: %s', exc)
+        return None
+
+
 def get_db():
     if 'db' not in g:
-        g.db = sqlite3.connect(app.config['DATABASE'])
+        g.db = sqlite3.connect(DATABASE)
         g.db.row_factory = sqlite3.Row
     return g.db
 
-# --- Close DB Connection After Each Request ---
+
 @app.teardown_appcontext
-def close_db(error):
+def close_db(error=None):
     db = g.pop('db', None)
     if db is not None:
         db.close()
 
-# --- Create Tables Utility ---
-def create_tables():
-    with sqlite3.connect(app.config['DATABASE']) as conn:
-        cursor = conn.cursor()
-        cursor.execute('''CREATE TABLE IF NOT EXISTS categories (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT UNIQUE
-        )''')
-        cursor.execute('''CREATE TABLE IF NOT EXISTS products (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            sku TEXT UNIQUE,
-            name TEXT,
-            category TEXT,
-            subcategory TEXT,
-            description TEXT,
-            material TEXT,
-            color TEXT,
-            sizes TEXT,
-            hsn TEXT,
-            gst REAL,
-            quantity1 INTEGER,
-            price1 REAL,
-            quantity2 INTEGER,
-            quantity3 INTEGER,
-            price3 REAL,
-            image_url TEXT
-        )''')
-        cursor.execute('''CREATE TABLE IF NOT EXISTS product_images (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            product_id INTEGER NOT NULL,
-            image_path TEXT NOT NULL,
-            image_index INTEGER NOT NULL,
-            FOREIGN KEY (product_id) REFERENCES products(id)
-        )''')
-        cursor.execute('''CREATE TABLE IF NOT EXISTS quotes (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT,
-            whatsapp TEXT,
-            email TEXT,
-            items_json TEXT,
-            total_amount REAL,
-            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-        )''')
+
+def initialize_database_if_needed():
+    schema_path = os.path.join(BASE_DIR, 'schema.sql')
+    conn = sqlite3.connect(DATABASE)
+    try:
+        cur = conn.cursor()
+        cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='products'")
+        has_products_table = cur.fetchone() is not None
+        if not has_products_table and os.path.exists(schema_path):
+            with open(schema_path, 'r', encoding='utf-8') as schema_file:
+                conn.executescript(schema_file.read())
+            conn.commit()
+    finally:
+        conn.close()
+
+
+def ensure_checkout_tables_exist():
+    """Create checkout-related tables only if missing; never drops existing data."""
+    conn = sqlite3.connect(DATABASE)
+    try:
+        conn.execute(
+            '''
+            CREATE TABLE IF NOT EXISTS users (
+                id INTEGER PRIMARY KEY
+            )
+            '''
+        )
+        conn.execute(
+            '''
+            CREATE TABLE IF NOT EXISTS order_shipping (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER,
+                status TEXT NOT NULL DEFAULT 'pending',
+                consignee_name TEXT NOT NULL,
+                consignee_phone TEXT NOT NULL,
+                consignee_address TEXT NOT NULL,
+                consignee_city TEXT NOT NULL,
+                consignee_state TEXT NOT NULL,
+                consignee_pincode TEXT NOT NULL,
+                internal_order_id TEXT NOT NULL UNIQUE,
+                delhivery_waybill TEXT,
+                FOREIGN KEY(user_id) REFERENCES users(id)
+            )
+            '''
+        )
         conn.commit()
+    finally:
+        conn.close()
 
-# --- Helpers ---
-def get_categories():
-    db = get_db()
-    categories = db.execute('SELECT category FROM products WHERE category IS NOT NULL AND TRIM(category) != ""').fetchall()
-    seen = set()
-    unique = []
-    for c in categories:
-        key = c['category'].replace(' ', '').lower()
-        if key and key not in seen:
-            seen.add(key)
-            unique.append(c['category'])
-    return unique
 
-# --- EMAIL CONFIG FOR GODADDY/OFFICE365 ---
-MAIL_SERVER = 'smtp.zoho.in'
-MAIL_PORT = 465
-MAIL_USE_SSL = True
-MAIL_USE_TLS = False
-MAIL_USERNAME = 'info@narinakhre.com'
-MAIL_PASSWORD = '3hbztEFHs0Ei'
+initialize_database_if_needed()
+ensure_checkout_tables_exist()
 
-# --- ROUTES ---
-@app.route('/contact', methods=['GET', 'POST'])
-def contact():
+
+def send_contact_email(to_email, subject, body):
+    # Configure your SMTP server here
+    SMTP_SERVER = 'smtp.gmail.com'
+    SMTP_PORT = 587
+    SMTP_USER = 'info@narinakhre.com'  # Replace with your email
+    SMTP_PASS = 'yourpassword'         # Replace with your password or app password
+    msg = MIMEMultipart()
+    msg['From'] = SMTP_USER
+    msg['To'] = to_email
+    msg['Subject'] = subject
+    msg.attach(MIMEText(body, 'plain'))
+    try:
+        server = smtplib.SMTP(SMTP_SERVER, SMTP_PORT)
+        server.starttls()
+        server.login(SMTP_USER, SMTP_PASS)
+        server.sendmail(SMTP_USER, to_email, msg.as_string())
+        server.quit()
+    except Exception as e:
+        print('Email send failed:', e)
+
+@app.route('/retail/contact', methods=['GET', 'POST'])
+def retail_contact():
+    g.site_type = 'retail'
     if request.method == 'POST':
         name = request.form.get('name')
         whatsapp = request.form.get('whatsapp')
         email = request.form.get('email')
-        message = request.form.get('message', '')
-        # Compose email body for user
-        user_body = f"""
-        <h2>Thank you for contacting Mohini Cosmetics!</h2>
-        <p>Dear {name},</p>
-        <p>We have received your inquiry and will get in touch with you soon.</p>
-        <hr>
-        <p><strong>Your Message:</strong></p>
-        <div style='background:#f9f9f9;padding:12px 18px;border-radius:8px;color:#be185d;font-size:1.1em;margin:12px 0 18px 0;'>{message}</div>
-        <div style='margin-top:18px;font-size:0.98em;color:#888;'>
-            Mohini Cosmetics, Shop No 136, Dharhai R Kotwali, Jabalpur, Maya Prash, Ina 482001<br>
-            Mob: +91 99941 44994, Email: info@narinakhre.com<br>
-            Website: Retail: <a href='https://narinakhre.com' style='color:#be185d;'>narinakhre.com</a>, Wholesale: <a href='https://wholesale.narinakhre.com' style='color:#be185d;'>wholesale.narinakhre.com</a>
-        </div>
-        """
-        # Compose email body for admin
-        admin_body = f"""
-        <h2>New Contact Inquiry from NariNakhre</h2>
-        <ul>
-            <li><strong>Name:</strong> {name}</li>
-            <li><strong>WhatsApp:</strong> {whatsapp}</li>
-            <li><strong>Email:</strong> {email}</li>
-            <li><strong>Message:</strong> {message}</li>
-        </ul>
-        """
-        sender_email = MAIL_USERNAME
-        sender_password = MAIL_PASSWORD
-        admin_email = sender_email
-        extra_admin_email = "hello@mohinicosmetics.com"
-        subject = "Nari Nakhre Contact Inquiry"
-        # User email
-        msg = MIMEMultipart()
-        msg['From'] = sender_email
-        msg['To'] = email
-        msg['Subject'] = subject
-        msg.attach(MIMEText(user_body, 'html'))
-        # Admin email
-        admin_msg = MIMEMultipart()
-        admin_msg['From'] = sender_email
-        admin_msg['To'] = admin_email
-        admin_msg['Subject'] = f"New Contact Inquiry from {name}"
-        admin_msg.attach(MIMEText(admin_body, 'html'))
-        # Extra admin email
-        extra_admin_msg = MIMEMultipart()
-        extra_admin_msg['From'] = sender_email
-        extra_admin_msg['To'] = extra_admin_email
-        extra_admin_msg['Subject'] = f"New Contact Inquiry from {name}"
-        extra_admin_msg.attach(MIMEText(admin_body, 'html'))
-        try:
-            server = smtplib.SMTP_SSL(MAIL_SERVER, MAIL_PORT)
-            server.login(sender_email, sender_password)
-            server.send_message(msg)
-            server.send_message(admin_msg)
-            server.send_message(extra_admin_msg)
-            server.quit()
-            flash("Contact inquiry submitted and email sent!", "success")
-        except Exception as e:
-            print(f"Contact email error: {e}")
-            flash("Contact submitted, but email could not be sent.", "warning")
-        session['contact_only'] = True
-        session['user_name'] = name
-        session['user_email'] = email
-        return redirect(url_for('thank_you'))
-    return render_template('contact.html')
-# Redirect /admin-login to /admin/login for user convenience
-@app.route('/admin-login', methods=['GET', 'POST'])
-def admin_login_redirect():
-    return redirect(url_for('admin_login'))
+        message = request.form.get('message')
+        # Email to customer
+        customer_subject = 'Thank you for contacting Nari Nakhre'
+        customer_body = f"""Dear {name},\n\nThank you for reaching out to Nari Nakhre! We have received your message and will get back to you soon.\n\nYour Message:\n{message}\n\nBest regards,\nNari Nakhre Team"""
+        send_contact_email(email, customer_subject, customer_body)
+        # Email to admin
+        admin_subject = f'New Retail Contact Form Submission from {name}'
+        admin_body = f"""New contact form submission:\n\nName: {name}\nWhatsApp: {whatsapp}\nEmail: {email}\nMessage: {message}"""
+        send_contact_email('info@narinakhre.com', admin_subject, admin_body)
+        return redirect('/retail/thank_you')
+    return render_template('retail/contact.html')
 
-@app.route('/')
-def index():
+
+@app.route('/contact', methods=['GET', 'POST'])
+@app.route('/wholesale/contact', methods=['GET', 'POST'])
+def wholesale_contact():
+    g.site_type = 'wholesale'
+    if request.method == 'POST':
+        # Honeypot defense: silently discard bot submissions.
+        if (request.form.get('system_verification_token') or '').strip():
+            return redirect(url_for('wholesale_thank_you'))
+
+        name = (request.form.get('name') or '').strip()
+        whatsapp = (request.form.get('whatsapp') or '').strip()
+        email = (request.form.get('email') or '').strip()
+        message = (request.form.get('message') or '').strip()
+
+        request_id = f"NN-QT-{datetime.now().strftime('%Y%m%d%H%M%S')}-{(whatsapp[-4:] if whatsapp else '0000')}"
+        quote_payload = json.dumps({
+            'source': 'wholesale_contact',
+            'message': message,
+        })
+
+        db_conn = get_db()
+        db_conn.execute(
+            'INSERT INTO quotes (request_id, name, whatsapp, email, items_json, total_amount) VALUES (?, ?, ?, ?, ?, ?)',
+            (request_id, name, whatsapp, email, quote_payload, None),
+        )
+        db_conn.commit()
+
+        if email:
+            customer_subject = 'Thank you for your quote request - Nari Nakhre Wholesale'
+            customer_body = (
+                f"Dear {name},\n\n"
+                'Your wholesale quote request has been received successfully. '\
+                'Our team will review and get in touch shortly.\n\n'
+                f"Request ID: {request_id}\n\n"
+                'Regards,\nNari Nakhre Wholesale Team'
+            )
+            send_contact_email(email, customer_subject, customer_body)
+
+        admin_subject = f'New Wholesale Contact/Quote Request: {request_id}'
+        admin_body = (
+            f"Request ID: {request_id}\n"
+            f"Name: {name}\n"
+            f"WhatsApp: {whatsapp}\n"
+            f"Email: {email}\n\n"
+            f"Message:\n{message}"
+        )
+        send_contact_email('info@narinakhre.com', admin_subject, admin_body)
+
+        session['wholesale_contact_user'] = {'name': name, 'email': email}
+        session.modified = True
+        return redirect(url_for('wholesale_thank_you'))
+
+    return render_template('wholesale/contact.html')
+
+
+@app.route('/wholesale/thank_you')
+def wholesale_thank_you():
+    g.site_type = 'wholesale'
+    user = session.pop('wholesale_contact_user', None) or {'name': 'Customer', 'email': ''}
+    session.modified = True
+    return render_template('wholesale/thank_you.html', user=user, contact_only=True)
+
+# --- SITE DETECTION ---
+@app.before_request
+def detect_site_type():
+    host = request.host.lower()
+    path = request.path.lower()
+    g.site_type = 'retail' if ('retail' in host or path.startswith('/retail')) else 'wholesale'
+
+def render_site(template_name, **kwargs):
+    site_type = getattr(g, 'site_type', 'wholesale')
     db = get_db()
-    products = db.execute('SELECT * FROM products').fetchall()
-    session['cart'] = session.get('cart', {})
+    # For retail, fetch categories from the products table's 'category' column
+    if site_type == 'retail':
+        cats = db.execute('SELECT DISTINCT category FROM products WHERE category IS NOT NULL AND category != ""').fetchall()
+        categories = [c['category'] for c in cats]
+    else:
+        cats = db.execute('SELECT DISTINCT c.name FROM products p JOIN categories c ON p.category_id = c.id WHERE c.name IS NOT NULL AND c.name != ""').fetchall()
+        categories = [c['name'] for c in cats]
+    kwargs['categories'] = categories
+    return render_template(f"{site_type}/{template_name}", **kwargs)
+
+# --- ROUTES: HOME & CATEGORY ---
+@app.route('/')
+@app.route('/retail')
+@app.route('/wholesale')
+def index():
+    if request.path.startswith('/retail'):
+        g.site_type = 'retail'
+    elif request.path.startswith('/wholesale'):
+        g.site_type = 'wholesale'
+    
+    db = get_db()
+    # For retail, group products by the 'category' column
+    if request.path.startswith('/retail'):
+        products = db.execute('SELECT * FROM products').fetchall()
+        grouped_products = {}
+        for p in products:
+            cat = p['category'] or 'New Arrivals'
+            if cat not in grouped_products:
+                grouped_products[cat] = []
+            p_dict = dict(p)
+            image_dir = os.path.join(app.root_path, 'static', 'assets', 'products')
+            images = []
+            for i in range(1, 10):
+                img_filename = f"{p['sku']}_{i}.jpg"
+                img_path = os.path.join(image_dir, img_filename)
+                if os.path.exists(img_path):
+                    images.append(url_for('static', filename=f"assets/products/{img_filename}"))
+                else:
+                    break
+            if not images:
+                images = [url_for('static', filename=f"assets/products/default.jpg")]
+            p_dict['images'] = images
+            tiers = []
+            for i in range(1, 4):
+                qty_key = f'quantity{i}'
+                price_key = f'price{i}'
+                qty = p_dict.get(qty_key)
+                price = p_dict.get(price_key)
+                if qty and price:
+                    try:
+                        qty_val = int(qty)
+                        price_val = float(price)
+                        if qty_val > 0 and price_val > 0:
+                            tiers.append({'qty': qty_val, 'price': price_val})
+                    except Exception:
+                        continue
+            if not tiers:
+                tiers = [{'qty': 1, 'price': 0}]
+            p_dict['tiers'] = tiers
+            grouped_products[cat].append(p_dict)
+        return render_site('index.html', grouped_products=grouped_products)
+    # For wholesale, keep the old logic
+    products = db.execute('''
+        SELECT p.*, c.name as category_name FROM products p
+        LEFT JOIN categories c ON p.category_id = c.id
+    ''').fetchall()
     grouped_products = {}
-    bangle_images = []
-    bangle_count = 0
-    for product in products:
-        cat = product['category'].strip() if product['category'] else None
-        if not cat:
-            continue  # skip products with no category
+    for p in products:
+        cat = p['category_name'] or 'New Arrivals'
         if cat not in grouped_products:
             grouped_products[cat] = []
-        # Add gallery images and tiered pricing to each product
-        product = dict(product)
-        # --- Ensure product['images'] is always a list ---
+        p_dict = dict(p)
+        image_dir = os.path.join(app.root_path, 'static', 'assets', 'products')
         images = []
-        for i in range(1,6):
-            img_path = os.path.join('static', 'assets', 'products', f"{product['sku']}_{i}.jpg")
+        for i in range(1, 10):
+            img_filename = f"{p['sku']}_{i}.jpg"
+            img_path = os.path.join(image_dir, img_filename)
             if os.path.exists(img_path):
-                images.append(url_for('static', filename=f"assets/products/{product['sku']}_{i}.jpg"))
+                images.append(url_for('static', filename=f"assets/products/{img_filename}"))
+            else:
+                break
         if not images:
-            images = [url_for('static', filename='assets/products/default.jpg')]
-        # If product['images'] exists and is a string, try to parse as JSON/list
-        if 'images' in product and not isinstance(product['images'], list):
-            try:
-                parsed = json.loads(product['images'])
-                if isinstance(parsed, list):
-                    images = parsed
-            except Exception:
-                pass
-        product['images'] = images
-        product['tiers'] = [
-            {'tier': 1, 'qty': product.get('quantity1'), 'price': product.get('price1')},
-            {'tier': 2, 'qty': product.get('quantity2'), 'price': product.get('price2')},
-            {'tier': 3, 'qty': product.get('quantity3'), 'price': product.get('price3')},
-        ]
-        # Collect first 4 bangle images for hero background
-        if bangle_count < 4 and 'bangle' in (product.get('category','').lower() + product.get('name','').lower()):
-            if product['images']:
-                bangle_images.append(product['images'][0])
-                bangle_count += 1
-        grouped_products[cat].append(product)
-    # Fallback: if less than 4, fill with default
-    while len(bangle_images) < 4:
-        bangle_images.append(url_for('static', filename='assets/products/default.jpg'))
-    return render_template('index.html', grouped_products=grouped_products, cart=session['cart'], hero_images=bangle_images)
+            images = [url_for('static', filename=f"assets/products/default.jpg")]
+        p_dict['images'] = images
+        tiers = []
+        for i in range(1, 4):
+            qty_key = f'quantity{i}'
+            price_key = f'price{i}'
+            qty = p_dict.get(qty_key)
+            price = p_dict.get(price_key)
+            if qty and price:
+                try:
+                    qty_val = int(qty)
+                    price_val = float(price)
+                    if qty_val > 0 and price_val > 0:
+                        tiers.append({'qty': qty_val, 'price': price_val})
+                except Exception:
+                    continue
+        if not tiers:
+            tiers = [{'qty': 1, 'price': 0}]
+        p_dict['tiers'] = tiers
+        grouped_products[cat].append(p_dict)
+    return render_site('index.html', grouped_products=grouped_products)
 
+@app.route('/category/<category>')
+@app.route('/retail/category/<category>')
+@app.route('/wholesale/category/<category>')
+def category_products(category):
+    if request.path.startswith('/retail'):
+        g.site_type = 'retail'
+    elif request.path.startswith('/wholesale'):
+        g.site_type = 'wholesale'
+        
+    db = get_db()
+    # For retail, filter by the 'category' column
+    if request.path.startswith('/retail'):
+        raw_products = db.execute('SELECT * FROM products WHERE category = ?', (category,)).fetchall()
+    else:
+        raw_products = db.execute('''
+            SELECT p.* FROM products p
+            JOIN categories c ON p.category_id = c.id
+            WHERE c.name = ?
+        ''', (category,)).fetchall()
+    products = []
+    image_dir = os.path.join(app.root_path, 'static', 'assets', 'products')
+    for p in raw_products:
+        p_dict = dict(p)
+        images = []
+        for i in range(1, 10):
+            img_filename = f"{p['sku']}_{i}.jpg"
+            img_path = os.path.join(image_dir, img_filename)
+            if os.path.exists(img_path):
+                images.append(url_for('static', filename=f"assets/products/{img_filename}"))
+            else:
+                break
+        if not images:
+            images = [url_for('static', filename=f"assets/products/default.jpg")]
+        p_dict['images'] = images
+        
+        tiers = []
+        for i in range(1, 4):
+            qty_key = f'quantity{i}'
+            price_key = f'price{i}'
+            qty = p_dict.get(qty_key)
+            price = p_dict.get(price_key)
+            if qty and price:
+                try:
+                    qty_val = int(qty)
+                    price_val = float(price)
+                    if qty_val > 0 and price_val > 0:
+                        tiers.append({'qty': qty_val, 'price': price_val})
+                except Exception:
+                    continue
+        p_dict['tiers'] = tiers
+        products.append(p_dict)
+    return render_site('category_products.html', category=category, products=products)
+
+@app.route('/product/<int:product_id>')
+@app.route('/retail/product/<int:product_id>')
+@app.route('/wholesale/product/<int:product_id>')
+def product_detail(product_id):
+    if request.path.startswith('/retail'):
+        g.site_type = 'retail'
+    elif request.path.startswith('/wholesale'):
+        g.site_type = 'wholesale'
+        
+    db = get_db()
+    product = db.execute('SELECT * FROM products WHERE id = ?', (product_id,)).fetchone()
+    if not product: return "Not Found", 404
+    p_dict = dict(product)
+    
+    image_dir = os.path.join(app.root_path, 'static', 'assets', 'products')
+    image_urls = []
+    for i in range(1, 10):
+        img_filename = f"{p_dict['sku']}_{i}.jpg"
+        img_path = os.path.join(image_dir, img_filename)
+        if os.path.exists(img_path):
+            image_urls.append(f"assets/products/{p_dict['sku']}_{i}.jpg")
+        else:
+            break
+    if not image_urls:
+        image_urls = [f"assets/products/default.jpg"]
+    
+    tiers = []
+    for i in range(1, 4):
+        qty_key = f'quantity{i}'
+        price_key = f'price{i}'
+        qty = p_dict.get(qty_key)
+        price = p_dict.get(price_key)
+        if qty and price:
+            try:
+                qty_val = int(qty)
+                price_val = float(price)
+                if qty_val > 0 and price_val > 0:
+                    tiers.append({'qty': qty_val, 'price': price_val})
+            except Exception:
+                continue
+    p_dict['tiers'] = tiers
+    # Find 4 random products (not the current one) for cross-sell
+    related = db.execute('''
+        SELECT * FROM products WHERE id != ? ORDER BY RANDOM() LIMIT 4
+    ''', (product_id,)).fetchall()
+    related_products = []
+    image_dir = os.path.join(app.root_path, 'static', 'assets', 'products')
+    for r in related:
+        r_dict = dict(r)
+        r_images = []
+        for i in range(1, 10):
+            img_filename = f"{r_dict['sku']}_{i}.jpg"
+            img_path = os.path.join(image_dir, img_filename)
+            if os.path.exists(img_path):
+                r_images.append(f"assets/products/{img_filename}")
+            else:
+                break
+        if not r_images:
+            r_images = ["assets/products/default.jpg"]
+        r_dict['images'] = r_images
+        related_products.append(r_dict)
+    return render_site('product_detail.html', product=p_dict, image_urls=image_urls, related_products=related_products)
+
+# --- CART & CHECKOUT ---
 @app.route('/update-cart', methods=['POST'])
 def update_cart():
     data = request.get_json()
-    print('[Add to Quote] Received:', data)
-    product_id = data.get('product_id')
-    if product_id is None or str(product_id).lower() == 'none' or str(product_id).strip() == '':
-        print('[Add to Quote] ERROR: product_id is missing or None! Data:', data)
-        return jsonify({'status': 'error', 'message': 'Product ID (SKU) is required.'}), 400
-    qty = int(data.get('qty'))
-    try:
-        tier_val = data.get('tier')
-        tier = int(float(tier_val))
-    except Exception as e:
-        print(f'[Add to Quote] Tier conversion error: {e}, value: {data.get("tier")}')
-        tier = 1
-    price = float(data.get('price'))
-    size = data.get('size', '')
-    if not size:
-        print('[Add to Quote] Error: Size is required.')
-        return jsonify({'status': 'error', 'message': 'Size is required.'}), 400
-    db = get_db()
-    product = db.execute('SELECT sku, name FROM products WHERE sku = ?', (product_id,)).fetchone()
-    if not product:
-        return jsonify({'status': 'error', 'message': f'Product with SKU {product_id} not found.'}), 404
-    sku = product['sku']
-    name = product['name']
-    product_key = f"{sku}_{tier}_{size}"
+    sku = data.get('product_id')
+    qty = int(data.get('qty', 1))
+    price = float(data.get('price', 0))
+    size = data.get('size', 'Standard')
+    
     cart = session.get('cart', {})
-    item_key = f"{sku}_{tier}_{size}"
-    new_qty = qty
-    new_item_data = {
-        'qty': new_qty,
-        'tier': tier,
-        'price': price,
-        'size': size,
-        'sku': sku,
-        'name': name
-    }
-    if new_qty > 0:
-        cart[item_key] = new_item_data
-        print(f'[Add to Quote] Added/Updated item: {item_key} -> {new_item_data}')
+    cart_key = f"{sku}_{size}"
+    if qty > 0:
+        db = get_db()
+        p = db.execute('SELECT name FROM products WHERE sku = ?', (sku,)).fetchone()
+        cart[cart_key] = {
+            'sku': sku,
+            'name': p['name'] if p else sku,
+            'qty': qty,
+            'price': price,
+            'size': size
+        }
     else:
-        cart.pop(item_key, None)
-        print(f'[Add to Quote] Removed item: {item_key}')
+        cart.pop(cart_key, None)
     session['cart'] = cart
     session.modified = True
-    print("[Add to Quote] Cart after update:", session['cart'])
-    # Return the updated quantity for this item (0 if removed)
-    updated_qty = cart[item_key]['qty'] if item_key in cart else 0
-    return jsonify({'status': 'success', 'cart_count': len(session['cart']), 'new_total': len(session['cart']), 'new_qty': updated_qty})
+    return jsonify({'status': 'success', 'new_total': sum(item['qty'] for item in cart.values())})
 
-@app.route('/product/<int:product_id>')
-def product_detail(product_id):
-    db = get_db()
-    product = db.execute('SELECT * FROM products WHERE id = ?', (product_id,)).fetchone()
-    if product is None:
-        return "Product not found", 404
-    product = dict(product)
-    # Set tiers like homepage
-    product['tiers'] = [
-        {'tier': 1, 'qty': product.get('quantity1'), 'price': product.get('price1')},
-        {'tier': 2, 'qty': product.get('quantity2'), 'price': product.get('price2')},
-        {'tier': 3, 'qty': product.get('quantity3'), 'price': product.get('price3')},
-    ]
-    # Set sizes as string (for dropdown)
-    product['sizes'] = product.get('sizes', '')
-    images = db.execute('SELECT image_path FROM product_images WHERE product_id = ? ORDER BY image_index', (product_id,)).fetchall()
-    # Normalize image paths to be relative to static folder
-    image_urls = []
-    for img in images:
-        path = img['image_path']
-        # Remove leading slashes and static/ if present
-        if path.startswith('static/'):
-            path = path[len('static/'):]
-        path = path.lstrip('/')
-        image_urls.append(path)
-    if not image_urls:
-        # Fallback: check for up to 5 images in static/assets/products/
-        for i in range(1, 6):
-            img_path = f"static/assets/products/{product['sku']}_{i}.jpg"
-            if os.path.exists(img_path):
-                image_urls.append(f"assets/products/{product['sku']}_{i}.jpg")
-        if not image_urls:
-            image_urls = [f"assets/products/{product['sku']}_1.jpg"]
-    related_products_raw = db.execute('SELECT * FROM products WHERE id != ? ORDER BY RANDOM() LIMIT 3', (product_id,)).fetchall()
-    related_products = []
-    for rel in related_products_raw:
-        rel = dict(rel)
-        rel['tiers'] = [
-            {'tier': 1, 'qty': rel.get('quantity1'), 'price': rel.get('price1')},
-            {'tier': 2, 'qty': rel.get('quantity2'), 'price': rel.get('price2')},
-            {'tier': 3, 'qty': rel.get('quantity3'), 'price': rel.get('price3')},
-        ]
-        rel['sizes'] = rel.get('sizes', '')
-        related_products.append(rel)
+@app.route('/checkout')
+@app.route('/retail/checkout')
+@app.route('/wholesale/checkout')
+def checkout():
+    if request.path.startswith('/retail'):
+        g.site_type = 'retail'
+    elif request.path.startswith('/wholesale'):
+        g.site_type = 'wholesale'
+    
+    cart = session.get('cart', {})
+    display_cart = []
+    for item in cart.values():
+        item_dict = dict(item)
+        if 'units' not in item_dict:
+            item_dict['units'] = item_dict.get('qty', 1)
+        display_cart.append(item_dict)
+    
+    subtotal = sum(item['price'] * item['units'] for item in display_cart)
+    return render_site('checkout.html', display_cart=display_cart, subtotal=subtotal, total_tax=0.0, discount=0.0, grand_total=subtotal)
 
-    return render_template('product_detail.html', product=product, image_urls=image_urls, related_products=related_products)
-
-@app.route('/admin/bulk_update_products', methods=['POST'])
-def bulk_update_products():
-    if not session.get('admin_logged_in'):
-        return redirect(url_for('admin_login'))
-    if 'excel_file' not in request.files:
-        flash("No file part", "danger")
-        return redirect(url_for('admin'))
-    file = request.files['excel_file']
-    if file.filename == '':
-        flash("No selected file", "danger")
-        return redirect(url_for('admin'))
-    if file:
-        try:
-            df = pd.read_excel(file)
-            df.columns = df.columns.str.strip().str.lower()
-            db = get_db()
-            update_count = 0
-            for index, row in df.iterrows():
-                sku_val = str(row.get('sku', '')).strip()
-                if not sku_val or sku_val == 'nan':
-                    continue
-                # Only update existing products
-                exists = db.execute('SELECT id FROM products WHERE sku = ?', (sku_val,)).fetchone()
-                if not exists:
-                    continue
-                # Update all columns present in the Excel
-                update_fields = []
-                update_values = []
-                for col in df.columns:
-                    if col != 'sku':
-                        update_fields.append(f"{col} = ?")
-                        update_values.append(row.get(col))
-                if update_fields:
-                    update_values.append(sku_val)
-                    db.execute(f"UPDATE products SET {', '.join(update_fields)} WHERE sku = ?", update_values)
-                    update_count += 1
-            db.commit()
-            flash(f'Bulk update successful! {update_count} products updated.', 'success')
-        except Exception as e:
-            db.rollback()
-            flash(f"Error in bulk update: {str(e)}", "danger")
-    return redirect(url_for('admin'))
-
-    # ...existing code...
-    # ...existing code...
-@app.route('/admin/manage_images', methods=['GET'])
-def admin_manage_images():
-    if not session.get('admin_logged_in'):
-        return redirect(url_for('admin_login'))
-    sku_search = request.args.get('sku_search', '').strip()
-    db = get_db()
-    if sku_search:
-        products = db.execute('SELECT sku, name FROM products WHERE sku LIKE ?', (f'%{sku_search}%',)).fetchall()
-    else:
-        products = db.execute('SELECT sku, name FROM products').fetchall()
-    product_list = []
-    for product in products:
-        sku = product['sku']
-        images = []
-        for i in range(1, 6):
-            img_path = f"assets/products/{sku}_{i}.jpg"
-            full_path = os.path.join('static', img_path)
-            if os.path.exists(full_path):
-                images.append(img_path)
-        product_list.append({'sku': sku, 'name': product['name'], 'images': images})
-    return render_template('admin_manage_images.html', products=product_list, sku_search=sku_search)
-
-@app.route('/admin/delete_image', methods=['POST'])
-def admin_delete_image():
-    if not session.get('admin_logged_in'):
-        return redirect(url_for('admin_login'))
-    sku = request.form.get('sku')
-    img_url = request.form.get('img_url')
-    img_path = os.path.join('static', img_url)
-    if os.path.exists(img_path):
-        os.remove(img_path)
-        flash('Image deleted.', 'success')
-    else:
-        flash('Image not found.', 'danger')
-    return redirect(url_for('admin_manage_images'))
-
-@app.route('/admin/upload_images', methods=['POST'])
-def admin_upload_images():
-    if not session.get('admin_logged_in'):
-        return redirect(url_for('admin_login'))
-    sku = request.form.get('sku')
-    files = request.files.getlist('images')
-    count = 0
-    for i in range(1, 6):
-        img_path = os.path.join('static', 'assets', 'products', f"{sku}_{i}.jpg")
-        if os.path.exists(img_path):
-            count += 1
-    available_slots = 5 - count
-    uploaded = 0
-    for file in files:
-        if uploaded >= available_slots:
-            break
-        if file and file.filename:
-            idx = count + uploaded + 1
-            filename = f"{sku}_{idx}.jpg"
-            save_path = os.path.join('static', 'assets', 'products', filename)
-            file.save(save_path)
-            uploaded += 1
-    if uploaded:
-        flash(f'{uploaded} image(s) uploaded.', 'success')
-    else:
-        flash('No images uploaded (max 5 per SKU).', 'warning')
-    return redirect(url_for('admin_manage_images'))
-    if not session.get('admin_logged_in'):
-        return redirect(url_for('admin_login'))
-    db = get_db()
-    products = db.execute('SELECT * FROM products').fetchall()
-    categories = get_categories()
-    # Pass Monaco UI flag for admin page
-    return render_template('admin.html', products=products, categories=categories, monaco_ui=True)
-
-@app.route('/admin/login', methods=['GET', 'POST'])
-def admin_login():
+@app.route('/checkout/shipping', methods=['GET', 'POST'])
+@app.route('/retail/checkout/shipping', methods=['GET', 'POST'])
+def checkout_shipping():
+    """Render shipping address form for checkout."""
+    g.site_type = 'retail'
     if request.method == 'POST':
-        username = request.form.get('username')
-        password = request.form.get('password')
-        if username == 'admin' and password == 'Raghav@2026':
-            session['admin_logged_in'] = True
-            return redirect(url_for('admin'))
-        else:
-            flash("Invalid credentials", "danger")
-    return render_template('admin_login.html')
+        return redirect(url_for('checkout_process'))
+    return render_site('checkout_shipping.html')
 
-@app.route('/admin/logout')
-def admin_logout():
-    session.pop('admin_logged_in', None)
+
+@app.route('/checkout/process', methods=['POST'])
+@app.route('/retail/checkout/process', methods=['POST'])
+def checkout_process():
+    g.site_type = 'retail'
+    consignee_name = (request.form.get('consignee_name') or '').strip()
+    consignee_phone = (request.form.get('consignee_phone') or '').strip()
+    consignee_address = (request.form.get('consignee_address') or '').strip()
+    consignee_city = (request.form.get('consignee_city') or '').strip()
+    consignee_state = (request.form.get('consignee_state') or '').strip()
+    consignee_pincode = (request.form.get('consignee_pincode') or '').strip()
+
+    # Delhivery-safe string formatter: strip forbidden symbols and normalize spaces.
+    def sanitize_for_delhivery(value):
+        cleaned = value or ''
+        for char in ['#', '&', '%', ';']:
+            cleaned = cleaned.replace(char, ' ')
+        return ' '.join(cleaned.split())
+
+    cleaned_name = sanitize_for_delhivery(consignee_name)
+    cleaned_address = sanitize_for_delhivery(consignee_address)
+
+    internal_order_id = f"NN-SHP-{datetime.now().strftime('%Y%m%d%H%M%S')}-{consignee_phone[-4:]}"
+    user_id = session.get('user_id')
+
+    shipping_record = Address(
+        user_id=user_id,
+        consignee_name=cleaned_name,
+        consignee_phone=consignee_phone,
+        consignee_address=cleaned_address,
+        consignee_city=consignee_city,
+        consignee_state=consignee_state,
+        consignee_pincode=consignee_pincode,
+        internal_order_id=internal_order_id,
+    )
+    db.session.add(shipping_record)
+    db.session.commit()
+
+    delhivery_payload = {
+        'shipments': [
+            {
+                'name': cleaned_name,
+                'phone': consignee_phone,
+                'add': cleaned_address,
+                'city': consignee_city,
+                'state': consignee_state,
+                'pin': consignee_pincode,
+                'country': 'IN',
+                'order': internal_order_id,
+                'payment_mode': 'Pre-paid',
+                'return_pin': app.config.get('WAREHOUSE_PIN', ''),
+                'client': DELHIVERY_CLIENT_NAME,
+            }
+        ],
+        'pickup_location': {
+            'name': DELHIVERY_PICKUP_LOCATION,
+        }
+    }
+
+    response = requests.post(
+        'https://track.delhivery.com/api/cmu/create.json',
+        data={
+            'format': 'json',
+            'data': json.dumps(delhivery_payload),
+        },
+        headers={
+            'Authorization': f'Token {DELHIVERY_API_TOKEN}',
+            'Content-Type': 'application/x-www-form-urlencoded',
+        },
+        timeout=30,
+    )
+
+    waybill = None
+    if response.status_code == 200:
+        try:
+            resp_json = response.json()
+            packages = resp_json.get('packages', [])
+            if isinstance(packages, list) and packages:
+                waybill = packages[0].get('waybill')
+        except Exception:
+            waybill = None
+
+    if waybill:
+        shipping_record.delhivery_waybill = waybill
+        db.session.commit()
+
+    print('Sanitized shipping payload for Delhivery:', {
+        'internal_order_id': internal_order_id,
+        'consignee_name': cleaned_name,
+        'consignee_phone': consignee_phone,
+        'consignee_address': cleaned_address,
+        'consignee_city': consignee_city,
+        'consignee_state': consignee_state,
+        'consignee_pincode': consignee_pincode,
+        'waybill': waybill,
+    })
+
+    session['checkout_handover'] = {
+        'internal_order_id': internal_order_id,
+        'waybill': waybill,
+    }
+    session.modified = True
+
+    try:
+        return redirect(url_for('payment_gateway_router'))
+    except BuildError:
+        return 'Checkout processed and Delhivery manifest attempted.', 200
+
+@app.route('/payment/gateway', methods=['GET'])
+@app.route('/retail/payment/gateway', methods=['GET'])
+def payment_gateway_router():
+    """Payment authorization gateway with session validation."""
+    g.site_type = 'retail'
+    checkout_handover = session.get('checkout_handover', {})
+    internal_order_id = checkout_handover.get('internal_order_id')
+    waybill = checkout_handover.get('waybill')
+    
+    if not internal_order_id or not waybill:
+        flash('Order ID or tracking number missing. Please complete shipping details again.', 'error')
+        return redirect(url_for('checkout_shipping'))
+    
+    # Calculate amount from current cart
+    cart = session.get('cart', {})
+    subtotal = sum(item['price'] * item['qty'] for item in cart.values())
+    total_tax = subtotal * 0.18
+    amount_to_pay = subtotal + total_tax
+    
+    return render_site('payment_gateway.html',
+        internal_order_id=internal_order_id,
+        waybill=waybill,
+        amount_to_pay=amount_to_pay,
+        subtotal=subtotal,
+        total_tax=total_tax
+    )
+
+@app.route('/payment/cancel', methods=['POST'])
+@app.route('/retail/payment/cancel', methods=['POST'])
+def payment_cancel():
+    """Clear checkout state and return to catalogue."""
+    g.site_type = 'retail'
+    session.pop('checkout_handover', None)
+    session.pop('cart', None)
+    session.modified = True
+    flash('Order cancelled. Returning to store.', 'info')
     return redirect(url_for('index'))
 
-@app.route('/admin/add_product', methods=['POST'])
-def add_product():
-    if not session.get('admin_logged_in'): return redirect(url_for('admin_login'))
-    
-    sku = request.form.get('sku')
-    name = request.form.get('name')
-    category = request.form.get('category')
-    subcategory = request.form.get('subcategory')
-    description = request.form.get('description')
-    material = request.form.get('material')
-    color = request.form.get('color')
-    sizes = request.form.get('sizes')
-    hsn = request.form.get('hsn')
-    gst = request.form.get('gst')
-    q1 = request.form.get('quantity1')
-    p1 = request.form.get('price1')
-    
-    image = request.files.get('image')
-    image_url = ""
-    if image and image.filename != '':
-        filename = secure_filename(image.filename)
-        filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
-        image.save(filepath)
-        image_url = filename
 
-    db = get_db()
+@app.route('/api/create-order', methods=['POST'])
+def create_razorpay_order():
+    g.site_type = 'retail'
+    payload = request.get_json(silent=True) or request.form or {}
+
+    checkout_handover = session.get('checkout_handover', {})
+    internal_order_id = (payload.get('order_id') or checkout_handover.get('internal_order_id') or '').strip()
+    waybill = (payload.get('waybill') or checkout_handover.get('waybill') or '').strip()
+
+    if not RAZORPAY_KEY_ID or not RAZORPAY_KEY_SECRET:
+        return jsonify({
+            'status': 'error',
+            'message': 'Razorpay credentials are not configured'
+        }), 500
+
     try:
-        db.execute('''INSERT INTO products 
-            (sku, name, category, subcategory, description, material, color, sizes, hsn, gst, quantity1, price1, image_url)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
-            (sku, name, category, subcategory, description, material, color, sizes, hsn, gst, q1, p1, image_url))
-        db.commit()
-        flash("Product added successfully!", "success")
-    except sqlite3.IntegrityError:
-        flash("Error: SKU must be unique", "danger")
-    
-    return redirect(url_for('admin'))
+        requested_amount = payload.get('amount')
+        if requested_amount is None:
+            cart = session.get('cart', {})
+            subtotal = sum(item['price'] * item['qty'] for item in cart.values())
+            requested_amount = subtotal + (subtotal * 0.18)
 
-@app.route('/admin/delete_product/<int:product_id>')
-def delete_product(product_id):
-    if not session.get('admin_logged_in'): return redirect(url_for('admin_login'))
-    db = get_db()
-    db.execute('DELETE FROM products WHERE id = ?', (product_id,))
-    db.commit()
-    flash("Product deleted!", "success")
-    return redirect(url_for('admin'))
+        amount_paise = int(round(float(requested_amount) * 100))
+        if amount_paise <= 0:
+            return jsonify({
+                'status': 'error',
+                'message': 'Invalid amount for payment'
+            }), 400
+    except (TypeError, ValueError):
+        return jsonify({
+            'status': 'error',
+            'message': 'Invalid amount for payment'
+        }), 400
 
-@app.route('/admin/import', methods=['POST'])
-def import_excel():
-    if not session.get('admin_logged_in'): return redirect(url_for('admin_login'))
-    if 'excel_file' not in request.files:
-        flash("No file part", "danger")
-        return redirect(url_for('admin'))
-    file = request.files['excel_file']
-    if file.filename == '':
-        flash("No selected file", "danger")
-        return redirect(url_for('admin'))
-    if file:
-        try:
-            # Load the Excel file
-            df = pd.read_excel(file)
-            # FOOLPROOF STEP 1: Clean and normalize headers (lowercase)
-            df.columns = df.columns.str.strip().str.lower()
-            # FOOLPROOF STEP 2: Clear existing products if you want a fresh start
-            # Product.query.delete() 
-            success_count = 0
-            db = get_db()
-            for index, row in df.iterrows():
-                # FOOLPROOF STEP 3: Skip empty rows or rows without a SKU
-                sku_val = str(row.get('sku', '')).strip()
-                if not sku_val or sku_val == 'nan':
-                    continue
-                # FOOLPROOF STEP 4: Robust Mapping
-                # Ensure SKU is unique
-                exists = db.execute('SELECT id FROM products WHERE sku = ?', (sku_val,)).fetchone()
-                if exists:
-                    continue
-                name = str(row.get('name', 'Unnamed Product'))
-                category = str(row.get('category', 'General'))
-                subcategory = str(row.get('subcategory', ''))
-                description = str(row.get('description', ''))
-                material = str(row.get('material', ''))
-                color = str(row.get('color', ''))
-                sizes = str(row.get('sizes', 'Standard'))
-                hsn = str(row.get('hsn', ''))
-                gst = float(row.get('gst', 0) if pd.notnull(row.get('gst')) else 0)
-                q1 = int(row.get('quantity1', 0) if pd.notnull(row.get('quantity1')) else 0)
-                p1 = float(row.get('price1', 0) if pd.notnull(row.get('price1')) else 0)
-                q2 = int(row.get('quantity2', 0) if pd.notnull(row.get('quantity2')) else 0)
-                p2 = float(row.get('price2', 0) if pd.notnull(row.get('price2')) else 0)
-                q3 = int(row.get('quantity3', 0) if pd.notnull(row.get('quantity3')) else 0)
-                p3 = float(row.get('price3', 0) if pd.notnull(row.get('price3')) else 0)
-                image_url = str(row.get('image_url', ''))
-                db.execute('''INSERT INTO products (sku, name, category, subcategory, description, material, color, sizes, hsn, gst, quantity1, price1, quantity2, price2, quantity3, price3, image_url) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
-                    (sku_val, name, category, subcategory, description, material, color, sizes, hsn, gst, q1, p1, q2, p2, q3, p3, image_url))
-                success_count += 1
-            db.commit()
-            flash(f'Import Successful! {success_count} products added to catalog.')
-        except Exception as e:
-            db.rollback()
-            flash(f"Error importing Excel: {str(e)}", "danger")
-            
-    return redirect(url_for('admin'))
+    receipt = internal_order_id or f"NN-RZP-{datetime.now().strftime('%Y%m%d%H%M%S')}"
 
-@app.route('/admin/delete_products', methods=['GET', 'POST'])
-def admin_delete_products():
-    db = get_db()
-    if request.method == 'POST':
-        product_ids = request.form.getlist('product_ids')
-        if product_ids:
-            # This handles the old 'Delete Selected' button logic if you still use it
-            db.executemany('DELETE FROM products WHERE id = ?', [(pid,) for pid in product_ids])
-            db.commit()
-            flash(f"Successfully deleted {len(product_ids)} products.")
-        return redirect(url_for('admin_delete_products'))
-
-    # THE CRITICAL CHANGE: We now SELECT every column needed for the bulk table
-    products = db.execute('''
-        SELECT id, sku, name, category, 
-               quantity1, price1, 
-               quantity2, price2, 
-               quantity3, price3 
-        FROM products
-    ''').fetchall()
-    
-    return render_template('admin_delete_products.html', products=products)
-    
-
-
-@app.route('/checkout', methods=['GET', 'POST'])
-def checkout():
-    print("[BUG DEBUG] session['cart'] at checkout:", session.get('cart', {}))
-    import pprint
-    pprint.pprint(session.get('cart', {}))
-    # After display_cart is built, print it for debugging
-    cart_data = session.get('cart', {})
-    db = get_db()
-    display_cart = []
-    subtotal = 0.0
-    total_tax = 0.0
-    if request.method == 'POST':
-        name = request.form.get('name')
-        session['user_name'] = name
-    for key, item in cart_data.items():
-        if isinstance(item, dict):
-            qty = int(item.get('qty', 1))
-            tier = int(item.get('tier', 1))
-            price = float(item.get('price', 0))
-            size = item.get('size', '')
-            sku = item.get('sku')
-        else:
-            qty = int(item)
-            tier = 1
-            price = 0.0
-            size = ''
-            sku = key
-        product = db.execute('SELECT * FROM products WHERE sku = ?', (sku,)).fetchone()
-        if product:
-            gst_rate = product['gst'] or 0.0
-            item_subtotal = price * qty
-            item_tax = item_subtotal * (gst_rate / 100)
-            subtotal += item_subtotal
-            total_tax += item_tax
-            display_cart.append({
-                'id': product['id'],
-                'sku': product['sku'],
-                'name': product['name'] if product['name'] else product['sku'],
-                'units': qty,  # This is the correct number of units
-                'tier': tier,
-                'size': size,
-                'price': price,
-                'tax': item_tax,
-                'total': item_subtotal + item_tax
-            })
-        else:
-            display_cart.append({
-                'id': sku,
-                'sku': sku,
-                'name': sku,
-                'units': qty,  # This is the correct number of units
-                'tier': tier,
-                'size': size,
-                'price': price,
-                'tax': 0,
-                'total': price * qty
-            })
-    grand_total = subtotal + total_tax
-    print("[BUG DEBUG] display_cart at checkout:")
-    pprint.pprint(display_cart)
-    if request.method == 'POST':
-        try:
-            # PDF/email logic here (if any)
-            pass
-        except Exception as e:
-            print(f"PDF/Email error: {e}")
-        return redirect(url_for('thank_you'))
-    # Always show cart on GET
-    return render_template('checkout.html', display_cart=display_cart, subtotal=subtotal, total_tax=total_tax, grand_total=grand_total)
-
-def send_quote_emails(name, email, whatsapp, address, display_cart, subtotal, total_tax, grand_total):
-    import smtplib
-    from email.mime.multipart import MIMEMultipart
-    from email.mime.text import MIMEText
-    sender_email = 'info@narinakhre.com'
-    sender_password = MAIL_PASSWORD
-    admin_email = 'mohinicosmetics.india@gmail.com'
-    extra_admin_email = 'narinakhre@gmail.com'
-    receiver_email = email
-    subject = "Nari Nakhre Wholesale Quote"
-    from flask import render_template
-    print("[DEBUG] Rendering email_quote.html with:")
-    print("name:", name)
-    print("address:", address)
-    print("display_cart:", display_cart)
-    print("grand_total:", grand_total)
-    print("subtotal:", subtotal)
-    print("total_tax:", total_tax)
-    formatted_subtotal = f"₹{subtotal:,.2f}"
-    formatted_gst = f"₹{total_tax:,.2f}"
-    formatted_grand_total = f"₹{grand_total:,.2f}"
     try:
-        body = render_template('email_quote.html',
-            name=name,
-            address=address,
-            display_cart=display_cart,
-            subtotal=formatted_subtotal,
-            gst=formatted_gst,
-            grand_total=formatted_grand_total)
-        print("[DEBUG] Email template rendered successfully.")
-    except Exception as e:
-        print("[DEBUG] Error rendering email_quote.html:", e)
-        raise
-    msg = MIMEMultipart()
-    msg['From'] = sender_email
-    msg['To'] = receiver_email
-    msg['Subject'] = subject
-    msg.attach(MIMEText(body, 'html'))
-    admin_msg = MIMEMultipart()
-    admin_msg['From'] = sender_email
-    admin_msg['To'] = admin_email
-    admin_msg['Subject'] = f"New Quote from {name}"
-    admin_msg.attach(MIMEText(body, 'html'))
-    extra_admin_msg = MIMEMultipart()
-    extra_admin_msg['From'] = sender_email
-    extra_admin_msg['To'] = extra_admin_email
-    extra_admin_msg['Subject'] = f"New Quote from {name}"
-    extra_admin_msg.attach(MIMEText(body, 'html'))
-    try:
-        server = smtplib.SMTP_SSL(MAIL_SERVER, MAIL_PORT)
-        server.login(sender_email, sender_password)
-        server.send_message(msg)
-        server.send_message(admin_msg)
-        server.send_message(extra_admin_msg)
-        server.quit()
-        print("Quote email sent successfully.")
-    except Exception as e:
-        print(f"Failed to send email: {e}")
+        order_payload = {
+            'amount': amount_paise,
+            'currency': 'INR',
+            'receipt': receipt,
+            'payment_capture': 1,
+            'notes': {
+                'internal_order_id': internal_order_id,
+                'waybill': waybill,
+            },
+        }
+        razorpay_order = razorpay_client.order.create(data=order_payload)
 
-@app.route('/submit_quote', methods=['POST'])
-def submit_quote():
-    # 1. Extract user details
-    if request.is_json:
-        data = request.get_json()
-        name = data.get('name')
-        whatsapp = data.get('whatsapp')
-        email = data.get('email')
-        address = data.get('address', '')
-        total_amount = data.get('tentative_total', 0)
-        cart = data.get('cart', {})
-    else:
-        name = request.form.get('name')
-        whatsapp = request.form.get('whatsapp')
-        email = request.form.get('email')
-        address = request.form.get('address', '')
-        total_amount = request.form.get('total_amount', 0)
-        cart = json.loads(request.form.get('cart_data', '{}'))
-    db = get_db()
-    # 3. Build display_cart and calculate totals
-    display_cart = []
-    subtotal = 0.0
-    total_tax = 0.0
-    grand_total = 0.0
-    subtotal = 0.0
-    total_gst = 0.0
-    display_cart = []
-    # Insert quote to DB to get unique ID
-    items_json = json.dumps(cart)
-    request_id = str(uuid.uuid4())
-    cursor = db.execute('INSERT INTO quotes (request_id, name, whatsapp, email, items_json, total_amount) VALUES (?, ?, ?, ?, ?, ?)', (request_id, name, whatsapp, email, items_json, grand_total))
-    db.commit()
-    quote_id = cursor.lastrowid
-    for item_key, item in cart.items():
-        # Get number of packs (units) and pieces per pack (tier)
-        tier = int(item.get('tier', 1))  # pieces per unit (pack)
-        units = int(item.get('qty', 1))  # number of packs
-        price = float(item.get('price', 0))
-        size = item.get('size', '')
-        sku = item.get('sku', '')
-        prod_name = item.get('name', '')
-        product = db.execute('SELECT * FROM products WHERE sku = ?', (sku,)).fetchone()
-        if product:
-            gst_rate = product['gst'] or 0.0
-            row_total = price * units
-            subtotal += row_total
-            gst_amount = row_total * (gst_rate / 100) if gst_rate else 0.0
-            total_gst += gst_amount
-            display_cart.append({
-                'sku': sku,
-                'name': prod_name or product['name'],
-                'size': size,
-                'tier': tier,  # pieces per unit (pack)
-                'units': units,  # number of packs
-                'price': f"₹{price:,.2f}",
-                'row_total': f"₹{row_total:,.2f}"
-            })
-    grand_total = subtotal + total_gst
-    formatted_subtotal = f"₹{subtotal:,.2f}"
-    formatted_gst = f"₹{total_gst:,.2f}"
-    formatted_grand_total = f"₹{grand_total:,.2f}"
-    # 4. Render email template and pass data
-    try:
-        html_body = render_template('email_quote.html', name=name, address=address, display_cart=display_cart, subtotal=formatted_subtotal, gst=formatted_gst, grand_total=formatted_grand_total)
-        # 5. Send email using Zoho SMTP
-        sender_email = 'info@narinakhre.com'
-        sender_password = MAIL_PASSWORD
-        admin_email = 'mohinicosmetics.india@gmail.com'
-        subject = f"Nari Nakhre Quote #{quote_id} for {name}"
-        # User email
-        msg = MIMEMultipart()
-        msg['From'] = sender_email
-        msg['To'] = email
-        msg['Subject'] = subject
-        msg.attach(MIMEText(html_body, 'html'))
-        # Admin email
-        admin_msg = MIMEMultipart()
-        admin_msg['From'] = sender_email
-        admin_msg['To'] = admin_email
-        admin_msg['Subject'] = f"New Quote from {name}"
-        admin_msg.attach(MIMEText(html_body, 'html'))
-        server = smtplib.SMTP_SSL(MAIL_SERVER, MAIL_PORT)
-        server.login(sender_email, sender_password)
-        server.send_message(msg)
-        server.send_message(admin_msg)
-        server.quit()
-        flash("Quote submitted and email sent!", "success")
-        # 6. Clear cart only after email is sent
-        session.pop('cart', None)
+        session['payment_pending'] = {
+            'internal_order_id': internal_order_id,
+            'waybill': waybill,
+            'razorpay_order_id': razorpay_order.get('id'),
+            'amount_paise': amount_paise,
+        }
+        session['razorpay_order_id'] = razorpay_order.get('id')
+        session['internal_order_id'] = internal_order_id
+        session['waybill'] = waybill
         session.modified = True
-    except Exception as e:
-        print(f"Email error: {e}")
-        flash("Quote submitted, but email could not be sent.", "warning")
-    # Store display_cart and grand_total for thank you page
-    session['quote_display_cart'] = display_cart
-    session['quote_grand_total'] = grand_total
-    session['user_name'] = name
-    session['user_whatsapp'] = whatsapp
-    session['user_email'] = email
-    return redirect(url_for('thank_you'))
+
+        return jsonify({
+            'status': 'success',
+            'order_id': razorpay_order.get('id'),
+            'razorpay_order_id': razorpay_order.get('id'),
+            'amount': razorpay_order.get('amount', amount_paise),
+            'currency': razorpay_order.get('currency', 'INR'),
+            'receipt': razorpay_order.get('receipt', receipt),
+            'key_id': app.config.get('RAZORPAY_KEY_ID', ''),
+        }), 200
+    except Exception:
+        return jsonify({
+            'status': 'error',
+            'message': 'Unable to create Razorpay order'
+        }), 500
+
+
+@app.route('/api/verify-payment', methods=['POST'])
+def verify_payment():
+    g.site_type = 'retail'
+    payload = request.get_json(silent=True) or request.form or {}
+    razorpay_order_id = (payload.get('razorpay_order_id') or '').strip()
+    razorpay_payment_id = (payload.get('razorpay_payment_id') or '').strip()
+    razorpay_signature = (payload.get('razorpay_signature') or '').strip()
+
+    if not razorpay_order_id or not razorpay_payment_id or not razorpay_signature:
+        return jsonify({
+            'status': 'error',
+            'message': 'Missing payment verification fields'
+        }), 400
+
+    pending_razorpay_order_id = (session.get('razorpay_order_id') or '').strip()
+    if not pending_razorpay_order_id or pending_razorpay_order_id != razorpay_order_id:
+        return jsonify({
+            'status': 'error',
+            'message': 'Order ID mismatch for pending session transaction'
+        }), 400
+
+    params_dict = {
+        'razorpay_order_id': razorpay_order_id,
+        'razorpay_payment_id': razorpay_payment_id,
+        'razorpay_signature': razorpay_signature
+    }
+
+    try:
+        razorpay_client.utility.verify_payment_signature(params_dict)
+    except Exception:
+        return jsonify({
+            'status': 'error',
+            'message': 'Invalid payment signature'
+        }), 400
+
+    try:
+        internal_order_id = (session.get('internal_order_id') or '').strip()
+        if not internal_order_id:
+            checkout_handover = session.get('checkout_handover', {})
+            internal_order_id = (checkout_handover.get('internal_order_id') or '').strip()
+
+        if not internal_order_id:
+            return jsonify({
+                'status': 'error',
+                'message': 'No active order found for this payment'
+            }), 400
+
+        shipping_record = Address.query.filter_by(internal_order_id=internal_order_id).first()
+        if shipping_record is None:
+            return jsonify({
+                'status': 'error',
+                'message': 'No active order found for this payment'
+            }), 400
+
+        shipping_record.status = 'paid'
+        if hasattr(shipping_record, 'razorpay_payment_id'):
+            shipping_record.razorpay_payment_id = razorpay_payment_id
+        db.session.commit()
+
+        session.pop('razorpay_order_id', None)
+        session.pop('payment_pending', None)
+        session.pop('internal_order_id', None)
+        session.pop('waybill', None)
+        session.pop('checkout_handover', None)
+        session.modified = True
+
+        return jsonify({
+            'status': 'success',
+            'message': 'Payment verified and order finalized'
+        }), 200
+    except Exception:
+        db.session.rollback()
+        return jsonify({
+            'status': 'error',
+            'message': 'Unable to finalize verified payment'
+        }), 500
+
+# --- DELHIVERY API ROUTES (Retail Only) ---
+@app.route('/api/delhivery/check/<pincode>', methods=['GET'])
+def delhivery_check_pincode(pincode):
+    if g.site_type != 'retail':
+        return jsonify({"status": False, "msg": "Unauthorized"}), 403
+    provider = get_shipping_provider(
+        app.config['SHIPPING_PROVIDER'],
+        api_token=app.config.get('DELHIVERY_API_KEY')
+    )
+    return jsonify(provider.verify_pincode(pincode))
+
+@app.route('/api/delhivery/shipping', methods=['POST'])
+def calculate_checkout_shipping():
+    if g.site_type != 'retail':
+        return jsonify({"status": False, "msg": "Unauthorized"}), 403
+    data = request.get_json()
+    pincode = data.get('pincode')
+    payment_mode = data.get('mode', 'Prepaid')
+    cart = session.get('cart', {})
+    total_weight = sum(item['qty'] for item in cart.values()) * 250
+    provider = get_shipping_provider(
+        app.config['SHIPPING_PROVIDER'],
+        api_token=app.config.get('DELHIVERY_API_KEY')
+    )
+    # If provider has get_rates, use it; else, return mock
+    rates = provider.get_rates(app.config['WAREHOUSE_PIN'], pincode, total_weight)
+    return jsonify({"shipping_cost": rates.get('rate', 0)})
+
+@app.route('/retail/place_order', methods=['POST'])
+def place_order():
+    data = request.form if request.form else request.json
+    name = data.get('name')
+    phone = data.get('phone')
+    email = data.get('email')
+    address_line1 = data.get('address_line1')
+    address_line2 = data.get('address_line2')
+    city = data.get('city')
+    state = data.get('state')
+    pincode = data.get('pincode')
+    country = data.get('country', 'IN')
+    payment_mode = data.get('payment_mode')
+    amount = float(data.get('amount', 0))
+    order_id = f'NN{datetime.now().strftime("%Y%m%d%H%M%S")}{phone[-4:]}'
+    cart = session.get('cart', {})
+    db = get_db()
+    total_weight = 0
+    for item in cart.values():
+        sku = item['sku']
+        qty = item['qty']
+        prod = db.execute('SELECT weight, length, breadth, height FROM products WHERE sku = ?', (sku,)).fetchone()
+        if prod:
+            dead_weight = (prod['weight'] or 0) * qty
+            l = prod['length'] or 0
+            b = prod['breadth'] or 0
+            h = prod['height'] or 0
+            vol_weight = get_shipping_provider(app.config['SHIPPING_PROVIDER']).calculate_volumetric_weight(l, b, h) * qty
+            billable = max(dead_weight, vol_weight)
+            total_weight += billable
+        else:
+            total_weight += qty * 250  # fallback
+    provider = get_shipping_provider(
+        app.config['SHIPPING_PROVIDER'],
+        api_token=app.config.get('DELHIVERY_API_KEY')
+    )
+    shipment_data = {
+        "name": name,
+        "add": f"{address_line1}, {address_line2}",
+        "pin": pincode,
+        "phone": phone,
+        "order": order_id,
+        "payment_mode": payment_mode,
+        "total_amount": amount,
+        "weight": total_weight,
+        "city": city,
+        "state": state,
+        "country": country,
+        "email": email,
+        "mobile": phone
+    }
+    resp = provider.create_shipment(shipment_data)
+    waybill = resp.get('waybill')
+    db.execute(
+        "INSERT INTO orders (order_id, name, phone, email, address_line1, address_line2, city, state, pincode, country, payment_mode, amount, waybill) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (order_id, name, phone, email, address_line1, address_line2, city, state, pincode, country, payment_mode, amount, waybill)
+    )
+    db.commit()
+    session.pop('cart', None)
+    tracking_url = f"https://www.delhivery.com/track/package/{waybill}" if waybill else None
+    return render_site('thank_you.html', order_id=order_id, waybill=waybill, tracking_url=tracking_url)
+
+@app.route('/clear_quote', methods=['POST'])
+def clear_quote():
+    session.pop('cart', None)
+    if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+        return ('', 204)
+    return redirect('/retail' if g.site_type == 'retail' else '/wholesale')
 
 @app.route('/thank_you')
 def thank_you():
-    user_name = session.get('user_name', 'Valued Customer')
-    user_email = session.get('user_email', '')
-    contact_only = session.pop('contact_only', False)
-    display_cart = session.get('quote_display_cart', [])
-    grand_total = session.get('quote_grand_total', 0)
-    return render_template('thank_you.html', user={'name': user_name, 'email': user_email}, display_cart=display_cart, grand_total=grand_total, contact_only=contact_only)
-
-@app.route('/thank-you')
-def thank_you_dash():
-    user_name = session.get('user_name', 'Valued Customer')
-    return render_template('thank_you.html', user={'name': user_name})
-
-# --- MIGRATION: Add address column to quotes if missing ---
-def ensure_quotes_columns():
-    db = get_db()
-    cursor = db.execute("PRAGMA table_info(quotes)")
-    columns = [row[1] for row in cursor.fetchall()]
-    if 'address' not in columns:
-        db.execute("ALTER TABLE quotes ADD COLUMN address TEXT")
-        db.commit()
-    if 'subtotal' not in columns:
-        db.execute("ALTER TABLE quotes ADD COLUMN subtotal REAL")
-        db.commit()
-    if 'total_tax' not in columns:
-        db.execute("ALTER TABLE quotes ADD COLUMN total_tax REAL")
-        db.commit()
-    if 'grand_total' not in columns:
-        db.execute("ALTER TABLE quotes ADD COLUMN grand_total REAL")
-        db.commit()
-
-def auto_migrate_products_table():
-    conn = get_db()
-    cursor = conn.cursor()
-    cursor.execute("PRAGMA table_info(products)")
-    columns = [column[1] for column in cursor.fetchall()]
-    if 'image_url' not in columns:
-        cursor.execute("ALTER TABLE products ADD COLUMN image_url TEXT")
-        conn.commit()
-
-# --- AJAX Routes for Bulk Management ---
+    return render_site('thank_you.html')
 
 
-# --- AJAX Routes for Bulk Management ---
+@app.route('/admin/upload-images', methods=['POST'])
+def admin_upload_images():
+    sku = request.form.get('sku')
+    uploaded_files = request.files.getlist('images')
 
-@app.route('/update_bulk_product', methods=['POST'])
-def update_bulk_product():
-    """Updates a single product's pricing tiers via AJAX."""
-    data = request.get_json()
-    db = get_db()
+    if not sku or not uploaded_files:
+        flash('SKU and images are required for upload.')
+        return redirect(url_for('admin_manage_images'))
+
+    sku = sku.strip()
+    if not sku:
+        flash('SKU and images are required for upload.')
+        return redirect(url_for('admin_manage_images'))
+
+    product = Product.query.filter_by(sku=sku).first()
+    if not product:
+        flash('Product not found for the provided SKU.')
+        return redirect(url_for('admin_manage_images'))
+
+    first_public_cloud_url = None
+    for idx, file in enumerate(uploaded_files, start=1):
+        if not file or not file.filename:
+            continue
+
+        target_name = f"{sku}_{idx}.webp"
+        public_cloud_url = upload_image_to_supabase(file, target_name)
+        if public_cloud_url and first_public_cloud_url is None:
+            first_public_cloud_url = public_cloud_url
+
+    if first_public_cloud_url:
+        product.image_field = first_public_cloud_url
+        db.session.commit()
+        flash('Product images successfully processed, scaled down, converted to WebP format, and synced to Supabase!')
+    else:
+        flash('No images were uploaded to cloud storage. Please try again.')
+
+    return redirect(url_for('admin_manage_images'))
+
+
+@app.route('/admin/dashboard', methods=['GET'])
+def admin_dashboard():
+    return (
+        '<h2>Admin Dashboard</h2>'
+        '<p>Catalog sync endpoint is active.</p>'
+        '<p>Use POST /admin/upload-excel with form field <code>excel_file</code>.</p>'
+    )
+
+
+@app.route('/admin/upload-excel', methods=['POST'])
+def admin_upload_excel():
+    import pandas as pd
+
+    file_object = request.files.get('excel_file')
+    if file_object is None or not file_object.filename:
+        flash('Please select an Excel or CSV catalog file to upload.')
+        return redirect(url_for('admin_dashboard'))
+
+    def normalize_value(value):
+        if pd.isna(value):
+            return None
+        if isinstance(value, str):
+            cleaned = value.strip()
+            return cleaned if cleaned else None
+        return value
+
+    def to_float(value, default=0.0):
+        value = normalize_value(value)
+        if value is None:
+            return default
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return default
+
+    def to_int(value, default=0):
+        value = normalize_value(value)
+        if value is None:
+            return default
+        try:
+            return int(float(value))
+        except (TypeError, ValueError):
+            return default
+
+    def to_bool(value, default=False):
+        value = normalize_value(value)
+        if value is None:
+            return default
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, (int, float)):
+            return bool(value)
+        text = str(value).strip().lower()
+        if text in {'1', 'true', 'yes', 'y', 'active'}:
+            return True
+        if text in {'0', 'false', 'no', 'n', 'inactive'}:
+            return False
+        return default
+
+    def row_value(row, key):
+        if key not in row.index:
+            return None
+        return normalize_value(row.get(key))
+
     try:
-        db.execute('''
-            UPDATE products 
-            SET quantity1 = ?, price1 = ?, 
-                quantity2 = ?, price2 = ?, 
-                quantity3 = ?, price3 = ?
-            WHERE sku = ?
-        ''', (data['qty1'], data['p1'], data['qty2'], data['p2'], data['qty3'], data['p3'], data['sku']))
-        db.commit()
-        return jsonify({"status": "success", "message": "Product updated"})
-    except Exception as e:
-        return jsonify({"status": "error", "message": str(e)}), 500
+        filename_lower = (file_object.filename or '').lower()
+        if filename_lower.endswith('.csv'):
+            df = pd.read_csv(file_object)
+        elif filename_lower.endswith('.xlsx'):
+            df = pd.read_excel(file_object)
+        else:
+            flash('Unsupported file format. Please upload a .csv or .xlsx file.')
+            return redirect(url_for('admin_dashboard'))
 
-@app.route('/delete_product_ajax', methods=['POST'])
-def delete_product_ajax():
-    """Deletes a single product via AJAX."""
-    data = request.get_json()
-    db = get_db()
-    try:
-        db.execute('DELETE FROM products WHERE sku = ?', (data['sku'],))
-        db.commit()
-        return jsonify({"status": "deleted", "sku": data['sku']})
-    except Exception as e:
-        return jsonify({"status": "error", "message": str(e)}), 500
-@app.route('/admin/organize_images', methods=['POST'])
-def admin_organize_images():
-    if not session.get('admin_logged_in'):
-        return redirect(url_for('admin_login'))
-    from organize_images import organize_images
-    organize_images()
-    flash('Images have been organized from uploads_q to static/assets/products.', 'success')
-    return redirect(url_for('admin_delete_products') )
+        df.columns = df.columns.str.lower().str.strip()
 
-# --- Excel Download Routes ---
-@app.route('/admin/edit_product_details', methods=['GET', 'POST'])
-def admin_edit_product_details():
-    if not session.get('admin_logged_in'):
-        return redirect(url_for('admin_login'))
-    db = get_db()
-    categories = [c['name'] for c in db.execute('SELECT name FROM categories').fetchall()]
-    subcategories = [row['subcategory'] for row in db.execute('SELECT DISTINCT subcategory FROM products WHERE subcategory IS NOT NULL AND subcategory != ""').fetchall()]
-    products = db.execute('SELECT * FROM products').fetchall()
-    if request.method == 'POST':
-        sku = request.form.get('sku')
-        name = request.form.get('name')
-        description = request.form.get('description')
-        hsn = request.form.get('hsn')
-        gst = request.form.get('gst')
-        category = request.form.get('category')
-        subcategory = request.form.get('subcategory')
-        sizes = request.form.get('sizes')
-        material = request.form.get('material')
-        color = request.form.get('color')
-        db.execute('''UPDATE products SET name=?, description=?, hsn=?, gst=?, category=?, subcategory=?, sizes=?, material=?, color=? WHERE sku=?''',
-            (name, description, hsn, gst, category, subcategory, sizes, material, color, sku))
-        db.commit()
-        flash(f'Product {sku} details updated!', 'success')
-        return redirect(url_for('admin_edit_product_details'))
-    return render_template('admin_edit_product_details.html', products=products, categories=categories, subcategories=subcategories)
+        processed_rows = 0
+        created_rows = 0
+        updated_rows = 0
 
-from io import BytesIO
-from flask import send_file
+        for _, row in df.iterrows():
+            row_sku = normalize_value(row.get('sku'))
+            if not row_sku:
+                continue
+            row_sku = str(row_sku).strip()
 
-@app.route('/download_users_excel')
-def download_users_excel():
-    db = get_db()
-    users = db.execute('SELECT name, whatsapp, email FROM quotes').fetchall()
-    df = pd.DataFrame(users, columns=['name', 'whatsapp', 'email'])
-    output = BytesIO()
-    df.to_excel(output, index=False)
-    output.seek(0)
-    return send_file(output, download_name='users.xlsx', as_attachment=True, mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+            product = Product.query.filter_by(sku=row_sku).first()
+            is_new = product is None
+            if is_new:
+                product = Product(sku=row_sku)
+                db.session.add(product)
 
-@app.route('/download_quotes_excel')
-def download_quotes_excel():
-    db = get_db()
-    quotes = db.execute('SELECT id, name, whatsapp, email, address, subtotal, total_tax, grand_total, created_at FROM quotes').fetchall()
-    df = pd.DataFrame(quotes, columns=['id', 'name', 'whatsapp', 'email', 'address', 'subtotal', 'total_tax', 'grand_total', 'created_at'])
-    output = BytesIO()
-    df.to_excel(output, index=False)
-    output.seek(0)
-    return send_file(output, download_name='quotes.xlsx', as_attachment=True, mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+            # Core identity and basics
+            if hasattr(product, 'name'):
+                product.name = row_value(row, 'name')
+            if hasattr(product, 'slug'):
+                product.slug = row_value(row, 'slug')
+            if hasattr(product, 'category'):
+                product.category = row_value(row, 'category')
+            if hasattr(product, 'sub_category'):
+                product.sub_category = row_value(row, 'sub_category')
+            if hasattr(product, 'collection'):
+                product.collection = row_value(row, 'collection')
+            if hasattr(product, 'size'):
+                product.size = row_value(row, 'size')
 
-@app.route('/download_products_excel')
-def download_products_excel():
-    db = get_db()
-    products = db.execute('SELECT sku, name, category, subcategory, description, material, color, sizes, hsn, gst, quantity1, price1, quantity2, price2, quantity3, price3, image_url FROM products').fetchall()
-    df = pd.DataFrame(products, columns=['sku', 'name', 'category', 'subcategory', 'description', 'material', 'color', 'sizes', 'hsn', 'gst', 'quantity1', 'price1', 'quantity2', 'price2', 'quantity3', 'price3', 'image_url'])
-    output = BytesIO()
-    df.to_excel(output, index=False)
-    output.seek(0)
-    return send_file(output, download_name='products.xlsx', as_attachment=True, mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+            # Unified pricing layer
+            if hasattr(product, 'retail_price'):
+                product.retail_price = to_float(row_value(row, 'retail_price'))
+            if hasattr(product, 'mrp_price'):
+                product.mrp_price = to_float(row_value(row, 'mrp_price'))
+            if hasattr(product, 'retail_discount_percent'):
+                product.retail_discount_percent = to_float(row_value(row, 'retail_discount_percent'))
+            if hasattr(product, 'wholesale_price'):
+                product.wholesale_price = to_float(row_value(row, 'wholesale_price'))
+            if hasattr(product, 'min_wholesale_qty'):
+                product.min_wholesale_qty = to_int(row_value(row, 'min_wholesale_qty'))
+            if hasattr(product, 'sets_count'):
+                product.sets_count = to_int(row_value(row, 'sets_count'))
+
+            # Legacy wholesale tier assignments
+            if hasattr(product, 'price1'):
+                product.price1 = to_float(row_value(row, 'price1'))
+            if hasattr(product, 'quantity1'):
+                product.quantity1 = to_int(row_value(row, 'quantity1'))
+            if hasattr(product, 'price2'):
+                product.price2 = to_float(row_value(row, 'price2'))
+            if hasattr(product, 'quantity2'):
+                product.quantity2 = to_int(row_value(row, 'quantity2'))
+            if hasattr(product, 'price3'):
+                product.price3 = to_float(row_value(row, 'price3'))
+            if hasattr(product, 'quantity3'):
+                product.quantity3 = to_int(row_value(row, 'quantity3'))
+
+            # Manufacturing, tax, and cost auditing
+            if hasattr(product, 'purchase_cost'):
+                product.purchase_cost = to_float(row_value(row, 'purchase_cost'))
+            if hasattr(product, 'making_charges'):
+                product.making_charges = to_float(row_value(row, 'making_charges'))
+            if hasattr(product, 'weight_grams'):
+                product.weight_grams = to_float(row_value(row, 'weight_grams'))
+            if hasattr(product, 'material'):
+                product.material = row_value(row, 'material')
+            if hasattr(product, 'hsn_code'):
+                product.hsn_code = row_value(row, 'hsn_code')
+            if hasattr(product, 'gst_percent'):
+                product.gst_percent = to_float(row_value(row, 'gst_percent'))
+
+            # Operations, logistics, and visibility
+            if hasattr(product, 'stock_total'):
+                product.stock_total = to_int(row_value(row, 'stock_total'))
+            if hasattr(product, 'box_packing_type'):
+                product.box_packing_type = row_value(row, 'box_packing_type')
+            if hasattr(product, 'vendor_id'):
+                product.vendor_id = row_value(row, 'vendor_id')
+            if hasattr(product, 'status'):
+                product.status = row_value(row, 'status')
+            if hasattr(product, 'is_active'):
+                product.is_active = to_bool(row_value(row, 'is_active'), default=True)
+            if hasattr(product, 'is_featured'):
+                product.is_featured = to_bool(row_value(row, 'is_featured'), default=False)
+
+            # Keep existing cloud image unless explicitly overridden by sheet.
+            sheet_image = row_value(row, 'image_field')
+            if sheet_image and hasattr(product, 'image_field'):
+                product.image_field = str(sheet_image)
+
+            processed_rows += 1
+            if is_new:
+                created_rows += 1
+            else:
+                updated_rows += 1
+
+        db.session.commit()
+        flash(
+            f'Inventory synchronization complete. Processed {processed_rows} rows '
+            f'({created_rows} created, {updated_rows} updated).'
+        )
+        return redirect(url_for('admin_dashboard'))
+    except Exception as exc:
+        db.session.rollback()
+        flash(f'Catalog sync failed: {exc}')
+        return redirect(url_for('admin_dashboard'))
+
+@app.route('/admin/login', methods=['GET', 'POST'])
+def admin_login():
+    # Simple admin login page, no authentication logic yet
+    return render_template('admin/admin_login.html')
+
 if __name__ == '__main__':
-    create_tables()
-    with app.app_context():
-        auto_migrate_products_table()
-        ensure_quotes_columns()
     app.run(debug=True)

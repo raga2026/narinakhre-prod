@@ -1,4 +1,4 @@
-{% extends "base.html" %}
+{% extends "wholesale/base.html" %}
 {% block title %}Product Details - {{ product['name'] }}{% endblock %}
 {% block content %}
 
@@ -117,22 +117,38 @@
                         data-price="{{ product.tiers[0].price if product.tiers and product.tiers[0].price else product.price1 }}"
                         data-size="{{ product.sizes.split(',')[0]|trim if product.sizes else '' }}"
                     >Add to Quote</button>
-                    <button class="share-btn btn-quote" title="Share this product" onclick="shareProduct()" style="display:flex;align-items:center;gap:8px;">
+                    <button class="share-btn btn-quote" title="Share this product" onclick="shareProduct({{ product['name']|tojson|forceescape }}, {{ request.url|tojson|forceescape }}, {{ url_for('static', filename=image_urls[0], _external=True)|tojson|forceescape }})" style="display:flex;align-items:center;gap:8px;">
                         <img src="{{ url_for('static', filename='assets/share.svg') }}" alt="Share" style="width:22px;height:22px;vertical-align:middle;"> Share
                     </button>
                 </div>
                 <script>
-                function shareProduct() {
+                async function shareProduct(name, url, imageUrl) {
                     const shareData = {
-                        title: '{{ product["name"]|escape }}',
-                        text: 'Check out this product on Nari Nakhre: {{ product["name"]|escape }}',
-                        url: window.location.href
+                        title: name,
+                        text: 'Check out this product on Nari Nakhre: ' + name,
+                        url: url
                     };
+                    const absoluteImageUrl = imageUrl ? new URL(imageUrl, window.location.origin).href : '';
+                    if (absoluteImageUrl && navigator.canShare && window.File) {
+                        try {
+                            const response = await fetch(absoluteImageUrl, { mode: 'cors' });
+                            if (response.ok) {
+                                const blob = await response.blob();
+                                const fileName = (name || 'product').replace(/[^a-z0-9]+/gi, '-').toLowerCase() + '.jpg';
+                                const file = new File([blob], fileName, { type: blob.type || 'image/jpeg' });
+                                const shareWithFiles = { ...shareData, files: [file] };
+                                if (navigator.canShare(shareWithFiles)) {
+                                    await navigator.share(shareWithFiles);
+                                    return;
+                                }
+                            }
+                        } catch (e) {}
+                    }
                     if (navigator.share) {
                         navigator.share(shareData).catch(()=>{});
                     } else {
                         // WhatsApp fallback
-                        const msg = encodeURIComponent(`${shareData.text} ${shareData.url}`);
+                        const msg = encodeURIComponent(`${shareData.text} ${shareData.url}${absoluteImageUrl ? ' ' + absoluteImageUrl : ''}`);
                         window.open(`https://wa.me/?text=${msg}`, '_blank');
                     }
                 }
@@ -164,12 +180,15 @@
                 {% for rel in related_products %}
                 <div class="product-card">
                     <a href="/product/{{ rel.id }}">
+                        {% set rel_first_image = rel.images[0] if rel.images and rel.images|length > 0 else '' %}
+                        {% set rel_first_image_clean = rel_first_image.replace('assets/products/', '') if rel_first_image else '' %}
+                        {% set rel_first_image_src = rel_first_image if rel_first_image and (rel_first_image.startswith('http://') or rel_first_image.startswith('https://') or rel_first_image.startswith('/static/')) else (url_for('static', filename='assets/products/' ~ rel_first_image_clean) if rel_first_image_clean else url_for('static', filename='assets/products/default.jpg')) %}
                         <img id="rel-carousel-{{ rel.sku }}" 
                              class="product-image" 
-                             src="/static/assets/products/{{ rel.sku }}_1.jpg" 
+                             src="{{ rel_first_image_src }}" 
                              alt="{{ rel.name }}" 
                              data-images='{{ rel.images|default([])|tojson }}'
-                             onerror="this.src='/static/assets/products/default.jpg'">
+                             onerror="this.src='{{ url_for('static', filename='assets/products/default.jpg') }}'">
                     </a>
                     <a href="/product/{{ rel.id }}" class="mini-title">{{ rel.name }}</a>
                     <div class="mini-price">₹{{ rel.price1 }}</div>
@@ -234,12 +253,12 @@ document.addEventListener('DOMContentLoaded', function() {
 {% block meta %}
     <meta property="og:title" content="{{ product['name'] }} | Nari Nakhre" />
     <meta property="og:description" content="{{ product['description']|default('Premium ethnic jewelry and accessories.')|striptags|truncate(120) }}" />
-    <meta property="og:image" content="{{ url_for('static', filename=image_urls[0]) }}" />
+    <meta property="og:image" content="{{ url_for('static', filename=image_urls[0], _external=True) }}" />
     <meta property="og:url" content="{{ request.url }}" />
     <meta property="og:type" content="product" />
     <meta name="twitter:card" content="summary_large_image" />
     <meta name="twitter:title" content="{{ product['name'] }} | Nari Nakhre" />
     <meta name="twitter:description" content="{{ product['description']|default('Premium ethnic jewelry and accessories.')|striptags|truncate(120) }}" />
-    <meta name="twitter:image" content="{{ url_for('static', filename=image_urls[0]) }}" />
+    <meta name="twitter:image" content="{{ url_for('static', filename=image_urls[0], _external=True) }}" />
 {% endblock %}
 {% endblock %}

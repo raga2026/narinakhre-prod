@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Thank You</title>
+    <link rel="stylesheet" href="/static/assets/style.css">
+    <style>
+        .thank-you-container {
+            max-width: 500px;
+            margin: 80px auto;
+            padding: 40px;
+            background: #fffbe6;
+            border-radius: 16px;
+            box-shadow: 0 2px 16px rgba(0,0,0,0.07);
+            text-align: center;
+        }
+        .thank-you-title {
+            font-size: 2rem;
+            color: #bfa14a;
+            margin-bottom: 16px;
+        }
+        .thank-you-message {
+            font-size: 1.2rem;
+            color: #333;
+        }
+        .luxury-btn {
+            display: inline-block;
+            margin-top: 32px;
+            padding: 12px 32px;
+            background: linear-gradient(90deg, #bfa14a 0%, #e6c97a 100%);
+            color: #fff;
+            font-weight: 600;
+            border: none;
+            border-radius: 8px;
+            font-size: 1.1rem;
+            text-decoration: none;
+            box-shadow: 0 2px 8px rgba(191,161,74,0.12);
+            transition: background 0.2s;
+        }
+        .luxury-btn:focus {
+            outline: 2px solid #bfa14a;
+        }
+        .logo {
+            height: 60px;
+            margin-bottom: 24px;
+        }
+        .bouquet {
+            height: 80px;
+            margin-bottom: 24px;
+        }
+    </style>
+</head>
+<body>
+    <div class="thank-you-container">
+        <img src="/static/assets/logo.png" alt="Nari Nakhre Logo" class="logo">
+        <img src="/static/assets/bouquet.webp" alt="Bouquet" class="bouquet">
+        {% if order_id %}
+        <div class="thank-you-title" style="color:#be185d;text-shadow:0 2px 8px #f43f5e44;">Thank you for your order!</div>
+        <div class="thank-you-message" style="color:#222;font-size:1.2em;margin-top:16px;background:#fffbe6;padding:12px 0;border-radius:8px;">
+            <span style="color:#be185d;font-weight:bold;">Your order has been placed successfully.</span><br>
+            <span style="color:#222;">Order ID: <b>{{ order_id }}</b></span><br>
+            {% if tracking_url and waybill %}
+            <span style="color:#222;">Track your package: <a href="{{ tracking_url }}" target="_blank" style="color:#be185d;text-decoration:underline;font-weight:bold;">{{ waybill }}</a></span><br>
+            {% endif %}
+            <span style="color:#222;">For help, contact <a href="mailto:info@narinakhre.com" style="color:#be185d;text-decoration:underline;font-weight:bold;">info@narinakhre.com</a>.</span>
+        </div>
+        {% else %}
+        <div class="thank-you-title" style="color:#be185d;text-shadow:0 2px 8px #f43f5e44;">Thank you!</div>
+        <div class="thank-you-message" style="color:#222;font-size:1.2em;margin-top:16px;background:#fffbe6;padding:12px 0;border-radius:8px;">
+            <span style="color:#be185d;font-weight:bold;">Your request has been received.</span><br>
+            <span style="color:#222;">For more information or assistance, please contact <a href="mailto:info@narinakhre.com" style="color:#be185d;text-decoration:underline;font-weight:bold;">info@narinakhre.com</a>.</span>
+        </div>
+        {% endif %}
+        <a href="/" class="rose-btn" style="margin-top:32px;display:inline-block;padding:14px 36px;font-size:1.2rem;font-weight:bold;border-radius:12px;background:linear-gradient(90deg,#be185d 0%,#f43f5e 100%);color:#fff;box-shadow:0 2px 12px #be185d44;text-decoration:none;">Shop More</a>
+    </div>
+    <script>
+        localStorage.removeItem('quoteCart');
+        localStorage.removeItem('retail_cart'); // Clear retail cart after payment
+    </script>
+    <script>
+        localStorage.removeItem('quoteCart');
+    </script>
+</body>
+</html>

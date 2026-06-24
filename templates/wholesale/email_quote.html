@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Nari Nakhre Wholesale Quote</title>
+    <style>
+        body { font-family: 'Segoe UI', Arial, sans-serif; background: #f8f9fa; margin: 0; }
+        .container { max-width: 600px; margin: 40px auto; background: #fff; border-radius: 16px; box-shadow: 0 2px 16px rgba(0,0,0,0.08); padding: 40px 32px; }
+        h1 { color: #be185d; margin-bottom: 16px; }
+        table { width: 100%; border-collapse: collapse; margin-bottom: 24px; font-size: 14px; }
+        th, td { padding: 10px; border: 1px solid #eeeeee; text-align: left; }
+        th { background: #be185d; color: #fff; }
+        .footer { margin-top: 32px; text-align: center; color: #757575; font-size: 0.9em; border-top: 1px solid #eeeeee; padding-top: 20px; }
+        .logo { height: 80px; margin-bottom: 20px; width: auto; }
+        .social { margin-top: 20px; }
+        .social img { height: 32px; vertical-align: middle; margin: 0 8px; }
+        .disclaimer { margin-top: 24px; padding: 12px; background-color: #fce4ec; border-radius: 8px; color: #be185d; font-size: 0.9em; font-weight: bold; text-align: center; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div style="text-align: center;">
+            <a href="https://narinakhre.com" target="_blank">
+                <img src="https://wholesale.narinakhre.com/static/assets/logo.png" alt="Nari Nakhre Logo" class="logo">
+            </a>
+        </div>
+        
+        <h1>Dear {{ name }},</h1>
+        <p>Thank you for requesting a quote from <strong>Nari Nakhre</strong>! Our team will contact you soon to take this forward.</p>
+        <p>Please find your requested quote details below:</p>
+        
+        {% if display_cart and display_cart|length > 0 %}
+        <table>
+            <thead>
+                <tr>
+                    <th>Item Name</th>
+                    <th>Pieces Per Unit</th>
+                    <th>Units</th>
+                    <th>Unit Price</th>
+                    <th>Total Price</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for item in display_cart %}
+                <tr>
+                    <td>{{ item.name }}</td>
+                    <td>{{ item.tier }}</td> <!-- Pieces Per Unit -->
+                    <td>{{ item.units }}</td> <!-- No of Units -->
+                    <td>{{ item.price }}</td> <!-- Unit Price -->
+                    <td>{{ item.row_total }}</td> <!-- Total Price = Units x Unit Price -->
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        
+        <div style="color:#be185d;font-size:1.2em;font-weight:bold; text-align: right;">
+            Grand Total: {{ grand_total }}
+        </div>
+        {% else %}
+        <div style="color:#be185d;font-weight:bold; text-align: center; padding: 20px;">No items found in your quote cart.</div>
+        {% endif %}
+        
+        <div class="disclaimer">
+            * Please note: These prices are tentative. All prices quoted are FOB Nari Nakhre Warehouse.
+        </div>
+
+        <div class="footer">
+            <div style="font-size:1.2em;font-weight:bold;margin-bottom:8px; color: #333;">Mohini Cosmetics</div>
+            <div>GSTIN: 23JFGPS7650J1ZV</div>
+            <div>136, Dharhai Rd, Kotwali, Jabalpur, Madhya Pradesh 482001</div>
+            <div style="margin-top: 8px;">Mob: +91 71572310 | Email: <a href="mailto:mohinicosmetics.india@gmail.com" style="color:#be185d;">mohinicosmetics.india@gmail.com</a></div>
+            <div>Website: <a href="https://narinakhre.com" style="color:#be185d;text-decoration:none;">narinakhre.com</a></div>
+            
+            <div class="social">
+                <a href="https://fb.com/narinakhre" target="_blank"><img src="https://img.icons8.com/color/48/facebook-new.png" alt="Facebook"></a>
+                <a href="https://instagram.com/narinakhre" target="_blank"><img src="https://img.icons8.com/color/48/instagram-new.png" alt="Instagram"></a>
+            </div>
+        </div>
+    </div>
+</body>
+</html>

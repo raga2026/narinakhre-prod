@@ -65,3 +65,20 @@ CREATE TABLE IF NOT EXISTS quotes (
     total_amount REAL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
+
+    -- Orders table for retail order placement and shipment tracking
+    CREATE TABLE IF NOT EXISTS orders (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        order_id TEXT NOT NULL UNIQUE,
+        name TEXT NOT NULL,
+        phone TEXT NOT NULL,
+        email TEXT,
+        address TEXT NOT NULL,
+        pincode TEXT NOT NULL,
+        city TEXT,
+        payment_mode TEXT NOT NULL, -- 'Prepaid' or 'COD'
+        amount REAL NOT NULL,
+        waybill TEXT, -- Delhivery AWB/waybill number
+        status TEXT DEFAULT 'Placed',
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );

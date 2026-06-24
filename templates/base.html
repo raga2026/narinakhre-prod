@@ -1,507 +1,225 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-
     {% block meta %}{% endblock %}
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Nari Nakhre | Premium Ethnic Jewelry & Accessories Wholesaler</title>
-    <link rel="icon" type="image/png" href="{{ url_for('static', filename='assets/logo.png') }}">
-    <meta name="description" content="Wholesale Indian jewelry, bridal sets, and traditional bangles. Shop premium ethnic accessories for weddings, festivals, and special occasions.">
-
-    <!-- Open Graph / Facebook / WhatsApp -->
-    <meta property="og:title" content="Nari Nakhre | Premium Ethnic Jewelry & Accessories Wholesaler">
-    <meta property="og:description" content="Wholesale Indian jewelry, bridal sets, and traditional bangles. Shop premium ethnic accessories for weddings, festivals, and special occasions.">
-    <meta property="og:image" content="https://raga2026.pythonanywhere.com/static/assets/logo.png">
-    <meta property="og:url" content="https://raga2026.pythonanywhere.com">
-    <meta property="og:type" content="website">
-
-    <!-- Twitter Card -->
-    <meta name="twitter:card" content="summary_large_image">
-    <meta name="twitter:title" content="Nari Nakhre | Premium Ethnic Jewelry & Accessories Wholesaler">
-    <meta name="twitter:description" content="Wholesale Indian jewelry, bridal sets, and traditional bangles. Shop premium ethnic accessories for weddings, festivals, and special occasions.">
-    <meta name="twitter:image" content="https://raga2026.pythonanywhere.com/static/assets/logo.png">
-
+    <title>{% if g.site_type == 'retail' %}[RETAIL]{% else %}[WHOLESALE]{% endif %} Nari Nakhre</title>
     <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
-    <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700;900&family=Lato:wght@400;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700;900&family=Merriweather:ital,wght@0,400;0,700;1,400&display=swap" rel="stylesheet">
+    
     <style>
-        body {
-            background: #f8fafc;
-            color: #312e2e;
-            font-family: 'Merriweather', 'Georgia', serif;
-        }
-        .hero-luxury-bg {
-            background-image: url('/static/images/bangle_background_v1.jpg');
-            background-size: cover;
-            background-position: center;
-            min-height: 500px;
-            position: relative;
-        }
-        .hero-luxury-bg > * {
-            position: relative;
-            z-index: 2;
-        }
-        .hero-premium-bg {
-            position: relative;
-            background-image: url('/static/assets/products/012025BNGMR004_1.jpg'); /* fallback to a real product image */
-            background-size: cover;
-            background-position: center;
-        }
-        .hero-premium-bg::before {
-            content: '';
-            position: absolute;
-            inset: 0;
-            background: rgba(255, 228, 235, 0.68); /* soft rose, translucent */
-            z-index: 1;
-        }
-        .hero-premium-bg > * {
-            position: relative;
-            z-index: 2;
-        }
-        .hero-art-glow {
-            box-shadow: 0 0 32px 8px #f9e7d0, 0 0 16px 4px #ffd70044;
-        }
-        .font-serif {
-            font-family: 'Playfair Display', 'Merriweather', serif;
-        }
-        .rose-accent {
-            color: #f472b6;
-        }
-        .product-card {
-            transition: box-shadow 0.2s, transform 0.2s;
-        }
-        .product-card:hover {
-            box-shadow: 0 8px 32px 0 #f472b633;
-            transform: translateY(-4px) scale(1.02);
-            border-color: #be185d;
-        }
-        .add-to-quote-btn {
+        body { background: #fdf2f8; color: #312e2e; font-family: 'Merriweather', serif; scroll-behavior: smooth; }
+        .font-serif { font-family: 'Playfair Display', serif; }
+        .rose-accent { color: #be185d; }
+        .btn-retail-main {
             background: linear-gradient(90deg, #be185d 0%, #f472b6 100%);
-            color: #fff;
-            border: none;
-            padding: 12px;
-            border-radius: 30px;
-            cursor: pointer;
-            font-weight: bold;
-            font-size: 1rem;
-            margin-top: 8px;
-            font-family: 'Merriweather', serif;
-            box-shadow: 0 2px 8px #be185d22;
-            transition: background 0.2s;
+            color: #fff !important; border-radius: 30px; font-weight: bold;
+            transition: all 0.3s ease; box-shadow: 0 4px 12px rgba(190, 24, 93, 0.2);
+            text-align: center; border: none; display: inline-block;
         }
-        .add-to-quote-btn:hover {
-            background: linear-gradient(90deg, #f472b6 0%, #be185d 100%);
-        }
-        .share-btn-float {
-            position: absolute;
-            top: 10px;
-            right: 10px;
-            background: #fff;
-            color: #be185d;
-            border: 1.5px solid #f472b6;
-            border-radius: 50%;
-            padding: 4px;
-            width: 32px;
-            height: 32px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            box-shadow: 0 2px 8px #be185d22;
-            z-index: 2;
-            cursor: pointer;
-            transition: box-shadow 0.2s, background 0.2s;
-        }
-        .share-btn-float:hover {
-            box-shadow: 0 4px 16px #be185d33;
-            background: #fdf2f8;
-        }
-        .nav-btn {
-            background: #be185d;
-            color: white;
-            padding: 6px 10px;
-            border-radius: 7px;
-            font-size: 13px;
-            font-weight: 600;
-            min-width: 0;
-            line-height: 1.2;
-            margin: 0 2px;
-            box-shadow: 0 1px 4px #be185d11;
-            transition: background 0.18s, color 0.18s, box-shadow 0.18s;
-        }
-        .nav-btn svg { margin-right: 3px; }
-        @media (max-width: 768px) {
-            header { flex-direction: column; gap: 8px; text-align: center; padding: 0.7rem 2vw; }
-            header nav { flex-wrap: wrap; justify-content: center; gap: 4px; }
-            .nav-btn, .rose-accent-dropdown {
-                font-size: 12px;
-                padding: 5px 8px;
-                border-radius: 7px;
-                margin: 2px 1px;
-                min-width: 0;
-                width: auto;
-                box-shadow: 0 1px 4px #be185d11;
-            }
-        }
-        header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            padding: 1rem 5%;
-            background: #1e293b;
-            border-bottom: 1px solid #334155;
-        }
-        @media (max-width: 768px) {
-            header { flex-direction: column; gap: 10px; text-align: center; }
-        }
+        .btn-black { background: #000; color: #fff; border-radius: 12px; font-weight: bold; transition: 0.3s; }
+        .cart-count { background: #be185d; color: white; border-radius: 50%; padding: 2px 6px; font-size: 10px; position: absolute; top: -5px; right: -10px; }
+        .hidden { display: none; }
     </style>
 </head>
-<body>
-        <header>
-            <div class="w-full header-main px-2 py-1">
-                <!-- Logo and name at top center -->
-                <div class="flex items-center justify-center gap-2 mb-2 header-logo-mobile">
-                    <a href="/" class="flex items-center gap-2">
-                        <img src="/static/assets/logo.png" alt="Logo" style="height:32px; background:white; padding:2px; border-radius:4px;">
-                        <span class="text-lg font-bold rose-accent font-serif">Nari Nakhre</span>
-                    </a>
-                </div>
-                <!-- Button row below logo: left and right aligned -->
-                <div class="flex flex-row justify-between items-center header-btn-row-mobile">
-                    <div class="flex flex-col items-start gap-2">
-                        <a href="/" class="nav-btn flex items-center gap-1 bg-rose-100 text-rose-700 hover:bg-rose-200 font-bold px-3 py-1 rounded-full text-xs shadow-sm" style="font-size:13px;min-width:0;">
-                            <svg width="16" height="16" fill="none" stroke="#be185d" stroke-width="2" viewBox="0 0 24 24" style="margin-right:2px;"><path d="M3 12L12 4l9 8"/><path d="M9 21V9h6v12"/></svg>
-                            Home
-                        </a>
-                        <div class="relative" id="categories-dropdown-wrapper">
-                            <button type="button" class="nav-btn rose-accent-dropdown flex items-center gap-1 px-3 py-1 rounded-full text-xs" id="categories-dropdown-btn" aria-haspopup="true" aria-expanded="false" style="font-size:13px;min-width:0;">
-                                <svg class="inline" width="14" height="14" fill="none" stroke="#be185d" stroke-width="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" stroke="#be185d" stroke-width="2" fill="#1e293b"/><path d="M19 9l-7 7-7-7" stroke="#be185d" stroke-width="2"/></svg>
-                                <span>Categories</span>
-                            </button>
-                            <div class="hidden absolute z-50 mt-2 w-44 text-rose-300 rounded-2xl shadow-2xl border border-rose-700/30 transition-all duration-200" id="categories-dropdown-menu">
-                                {% for cat in categories %}
-                                    <a href="{{ url_for('category_products', category=cat) }}" class="block px-4 py-2 rounded-xl font-semibold hover:bg-rose-600/20 hover:text-rose-400 transition-all duration-150 text-xs">{{ cat }}</a>
-                                {% endfor %}
-                            </div>
-                        </div>
+<body class="flex flex-col min-h-screen">
+
+
+    <!-- Retail Header -->
+    <header class="py-4 px-6 sticky top-0 z-50 shadow-md bg-white border-b-2 border-rose-700">
+        <div class="container mx-auto flex justify-between items-center">
+            <a href="/" class="text-3xl font-black rose-accent font-serif">Nari Nakhre</a>
+            <nav class="flex items-center gap-6 font-bold relative">
+                <a href="/" class="rose-accent hover:underline">Home</a>
+                <div class="relative group">
+                    <button type="button" class="rose-accent hover:underline cursor-pointer focus:outline-none">Categories</button>
+                    {% if categories %}
+                    <div class="absolute left-0 mt-2 w-48 bg-white border border-rose-200 rounded-xl shadow-lg z-50 hidden group-hover:block">
+                        {% for cat in categories %}
+                        <a href="/retail/category/{{ cat }}" class="block px-4 py-2 text-rose-700 hover:bg-rose-50 hover:text-rose-900">{{ cat }}</a>
+                        {% endfor %}
                     </div>
-                    <div class="flex flex-col items-end gap-2">
-                        <a href="{{ url_for('checkout') }}" class="nav-btn flex items-center gap-1 bg-rose-100 text-rose-700 hover:bg-rose-200 font-bold px-3 py-1 rounded-full text-xs shadow-sm" style="font-size:13px;min-width:0;">
-                            <svg width="16" height="16" fill="none" stroke="#be185d" stroke-width="2" viewBox="0 0 24 24" style="margin-right:2px;"><circle cx="9" cy="21" r="1"/><circle cx="20" cy="21" r="1"/><path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"/></svg>
-                            Cart
-                        </a>
-                        <button id="contact-us-btn" class="nav-btn flex items-center gap-1 bg-rose-600 hover:bg-rose-700 text-white font-bold px-3 py-1 rounded-full text-xs" style="font-size:13px;min-width:0;">
-                            <svg width="14" height="14" fill="none" stroke="#fff" stroke-width="2" viewBox="0 0 24 24"><path d="M21 10.5V6a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h7.5"/><path d="M16 3v4a1 1 0 0 0 1 1h4"/><path d="M21 15v4a2 2 0 0 1-2 2h-7.5"/><path d="M16 21v-4a1 1 0 0 1 1-1h4"/></svg>
-                            Contact Us
-                        </button>
-                    </div>
+                    {% endif %}
                 </div>
+                <a href="/retail/checkout" class="relative rose-accent hover:underline">
+                    Cart <span id="cart-count" class="cart-count">{{ session.get('cart', {})|length }}</span>
+                </a>
+                <a href="/retail/contact" class="rose-accent hover:underline">Contact Us</a>
+            </nav>
+        </div>
+        {% if g.site_type == 'retail' %}
+        <div class="w-full flex justify-end py-2 px-4 bg-rose-50">
+            <div class="flex items-center gap-2">
+                <input id="pincode-input" type="text" placeholder="Pincode" class="border p-1 rounded text-sm w-24">
+                <button class="btn-black px-3 py-1 text-xs" onclick="verifyService()">Check</button>
+                <span id="pincode-result" class="text-xs font-bold"></span>
             </div>
-        <style>
-            body { background: #f8fafc !important; }
-            @media (max-width: 768px) {
-                .header-main {
-                    display: flex !important;
-                    flex-direction: column !important;
-                    align-items: stretch !important;
-                    gap: 0.3rem !important;
-                }
-                .header-logo-mobile {
-                    justify-content: center !important;
-                }
-                .header-btn-row-mobile {
-                    flex-direction: row !important;
-                    justify-content: space-between !important;
-                    align-items: flex-start !important;
-                }
-            }
-            .nav-btn, .rose-accent-dropdown {
-                border: none !important;
-                box-shadow: 0 1px 4px #be185d11;
-            }
-        <style>
-            @media (max-width: 768px) {
-                .header-main {
-                    display: flex !important;
-                    flex-direction: column !important;
-                    align-items: stretch !important;
-                    gap: 0.3rem !important;
-                }
-                .header-row-mobile {
-                    flex-direction: row !important;
-                    justify-content: space-between !important;
-                    align-items: flex-start !important;
-                }
-                .header-logo-mobile {
-                    flex: 1 1 0%;
-                    align-items: center !important;
-                    justify-content: center !important;
-                }
-            }
-            .nav-btn, .rose-accent-dropdown {
-                border: none !important;
-                box-shadow: 0 1px 4px #be185d11;
-            }
-        <style>
-            @media (max-width: 768px) {
-                .header-main {
-                    display: flex !important;
-                    flex-direction: column !important;
-                    align-items: stretch !important;
-                    gap: 0.3rem !important;
-                }
-                .header-logo, .header-contact, .header-row, .header-categories {
-                    width: 100% !important;
-                }
-                .header-logo {
-                    justify-content: center !important;
-                }
-                .header-contact {
-                    margin-bottom: 0.2rem !important;
-                }
-                .header-row {
-                    flex-direction: row !important;
-                    justify-content: space-between !important;
-                    margin-bottom: 0.2rem !important;
-                }
-                .header-categories {
-                    margin-top: 0.2rem !important;
-                }
-            }
-            .nav-btn, .rose-accent-dropdown {
-                border: none !important;
-                box-shadow: 0 1px 4px #be185d11;
-            }
-        <style>
-            @media (max-width: 768px) {
-                .header-main {
-                    flex-direction: column !important;
-                    gap: 0.5rem !important;
-                    align-items: stretch !important;
-                }
-                .header-logo {
-                    justify-content: center !important;
-                    margin-bottom: 0.5rem !important;
-                }
-                .header-icons {
-                    flex-direction: column !important;
-                    justify-content: center !important;
-                    align-items: center !important;
-                    gap: 0.5rem !important;
-                }
-            }
-        <style>
-            @media (max-width: 768px) {
-                .header-main {
-                    flex-direction: column !important;
-                    gap: 0.5rem !important;
-                    align-items: stretch !important;
-                }
-                .header-logo {
-                    justify-content: center !important;
-                    margin-bottom: 0.5rem !important;
-                }
-                .header-center {
-                    flex-direction: row !important;
-                    justify-content: center !important;
-                    gap: 0.5rem !important;
-                }
-                .header-top {
-                    flex-direction: row !important;
-                    justify-content: center !important;
-                    gap: 0.5rem !important;
-                }
-                .header-right {
-                    flex-direction: row !important;
-                    justify-content: center !important;
-                    gap: 0.5rem !important;
-                    margin-top: 0.5rem !important;
-                }
-                .header-bottom {
-                    flex-direction: row !important;
-                    justify-content: center !important;
-                    gap: 0.5rem !important;
-                }
-            }
-        <style>
-            /* Dropdown styles - beautified */
-            .rose-accent-dropdown {
-                background: linear-gradient(90deg, #be185d 0%, #f472b6 100%);
-                color: #fff;
-                border: none;
-                border-radius: 1rem;
-                font-weight: bold;
-                box-shadow: 0 2px 8px rgba(190,24,93,0.10);
-                padding: 10px 24px;
-                font-size: 1rem;
-                transition: background 0.2s, color 0.2s;
-            }
-            .rose-accent-dropdown:hover, .rose-accent-dropdown:focus {
-                background: linear-gradient(90deg, #f472b6 0%, #be185d 100%);
-                color: #fff;
-            }
-            #categories-dropdown-menu {
-                min-width: 12rem;
-                border-radius: 1rem;
-                box-shadow: 0 8px 32px 0 rgba(190,24,93,0.18);
-                border: 1px solid #be185d33;
-                background: #1e293b !important;
-            }
-            #categories-dropdown-menu a {
-                font-size: 1.05rem;
-                letter-spacing: 0.01em;
-                color: #fff !important;
-            }
-            #categories-dropdown-menu a:hover {
-                background: #be185d22;
-                color: #f472b6;
-            }
-            @media (max-width: 768px) {
-                #categories-dropdown-menu { left: 0; right: auto; }
-            }
-        </style>
-        <script>
-        // Toggle categories dropdown on click
-        document.addEventListener('DOMContentLoaded', function() {
-            const btn = document.getElementById('categories-dropdown-btn');
-            const menu = document.getElementById('categories-dropdown-menu');
-            let open = false;
-            btn.addEventListener('click', function(e) {
-                e.stopPropagation();
-                open = !open;
-                menu.classList.toggle('hidden', !open);
-                btn.setAttribute('aria-expanded', open ? 'true' : 'false');
-            });
-            // Close dropdown when clicking outside
-            document.addEventListener('click', function(e) {
-                if (open && !document.getElementById('categories-dropdown-wrapper').contains(e.target)) {
-                    menu.classList.add('hidden');
-                    btn.setAttribute('aria-expanded', 'false');
-                    open = false;
-                }
-            });
-        });
-        </script>
+        </div>
+        {% endif %}
     </header>
 
-    <main class="container mx-auto p-4">
-        {% block content %}{% endblock %}
-    </main>
-    <script src="{{ url_for('static', filename='js/cart_global.js') }}"></script>
-    <script src="{{ url_for('static', filename='js/quote-actions.js') }}"></script>
 
-    <!-- Premium Hero Random Background & Share Button Logic -->
-    <script>
-    // Random Hero Bangle Image
-    document.addEventListener('DOMContentLoaded', function() {
-        var heroImg = document.getElementById('hero-bangle-img');
-        if (heroImg) {
-            var imgs = [
-                '/static/images/bangle1.jpg',
-                '/static/images/bangle2.jpg',
-                '/static/images/bangle3.jpg',
-                '/static/images/bangle4.jpg'
-            ];
-            var idx = Math.floor(Math.random() * imgs.length);
-            heroImg.src = imgs[idx];
-        }
-    });
-    // Web Share API for Product Cards
-    function shareProduct(name, url) {
-        const shareData = {
-            title: name,
-            text: 'Check out this product on Nari Nakhre: ' + name,
-            url: url
-        };
-        if (navigator.share) {
-            navigator.share(shareData).catch(()=>{});
-        } else {
-            // WhatsApp fallback
-            const msg = encodeURIComponent(`${shareData.text} ${shareData.url}`);
-            window.open(`https://wa.me/?text=${msg}`, '_blank');
-        }
-    }
-    </script>
+    <main class="flex-grow">{% block content %}{% endblock %}</main>
 
-    <!-- Contact Us Modal -->
-    <div id="contact-modal" class="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-60 hidden">
-        <div class="bg-white text-black rounded-2xl shadow-2xl p-8 max-w-lg w-full relative">
-            <button onclick="closeContactModal()" class="absolute top-3 right-3 text-rose-600 hover:text-rose-800 text-2xl font-bold">&times;</button>
-            <h2 class="text-2xl font-extrabold rose-accent mb-6 text-center">Contact Us</h2>
-            <form id="contact-form" method="POST" action="/contact" class="relative">
-                <div class="mb-4">
-                    <label class="block text-rose-600 font-bold mb-2">Full Name</label>
-                    <input type="text" name="name" required class="w-full border border-rose-300 rounded-lg p-3 focus:border-rose-500 outline-none">
-                </div>
-                <div class="mb-4">
-                    <label class="block text-rose-600 font-bold mb-2">WhatsApp Number</label>
-                    <input type="text" name="whatsapp" required class="w-full border border-rose-300 rounded-lg p-3 focus:border-rose-500 outline-none">
-                </div>
-                <div class="mb-4">
-                    <label class="block text-rose-600 font-bold mb-2">Email Address</label>
-                    <input type="email" name="email" required class="w-full border border-rose-300 rounded-lg p-3 focus:border-rose-500 outline-none">
-                </div>
-                <div class="mb-6">
-                    <label class="block text-rose-600 font-bold mb-2">Message</label>
-                    <textarea name="message" rows="3" required class="w-full border border-rose-300 rounded-lg p-3 focus:border-rose-500 outline-none"></textarea>
-                </div>
-                <button type="submit" class="w-full py-3 rounded-lg font-bold text-xl bg-rose-600 text-white hover:bg-rose-700 transition block md:hidden fixed top-4 right-6 z-50" style="max-width:160px;box-shadow:0 2px 12px #be185d44;">Send Message</button>
-                <button type="submit" class="w-full py-3 rounded-lg font-bold text-xl bg-rose-600 text-white hover:bg-rose-700 transition hidden md:block mt-4">Send Message</button>
-                <style>
-                @media (max-width: 768px) {
-                    #contact-modal form .fixed.top-4.right-6 {
-                        display: block !important;
-                    }
-                    #contact-modal form .hidden.md\:block {
-                        display: none !important;
-                    }
-                }
-                @media (min-width: 769px) {
-                    #contact-modal form .fixed.top-4.right-6 {
-                        display: none !important;
-                    }
-                    #contact-modal form .hidden.md\:block {
-                        display: block !important;
-                    }
-                }
-                </style>
-            </form>
-        </div>
-    </div>
-
-    <!-- Footer with company details and Admin button below address -->
-
-    <footer class="w-full bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 text-rose-200 py-8 mt-16 border-t border-rose-900/20">
-        <div class="max-w-4xl mx-auto flex flex-col items-center gap-2 px-4">
-            <div class="text-center">
-                <div class="mb-3">
-                    <span class="font-semibold text-rose-300">Follow Us :</span>
-                    <a href="https://fb.com/narinakhre" target="_blank" class="inline-block mx-1 align-middle" title="Facebook">
-                        <img src="https://img.icons8.com/color/32/facebook-new.png" alt="Facebook" style="display:inline;height:28px;vertical-align:middle;"/>
-                    </a>
-                    <a href="https://instagram.com/narinakhre" target="_blank" class="inline-block mx-1 align-middle" title="Instagram">
-                        <img src="https://img.icons8.com/color/32/instagram-new.png" alt="Instagram" style="display:inline;height:28px;vertical-align:middle;"/>
-                    </a>
-                </div>
-                <div class="text-lg font-bold rose-accent mb-1">Mohini Cosmetics</div>
-                <div>Shop No 136, Dharhai R Kotwali, Jabalpur, Maya Prash, Ina 482001</div>
-                <div class="text-sm mt-2">Mob: +91 99941 44994, Email: <a href="mailto:info@narinakhre.com" class="underline text-rose-300 hover:text-rose-400">info@narinakhre.com</a></div>
-                <div class="text-sm">Website: <a href="https://narinakhre.com" class="underline text-rose-300 hover:text-rose-400">Retail: narinakhre.com</a>, <a href="https://wholesale.narinakhre.com" class="underline text-rose-300 hover:text-rose-400">Wholesale: wholesale.narinakhre.com</a></div>
-                <a href="{{ url_for('admin_login') }}" class="mt-4 inline-block px-4 py-1 text-xs bg-slate-700 text-rose-200 rounded font-semibold hover:bg-slate-800 transition">Admin</a>
+    <!-- Retail Footer -->
+    <footer class="bg-white border-t-2 border-rose-700 py-8 mt-10">
+        <div class="container mx-auto px-4 flex flex-col md:flex-row justify-between items-center gap-6">
+            <div class="flex flex-col md:flex-row gap-4 md:gap-8 items-center">
+                <a href="/" class="rose-accent font-bold hover:underline">Home</a>
+                <a href="/retail/categories" class="rose-accent font-bold hover:underline">Categories</a>
+                <a href="/retail/checkout" class="rose-accent font-bold hover:underline">Cart</a>
+                <a href="/retail/contact" class="rose-accent font-bold hover:underline">Contact Us</a>
             </div>
-        </div>
-        <div class="text-xs text-rose-300 mt-4 text-center opacity-80">
-            &copy; 2026 Mohini Cosmetics. All rights reserved.
+            <div class="text-center text-xs text-gray-500 mt-4 md:mt-0">
+                <div>Nari Nakhre Retail &copy; {{ 2026 }}. All Rights Reserved.</div>
+                <div>Handcrafted with <span style="color:#be185d">&#10084;</span> in India. | <a href="mailto:info@narinakhre.com" class="hover:underline text-rose-700">info@narinakhre.com</a></div>
+            </div>
         </div>
     </footer>
 
     <script>
-        // Contact Us modal logic
-        const contactBtn = document.getElementById('contact-us-btn');
-        const contactModal = document.getElementById('contact-modal');
-        function closeContactModal() { contactModal.classList.add('hidden'); }
-        contactBtn.addEventListener('click', function() { contactModal.classList.remove('hidden'); });
-        contactModal.addEventListener('click', function(e) { if (e.target === contactModal) closeContactModal(); });
-        document.addEventListener('keydown', function(e) { if (e.key === 'Escape') closeContactModal(); });
+
+    // Amazon-style Retail Cart Logic
+    function retailAddToCart(btn) {
+        const container = btn.closest('.cart-container');
+        const sku = btn.getAttribute('data-sku');
+        const price = btn.getAttribute('data-price');
+        const name = btn.getAttribute('data-name');
+        let size = 'Standard';
+        const sizeSelect = container.querySelector('.size-select') || document.getElementById('size-main');
+        if (sizeSelect) size = sizeSelect.value;
+        // Always set to 1 on Add to Cart
+        const qty = 1;
+        fetch('/update-cart', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ product_id: sku, qty: qty, price: price, size: size })
+        })
+        .then(res => res.json())
+        .then(data => {
+            if (data.status === 'success') {
+                const cartCount = document.getElementById('cart-count');
+                if (cartCount) cartCount.innerText = data.new_total || (data.cart_count || '1');
+                btn.classList.add('hidden');
+                const counter = container.querySelector('.unit-counter');
+                if (counter) {
+                    counter.classList.remove('hidden');
+                    counter.querySelector('.qty-display').innerText = '1';
+                }
+            }
+        });
+    }
+
+    function retailIncrement(btn) {
+        const container = btn.closest('.cart-container');
+        const counter = btn.closest('.unit-counter');
+        const sku = container.querySelector('.add-to-cart-btn').getAttribute('data-sku');
+        const price = container.querySelector('.add-to-cart-btn').getAttribute('data-price');
+        const name = container.querySelector('.add-to-cart-btn').getAttribute('data-name');
+        let size = 'Standard';
+        const sizeSelect = container.querySelector('.size-select') || document.getElementById('size-main');
+        if (sizeSelect) size = sizeSelect.value;
+        let qty = parseInt(counter.querySelector('.qty-display').innerText) || 1;
+        if (qty >= 5) return;
+        qty++;
+        fetch('/update-cart', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ product_id: sku, qty: qty, price: price, size: size })
+        })
+        .then(res => res.json())
+        .then(data => {
+            if (data.status === 'success') {
+                counter.querySelector('.qty-display').innerText = qty;
+                const cartCount = document.getElementById('cart-count');
+                if (cartCount) cartCount.innerText = data.new_total || (data.cart_count || '1');
+            }
+        });
+    }
+
+    function retailDecrement(btn) {
+        const container = btn.closest('.cart-container');
+        const counter = btn.closest('.unit-counter');
+        const sku = container.querySelector('.add-to-cart-btn').getAttribute('data-sku');
+        const price = container.querySelector('.add-to-cart-btn').getAttribute('data-price');
+        const name = container.querySelector('.add-to-cart-btn').getAttribute('data-name');
+        let size = 'Standard';
+        const sizeSelect = container.querySelector('.size-select') || document.getElementById('size-main');
+        if (sizeSelect) size = sizeSelect.value;
+        let qty = parseInt(counter.querySelector('.qty-display').innerText) || 1;
+        if (qty <= 1) {
+            // Remove from cart, show Add to Cart button
+            fetch('/update-cart', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ product_id: sku, qty: 0, price: price, size: size })
+            })
+            .then(res => res.json())
+            .then(data => {
+                if (data.status === 'success') {
+                    counter.classList.add('hidden');
+                    const addBtn = container.querySelector('.add-to-cart-btn');
+                    if (addBtn) addBtn.classList.remove('hidden');
+                    const cartCount = document.getElementById('cart-count');
+                    if (cartCount) cartCount.innerText = data.new_total || (data.cart_count || '0');
+                }
+            });
+            return;
+        }
+        qty--;
+        fetch('/update-cart', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ product_id: sku, qty: qty, price: price, size: size })
+        })
+        .then(res => res.json())
+        .then(data => {
+            if (data.status === 'success') {
+                counter.querySelector('.qty-display').innerText = qty;
+                const cartCount = document.getElementById('cart-count');
+                if (cartCount) cartCount.innerText = data.new_total || (data.cart_count || '1');
+            }
+        });
+    }
+
+    function retailBuyNow(btn) {
+        const container = btn.closest('.cart-container');
+        const sku = btn.getAttribute('data-sku');
+        const price = btn.getAttribute('data-price');
+        const name = btn.getAttribute('data-name');
+        let size = 'Standard';
+        const sizeSelect = container.querySelector('.size-select') || document.getElementById('size-main');
+        if (sizeSelect) size = sizeSelect.value;
+        // If counter is visible, use its value, else 1
+        let qty = 1;
+        const counter = container.querySelector('.unit-counter');
+        if (counter && !counter.classList.contains('hidden')) {
+            qty = parseInt(counter.querySelector('.qty-display').innerText) || 1;
+        }
+        fetch('/update-cart', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ product_id: sku, qty: qty, price: price, size: size })
+        })
+        .then(res => res.json())
+        .then(data => {
+            if (data.status === 'success') {
+                const cartCount = document.getElementById('cart-count');
+                if (cartCount) cartCount.innerText = data.new_total || (data.cart_count || '1');
+                window.location.href = '/retail/checkout';
+            }
+        });
+    }
+
+    function verifyService() {
+        const pin = document.getElementById('pincode-input').value;
+        const res = document.getElementById('pincode-result');
+        fetch(`/api/delhivery/check/${pin}`).then(r => r.json()).then(data => {
+            res.innerText = data.status ? "Deliverable" : "Not Serviceable";
+            res.className = data.status ? "text-green-600" : "text-red-600";
+        });
+    }
     </script>
 </body>
 </html>

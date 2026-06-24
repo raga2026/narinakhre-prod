@@ -1,4 +1,4 @@
-{% extends "base.html" %}
+{% extends "wholesale/base.html" %}
 {% block content %}
 <style>
     /* ...existing code... */
@@ -111,15 +111,19 @@
     {% for product in products %}
     <div class="bg-white rounded-xl shadow p-3 flex flex-col items-center relative product-card">
         <button class="absolute top-2 right-2 bg-rose-100 hover:bg-rose-200 rounded-full p-2 shadow"
-            onclick="shareProduct('{{ product.name }}', '{{ url_for('product_detail', product_id=product.id, _external=True) }}')">
+            onclick="shareProduct({{ product.name|tojson|forceescape }}, {{ url_for('product_detail', product_id=product.id, _external=True)|tojson|forceescape }}, {{ product.images[0]|tojson|forceescape }})">
             <img src="{{ url_for('static', filename='assets/share.svg') }}" alt="Share" class="w-5 h-5" />
         </button>
         <a href="{{ url_for('product_detail', product_id=product.id) }}" class="block w-full">
+              {% set first_image = product.images[0] if product.images and product.images|length > 0 else '' %}
+              {% set first_image_clean = first_image.replace('assets/products/', '') if first_image else '' %}
+              {% set first_image_src = first_image if first_image and (first_image.startswith('http://') or first_image.startswith('https://') or first_image.startswith('/static/')) else (url_for('static', filename='assets/products/' ~ first_image_clean) if first_image_clean else url_for('static', filename='assets/products/default.jpg')) %}
             <img id="carousel-img-{{ product.sku }}" 
-                 src="{{ product.images[0] }}" 
+                  src="{{ first_image_src }}" 
                  alt="{{ product.name }}" 
                  class="w-full h-32 md:h-48 object-contain rounded-xl bg-slate-100 transition-opacity duration-500"
-                 data-images='{{ product.images|tojson }}' />
+                  data-images='{{ product.images|tojson }}' 
+                  onerror="this.src='{{ url_for('static', filename='assets/products/default.jpg') }}'" />
         </a>
         <a href="{{ url_for('product_detail', product_id=product.id) }}" class="mt-2 w-full block text-center font-semibold text-slate-800 product-title whitespace-normal overflow-hidden text-ellipsis" style="font-family:'Playfair Display',serif; font-size:1.08rem; max-height:2.7em; line-height:1.35; min-height:2.7em;">
             {{ product.name }}
@@ -173,16 +177,32 @@ function filterProducts() {
     });
 }
 
-function shareProduct(name, url) {
+async function shareProduct(name, url, imageUrl) {
     const shareData = {
         title: name,
         text: 'Check out this product on Nari Nakhre: ' + name,
         url: url
     };
+    const absoluteImageUrl = imageUrl ? new URL(imageUrl, window.location.origin).href : '';
+    if (absoluteImageUrl && navigator.canShare && window.File) {
+        try {
+            const response = await fetch(absoluteImageUrl, { mode: 'cors' });
+            if (response.ok) {
+                const blob = await response.blob();
+                const fileName = (name || 'product').replace(/[^a-z0-9]+/gi, '-').toLowerCase() + '.jpg';
+                const file = new File([blob], fileName, { type: blob.type || 'image/jpeg' });
+                const shareWithFiles = { ...shareData, files: [file] };
+                if (navigator.canShare(shareWithFiles)) {
+                    await navigator.share(shareWithFiles);
+                    return;
+                }
+            }
+        } catch (e) {}
+    }
     if (navigator.share) {
         navigator.share(shareData).catch(()=>{});
     } else {
-        const msg = encodeURIComponent(`${shareData.text} ${shareData.url}`);
+        const msg = encodeURIComponent(`${shareData.text} ${shareData.url}${absoluteImageUrl ? ' ' + absoluteImageUrl : ''}`);
         window.open(`https://wa.me/?text=${msg}`, '_blank');
     }
 }

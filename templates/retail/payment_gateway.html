@@ -1,0 +1,162 @@
+{% extends "retail/base.html" %}
+
+{% block title %}Checkout - Nari Nakhre{% endblock %}
+
+{% block meta %}
+<meta name="description" content="Secure Razorpay checkout for your Nari Nakhre order">
+{% endblock %}
+
+{% block content %}
+<script src="https://checkout.razorpay.com/v1/checkout.js"></script>
+
+<div class="min-h-screen bg-[#181c2a] px-4 py-8 sm:px-6 lg:px-8">
+    <div class="mx-auto w-full max-w-3xl">
+        <div class="mb-8 text-center">
+            <h1 class="text-3xl font-bold text-rose-100 sm:text-4xl">Checkout</h1>
+            <p class="mt-2 text-rose-200/70">Review your order and complete payment securely.</p>
+        </div>
+
+        <div class="rounded-2xl border border-rose-500/25 bg-[#23263a] p-6 shadow-2xl shadow-black/20 sm:p-8">
+            <div class="mb-6 flex items-center justify-between border-b border-rose-500/20 pb-4">
+                <div>
+                    <h2 class="text-xl font-semibold text-rose-100">Order Summary</h2>
+                    <p class="text-sm text-rose-200/60">Confirm the payment details before continuing.</p>
+                </div>
+                <div class="rounded-full bg-rose-500/10 px-3 py-1 text-xs font-semibold uppercase tracking-[0.2em] text-rose-300">Razorpay</div>
+            </div>
+
+            <div class="space-y-4 rounded-xl border border-rose-500/15 bg-[#181c2a] p-5">
+                <div class="flex items-start justify-between gap-4 border-b border-rose-500/10 pb-3">
+                    <span class="text-sm text-rose-200/60">Order ID</span>
+                    <span class="break-all text-right font-mono text-sm font-semibold text-rose-100">{{ order_id or internal_order_id }}</span>
+                </div>
+                <div class="flex items-start justify-between gap-4 border-b border-rose-500/10 pb-3">
+                    <span class="text-sm text-rose-200/60">Waybill Tracking</span>
+                    <span class="break-all text-right font-mono text-sm font-semibold text-rose-100">{{ waybill }}</span>
+                </div>
+                <div class="flex items-start justify-between gap-4">
+                    <span class="text-sm text-rose-200/60">Total Amount</span>
+                    <span class="text-right text-2xl font-bold text-rose-400">₹{{ amount or amount_to_pay }}</span>
+                </div>
+            </div>
+
+            <div class="mt-6 rounded-xl border border-rose-500/15 bg-rose-500/5 p-4 text-sm text-rose-100/80">
+                Your payment will open in Razorpay’s secure checkout modal.
+            </div>
+
+            <div id="payment-banner" class="mt-5 hidden rounded-xl border border-yellow-400/30 bg-yellow-400/10 px-4 py-3 text-sm text-yellow-100"></div>
+
+            <button id="rzp-button1" class="mt-6 w-full rounded-lg bg-rose-500 py-4 text-xl font-bold text-white shadow-lg transition hover:bg-yellow-400 hover:text-rose-700">
+                Pay Now
+            </button>
+
+            <div class="mt-4 flex flex-col gap-3 sm:flex-row">
+                <form method="POST" action="{{ url_for('payment_cancel') }}" class="sm:flex-1">
+                    <button type="submit" class="w-full rounded-lg border border-rose-500/30 bg-[#181c2a] px-5 py-3 font-semibold text-rose-100 transition hover:bg-rose-500/10">Cancel Checkout</button>
+                </form>
+                <a href="{{ url_for('checkout_shipping') }}" class="sm:flex-1">
+                    <span class="block w-full rounded-lg border border-rose-500/30 bg-[#181c2a] px-5 py-3 text-center font-semibold text-rose-100 transition hover:bg-rose-500/10">Edit Shipping</span>
+                </a>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+(function () {
+    const button = document.getElementById('rzp-button1');
+    const banner = document.getElementById('payment-banner');
+
+    function showBanner(message) {
+        banner.textContent = message;
+        banner.classList.remove('hidden');
+        window.clearTimeout(window.__paymentBannerTimer);
+        window.__paymentBannerTimer = window.setTimeout(() => {
+            banner.classList.add('hidden');
+        }, 3500);
+    }
+
+    button.addEventListener('click', async function () {
+        try {
+            const createOrderResponse = await fetch('/api/create-order', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-Requested-With': 'XMLHttpRequest'
+                },
+                body: JSON.stringify({
+                    order_id: {{ (order_id or internal_order_id)|tojson }},
+                    waybill: {{ waybill|tojson }},
+                    amount: {{ (amount or amount_to_pay)|tojson }}
+                })
+            });
+
+            if (!createOrderResponse.ok) {
+                showBanner('Unable to create Razorpay order. Please try again.');
+                return;
+            }
+
+            const data = await createOrderResponse.json();
+            const razorpayOrderId = data.order_id || data.razorpay_order_id || data.id;
+            const razorpayAmount = data.amount || Math.round(Number({{ amount or amount_to_pay }}) * 100);
+
+            if (!razorpayOrderId) {
+                showBanner('Payment order was not returned by the server.');
+                return;
+            }
+
+            const options = {
+                key: {{ config['RAZORPAY_KEY_ID']|tojson }},
+                amount: razorpayAmount,
+                currency: 'INR',
+                name: 'Nari Nakhre',
+                description: 'Order payment for {{ order_id or internal_order_id }}',
+                order_id: razorpayOrderId,
+                prefill: {
+                    name: '',
+                    email: '',
+                    contact: ''
+                },
+                theme: {
+                    color: '#be185d'
+                },
+                handler: function (response) {
+                    const form = document.createElement('form');
+                    form.method = 'POST';
+                    form.action = '/api/verify-payment';
+
+                    const fields = {
+                        razorpay_payment_id: response.razorpay_payment_id,
+                        razorpay_order_id: response.razorpay_order_id,
+                        razorpay_signature: response.razorpay_signature
+                    };
+
+                    Object.keys(fields).forEach((name) => {
+                        const input = document.createElement('input');
+                        input.type = 'hidden';
+                        input.name = name;
+                        input.value = fields[name];
+                        form.appendChild(input);
+                    });
+
+                    document.body.appendChild(form);
+                    form.submit();
+                }
+            };
+
+            const rzp = new Razorpay(options);
+            rzp.on('payment.failed', function () {
+                showBanner('Payment was not completed. You can try again safely.');
+            });
+            rzp.on('modal.closed', function () {
+                showBanner('Payment window closed before completion.');
+            });
+            rzp.open();
+        } catch (error) {
+            console.error(error);
+            showBanner('Something went wrong while opening checkout.');
+        }
+    });
+})();
+</script>
+{% endblock %}

@@ -1,0 +1,101 @@
+{% extends "retail/base.html" %}
+{% block title %}Shipping Address | Nari Nakhre{% endblock %}
+{% block content %}
+<div class="max-w-3xl mx-auto px-4 py-10 sm:py-12">
+    <div class="rounded-2xl border border-rose-500/30 bg-[#181c2a] p-6 sm:p-8 shadow-xl">
+        <h1 class="text-2xl sm:text-3xl font-serif font-bold text-rose-100 mb-2">Shipping Address</h1>
+        <p class="text-sm sm:text-base text-rose-200/80 mb-6">Enter delivery details to continue with checkout.</p>
+
+        <form method="POST" action="/checkout/process" class="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-5">
+            <div class="sm:col-span-2">
+                <label for="consignee_name" class="block text-sm font-semibold text-rose-200 mb-2">Full Name</label>
+                <input
+                    id="consignee_name"
+                    name="consignee_name"
+                    type="text"
+                    required
+                    autocomplete="name"
+                    class="w-full rounded-xl border border-rose-500 bg-[#23263a] px-4 py-3 text-rose-100 placeholder-rose-300/60 focus:border-rose-500 focus:outline-none focus:ring-2 focus:ring-rose-500/30"
+                    placeholder="Enter full name"
+                >
+            </div>
+
+            <div class="sm:col-span-2">
+                <label for="consignee_phone" class="block text-sm font-semibold text-rose-200 mb-2">Phone / WhatsApp Number</label>
+                <input
+                    id="consignee_phone"
+                    name="consignee_phone"
+                    type="tel"
+                    required
+                    inputmode="numeric"
+                    autocomplete="tel"
+                    class="w-full rounded-xl border border-rose-500 bg-[#23263a] px-4 py-3 text-rose-100 placeholder-rose-300/60 focus:border-rose-500 focus:outline-none focus:ring-2 focus:ring-rose-500/30"
+                    placeholder="Enter phone number"
+                >
+            </div>
+
+            <div class="sm:col-span-2">
+                <label for="consignee_address" class="block text-sm font-semibold text-rose-200 mb-2">Shipping Address (Flat, Street, Building)</label>
+                <textarea
+                    id="consignee_address"
+                    name="consignee_address"
+                    rows="3"
+                    required
+                    autocomplete="street-address"
+                    class="w-full rounded-xl border border-rose-500 bg-[#23263a] px-4 py-3 text-rose-100 placeholder-rose-300/60 focus:border-rose-500 focus:outline-none focus:ring-2 focus:ring-rose-500/30"
+                    placeholder="Enter complete shipping address"
+                ></textarea>
+            </div>
+
+            <div>
+                <label for="consignee_city" class="block text-sm font-semibold text-rose-200 mb-2">City</label>
+                <input
+                    id="consignee_city"
+                    name="consignee_city"
+                    type="text"
+                    required
+                    autocomplete="address-level2"
+                    class="w-full rounded-xl border border-rose-500 bg-[#23263a] px-4 py-3 text-rose-100 placeholder-rose-300/60 focus:border-rose-500 focus:outline-none focus:ring-2 focus:ring-rose-500/30"
+                    placeholder="Enter city"
+                >
+            </div>
+
+            <div>
+                <label for="consignee_state" class="block text-sm font-semibold text-rose-200 mb-2">State</label>
+                <input
+                    id="consignee_state"
+                    name="consignee_state"
+                    type="text"
+                    required
+                    autocomplete="address-level1"
+                    class="w-full rounded-xl border border-rose-500 bg-[#23263a] px-4 py-3 text-rose-100 placeholder-rose-300/60 focus:border-rose-500 focus:outline-none focus:ring-2 focus:ring-rose-500/30"
+                    placeholder="Enter state"
+                >
+            </div>
+
+            <div class="sm:col-span-2">
+                <label for="consignee_pincode" class="block text-sm font-semibold text-rose-200 mb-2">Pin Code</label>
+                <input
+                    id="consignee_pincode"
+                    name="consignee_pincode"
+                    type="text"
+                    required
+                    inputmode="numeric"
+                    value="{{ session.get('verified_pincode', '') }}"
+                    class="w-full rounded-xl border border-rose-500 bg-[#23263a] px-4 py-3 text-rose-100 placeholder-rose-300/60 focus:border-rose-500 focus:outline-none focus:ring-2 focus:ring-rose-500/30"
+                    placeholder="Enter pin code"
+                >
+            </div>
+
+            <div class="sm:col-span-2 pt-2">
+                <button
+                    type="submit"
+                    class="w-full rounded-xl bg-rose-500 px-5 py-3.5 text-base font-bold text-white shadow-lg transition hover:bg-rose-600 focus:outline-none focus:ring-2 focus:ring-rose-500/40 focus:ring-offset-2 focus:ring-offset-[#181c2a]"
+                >
+                    Proceed to Payment
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+{% endblock %}
