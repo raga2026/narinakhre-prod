@@ -1,7 +1,8 @@
 services:
+  # --- 1. Your Existing Test Environment ---
   - type: web
     name: narinakhre-test
-    plan: starter
+    plan: free
     runtime: python
     region: singapore
     buildCommand: "pip install -r requirements.txt"
@@ -10,10 +11,17 @@ services:
     domains:
       - test-retail.narinakhre.com
       - test-wholesale.narinakhre.com
-    envVars:
-      - key: SUPABASE_URL
-        value: https://hkbyejqctqnywirjawai.supabase.co
-      - key: SUPABASE_KEY
-        sync: false
-      - key: SECRET_KEY
-        sync: false
+
+  # --- 2. Your Live Production Environment ---
+  - type: web
+    name: narinakhre-production
+    plan: free
+    runtime: python
+    region: singapore
+    buildCommand: "pip install -r requirements.txt"
+    startCommand: "gunicorn app:app"
+    autoDeployTrigger: commit
+    domains:
+      - narinakhre.com
+      - www.narinakhre.com
+      - wholesale.narinakhre.com
