@@ -1,5 +1,4 @@
 services:
-  # --- 1. Your Existing Test Environment ---
   - type: web
     name: narinakhre-test
     plan: free
@@ -7,12 +6,10 @@ services:
     region: singapore
     buildCommand: "pip install -r requirements.txt"
     startCommand: "gunicorn app:app"
-    autoDeployTrigger: commit
     domains:
       - test-retail.narinakhre.com
       - test-wholesale.narinakhre.com
 
-  # --- 2. Your Live Production Environment ---
   - type: web
     name: narinakhre-production
     plan: free
@@ -20,7 +17,6 @@ services:
     region: singapore
     buildCommand: "pip install -r requirements.txt"
     startCommand: "gunicorn app:app"
-    autoDeployTrigger: commit
     domains:
       - narinakhre.com
       - www.narinakhre.com
