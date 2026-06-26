@@ -7,8 +7,8 @@ services:
     buildCommand: "pip install -r requirements.txt"
     startCommand: "gunicorn app:app"
     domains:
-      - test.retail.narinakhre.com
-      - test.wholesale.narinakhre.com
+      - test-retail.narinakhre.com
+      - test-wholesale.narinakhre.com
 
   - type: web
     name: narinakhre-production
