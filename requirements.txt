@@ -5,3 +5,8 @@ razorpay
 Flask-SQLAlchemy
 Werkzeug
 supabase
+pyotp
+pandas
+openpyxl
+selenium
+Pillow

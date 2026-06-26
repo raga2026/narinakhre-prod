@@ -1,11 +1,14 @@
 
 import os
 import json
+import hmac
 import sqlite3
 import smtplib
 import requests
 import razorpay
+import pyotp
 from datetime import datetime
+from functools import wraps
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 
@@ -50,6 +53,9 @@ DELHIVERY_CLIENT_NAME = os.environ.get('DELHIVERY_CLIENT_NAME', '')
 DELHIVERY_PICKUP_LOCATION = os.environ.get('DELHIVERY_PICKUP_LOCATION', '')
 RAZORPAY_KEY_ID = os.environ.get('RAZORPAY_KEY_ID')
 RAZORPAY_KEY_SECRET = os.environ.get('RAZORPAY_KEY_SECRET')
+ADMIN_USERNAME = os.environ.get('ADMIN_USERNAME', '')
+ADMIN_PASSWORD = os.environ.get('ADMIN_PASSWORD', '')
+ADMIN_TOTP_SECRET = os.environ.get('ADMIN_TOTP_SECRET', '')
 razorpay_client = razorpay.Client(auth=(os.environ.get("RAZORPAY_KEY_ID"), os.environ.get("RAZORPAY_KEY_SECRET")))
 
 
@@ -1132,7 +1138,17 @@ def thank_you():
     return render_site('thank_you.html')
 
 
+def admin_required(view_func):
+    @wraps(view_func)
+    def wrapped_view(*args, **kwargs):
+        if session.get('is_admin') is not True:
+            return redirect(url_for('admin_login'))
+        return view_func(*args, **kwargs)
+    return wrapped_view
+
+
 @app.route('/admin/upload-images', methods=['POST'])
+@admin_required
 def admin_upload_images():
     sku = request.form.get('sku')
     uploaded_files = request.files.getlist('images')
@@ -1172,6 +1188,7 @@ def admin_upload_images():
 
 
 @app.route('/admin/dashboard', methods=['GET'])
+@admin_required
 def admin_dashboard():
     return (
         '<h2>Admin Dashboard</h2>'
@@ -1181,6 +1198,7 @@ def admin_dashboard():
 
 
 @app.route('/admin/upload-excel', methods=['POST'])
+@admin_required
 def admin_upload_excel():
     import pandas as pd
 
@@ -1357,8 +1375,58 @@ def admin_upload_excel():
 
 @app.route('/admin/login', methods=['GET', 'POST'])
 def admin_login():
-    # Simple admin login page, no authentication logic yet
-    return render_template('admin/admin_login.html')
+    if request.method == 'GET':
+        return render_template('admin_login.html')
+
+    username = (request.form.get('username') or '').strip()
+    password = request.form.get('password') or ''
+
+    if not ADMIN_USERNAME or not ADMIN_PASSWORD or not ADMIN_TOTP_SECRET:
+        flash('Admin authentication is not configured.', 'error')
+        return render_template('admin_login.html'), 500
+
+    if hmac.compare_digest(username, ADMIN_USERNAME) and hmac.compare_digest(password, ADMIN_PASSWORD):
+        session['admin_step'] = 'totp'
+        session.pop('is_admin', None)
+        session.modified = True
+        return redirect(url_for('admin_verify_totp'))
+
+    flash('Invalid username or password.', 'error')
+    return render_template('admin_login.html'), 401
+
+
+@app.route('/admin/verify-totp', methods=['GET', 'POST'])
+def admin_verify_totp():
+    if session.get('admin_step') != 'totp':
+        flash('Please complete login first.', 'error')
+        return redirect(url_for('admin_login'))
+
+    if request.method == 'GET':
+        return render_template('admin_totp.html')
+
+    code = (request.form.get('totp_code') or '').strip().replace(' ', '')
+    if not ADMIN_TOTP_SECRET:
+        flash('TOTP is not configured.', 'error')
+        return render_template('admin_totp.html'), 500
+
+    totp = pyotp.TOTP(ADMIN_TOTP_SECRET)
+    if totp.verify(code, valid_window=1):
+        session['is_admin'] = True
+        session.pop('admin_step', None)
+        session.modified = True
+        return redirect(url_for('admin_dashboard'))
+
+    flash('Invalid authentication code.', 'error')
+    return render_template('admin_totp.html'), 401
+
+
+@app.route('/admin/logout', methods=['GET'])
+@admin_required
+def admin_logout():
+    session.pop('is_admin', None)
+    session.pop('admin_step', None)
+    session.modified = True
+    return redirect(url_for('admin_login'))
 
 if __name__ == '__main__':
     app.run(debug=True)
