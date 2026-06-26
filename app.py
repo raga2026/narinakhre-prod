@@ -183,6 +183,21 @@ def initialize_database_if_needed():
         try:
             conn.execute(
                 '''
+                CREATE TABLE IF NOT EXISTS categories (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    name TEXT
+                )
+                '''
+            )
+
+            # Ensure categories has all required columns in existing databases.
+            required_category_columns = [
+                ('name', 'TEXT'),
+            ]
+            ensure_table_columns(conn, 'categories', required_category_columns)
+
+            conn.execute(
+                '''
                 CREATE TABLE IF NOT EXISTS products (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     sku TEXT NOT NULL UNIQUE,
@@ -221,7 +236,8 @@ def initialize_database_if_needed():
                     weight REAL DEFAULT 0.0,
                     length REAL DEFAULT 0.0,
                     breadth REAL DEFAULT 0.0,
-                    height REAL DEFAULT 0.0
+                    height REAL DEFAULT 0.0,
+                    FOREIGN KEY (category_id) REFERENCES categories(id)
                 )
                 '''
             )
