@@ -167,18 +167,125 @@ def close_db(error=None):
 
 
 def initialize_database_if_needed():
-    schema_path = os.path.join(BASE_DIR, 'schema.sql')
-    conn = sqlite3.connect(DATABASE)
-    try:
-        cur = conn.cursor()
-        cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='products'")
-        has_products_table = cur.fetchone() is not None
-        if not has_products_table and os.path.exists(schema_path):
-            with open(schema_path, 'r', encoding='utf-8') as schema_file:
-                conn.executescript(schema_file.read())
+    def ensure_table_columns(conn, table_name, required_columns):
+        existing = {
+            row[1] for row in conn.execute(f"PRAGMA table_info({table_name})").fetchall()
+        }
+        for col_name, col_def in required_columns:
+            if col_name not in existing:
+                conn.execute(f"ALTER TABLE {table_name} ADD COLUMN {col_name} {col_def}")
+
+    # Main app database + local quotes database (if used separately)
+    db_paths = [DATABASE, os.path.join(BASE_DIR, 'quotes.db')]
+
+    for db_path in db_paths:
+        conn = sqlite3.connect(db_path)
+        try:
+            conn.execute(
+                '''
+                CREATE TABLE IF NOT EXISTS products (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    sku TEXT NOT NULL UNIQUE,
+                    name TEXT,
+                    slug TEXT,
+                    category TEXT,
+                    sub_category TEXT,
+                    collection TEXT,
+                    size TEXT,
+                    retail_price REAL DEFAULT 0.0,
+                    mrp_price REAL DEFAULT 0.0,
+                    retail_discount_percent REAL DEFAULT 0.0,
+                    wholesale_price REAL DEFAULT 0.0,
+                    min_wholesale_qty INTEGER DEFAULT 0,
+                    sets_count INTEGER DEFAULT 0,
+                    image_field TEXT,
+                    quantity1 INTEGER DEFAULT 0,
+                    price1 REAL DEFAULT 0.0,
+                    quantity2 INTEGER DEFAULT 0,
+                    price2 REAL DEFAULT 0.0,
+                    quantity3 INTEGER DEFAULT 0,
+                    price3 REAL DEFAULT 0.0,
+                    purchase_cost REAL DEFAULT 0.0,
+                    making_charges REAL DEFAULT 0.0,
+                    weight_grams REAL DEFAULT 0.0,
+                    material TEXT,
+                    hsn_code TEXT,
+                    gst_percent REAL DEFAULT 0.0,
+                    stock_total INTEGER DEFAULT 0,
+                    box_packing_type TEXT,
+                    vendor_id TEXT,
+                    status TEXT,
+                    is_active INTEGER DEFAULT 1,
+                    is_featured INTEGER DEFAULT 0,
+                    category_id INTEGER,
+                    weight REAL DEFAULT 0.0,
+                    length REAL DEFAULT 0.0,
+                    breadth REAL DEFAULT 0.0,
+                    height REAL DEFAULT 0.0
+                )
+                '''
+            )
+
+            # Add missing columns in already-existing products tables
+            required_product_columns = [
+                ('sku', 'TEXT'),
+                ('name', 'TEXT'),
+                ('slug', 'TEXT'),
+                ('category', 'TEXT'),
+                ('sub_category', 'TEXT'),
+                ('collection', 'TEXT'),
+                ('size', 'TEXT'),
+                ('retail_price', 'REAL DEFAULT 0.0'),
+                ('mrp_price', 'REAL DEFAULT 0.0'),
+                ('retail_discount_percent', 'REAL DEFAULT 0.0'),
+                ('wholesale_price', 'REAL DEFAULT 0.0'),
+                ('min_wholesale_qty', 'INTEGER DEFAULT 0'),
+                ('sets_count', 'INTEGER DEFAULT 0'),
+                ('image_field', 'TEXT'),
+                ('quantity1', 'INTEGER DEFAULT 0'),
+                ('price1', 'REAL DEFAULT 0.0'),
+                ('quantity2', 'INTEGER DEFAULT 0'),
+                ('price2', 'REAL DEFAULT 0.0'),
+                ('quantity3', 'INTEGER DEFAULT 0'),
+                ('price3', 'REAL DEFAULT 0.0'),
+                ('purchase_cost', 'REAL DEFAULT 0.0'),
+                ('making_charges', 'REAL DEFAULT 0.0'),
+                ('weight_grams', 'REAL DEFAULT 0.0'),
+                ('material', 'TEXT'),
+                ('hsn_code', 'TEXT'),
+                ('gst_percent', 'REAL DEFAULT 0.0'),
+                ('stock_total', 'INTEGER DEFAULT 0'),
+                ('box_packing_type', 'TEXT'),
+                ('vendor_id', 'TEXT'),
+                ('status', 'TEXT'),
+                ('is_active', 'INTEGER DEFAULT 1'),
+                ('is_featured', 'INTEGER DEFAULT 0'),
+                ('category_id', 'INTEGER'),
+                ('weight', 'REAL DEFAULT 0.0'),
+                ('length', 'REAL DEFAULT 0.0'),
+                ('breadth', 'REAL DEFAULT 0.0'),
+                ('height', 'REAL DEFAULT 0.0'),
+            ]
+            ensure_table_columns(conn, 'products', required_product_columns)
+
+            conn.execute(
+                '''
+                CREATE TABLE IF NOT EXISTS quotes (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    request_id TEXT UNIQUE,
+                    name TEXT,
+                    whatsapp TEXT,
+                    email TEXT,
+                    items_json TEXT,
+                    total_amount REAL DEFAULT 0.0,
+                    created_at TEXT DEFAULT CURRENT_TIMESTAMP
+                )
+                '''
+            )
+
             conn.commit()
-    finally:
-        conn.close()
+        finally:
+            conn.close()
 
 
 def ensure_checkout_tables_exist():

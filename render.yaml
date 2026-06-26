@@ -6,6 +6,31 @@ services:
     region: singapore
     buildCommand: "pip install -r requirements.txt"
     startCommand: "gunicorn app:app"
+    envVars:
+      - key: FLASK_SECRET_KEY
+        value: nari-nakhre-dev-secret
+      - key: DB_PATH
+        value: narinakhre.db
+      - key: SHIPPING_PROVIDER
+        value: delhivery
+      - key: WAREHOUSE_PIN
+        value: "482001"
+      - key: DELHIVERY_API_KEY
+        value: "070b26681f13da4c8cf5d8a6dbf441614c992e7c"
+      - key: DELHIVERY_API_TOKEN
+        value: "070b26681f13da4c8cf5d8a6dbf441614c992e7c"
+      - key: DELHIVERY_CLIENT_NAME
+        value: "Mohini Cosmetics"
+      - key: DELHIVERY_PICKUP_LOCATION
+        value: "Nari Nakhre"
+      - key: RAZORPAY_KEY_ID
+        value: rzp_live_T3P54Pmu1l34zD
+      - key: RAZORPAY_KEY_SECRET
+        value: opLMIy9HtdDjJJprHxe83Gtz
+      - key: SUPABASE_URL
+        value: "https://eopqwvssznmxfxrfzqbx.supabase.co"
+      - key: SUPABASE_KEY
+        value: "SUPABASE_KEY_REMOVED"
     domains:
       - test-retail.narinakhre.com
       - test-wholesale.narinakhre.com
