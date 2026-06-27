@@ -6,53 +6,93 @@
     <title>Admin Login - NariNakhre</title>
     <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
     <style>
-        body { background: #fff; color: #0f172a; }
+        body { background: #0f172a; color: #f8fafc; }
         .rose-btn { background: linear-gradient(90deg, #be185d 0%, #f43f5e 100%); color: white; }
+        .rose-accent { color: #be185d; }
+        .glow-pink { box-shadow: 0 0 16px rgba(190,24,93,0.4); }
     </style>
 </head>
 <body class="flex items-center justify-center min-h-screen">
-    <div class="max-w-md mx-auto bg-slate-800/50 rounded-2xl shadow-xl p-8 border border-pink-500/20">
-        <h1 class="text-2xl font-extrabold rose-accent mb-6 text-center">Admin Login</h1>
-        <form method="POST" action="/admin/login" class="space-y-6">
-                            <input type="text" name="username" placeholder="Username" required class="w-full bg-slate-900 border border-pink-500/30 rounded-xl p-3 text-gray-900 placeholder-gray-400">
-                            <div class="relative">
-                                <input id="admin-password" type="password" name="password" placeholder="Password" required class="w-full bg-slate-900 border border-pink-500/30 rounded-xl p-3 text-gray-900 placeholder-gray-400 pr-12">
-                                <button type="button" id="toggle-password" tabindex="-1" class="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-pink-500 focus:outline-none" onclick="togglePassword()">
-                                    <svg id="eye-icon" xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0zm6 0c0 3.866-4.477 7-10 7S1 15.866 1 12 5.477 5 11 5s10 3.134 10 7z" />
-                                    </svg>
-                                    <svg id="eye-off-icon" xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 hidden" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.875 18.825A10.05 10.05 0 0111 19c-5.523 0-10-3.134-10-7a9.956 9.956 0 013.422-5.746M6.634 6.634A9.956 9.956 0 0111 5c5.523 0 10 3.134 10 7 0 1.306-.417 2.534-1.175 3.617M15 12a3 3 0 11-6 0 3 3 0 016 0zm-6 0a3 3 0 016 0" />
-                                    </svg>
-                                </button>
-                            </div>
-            <button type="submit" class="rose-btn w-full py-4 rounded-2xl font-bold text-xl shadow-lg glow-pink">Login</button>
-        </form>
+    <div class="w-full max-w-md mx-auto bg-slate-800 rounded-2xl shadow-2xl p-8 border border-pink-500/20">
+
+        <div class="text-center mb-8">
+            <h1 class="text-3xl font-extrabold rose-accent font-serif">Nari Nakhre™</h1>
+            <p class="text-slate-400 text-sm mt-1">Admin Panel — Secure Login</p>
+        </div>
+
         {% with messages = get_flashed_messages(with_categories=true) %}
         {% if messages %}
-            <div class="mt-6">
+            <div class="mb-6">
             {% for category, msg in messages %}
-                <div class="bg-pink-900/30 text-pink-200 rounded-xl p-3 mb-2">{{ msg }}</div>
+                <div class="bg-pink-900/40 text-pink-200 border border-pink-500/30 rounded-xl p-3 mb-2 text-sm">{{ msg }}</div>
             {% endfor %}
             </div>
         {% endif %}
         {% endwith %}
+
+        <form method="POST" action="/admin/login" class="space-y-5">
+            <div>
+                <label for="username" class="block text-sm font-semibold text-slate-300 mb-1">Username</label>
+                <input
+                    id="username"
+                    type="text"
+                    name="username"
+                    placeholder="Enter admin username"
+                    required
+                    autocomplete="username"
+                    class="w-full bg-slate-900 border border-pink-500/30 rounded-xl p-3 text-white placeholder-slate-500 focus:outline-none focus:border-pink-500 transition">
+            </div>
+
+            <div>
+                <label for="admin-password" class="block text-sm font-semibold text-slate-300 mb-1">Password</label>
+                <div class="relative">
+                    <input
+                        id="admin-password"
+                        type="password"
+                        name="password"
+                        placeholder="Enter admin password"
+                        required
+                        autocomplete="current-password"
+                        class="w-full bg-slate-900 border border-pink-500/30 rounded-xl p-3 text-white placeholder-slate-500 pr-12 focus:outline-none focus:border-pink-500 transition">
+                    <button
+                        type="button"
+                        tabindex="-1"
+                        aria-label="Toggle password visibility"
+                        class="absolute right-3 top-1/2 transform -translate-y-1/2 text-slate-400 hover:text-pink-400 focus:outline-none"
+                        onclick="togglePassword()">
+                        <svg id="eye-icon" xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0zm6 0c0 3.866-4.477 7-10 7S1 15.866 1 12 5.477 5 11 5s10 3.134 10 7z" />
+                        </svg>
+                        <svg id="eye-off-icon" xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 hidden" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.875 18.825A10.05 10.05 0 0111 19c-5.523 0-10-3.134-10-7a9.956 9.956 0 013.422-5.746M6.634 6.634A9.956 9.956 0 0111 5c5.523 0 10 3.134 10 7 0 1.306-.417 2.534-1.175 3.617M15 12a3 3 0 11-6 0 3 3 0 016 0zm-6 0a3 3 0 016 0" />
+                        </svg>
+                    </button>
+                </div>
+            </div>
+
+            <button type="submit" class="rose-btn glow-pink w-full py-3 rounded-2xl font-bold text-lg shadow-lg mt-2 transition hover:opacity-90">
+                Login
+            </button>
+        </form>
+
+        <p class="text-center text-slate-600 text-xs mt-8">Nari Nakhre Admin &copy; 2026. Authorised Access Only.</p>
     </div>
-</body>
-<script>
-function togglePassword() {
-    const pwd = document.getElementById('admin-password');
-    const eye = document.getElementById('eye-icon');
-    const eyeOff = document.getElementById('eye-off-icon');
-    if (pwd.type === 'password') {
-        pwd.type = 'text';
-        eye.classList.add('hidden');
-        eyeOff.classList.remove('hidden');
-    } else {
-        pwd.type = 'password';
-        eye.classList.remove('hidden');
-        eyeOff.classList.add('hidden');
+
+    <script>
+    function togglePassword() {
+        const pwd = document.getElementById('admin-password');
+        const eye = document.getElementById('eye-icon');
+        const eyeOff = document.getElementById('eye-off-icon');
+        if (pwd.type === 'password') {
+            pwd.type = 'text';
+            eye.classList.add('hidden');
+            eyeOff.classList.remove('hidden');
+        } else {
+            pwd.type = 'password';
+            eye.classList.remove('hidden');
+            eyeOff.classList.add('hidden');
+        }
     }
-}
-</script>
+    </script>
+</body>
 </html>

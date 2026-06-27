@@ -1376,14 +1376,14 @@ def admin_upload_excel():
 @app.route('/admin/login', methods=['GET', 'POST'])
 def admin_login():
     if request.method == 'GET':
-        return render_template('admin_login.html')
+        return render_template('admin/admin_login.html')
 
     username = (request.form.get('username') or '').strip()
     password = request.form.get('password') or ''
 
     if not ADMIN_USERNAME or not ADMIN_PASSWORD or not ADMIN_TOTP_SECRET:
         flash('Admin authentication is not configured.', 'error')
-        return render_template('admin_login.html'), 500
+        return render_template('admin/admin_login.html'), 500
 
     if hmac.compare_digest(username, ADMIN_USERNAME) and hmac.compare_digest(password, ADMIN_PASSWORD):
         session['admin_step'] = 'totp'
@@ -1392,7 +1392,7 @@ def admin_login():
         return redirect(url_for('admin_verify_totp'))
 
     flash('Invalid username or password.', 'error')
-    return render_template('admin_login.html'), 401
+    return render_template('admin/admin_login.html'), 401
 
 
 @app.route('/admin/verify-totp', methods=['GET', 'POST'])
@@ -1402,12 +1402,12 @@ def admin_verify_totp():
         return redirect(url_for('admin_login'))
 
     if request.method == 'GET':
-        return render_template('admin_totp.html')
+        return render_template('admin/admin_totp.html')
 
     code = (request.form.get('totp_code') or '').strip().replace(' ', '')
     if not ADMIN_TOTP_SECRET:
         flash('TOTP is not configured.', 'error')
-        return render_template('admin_totp.html'), 500
+        return render_template('admin/admin_totp.html'), 500
 
     totp = pyotp.TOTP(ADMIN_TOTP_SECRET)
     if totp.verify(code, valid_window=1):
@@ -1417,7 +1417,7 @@ def admin_verify_totp():
         return redirect(url_for('admin_dashboard'))
 
     flash('Invalid authentication code.', 'error')
-    return render_template('admin_totp.html'), 401
+    return render_template('admin/admin_totp.html'), 401
 
 
 @app.route('/admin/logout', methods=['GET'])
