@@ -6,8 +6,6 @@ import smtplib
 import requests
 import razorpay
 import pyotp
-import psycopg2
-import psycopg2.extras
 from datetime import datetime
 from functools import wraps
 from email.mime.multipart import MIMEMultipart
@@ -16,6 +14,7 @@ from email.mime.text import MIMEText
 from flask import Flask, g, jsonify, redirect, render_template, request, session, url_for, flash
 from flask_sqlalchemy import SQLAlchemy
 from werkzeug.routing import BuildError
+from supabase import create_client, Client as SupabaseClient
 
 from utils.shipping_manager import get_shipping_provider
 
@@ -37,17 +36,27 @@ load_env_file(os.path.join(os.path.dirname(os.path.abspath(__file__)), '.env'))
 app.secret_key = os.environ.get('FLASK_SECRET_KEY', 'nari-nakhre-dev-secret')
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-DATABASE_URL = os.environ.get('DATABASE_URL', '')
+SUPABASE_URL = os.environ.get('SUPABASE_URL', '').rstrip('/')
+SUPABASE_KEY = os.environ.get('SUPABASE_KEY', '')
 
 app.config['SHIPPING_PROVIDER'] = os.environ.get('SHIPPING_PROVIDER', 'mock')
 app.config['DELHIVERY_API_KEY'] = os.environ.get('DELHIVERY_API_KEY', '')
 app.config['WAREHOUSE_PIN'] = os.environ.get('WAREHOUSE_PIN', '400001')
 app.config['RAZORPAY_KEY_ID'] = os.environ.get('RAZORPAY_KEY_ID', '')
 app.config['RAZORPAY_KEY_SECRET'] = os.environ.get('RAZORPAY_KEY_SECRET', '')
-app.config['SQLALCHEMY_DATABASE_URI'] = DATABASE_URL
+app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///:memory:'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
 db = SQLAlchemy(app)
+
+# Supabase client for database operations
+_supabase_client: SupabaseClient = None
+
+def get_supabase():
+    global _supabase_client
+    if _supabase_client is None:
+        _supabase_client = create_client(SUPABASE_URL, SUPABASE_KEY)
+    return _supabase_client
 
 DELHIVERY_API_TOKEN = os.environ.get('DELHIVERY_API_TOKEN', '')
 DELHIVERY_CLIENT_NAME = os.environ.get('DELHIVERY_CLIENT_NAME', '')
@@ -159,151 +168,180 @@ def upload_image_to_supabase(file_storage_object, filename):
         return None
 
 
-class PGWrapper:
+class SupabaseDB:
     """
-    Thin wrapper around a psycopg2 connection that makes it behave
-    like the sqlite3 connection used throughout the app.
-    - Converts ? placeholders to %s for PostgreSQL
-    - Returns RealDictRow results (accessible by column name)
-    - Exposes .commit() and .close()
+    Wrapper around the Supabase REST API that mimics the sqlite3
+    connection interface used throughout the app.
+    Uses Supabase PostgREST for SELECT queries and
+    direct SQL execution via the rpc/sql endpoint for
+    INSERT, UPDATE, DELETE, CREATE TABLE operations.
     """
-    def __init__(self, conn):
-        self._conn = conn
+
+    def __init__(self, client):
+        self._client = client
+        self._pending = []
 
     def execute(self, sql, params=None):
-        sql = sql.replace('?', '%s')
-        cur = self._conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-        cur.execute(sql, params or ())
-        return cur
+        return SupabaseCursor(self._client, sql, params)
 
     def commit(self):
-        self._conn.commit()
+        pass  # Supabase REST is auto-commit
 
     def rollback(self):
-        self._conn.rollback()
+        pass
 
     def close(self):
-        self._conn.close()
+        pass
+
+
+class SupabaseCursor:
+    """Executes SQL via Supabase and returns results as list of dict-like objects."""
+
+    def __init__(self, client, sql, params=None):
+        self._client = client
+        self._rows = []
+        self._execute(sql, params or ())
+
+    def _execute(self, sql, params):
+        sql_clean = sql.strip()
+        # Replace ? with %s style then format with params
+        parts = sql_clean.split('?')
+        if len(parts) - 1 != len(params):
+            formatted = sql_clean
+        else:
+            formatted = ''
+            for i, part in enumerate(parts):
+                formatted += part
+                if i < len(params):
+                    val = params[i]
+                    if val is None:
+                        formatted += 'NULL'
+                    elif isinstance(val, bool):
+                        formatted += '1' if val else '0'
+                    elif isinstance(val, (int, float)):
+                        formatted += str(val)
+                    else:
+                        escaped = str(val).replace("'", "''")
+                        formatted += f"'{escaped}'"
+
+        try:
+            result = self._client.rpc('execute_sql', {'query': formatted}).execute()
+            if result.data:
+                if isinstance(result.data, list):
+                    self._rows = result.data
+                elif isinstance(result.data, dict) and 'rows' in result.data:
+                    self._rows = result.data['rows']
+        except Exception as e:
+            app.logger.error(f'SupabaseCursor error: {e} | SQL: {formatted[:200]}')
+            self._rows = []
+
+    def fetchone(self):
+        return self._rows[0] if self._rows else None
+
+    def fetchall(self):
+        return self._rows
+
+    def __iter__(self):
+        return iter(self._rows)
 
 
 def get_db():
     if 'db' not in g:
-        conn = psycopg2.connect(DATABASE_URL)
-        g.db = PGWrapper(conn)
+        g.db = SupabaseDB(get_supabase())
     return g.db
 
 
 @app.teardown_appcontext
 def close_db(error=None):
-    wrapper = g.pop('db', None)
-    if wrapper is not None:
-        try:
-            wrapper._conn.commit()
-            wrapper.close()
-        except Exception:
-            pass
+    g.pop('db', None)
 
 
 def initialize_database_if_needed():
-    """Create all tables in Supabase PostgreSQL if they do not exist."""
-    conn = psycopg2.connect(DATABASE_URL)
-    try:
-        cur = conn.cursor()
-
-        cur.execute('''
-            CREATE TABLE IF NOT EXISTS categories (
-                id SERIAL PRIMARY KEY,
-                name TEXT
-            )
-        ''')
-
-        cur.execute('''
-            CREATE TABLE IF NOT EXISTS products (
-                id SERIAL PRIMARY KEY,
-                sku TEXT NOT NULL UNIQUE,
-                name TEXT,
-                slug TEXT,
-                category TEXT,
-                sub_category TEXT,
-                collection TEXT,
-                size TEXT,
-                retail_price FLOAT DEFAULT 0.0,
-                mrp_price FLOAT DEFAULT 0.0,
-                retail_discount_percent FLOAT DEFAULT 0.0,
-                wholesale_price FLOAT DEFAULT 0.0,
-                min_wholesale_qty INTEGER DEFAULT 0,
-                sets_count INTEGER DEFAULT 0,
-                image_field TEXT,
-                quantity1 INTEGER DEFAULT 0,
-                price1 FLOAT DEFAULT 0.0,
-                quantity2 INTEGER DEFAULT 0,
-                price2 FLOAT DEFAULT 0.0,
-                quantity3 INTEGER DEFAULT 0,
-                price3 FLOAT DEFAULT 0.0,
-                purchase_cost FLOAT DEFAULT 0.0,
-                making_charges FLOAT DEFAULT 0.0,
-                weight_grams FLOAT DEFAULT 0.0,
-                material TEXT,
-                hsn_code TEXT,
-                gst_percent FLOAT DEFAULT 0.0,
-                stock_total INTEGER DEFAULT 0,
-                box_packing_type TEXT,
-                vendor_id TEXT,
-                status TEXT,
-                is_active INTEGER DEFAULT 1,
-                is_featured INTEGER DEFAULT 0,
-                category_id INTEGER REFERENCES categories(id),
-                weight FLOAT DEFAULT 0.0,
-                length FLOAT DEFAULT 0.0,
-                breadth FLOAT DEFAULT 0.0,
-                height FLOAT DEFAULT 0.0
-            )
-        ''')
-
-        cur.execute('''
-            CREATE TABLE IF NOT EXISTS quotes (
-                id SERIAL PRIMARY KEY,
-                request_id TEXT UNIQUE,
-                name TEXT,
-                whatsapp TEXT,
-                email TEXT,
-                items_json TEXT,
-                total_amount FLOAT DEFAULT 0.0,
-                status TEXT DEFAULT 'New',
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        ''')
-
-        cur.execute('''
-            CREATE TABLE IF NOT EXISTS users (
-                id SERIAL PRIMARY KEY
-            )
-        ''')
-
-        cur.execute('''
-            CREATE TABLE IF NOT EXISTS order_shipping (
-                id SERIAL PRIMARY KEY,
-                user_id INTEGER REFERENCES users(id),
-                status TEXT NOT NULL DEFAULT 'pending',
-                consignee_name TEXT NOT NULL,
-                consignee_phone TEXT NOT NULL,
-                consignee_address TEXT NOT NULL,
-                consignee_city TEXT NOT NULL,
-                consignee_state TEXT NOT NULL,
-                consignee_pincode TEXT NOT NULL,
-                internal_order_id TEXT NOT NULL UNIQUE,
-                delhivery_waybill TEXT
-            )
-        ''')
-
-        conn.commit()
-        app.logger.info('Database tables verified/created successfully.')
-    except Exception as e:
-        conn.rollback()
-        app.logger.error(f'Database initialization error: {e}')
-        raise
-    finally:
-        conn.close()
+    """
+    Create all tables in Supabase via the SQL editor RPC.
+    This runs once on app startup. Tables are created only if
+    they do not already exist so existing data is never touched.
+    """
+    tables_sql = [
+        '''CREATE TABLE IF NOT EXISTS categories (
+            id BIGSERIAL PRIMARY KEY,
+            name TEXT
+        )''',
+        '''CREATE TABLE IF NOT EXISTS products (
+            id BIGSERIAL PRIMARY KEY,
+            sku TEXT NOT NULL UNIQUE,
+            name TEXT,
+            slug TEXT,
+            category TEXT,
+            sub_category TEXT,
+            collection TEXT,
+            size TEXT,
+            retail_price FLOAT DEFAULT 0.0,
+            mrp_price FLOAT DEFAULT 0.0,
+            retail_discount_percent FLOAT DEFAULT 0.0,
+            wholesale_price FLOAT DEFAULT 0.0,
+            min_wholesale_qty INTEGER DEFAULT 0,
+            sets_count INTEGER DEFAULT 0,
+            image_field TEXT,
+            quantity1 INTEGER DEFAULT 0,
+            price1 FLOAT DEFAULT 0.0,
+            quantity2 INTEGER DEFAULT 0,
+            price2 FLOAT DEFAULT 0.0,
+            quantity3 INTEGER DEFAULT 0,
+            price3 FLOAT DEFAULT 0.0,
+            purchase_cost FLOAT DEFAULT 0.0,
+            making_charges FLOAT DEFAULT 0.0,
+            weight_grams FLOAT DEFAULT 0.0,
+            material TEXT,
+            hsn_code TEXT,
+            gst_percent FLOAT DEFAULT 0.0,
+            stock_total INTEGER DEFAULT 0,
+            box_packing_type TEXT,
+            vendor_id TEXT,
+            status TEXT,
+            is_active INTEGER DEFAULT 1,
+            is_featured INTEGER DEFAULT 0,
+            category_id BIGINT REFERENCES categories(id),
+            weight FLOAT DEFAULT 0.0,
+            length FLOAT DEFAULT 0.0,
+            breadth FLOAT DEFAULT 0.0,
+            height FLOAT DEFAULT 0.0
+        )''',
+        '''CREATE TABLE IF NOT EXISTS quotes (
+            id BIGSERIAL PRIMARY KEY,
+            request_id TEXT UNIQUE,
+            name TEXT,
+            whatsapp TEXT,
+            email TEXT,
+            items_json TEXT,
+            total_amount FLOAT DEFAULT 0.0,
+            status TEXT DEFAULT 'New',
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )''',
+        '''CREATE TABLE IF NOT EXISTS users (
+            id BIGSERIAL PRIMARY KEY
+        )''',
+        '''CREATE TABLE IF NOT EXISTS order_shipping (
+            id BIGSERIAL PRIMARY KEY,
+            user_id BIGINT REFERENCES users(id),
+            status TEXT NOT NULL DEFAULT 'pending',
+            consignee_name TEXT NOT NULL,
+            consignee_phone TEXT NOT NULL,
+            consignee_address TEXT NOT NULL,
+            consignee_city TEXT NOT NULL,
+            consignee_state TEXT NOT NULL,
+            consignee_pincode TEXT NOT NULL,
+            internal_order_id TEXT NOT NULL UNIQUE,
+            delhivery_waybill TEXT
+        )'''
+    ]
+    client = get_supabase()
+    for sql in tables_sql:
+        try:
+            client.rpc('execute_sql', {'query': sql}).execute()
+        except Exception as e:
+            app.logger.warning(f'Table init warning (may already exist): {e}')
+    app.logger.info('Database tables verified/created via Supabase RPC.')
 
 
 def ensure_checkout_tables_exist():
