@@ -471,6 +471,52 @@ def render_site(template_name, **kwargs):
     return render_template(f"{site_type}/{template_name}", **kwargs)
 
 # --- ROUTES: HOME & CATEGORY ---
+def get_supabase_image_urls(sku):
+    supabase_url = (os.environ.get('SUPABASE_URL') or '').rstrip('/')
+    bucket = 'products'
+    if not supabase_url:
+        return []
+    return [f"{supabase_url}/storage/v1/object/public/{bucket}/{sku}_{i}.webp" for i in range(1, 10)]
+
+
+def get_random_hero_images(db, count=4):
+    import random
+    rows = db.execute(
+        "SELECT image_field FROM products WHERE image_field IS NOT NULL AND image_field LIKE 'http%' ORDER BY RANDOM() LIMIT ?",
+        (count,)
+    ).fetchall()
+    return [r['image_field'] for r in rows]
+
+
+def build_product_dict(p):
+    p_dict = dict(p)
+    image_field = p_dict.get('image_field') or ''
+    if image_field.startswith('http'):
+        all_urls = get_supabase_image_urls(p_dict['sku'])
+        images = [image_field] + [u for u in all_urls if u != image_field]
+    else:
+        images = get_supabase_image_urls(p_dict['sku'])
+    if not images:
+        images = ['/static/assets/products/default.jpg']
+    p_dict['images'] = images
+    tiers = []
+    for i in range(1, 4):
+        qty = p_dict.get(f'quantity{i}')
+        price = p_dict.get(f'price{i}')
+        if qty and price:
+            try:
+                qty_val = int(qty)
+                price_val = float(price)
+                if qty_val > 0 and price_val > 0:
+                    tiers.append({'qty': qty_val, 'price': price_val})
+            except Exception:
+                continue
+    if not tiers:
+        tiers = [{'qty': 1, 'price': 0}]
+    p_dict['tiers'] = tiers
+    return p_dict
+
+
 @app.route('/')
 @app.route('/retail')
 @app.route('/wholesale')
@@ -479,90 +525,32 @@ def index():
         g.site_type = 'retail'
     elif request.path.startswith('/wholesale'):
         g.site_type = 'wholesale'
-    
+
     db = get_db()
-    # For retail, group products by the 'category' column
-    if request.path.startswith('/retail'):
-        products = db.execute('SELECT * FROM products').fetchall()
+    hero_images = get_random_hero_images(db, count=4)
+
+    if g.site_type == 'retail':
+        products = db.execute('SELECT * FROM products WHERE is_active=1').fetchall()
         grouped_products = {}
         for p in products:
             cat = p['category'] or 'New Arrivals'
             if cat not in grouped_products:
                 grouped_products[cat] = []
-            p_dict = dict(p)
-            image_dir = os.path.join(app.root_path, 'static', 'assets', 'products')
-            images = []
-            for i in range(1, 10):
-                img_filename = f"{p['sku']}_{i}.jpg"
-                img_path = os.path.join(image_dir, img_filename)
-                if os.path.exists(img_path):
-                    images.append(url_for('static', filename=f"assets/products/{img_filename}"))
-                else:
-                    break
-            if not images:
-                images = [url_for('static', filename=f"assets/products/default.jpg")]
-            p_dict['images'] = images
-            tiers = []
-            for i in range(1, 4):
-                qty_key = f'quantity{i}'
-                price_key = f'price{i}'
-                qty = p_dict.get(qty_key)
-                price = p_dict.get(price_key)
-                if qty and price:
-                    try:
-                        qty_val = int(qty)
-                        price_val = float(price)
-                        if qty_val > 0 and price_val > 0:
-                            tiers.append({'qty': qty_val, 'price': price_val})
-                    except Exception:
-                        continue
-            if not tiers:
-                tiers = [{'qty': 1, 'price': 0}]
-            p_dict['tiers'] = tiers
-            grouped_products[cat].append(p_dict)
-        return render_site('index.html', grouped_products=grouped_products)
-    # For wholesale, keep the old logic
+            grouped_products[cat].append(build_product_dict(p))
+        return render_site('index.html', grouped_products=grouped_products, hero_images=hero_images)
+
     products = db.execute('''
         SELECT p.*, c.name as category_name FROM products p
         LEFT JOIN categories c ON p.category_id = c.id
+        WHERE p.is_active=1
     ''').fetchall()
     grouped_products = {}
     for p in products:
-        cat = p['category_name'] or 'New Arrivals'
+        cat = p['category_name'] or p['category'] or 'New Arrivals'
         if cat not in grouped_products:
             grouped_products[cat] = []
-        p_dict = dict(p)
-        image_dir = os.path.join(app.root_path, 'static', 'assets', 'products')
-        images = []
-        for i in range(1, 10):
-            img_filename = f"{p['sku']}_{i}.jpg"
-            img_path = os.path.join(image_dir, img_filename)
-            if os.path.exists(img_path):
-                images.append(url_for('static', filename=f"assets/products/{img_filename}"))
-            else:
-                break
-        if not images:
-            images = [url_for('static', filename=f"assets/products/default.jpg")]
-        p_dict['images'] = images
-        tiers = []
-        for i in range(1, 4):
-            qty_key = f'quantity{i}'
-            price_key = f'price{i}'
-            qty = p_dict.get(qty_key)
-            price = p_dict.get(price_key)
-            if qty and price:
-                try:
-                    qty_val = int(qty)
-                    price_val = float(price)
-                    if qty_val > 0 and price_val > 0:
-                        tiers.append({'qty': qty_val, 'price': price_val})
-                except Exception:
-                    continue
-        if not tiers:
-            tiers = [{'qty': 1, 'price': 0}]
-        p_dict['tiers'] = tiers
-        grouped_products[cat].append(p_dict)
-    return render_site('index.html', grouped_products=grouped_products)
+        grouped_products[cat].append(build_product_dict(p))
+    return render_site('index.html', grouped_products=grouped_products, hero_images=hero_images)
 
 @app.route('/category/<category>')
 @app.route('/retail/category/<category>')
@@ -1291,22 +1279,38 @@ def admin_add_product():
         sku = request.form.get('sku', '').strip()
         name = request.form.get('name', '').strip()
         category = request.form.get('category', '').strip()
+        sub_category = request.form.get('sub_category', '').strip()
+        collection = request.form.get('collection', '').strip()
+        size = request.form.get('size', '').strip()
         retail_price = float(request.form.get('retail_price', 0) or 0)
         mrp_price = float(request.form.get('mrp_price', 0) or 0)
         wholesale_price = float(request.form.get('wholesale_price', 0) or 0)
         stock_total = int(request.form.get('stock_total', 0) or 0)
         material = request.form.get('material', '').strip()
         slug = request.form.get('slug', '').strip()
+        hsn_code = request.form.get('hsn_code', '').strip()
+        gst_percent = float(request.form.get('gst_percent', 0) or 0)
+        weight_grams = float(request.form.get('weight_grams', 0) or 0)
+        length = float(request.form.get('length', 0) or 0)
+        breadth = float(request.form.get('breadth', 0) or 0)
+        height = float(request.form.get('height', 0) or 0)
         price1 = float(request.form.get('price1', 0) or 0)
         quantity1 = int(request.form.get('quantity1', 0) or 0)
         price2 = float(request.form.get('price2', 0) or 0)
         quantity2 = int(request.form.get('quantity2', 0) or 0)
         price3 = float(request.form.get('price3', 0) or 0)
         quantity3 = int(request.form.get('quantity3', 0) or 0)
+        sets_count = int(request.form.get('sets_count', 1) or 1)
+        min_wholesale_qty = int(request.form.get('min_wholesale_qty', 0) or 0)
 
         if not sku:
             flash('SKU is required.')
             return redirect(url_for('admin_add_product'))
+
+        if not slug:
+            import re
+            slug = re.sub(r'[^a-z0-9\s-]', '', name.lower())
+            slug = re.sub(r'\s+', '-', slug.strip())[:80]
 
         existing = db.execute('SELECT id FROM products WHERE sku=?', (sku,)).fetchone()
         if existing:
@@ -1316,18 +1320,47 @@ def admin_add_product():
         image_url = None
         image_file = request.files.get('image')
         if image_file and image_file.filename:
-            filename = f"{sku}_1.webp"
-            image_url = upload_image_to_supabase(image_file, filename)
+            from PIL import Image as PilImage
+            import io as _io
+            try:
+                with PilImage.open(image_file.stream) as img:
+                    if img.mode in ('RGBA', 'P', 'LA'):
+                        img = img.convert('RGBA')
+                    else:
+                        img = img.convert('RGB')
+                    buf = _io.BytesIO()
+                    img.save(buf, format='WEBP', quality=85, method=6)
+                    buf.seek(0)
+                    filename = f"{sku}_1.webp"
+                    upload_url = f"{(os.environ.get('SUPABASE_URL') or '').rstrip('/')}/storage/v1/object/products/{filename}"
+                    headers = {
+                        'Authorization': f"Bearer {os.environ.get('SUPABASE_KEY', '')}",
+                        'apikey': os.environ.get('SUPABASE_KEY', ''),
+                        'Content-Type': 'image/webp',
+                        'x-upsert': 'true',
+                    }
+                    resp = requests.put(upload_url, headers=headers, data=buf.read(), timeout=30)
+                    if resp.status_code == 200:
+                        supabase_url = (os.environ.get('SUPABASE_URL') or '').rstrip('/')
+                        image_url = f"{supabase_url}/storage/v1/object/public/products/{filename}"
+            except Exception as e:
+                app.logger.error(f'Image upload failed for {sku}: {e}')
 
         db.execute(
             '''INSERT INTO products
-               (sku, name, category, retail_price, mrp_price, wholesale_price,
-                stock_total, material, slug, price1, quantity1, price2, quantity2,
-                price3, quantity3, image_field, is_active)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,1)''',
-            (sku, name, category, retail_price, mrp_price, wholesale_price,
-             stock_total, material, slug, price1, quantity1, price2, quantity2,
-             price3, quantity3, image_url)
+               (sku, name, category, sub_category, collection, size,
+                retail_price, mrp_price, wholesale_price, stock_total,
+                material, slug, hsn_code, gst_percent, weight_grams,
+                length, breadth, height,
+                price1, quantity1, price2, quantity2, price3, quantity3,
+                sets_count, min_wholesale_qty, image_field, is_active)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,1)''',
+            (sku, name, category, sub_category, collection, size,
+             retail_price, mrp_price, wholesale_price, stock_total,
+             material, slug, hsn_code, gst_percent, weight_grams,
+             length, breadth, height,
+             price1, quantity1, price2, quantity2, price3, quantity3,
+             sets_count, min_wholesale_qty, image_url)
         )
         db.commit()
         flash(f'Product {sku} added successfully.')
@@ -1368,11 +1401,8 @@ def admin_upload_excel():
         return redirect(url_for('admin_dashboard'))
 
     def normalize_value(value):
-        try:
-            if pd.isna(value):
-                return None
-        except Exception:
-            pass
+        if pd.isna(value):
+            return None
         if isinstance(value, str):
             cleaned = value.strip()
             return cleaned if cleaned else None
@@ -1428,7 +1458,6 @@ def admin_upload_excel():
 
         df.columns = df.columns.str.lower().str.strip()
 
-        conn = get_db()
         processed_rows = 0
         created_rows = 0
         updated_rows = 0
@@ -1439,96 +1468,101 @@ def admin_upload_excel():
                 continue
             row_sku = str(row_sku).strip()
 
-            existing = conn.execute(
-                'SELECT id FROM products WHERE sku = ?', (row_sku,)
-            ).fetchone()
-            is_new = existing is None
-
-            # Preserve existing image unless sheet provides one
-            existing_image = None
-            if not is_new:
-                img_row = conn.execute(
-                    'SELECT image_field FROM products WHERE sku = ?', (row_sku,)
-                ).fetchone()
-                if img_row:
-                    existing_image = img_row['image_field']
-
-            sheet_image = row_value(row, 'image_field')
-            final_image = str(sheet_image) if sheet_image else existing_image
-
-            values = (
-                row_value(row, 'name'),
-                row_value(row, 'slug'),
-                row_value(row, 'category'),
-                row_value(row, 'sub_category'),
-                row_value(row, 'collection'),
-                row_value(row, 'size'),
-                to_float(row_value(row, 'retail_price')),
-                to_float(row_value(row, 'mrp_price')),
-                to_float(row_value(row, 'retail_discount_percent')),
-                to_float(row_value(row, 'wholesale_price')),
-                to_int(row_value(row, 'min_wholesale_qty')),
-                to_int(row_value(row, 'sets_count')),
-                final_image,
-                to_float(row_value(row, 'price1')),
-                to_int(row_value(row, 'quantity1')),
-                to_float(row_value(row, 'price2')),
-                to_int(row_value(row, 'quantity2')),
-                to_float(row_value(row, 'price3')),
-                to_int(row_value(row, 'quantity3')),
-                to_float(row_value(row, 'purchase_cost')),
-                to_float(row_value(row, 'making_charges')),
-                to_float(row_value(row, 'weight_grams')),
-                row_value(row, 'material'),
-                row_value(row, 'hsn_code'),
-                to_float(row_value(row, 'gst_percent')),
-                to_int(row_value(row, 'stock_total'), default=0),
-                row_value(row, 'box_packing_type'),
-                row_value(row, 'vendor_id'),
-                row_value(row, 'status'),
-                1 if to_bool(row_value(row, 'is_active'), default=True) else 0,
-                1 if to_bool(row_value(row, 'is_featured'), default=False) else 0,
-            )
-
+            product = Product.query.filter_by(sku=row_sku).first()
+            is_new = product is None
             if is_new:
-                conn.execute(
-                    '''INSERT INTO products
-                       (name, slug, category, sub_category, collection, size,
-                        retail_price, mrp_price, retail_discount_percent, wholesale_price,
-                        min_wholesale_qty, sets_count, image_field,
-                        price1, quantity1, price2, quantity2, price3, quantity3,
-                        purchase_cost, making_charges, weight_grams, material,
-                        hsn_code, gst_percent, stock_total, box_packing_type,
-                        vendor_id, status, is_active, is_featured, sku)
-                       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',
-                    values + (row_sku,)
-                )
-                created_rows += 1
-            else:
-                conn.execute(
-                    '''UPDATE products SET
-                       name=?, slug=?, category=?, sub_category=?, collection=?, size=?,
-                       retail_price=?, mrp_price=?, retail_discount_percent=?, wholesale_price=?,
-                       min_wholesale_qty=?, sets_count=?, image_field=?,
-                       price1=?, quantity1=?, price2=?, quantity2=?, price3=?, quantity3=?,
-                       purchase_cost=?, making_charges=?, weight_grams=?, material=?,
-                       hsn_code=?, gst_percent=?, stock_total=?, box_packing_type=?,
-                       vendor_id=?, status=?, is_active=?, is_featured=?
-                       WHERE sku=?''',
-                    values + (row_sku,)
-                )
-                updated_rows += 1
+                product = Product(sku=row_sku)
+                db.session.add(product)
+
+            # Core identity and basics
+            if hasattr(product, 'name'):
+                product.name = row_value(row, 'name')
+            if hasattr(product, 'slug'):
+                product.slug = row_value(row, 'slug')
+            if hasattr(product, 'category'):
+                product.category = row_value(row, 'category')
+            if hasattr(product, 'sub_category'):
+                product.sub_category = row_value(row, 'sub_category')
+            if hasattr(product, 'collection'):
+                product.collection = row_value(row, 'collection')
+            if hasattr(product, 'size'):
+                product.size = row_value(row, 'size')
+
+            # Unified pricing layer
+            if hasattr(product, 'retail_price'):
+                product.retail_price = to_float(row_value(row, 'retail_price'))
+            if hasattr(product, 'mrp_price'):
+                product.mrp_price = to_float(row_value(row, 'mrp_price'))
+            if hasattr(product, 'retail_discount_percent'):
+                product.retail_discount_percent = to_float(row_value(row, 'retail_discount_percent'))
+            if hasattr(product, 'wholesale_price'):
+                product.wholesale_price = to_float(row_value(row, 'wholesale_price'))
+            if hasattr(product, 'min_wholesale_qty'):
+                product.min_wholesale_qty = to_int(row_value(row, 'min_wholesale_qty'))
+            if hasattr(product, 'sets_count'):
+                product.sets_count = to_int(row_value(row, 'sets_count'))
+
+            # Legacy wholesale tier assignments
+            if hasattr(product, 'price1'):
+                product.price1 = to_float(row_value(row, 'price1'))
+            if hasattr(product, 'quantity1'):
+                product.quantity1 = to_int(row_value(row, 'quantity1'))
+            if hasattr(product, 'price2'):
+                product.price2 = to_float(row_value(row, 'price2'))
+            if hasattr(product, 'quantity2'):
+                product.quantity2 = to_int(row_value(row, 'quantity2'))
+            if hasattr(product, 'price3'):
+                product.price3 = to_float(row_value(row, 'price3'))
+            if hasattr(product, 'quantity3'):
+                product.quantity3 = to_int(row_value(row, 'quantity3'))
+
+            # Manufacturing, tax, and cost auditing
+            if hasattr(product, 'purchase_cost'):
+                product.purchase_cost = to_float(row_value(row, 'purchase_cost'))
+            if hasattr(product, 'making_charges'):
+                product.making_charges = to_float(row_value(row, 'making_charges'))
+            if hasattr(product, 'weight_grams'):
+                product.weight_grams = to_float(row_value(row, 'weight_grams'))
+            if hasattr(product, 'material'):
+                product.material = row_value(row, 'material')
+            if hasattr(product, 'hsn_code'):
+                product.hsn_code = row_value(row, 'hsn_code')
+            if hasattr(product, 'gst_percent'):
+                product.gst_percent = to_float(row_value(row, 'gst_percent'))
+
+            # Operations, logistics, and visibility
+            if hasattr(product, 'stock_total'):
+                product.stock_total = to_int(row_value(row, 'stock_total'))
+            if hasattr(product, 'box_packing_type'):
+                product.box_packing_type = row_value(row, 'box_packing_type')
+            if hasattr(product, 'vendor_id'):
+                product.vendor_id = row_value(row, 'vendor_id')
+            if hasattr(product, 'status'):
+                product.status = row_value(row, 'status')
+            if hasattr(product, 'is_active'):
+                product.is_active = to_bool(row_value(row, 'is_active'), default=True)
+            if hasattr(product, 'is_featured'):
+                product.is_featured = to_bool(row_value(row, 'is_featured'), default=False)
+
+            # Keep existing cloud image unless explicitly overridden by sheet.
+            sheet_image = row_value(row, 'image_field')
+            if sheet_image and hasattr(product, 'image_field'):
+                product.image_field = str(sheet_image)
 
             processed_rows += 1
+            if is_new:
+                created_rows += 1
+            else:
+                updated_rows += 1
 
-        conn.commit()
+        db.session.commit()
         flash(
             f'Inventory synchronization complete. Processed {processed_rows} rows '
             f'({created_rows} created, {updated_rows} updated).'
         )
         return redirect(url_for('admin_dashboard'))
-
     except Exception as exc:
+        db.session.rollback()
         flash(f'Catalog sync failed: {exc}')
         return redirect(url_for('admin_dashboard'))
 
