@@ -168,184 +168,88 @@ def upload_image_to_supabase(file_storage_object, filename):
         return None
 
 
-class SupabaseDB:
-    """
-    Wrapper around the Supabase REST API that mimics the sqlite3
-    connection interface used throughout the app.
-    Uses Supabase PostgREST for SELECT queries and
-    direct SQL execution via the rpc/sql endpoint for
-    INSERT, UPDATE, DELETE, CREATE TABLE operations.
-    """
+import re as _re
+import sqlite3 as _sqlite3
 
-    def __init__(self, client):
-        self._client = client
-        self._pending = []
+# ---------------------------------------------------------------------------
+# Hybrid database layer
+# On Render: uses a local SQLite file at /opt/render/project/src/narinakhre.db
+# which persists as long as the service is running.
+# On redeploy: tables are recreated and Excel re-upload restores products.
+# Images always come from Supabase so they are never lost.
+# This avoids all PostgreSQL port/schema issues on Render free plan.
+# ---------------------------------------------------------------------------
 
-    def execute(self, sql, params=None):
-        return SupabaseCursor(self._client, sql, params)
-
-    def commit(self):
-        pass  # Supabase REST is auto-commit
-
-    def rollback(self):
-        pass
-
-    def close(self):
-        pass
-
-
-class SupabaseCursor:
-    """Executes SQL via Supabase and returns results as list of dict-like objects."""
-
-    def __init__(self, client, sql, params=None):
-        self._client = client
-        self._rows = []
-        self._execute(sql, params or ())
-
-    def _execute(self, sql, params):
-        sql_clean = sql.strip()
-        # Replace ? with %s style then format with params
-        parts = sql_clean.split('?')
-        if len(parts) - 1 != len(params):
-            formatted = sql_clean
-        else:
-            formatted = ''
-            for i, part in enumerate(parts):
-                formatted += part
-                if i < len(params):
-                    val = params[i]
-                    if val is None:
-                        formatted += 'NULL'
-                    elif isinstance(val, bool):
-                        formatted += '1' if val else '0'
-                    elif isinstance(val, (int, float)):
-                        formatted += str(val)
-                    else:
-                        escaped = str(val).replace("'", "''")
-                        formatted += f"'{escaped}'"
-
-        try:
-            result = self._client.rpc('execute_sql', {'query': formatted}).execute()
-            if result.data:
-                if isinstance(result.data, list):
-                    self._rows = result.data
-                elif isinstance(result.data, dict) and 'rows' in result.data:
-                    self._rows = result.data['rows']
-        except Exception as e:
-            app.logger.error(f'SupabaseCursor error: {e} | SQL: {formatted[:200]}')
-            self._rows = []
-
-    def fetchone(self):
-        return self._rows[0] if self._rows else None
-
-    def fetchall(self):
-        return self._rows
-
-    def __iter__(self):
-        return iter(self._rows)
+_DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'narinakhre.db')
 
 
 def get_db():
     if 'db' not in g:
-        g.db = SupabaseDB(get_supabase())
+        conn = _sqlite3.connect(_DB_PATH)
+        conn.row_factory = _sqlite3.Row
+        g.db = conn
     return g.db
 
 
 @app.teardown_appcontext
 def close_db(error=None):
-    g.pop('db', None)
+    conn = g.pop('db', None)
+    if conn is not None:
+        try:
+            conn.commit()
+            conn.close()
+        except Exception:
+            pass
 
 
 def initialize_database_if_needed():
-    """
-    Create all tables in Supabase via the SQL editor RPC.
-    This runs once on app startup. Tables are created only if
-    they do not already exist so existing data is never touched.
-    """
-    tables_sql = [
-        '''CREATE TABLE IF NOT EXISTS categories (
-            id BIGSERIAL PRIMARY KEY,
-            name TEXT
-        )''',
-        '''CREATE TABLE IF NOT EXISTS products (
-            id BIGSERIAL PRIMARY KEY,
-            sku TEXT NOT NULL UNIQUE,
-            name TEXT,
-            slug TEXT,
-            category TEXT,
-            sub_category TEXT,
-            collection TEXT,
-            size TEXT,
-            retail_price FLOAT DEFAULT 0.0,
-            mrp_price FLOAT DEFAULT 0.0,
-            retail_discount_percent FLOAT DEFAULT 0.0,
-            wholesale_price FLOAT DEFAULT 0.0,
-            min_wholesale_qty INTEGER DEFAULT 0,
-            sets_count INTEGER DEFAULT 0,
+    """Create all tables in SQLite if they do not exist."""
+    conn = _sqlite3.connect(_DB_PATH)
+    try:
+        conn.execute('''CREATE TABLE IF NOT EXISTS categories (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT)''')
+        conn.execute('''CREATE TABLE IF NOT EXISTS products (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            sku TEXT NOT NULL UNIQUE, name TEXT, slug TEXT,
+            category TEXT, sub_category TEXT, collection TEXT, size TEXT,
+            retail_price REAL DEFAULT 0, mrp_price REAL DEFAULT 0,
+            retail_discount_percent REAL DEFAULT 0, wholesale_price REAL DEFAULT 0,
+            min_wholesale_qty INTEGER DEFAULT 0, sets_count INTEGER DEFAULT 0,
             image_field TEXT,
-            quantity1 INTEGER DEFAULT 0,
-            price1 FLOAT DEFAULT 0.0,
-            quantity2 INTEGER DEFAULT 0,
-            price2 FLOAT DEFAULT 0.0,
-            quantity3 INTEGER DEFAULT 0,
-            price3 FLOAT DEFAULT 0.0,
-            purchase_cost FLOAT DEFAULT 0.0,
-            making_charges FLOAT DEFAULT 0.0,
-            weight_grams FLOAT DEFAULT 0.0,
-            material TEXT,
-            hsn_code TEXT,
-            gst_percent FLOAT DEFAULT 0.0,
-            stock_total INTEGER DEFAULT 0,
-            box_packing_type TEXT,
-            vendor_id TEXT,
-            status TEXT,
-            is_active INTEGER DEFAULT 1,
-            is_featured INTEGER DEFAULT 0,
-            category_id BIGINT REFERENCES categories(id),
-            weight FLOAT DEFAULT 0.0,
-            length FLOAT DEFAULT 0.0,
-            breadth FLOAT DEFAULT 0.0,
-            height FLOAT DEFAULT 0.0
-        )''',
-        '''CREATE TABLE IF NOT EXISTS quotes (
-            id BIGSERIAL PRIMARY KEY,
-            request_id TEXT UNIQUE,
-            name TEXT,
-            whatsapp TEXT,
-            email TEXT,
-            items_json TEXT,
-            total_amount FLOAT DEFAULT 0.0,
+            quantity1 INTEGER DEFAULT 0, price1 REAL DEFAULT 0,
+            quantity2 INTEGER DEFAULT 0, price2 REAL DEFAULT 0,
+            quantity3 INTEGER DEFAULT 0, price3 REAL DEFAULT 0,
+            purchase_cost REAL DEFAULT 0, making_charges REAL DEFAULT 0,
+            weight_grams REAL DEFAULT 0, material TEXT, hsn_code TEXT,
+            gst_percent REAL DEFAULT 0, stock_total INTEGER DEFAULT 0,
+            box_packing_type TEXT, vendor_id TEXT, status TEXT,
+            is_active INTEGER DEFAULT 1, is_featured INTEGER DEFAULT 0,
+            category_id INTEGER, weight REAL DEFAULT 0,
+            length REAL DEFAULT 0, breadth REAL DEFAULT 0, height REAL DEFAULT 0)''')
+        conn.execute('''CREATE TABLE IF NOT EXISTS quotes (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            request_id TEXT UNIQUE, name TEXT, whatsapp TEXT, email TEXT,
+            items_json TEXT, total_amount REAL DEFAULT 0,
             status TEXT DEFAULT 'New',
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )''',
-        '''CREATE TABLE IF NOT EXISTS users (
-            id BIGSERIAL PRIMARY KEY
-        )''',
-        '''CREATE TABLE IF NOT EXISTS order_shipping (
-            id BIGSERIAL PRIMARY KEY,
-            user_id BIGINT REFERENCES users(id),
-            status TEXT NOT NULL DEFAULT 'pending',
-            consignee_name TEXT NOT NULL,
-            consignee_phone TEXT NOT NULL,
-            consignee_address TEXT NOT NULL,
-            consignee_city TEXT NOT NULL,
-            consignee_state TEXT NOT NULL,
-            consignee_pincode TEXT NOT NULL,
-            internal_order_id TEXT NOT NULL UNIQUE,
-            delhivery_waybill TEXT
-        )'''
-    ]
-    client = get_supabase()
-    for sql in tables_sql:
-        try:
-            client.rpc('execute_sql', {'query': sql}).execute()
-        except Exception as e:
-            app.logger.warning(f'Table init warning (may already exist): {e}')
-    app.logger.info('Database tables verified/created via Supabase RPC.')
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP)''')
+        conn.execute('''CREATE TABLE IF NOT EXISTS users (
+            id INTEGER PRIMARY KEY AUTOINCREMENT)''')
+        conn.execute('''CREATE TABLE IF NOT EXISTS order_shipping (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER, status TEXT NOT NULL DEFAULT 'pending',
+            consignee_name TEXT NOT NULL, consignee_phone TEXT NOT NULL,
+            consignee_address TEXT NOT NULL, consignee_city TEXT NOT NULL,
+            consignee_state TEXT NOT NULL, consignee_pincode TEXT NOT NULL,
+            internal_order_id TEXT NOT NULL UNIQUE, delhivery_waybill TEXT)''')
+        conn.commit()
+        app.logger.info('Database tables ready.')
+    except Exception as e:
+        app.logger.error(f'DB init error: {e}')
+    finally:
+        conn.close()
 
 
 def ensure_checkout_tables_exist():
-    """No-op — all tables created in initialize_database_if_needed."""
     pass
 
 
