@@ -2,11 +2,12 @@
 import os
 import json
 import hmac
-import sqlite3
 import smtplib
 import requests
 import razorpay
 import pyotp
+import psycopg2
+import psycopg2.extras
 from datetime import datetime
 from functools import wraps
 from email.mime.multipart import MIMEMultipart
@@ -36,14 +37,14 @@ load_env_file(os.path.join(os.path.dirname(os.path.abspath(__file__)), '.env'))
 app.secret_key = os.environ.get('FLASK_SECRET_KEY', 'nari-nakhre-dev-secret')
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-DATABASE = os.environ.get('DB_PATH', os.path.join(BASE_DIR, 'narinakhre.db'))
+DATABASE_URL = os.environ.get('DATABASE_URL', '')
 
 app.config['SHIPPING_PROVIDER'] = os.environ.get('SHIPPING_PROVIDER', 'mock')
 app.config['DELHIVERY_API_KEY'] = os.environ.get('DELHIVERY_API_KEY', '')
 app.config['WAREHOUSE_PIN'] = os.environ.get('WAREHOUSE_PIN', '400001')
 app.config['RAZORPAY_KEY_ID'] = os.environ.get('RAZORPAY_KEY_ID', '')
 app.config['RAZORPAY_KEY_SECRET'] = os.environ.get('RAZORPAY_KEY_SECRET', '')
-app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///' + DATABASE.replace('\\', '/')
+app.config['SQLALCHEMY_DATABASE_URI'] = DATABASE_URL
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
 db = SQLAlchemy(app)
@@ -158,174 +159,131 @@ def upload_image_to_supabase(file_storage_object, filename):
         return None
 
 
+class PGWrapper:
+    """
+    Thin wrapper around a psycopg2 connection that makes it behave
+    like the sqlite3 connection used throughout the app.
+    - Converts ? placeholders to %s for PostgreSQL
+    - Returns RealDictRow results (accessible by column name)
+    - Exposes .commit() and .close()
+    """
+    def __init__(self, conn):
+        self._conn = conn
+
+    def execute(self, sql, params=None):
+        sql = sql.replace('?', '%s')
+        cur = self._conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cur.execute(sql, params or ())
+        return cur
+
+    def commit(self):
+        self._conn.commit()
+
+    def rollback(self):
+        self._conn.rollback()
+
+    def close(self):
+        self._conn.close()
+
+
 def get_db():
     if 'db' not in g:
-        g.db = sqlite3.connect(DATABASE)
-        g.db.row_factory = sqlite3.Row
+        conn = psycopg2.connect(DATABASE_URL)
+        g.db = PGWrapper(conn)
     return g.db
 
 
 @app.teardown_appcontext
 def close_db(error=None):
-    db = g.pop('db', None)
-    if db is not None:
-        db.close()
+    wrapper = g.pop('db', None)
+    if wrapper is not None:
+        try:
+            wrapper._conn.commit()
+            wrapper.close()
+        except Exception:
+            pass
 
 
 def initialize_database_if_needed():
-    def ensure_table_columns(conn, table_name, required_columns):
-        existing = {
-            row[1] for row in conn.execute(f"PRAGMA table_info({table_name})").fetchall()
-        }
-        for col_name, col_def in required_columns:
-            if col_name not in existing:
-                conn.execute(f"ALTER TABLE {table_name} ADD COLUMN {col_name} {col_def}")
-
-    # Main app database + local quotes database (if used separately)
-    db_paths = [DATABASE, os.path.join(BASE_DIR, 'quotes.db')]
-
-    for db_path in db_paths:
-        conn = sqlite3.connect(db_path)
-        try:
-            conn.execute(
-                '''
-                CREATE TABLE IF NOT EXISTS categories (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    name TEXT
-                )
-                '''
-            )
-
-            # Ensure categories has all required columns in existing databases.
-            required_category_columns = [
-                ('name', 'TEXT'),
-            ]
-            ensure_table_columns(conn, 'categories', required_category_columns)
-
-            conn.execute(
-                '''
-                CREATE TABLE IF NOT EXISTS products (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    sku TEXT NOT NULL UNIQUE,
-                    name TEXT,
-                    slug TEXT,
-                    category TEXT,
-                    sub_category TEXT,
-                    collection TEXT,
-                    size TEXT,
-                    retail_price REAL DEFAULT 0.0,
-                    mrp_price REAL DEFAULT 0.0,
-                    retail_discount_percent REAL DEFAULT 0.0,
-                    wholesale_price REAL DEFAULT 0.0,
-                    min_wholesale_qty INTEGER DEFAULT 0,
-                    sets_count INTEGER DEFAULT 0,
-                    image_field TEXT,
-                    quantity1 INTEGER DEFAULT 0,
-                    price1 REAL DEFAULT 0.0,
-                    quantity2 INTEGER DEFAULT 0,
-                    price2 REAL DEFAULT 0.0,
-                    quantity3 INTEGER DEFAULT 0,
-                    price3 REAL DEFAULT 0.0,
-                    purchase_cost REAL DEFAULT 0.0,
-                    making_charges REAL DEFAULT 0.0,
-                    weight_grams REAL DEFAULT 0.0,
-                    material TEXT,
-                    hsn_code TEXT,
-                    gst_percent REAL DEFAULT 0.0,
-                    stock_total INTEGER DEFAULT 0,
-                    box_packing_type TEXT,
-                    vendor_id TEXT,
-                    status TEXT,
-                    is_active INTEGER DEFAULT 1,
-                    is_featured INTEGER DEFAULT 0,
-                    category_id INTEGER,
-                    weight REAL DEFAULT 0.0,
-                    length REAL DEFAULT 0.0,
-                    breadth REAL DEFAULT 0.0,
-                    height REAL DEFAULT 0.0,
-                    FOREIGN KEY (category_id) REFERENCES categories(id)
-                )
-                '''
-            )
-
-            # Add missing columns in already-existing products tables
-            required_product_columns = [
-                ('sku', 'TEXT'),
-                ('name', 'TEXT'),
-                ('slug', 'TEXT'),
-                ('category', 'TEXT'),
-                ('sub_category', 'TEXT'),
-                ('collection', 'TEXT'),
-                ('size', 'TEXT'),
-                ('retail_price', 'REAL DEFAULT 0.0'),
-                ('mrp_price', 'REAL DEFAULT 0.0'),
-                ('retail_discount_percent', 'REAL DEFAULT 0.0'),
-                ('wholesale_price', 'REAL DEFAULT 0.0'),
-                ('min_wholesale_qty', 'INTEGER DEFAULT 0'),
-                ('sets_count', 'INTEGER DEFAULT 0'),
-                ('image_field', 'TEXT'),
-                ('quantity1', 'INTEGER DEFAULT 0'),
-                ('price1', 'REAL DEFAULT 0.0'),
-                ('quantity2', 'INTEGER DEFAULT 0'),
-                ('price2', 'REAL DEFAULT 0.0'),
-                ('quantity3', 'INTEGER DEFAULT 0'),
-                ('price3', 'REAL DEFAULT 0.0'),
-                ('purchase_cost', 'REAL DEFAULT 0.0'),
-                ('making_charges', 'REAL DEFAULT 0.0'),
-                ('weight_grams', 'REAL DEFAULT 0.0'),
-                ('material', 'TEXT'),
-                ('hsn_code', 'TEXT'),
-                ('gst_percent', 'REAL DEFAULT 0.0'),
-                ('stock_total', 'INTEGER DEFAULT 0'),
-                ('box_packing_type', 'TEXT'),
-                ('vendor_id', 'TEXT'),
-                ('status', 'TEXT'),
-                ('is_active', 'INTEGER DEFAULT 1'),
-                ('is_featured', 'INTEGER DEFAULT 0'),
-                ('category_id', 'INTEGER'),
-                ('weight', 'REAL DEFAULT 0.0'),
-                ('length', 'REAL DEFAULT 0.0'),
-                ('breadth', 'REAL DEFAULT 0.0'),
-                ('height', 'REAL DEFAULT 0.0'),
-            ]
-            ensure_table_columns(conn, 'products', required_product_columns)
-
-            conn.execute(
-                '''
-                CREATE TABLE IF NOT EXISTS quotes (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    request_id TEXT UNIQUE,
-                    name TEXT,
-                    whatsapp TEXT,
-                    email TEXT,
-                    items_json TEXT,
-                    total_amount REAL DEFAULT 0.0,
-                    created_at TEXT DEFAULT CURRENT_TIMESTAMP
-                )
-                '''
-            )
-
-            conn.commit()
-        finally:
-            conn.close()
-
-
-def ensure_checkout_tables_exist():
-    """Create checkout-related tables only if missing; never drops existing data."""
-    conn = sqlite3.connect(DATABASE)
+    """Create all tables in Supabase PostgreSQL if they do not exist."""
+    conn = psycopg2.connect(DATABASE_URL)
     try:
-        conn.execute(
-            '''
-            CREATE TABLE IF NOT EXISTS users (
-                id INTEGER PRIMARY KEY
+        cur = conn.cursor()
+
+        cur.execute('''
+            CREATE TABLE IF NOT EXISTS categories (
+                id SERIAL PRIMARY KEY,
+                name TEXT
             )
-            '''
-        )
-        conn.execute(
-            '''
+        ''')
+
+        cur.execute('''
+            CREATE TABLE IF NOT EXISTS products (
+                id SERIAL PRIMARY KEY,
+                sku TEXT NOT NULL UNIQUE,
+                name TEXT,
+                slug TEXT,
+                category TEXT,
+                sub_category TEXT,
+                collection TEXT,
+                size TEXT,
+                retail_price FLOAT DEFAULT 0.0,
+                mrp_price FLOAT DEFAULT 0.0,
+                retail_discount_percent FLOAT DEFAULT 0.0,
+                wholesale_price FLOAT DEFAULT 0.0,
+                min_wholesale_qty INTEGER DEFAULT 0,
+                sets_count INTEGER DEFAULT 0,
+                image_field TEXT,
+                quantity1 INTEGER DEFAULT 0,
+                price1 FLOAT DEFAULT 0.0,
+                quantity2 INTEGER DEFAULT 0,
+                price2 FLOAT DEFAULT 0.0,
+                quantity3 INTEGER DEFAULT 0,
+                price3 FLOAT DEFAULT 0.0,
+                purchase_cost FLOAT DEFAULT 0.0,
+                making_charges FLOAT DEFAULT 0.0,
+                weight_grams FLOAT DEFAULT 0.0,
+                material TEXT,
+                hsn_code TEXT,
+                gst_percent FLOAT DEFAULT 0.0,
+                stock_total INTEGER DEFAULT 0,
+                box_packing_type TEXT,
+                vendor_id TEXT,
+                status TEXT,
+                is_active INTEGER DEFAULT 1,
+                is_featured INTEGER DEFAULT 0,
+                category_id INTEGER REFERENCES categories(id),
+                weight FLOAT DEFAULT 0.0,
+                length FLOAT DEFAULT 0.0,
+                breadth FLOAT DEFAULT 0.0,
+                height FLOAT DEFAULT 0.0
+            )
+        ''')
+
+        cur.execute('''
+            CREATE TABLE IF NOT EXISTS quotes (
+                id SERIAL PRIMARY KEY,
+                request_id TEXT UNIQUE,
+                name TEXT,
+                whatsapp TEXT,
+                email TEXT,
+                items_json TEXT,
+                total_amount FLOAT DEFAULT 0.0,
+                status TEXT DEFAULT 'New',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+
+        cur.execute('''
+            CREATE TABLE IF NOT EXISTS users (
+                id SERIAL PRIMARY KEY
+            )
+        ''')
+
+        cur.execute('''
             CREATE TABLE IF NOT EXISTS order_shipping (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                user_id INTEGER,
+                id SERIAL PRIMARY KEY,
+                user_id INTEGER REFERENCES users(id),
                 status TEXT NOT NULL DEFAULT 'pending',
                 consignee_name TEXT NOT NULL,
                 consignee_phone TEXT NOT NULL,
@@ -334,14 +292,23 @@ def ensure_checkout_tables_exist():
                 consignee_state TEXT NOT NULL,
                 consignee_pincode TEXT NOT NULL,
                 internal_order_id TEXT NOT NULL UNIQUE,
-                delhivery_waybill TEXT,
-                FOREIGN KEY(user_id) REFERENCES users(id)
+                delhivery_waybill TEXT
             )
-            '''
-        )
+        ''')
+
         conn.commit()
+        app.logger.info('Database tables verified/created successfully.')
+    except Exception as e:
+        conn.rollback()
+        app.logger.error(f'Database initialization error: {e}')
+        raise
     finally:
         conn.close()
+
+
+def ensure_checkout_tables_exist():
+    """No-op — all tables created in initialize_database_if_needed."""
+    pass
 
 
 initialize_database_if_needed()
@@ -471,52 +438,6 @@ def render_site(template_name, **kwargs):
     return render_template(f"{site_type}/{template_name}", **kwargs)
 
 # --- ROUTES: HOME & CATEGORY ---
-def get_supabase_image_urls(sku):
-    supabase_url = (os.environ.get('SUPABASE_URL') or '').rstrip('/')
-    bucket = 'products'
-    if not supabase_url:
-        return []
-    return [f"{supabase_url}/storage/v1/object/public/{bucket}/{sku}_{i}.webp" for i in range(1, 10)]
-
-
-def get_random_hero_images(db, count=4):
-    import random
-    rows = db.execute(
-        "SELECT image_field FROM products WHERE image_field IS NOT NULL AND image_field LIKE 'http%' ORDER BY RANDOM() LIMIT ?",
-        (count,)
-    ).fetchall()
-    return [r['image_field'] for r in rows]
-
-
-def build_product_dict(p):
-    p_dict = dict(p)
-    image_field = p_dict.get('image_field') or ''
-    if image_field.startswith('http'):
-        all_urls = get_supabase_image_urls(p_dict['sku'])
-        images = [image_field] + [u for u in all_urls if u != image_field]
-    else:
-        images = get_supabase_image_urls(p_dict['sku'])
-    if not images:
-        images = ['/static/assets/products/default.jpg']
-    p_dict['images'] = images
-    tiers = []
-    for i in range(1, 4):
-        qty = p_dict.get(f'quantity{i}')
-        price = p_dict.get(f'price{i}')
-        if qty and price:
-            try:
-                qty_val = int(qty)
-                price_val = float(price)
-                if qty_val > 0 and price_val > 0:
-                    tiers.append({'qty': qty_val, 'price': price_val})
-            except Exception:
-                continue
-    if not tiers:
-        tiers = [{'qty': 1, 'price': 0}]
-    p_dict['tiers'] = tiers
-    return p_dict
-
-
 @app.route('/')
 @app.route('/retail')
 @app.route('/wholesale')
@@ -525,32 +446,90 @@ def index():
         g.site_type = 'retail'
     elif request.path.startswith('/wholesale'):
         g.site_type = 'wholesale'
-
+    
     db = get_db()
-    hero_images = get_random_hero_images(db, count=4)
-
-    if g.site_type == 'retail':
-        products = db.execute('SELECT * FROM products WHERE is_active=1').fetchall()
+    # For retail, group products by the 'category' column
+    if request.path.startswith('/retail'):
+        products = db.execute('SELECT * FROM products').fetchall()
         grouped_products = {}
         for p in products:
             cat = p['category'] or 'New Arrivals'
             if cat not in grouped_products:
                 grouped_products[cat] = []
-            grouped_products[cat].append(build_product_dict(p))
-        return render_site('index.html', grouped_products=grouped_products, hero_images=hero_images)
-
+            p_dict = dict(p)
+            image_dir = os.path.join(app.root_path, 'static', 'assets', 'products')
+            images = []
+            for i in range(1, 10):
+                img_filename = f"{p['sku']}_{i}.jpg"
+                img_path = os.path.join(image_dir, img_filename)
+                if os.path.exists(img_path):
+                    images.append(url_for('static', filename=f"assets/products/{img_filename}"))
+                else:
+                    break
+            if not images:
+                images = [url_for('static', filename=f"assets/products/default.jpg")]
+            p_dict['images'] = images
+            tiers = []
+            for i in range(1, 4):
+                qty_key = f'quantity{i}'
+                price_key = f'price{i}'
+                qty = p_dict.get(qty_key)
+                price = p_dict.get(price_key)
+                if qty and price:
+                    try:
+                        qty_val = int(qty)
+                        price_val = float(price)
+                        if qty_val > 0 and price_val > 0:
+                            tiers.append({'qty': qty_val, 'price': price_val})
+                    except Exception:
+                        continue
+            if not tiers:
+                tiers = [{'qty': 1, 'price': 0}]
+            p_dict['tiers'] = tiers
+            grouped_products[cat].append(p_dict)
+        return render_site('index.html', grouped_products=grouped_products)
+    # For wholesale, keep the old logic
     products = db.execute('''
         SELECT p.*, c.name as category_name FROM products p
         LEFT JOIN categories c ON p.category_id = c.id
-        WHERE p.is_active=1
     ''').fetchall()
     grouped_products = {}
     for p in products:
-        cat = p['category_name'] or p['category'] or 'New Arrivals'
+        cat = p['category_name'] or 'New Arrivals'
         if cat not in grouped_products:
             grouped_products[cat] = []
-        grouped_products[cat].append(build_product_dict(p))
-    return render_site('index.html', grouped_products=grouped_products, hero_images=hero_images)
+        p_dict = dict(p)
+        image_dir = os.path.join(app.root_path, 'static', 'assets', 'products')
+        images = []
+        for i in range(1, 10):
+            img_filename = f"{p['sku']}_{i}.jpg"
+            img_path = os.path.join(image_dir, img_filename)
+            if os.path.exists(img_path):
+                images.append(url_for('static', filename=f"assets/products/{img_filename}"))
+            else:
+                break
+        if not images:
+            images = [url_for('static', filename=f"assets/products/default.jpg")]
+        p_dict['images'] = images
+        tiers = []
+        for i in range(1, 4):
+            qty_key = f'quantity{i}'
+            price_key = f'price{i}'
+            qty = p_dict.get(qty_key)
+            price = p_dict.get(price_key)
+            if qty and price:
+                try:
+                    qty_val = int(qty)
+                    price_val = float(price)
+                    if qty_val > 0 and price_val > 0:
+                        tiers.append({'qty': qty_val, 'price': price_val})
+                except Exception:
+                    continue
+        if not tiers:
+            tiers = [{'qty': 1, 'price': 0}]
+        p_dict['tiers'] = tiers
+        grouped_products[cat].append(p_dict)
+    return render_site('index.html', grouped_products=grouped_products)
 
 @app.route('/category/<category>')
 @app.route('/retail/category/<category>')
@@ -749,18 +728,16 @@ def checkout_process():
     internal_order_id = f"NN-SHP-{datetime.now().strftime('%Y%m%d%H%M%S')}-{consignee_phone[-4:]}"
     user_id = session.get('user_id')
 
-    shipping_record = Address(
-        user_id=user_id,
-        consignee_name=cleaned_name,
-        consignee_phone=consignee_phone,
-        consignee_address=cleaned_address,
-        consignee_city=consignee_city,
-        consignee_state=consignee_state,
-        consignee_pincode=consignee_pincode,
-        internal_order_id=internal_order_id,
+    conn = get_db()
+    conn.execute(
+        '''INSERT INTO order_shipping
+           (user_id, consignee_name, consignee_phone, consignee_address,
+            consignee_city, consignee_state, consignee_pincode, internal_order_id, status)
+           VALUES (?,?,?,?,?,?,?,?,'pending')''',
+        (user_id, cleaned_name, consignee_phone, cleaned_address,
+         consignee_city, consignee_state, consignee_pincode, internal_order_id)
     )
-    db.session.add(shipping_record)
-    db.session.commit()
+    conn.commit()
 
     delhivery_payload = {
         'shipments': [
@@ -807,8 +784,11 @@ def checkout_process():
             waybill = None
 
     if waybill:
-        shipping_record.delhivery_waybill = waybill
-        db.session.commit()
+        conn.execute(
+            'UPDATE order_shipping SET delhivery_waybill=? WHERE internal_order_id=?',
+            (waybill, internal_order_id)
+        )
+        conn.commit()
 
     print('Sanitized shipping payload for Delhivery:', {
         'internal_order_id': internal_order_id,
@@ -994,17 +974,22 @@ def verify_payment():
                 'message': 'No active order found for this payment'
             }), 400
 
-        shipping_record = Address.query.filter_by(internal_order_id=internal_order_id).first()
-        if shipping_record is None:
+        conn = get_db()
+        row = conn.execute(
+            'SELECT id FROM order_shipping WHERE internal_order_id=?',
+            (internal_order_id,)
+        ).fetchone()
+        if row is None:
             return jsonify({
                 'status': 'error',
                 'message': 'No active order found for this payment'
             }), 400
 
-        shipping_record.status = 'paid'
-        if hasattr(shipping_record, 'razorpay_payment_id'):
-            shipping_record.razorpay_payment_id = razorpay_payment_id
-        db.session.commit()
+        conn.execute(
+            'UPDATE order_shipping SET status=? WHERE internal_order_id=?',
+            ('paid', internal_order_id)
+        )
+        conn.commit()
 
         session.pop('razorpay_order_id', None)
         session.pop('payment_pending', None)
@@ -1017,8 +1002,8 @@ def verify_payment():
             'status': 'success',
             'message': 'Payment verified and order finalized'
         }), 200
-    except Exception:
-        db.session.rollback()
+    except Exception as e:
+        app.logger.error(f'Payment verification error: {e}')
         return jsonify({
             'status': 'error',
             'message': 'Unable to finalize verified payment'
@@ -1105,11 +1090,12 @@ def place_order():
     }
     resp = provider.create_shipment(shipment_data)
     waybill = resp.get('waybill')
-    db.execute(
-        "INSERT INTO orders (order_id, name, phone, email, address_line1, address_line2, city, state, pincode, country, payment_mode, amount, waybill) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        (order_id, name, phone, email, address_line1, address_line2, city, state, pincode, country, payment_mode, amount, waybill)
+    conn = get_db()
+    conn.execute(
+        "INSERT INTO order_shipping (internal_order_id, consignee_name, consignee_phone, consignee_address, consignee_city, consignee_state, consignee_pincode, delhivery_waybill, status) VALUES (?,?,?,?,?,?,?,?,'pending')",
+        (order_id, name, phone, f"{address_line1}, {address_line2}", city, state, pincode, waybill)
     )
-    db.commit()
+    conn.commit()
     session.pop('cart', None)
     tracking_url = f"https://www.delhivery.com/track/package/{waybill}" if waybill else None
     return render_site('thank_you.html', order_id=order_id, waybill=waybill, tracking_url=tracking_url)
@@ -1150,7 +1136,8 @@ def admin_upload_images():
         flash('SKU and images are required for upload.')
         return redirect(url_for('admin_manage_images'))
 
-    product = Product.query.filter_by(sku=sku).first()
+    conn = get_db()
+    product = conn.execute('SELECT id FROM products WHERE sku=?', (sku,)).fetchone()
     if not product:
         flash('Product not found for the provided SKU.')
         return redirect(url_for('admin_manage_images'))
@@ -1166,8 +1153,8 @@ def admin_upload_images():
             first_public_cloud_url = public_cloud_url
 
     if first_public_cloud_url:
-        product.image_field = first_public_cloud_url
-        db.session.commit()
+        conn.execute('UPDATE products SET image_field=? WHERE sku=?', (first_public_cloud_url, sku))
+        conn.commit()
         flash('Product images successfully processed, scaled down, converted to WebP format, and synced to Supabase!')
     else:
         flash('No images were uploaded to cloud storage. Please try again.')
@@ -1279,38 +1266,22 @@ def admin_add_product():
         sku = request.form.get('sku', '').strip()
         name = request.form.get('name', '').strip()
         category = request.form.get('category', '').strip()
-        sub_category = request.form.get('sub_category', '').strip()
-        collection = request.form.get('collection', '').strip()
-        size = request.form.get('size', '').strip()
         retail_price = float(request.form.get('retail_price', 0) or 0)
         mrp_price = float(request.form.get('mrp_price', 0) or 0)
         wholesale_price = float(request.form.get('wholesale_price', 0) or 0)
         stock_total = int(request.form.get('stock_total', 0) or 0)
         material = request.form.get('material', '').strip()
         slug = request.form.get('slug', '').strip()
-        hsn_code = request.form.get('hsn_code', '').strip()
-        gst_percent = float(request.form.get('gst_percent', 0) or 0)
-        weight_grams = float(request.form.get('weight_grams', 0) or 0)
-        length = float(request.form.get('length', 0) or 0)
-        breadth = float(request.form.get('breadth', 0) or 0)
-        height = float(request.form.get('height', 0) or 0)
         price1 = float(request.form.get('price1', 0) or 0)
         quantity1 = int(request.form.get('quantity1', 0) or 0)
         price2 = float(request.form.get('price2', 0) or 0)
         quantity2 = int(request.form.get('quantity2', 0) or 0)
         price3 = float(request.form.get('price3', 0) or 0)
         quantity3 = int(request.form.get('quantity3', 0) or 0)
-        sets_count = int(request.form.get('sets_count', 1) or 1)
-        min_wholesale_qty = int(request.form.get('min_wholesale_qty', 0) or 0)
 
         if not sku:
             flash('SKU is required.')
             return redirect(url_for('admin_add_product'))
-
-        if not slug:
-            import re
-            slug = re.sub(r'[^a-z0-9\s-]', '', name.lower())
-            slug = re.sub(r'\s+', '-', slug.strip())[:80]
 
         existing = db.execute('SELECT id FROM products WHERE sku=?', (sku,)).fetchone()
         if existing:
@@ -1320,47 +1291,18 @@ def admin_add_product():
         image_url = None
         image_file = request.files.get('image')
         if image_file and image_file.filename:
-            from PIL import Image as PilImage
-            import io as _io
-            try:
-                with PilImage.open(image_file.stream) as img:
-                    if img.mode in ('RGBA', 'P', 'LA'):
-                        img = img.convert('RGBA')
-                    else:
-                        img = img.convert('RGB')
-                    buf = _io.BytesIO()
-                    img.save(buf, format='WEBP', quality=85, method=6)
-                    buf.seek(0)
-                    filename = f"{sku}_1.webp"
-                    upload_url = f"{(os.environ.get('SUPABASE_URL') or '').rstrip('/')}/storage/v1/object/products/{filename}"
-                    headers = {
-                        'Authorization': f"Bearer {os.environ.get('SUPABASE_KEY', '')}",
-                        'apikey': os.environ.get('SUPABASE_KEY', ''),
-                        'Content-Type': 'image/webp',
-                        'x-upsert': 'true',
-                    }
-                    resp = requests.put(upload_url, headers=headers, data=buf.read(), timeout=30)
-                    if resp.status_code == 200:
-                        supabase_url = (os.environ.get('SUPABASE_URL') or '').rstrip('/')
-                        image_url = f"{supabase_url}/storage/v1/object/public/products/{filename}"
-            except Exception as e:
-                app.logger.error(f'Image upload failed for {sku}: {e}')
+            filename = f"{sku}_1.webp"
+            image_url = upload_image_to_supabase(image_file, filename)
 
         db.execute(
             '''INSERT INTO products
-               (sku, name, category, sub_category, collection, size,
-                retail_price, mrp_price, wholesale_price, stock_total,
-                material, slug, hsn_code, gst_percent, weight_grams,
-                length, breadth, height,
-                price1, quantity1, price2, quantity2, price3, quantity3,
-                sets_count, min_wholesale_qty, image_field, is_active)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,1)''',
-            (sku, name, category, sub_category, collection, size,
-             retail_price, mrp_price, wholesale_price, stock_total,
-             material, slug, hsn_code, gst_percent, weight_grams,
-             length, breadth, height,
-             price1, quantity1, price2, quantity2, price3, quantity3,
-             sets_count, min_wholesale_qty, image_url)
+               (sku, name, category, retail_price, mrp_price, wholesale_price,
+                stock_total, material, slug, price1, quantity1, price2, quantity2,
+                price3, quantity3, image_field, is_active)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,1)''',
+            (sku, name, category, retail_price, mrp_price, wholesale_price,
+             stock_total, material, slug, price1, quantity1, price2, quantity2,
+             price3, quantity3, image_url)
         )
         db.commit()
         flash(f'Product {sku} added successfully.')
@@ -1462,107 +1404,103 @@ def admin_upload_excel():
         created_rows = 0
         updated_rows = 0
 
+        conn = get_db()
         for _, row in df.iterrows():
             row_sku = normalize_value(row.get('sku'))
             if not row_sku:
                 continue
             row_sku = str(row_sku).strip()
 
-            product = Product.query.filter_by(sku=row_sku).first()
-            is_new = product is None
-            if is_new:
-                product = Product(sku=row_sku)
-                db.session.add(product)
+            existing = conn.execute('SELECT id FROM products WHERE sku=?', (row_sku,)).fetchone()
+            is_new = existing is None
 
-            # Core identity and basics
-            if hasattr(product, 'name'):
-                product.name = row_value(row, 'name')
-            if hasattr(product, 'slug'):
-                product.slug = row_value(row, 'slug')
-            if hasattr(product, 'category'):
-                product.category = row_value(row, 'category')
-            if hasattr(product, 'sub_category'):
-                product.sub_category = row_value(row, 'sub_category')
-            if hasattr(product, 'collection'):
-                product.collection = row_value(row, 'collection')
-            if hasattr(product, 'size'):
-                product.size = row_value(row, 'size')
+            existing_image = None
+            if not is_new:
+                img_row = conn.execute('SELECT image_field FROM products WHERE sku=?', (row_sku,)).fetchone()
+                if img_row:
+                    existing_image = img_row['image_field']
 
-            # Unified pricing layer
-            if hasattr(product, 'retail_price'):
-                product.retail_price = to_float(row_value(row, 'retail_price'))
-            if hasattr(product, 'mrp_price'):
-                product.mrp_price = to_float(row_value(row, 'mrp_price'))
-            if hasattr(product, 'retail_discount_percent'):
-                product.retail_discount_percent = to_float(row_value(row, 'retail_discount_percent'))
-            if hasattr(product, 'wholesale_price'):
-                product.wholesale_price = to_float(row_value(row, 'wholesale_price'))
-            if hasattr(product, 'min_wholesale_qty'):
-                product.min_wholesale_qty = to_int(row_value(row, 'min_wholesale_qty'))
-            if hasattr(product, 'sets_count'):
-                product.sets_count = to_int(row_value(row, 'sets_count'))
-
-            # Legacy wholesale tier assignments
-            if hasattr(product, 'price1'):
-                product.price1 = to_float(row_value(row, 'price1'))
-            if hasattr(product, 'quantity1'):
-                product.quantity1 = to_int(row_value(row, 'quantity1'))
-            if hasattr(product, 'price2'):
-                product.price2 = to_float(row_value(row, 'price2'))
-            if hasattr(product, 'quantity2'):
-                product.quantity2 = to_int(row_value(row, 'quantity2'))
-            if hasattr(product, 'price3'):
-                product.price3 = to_float(row_value(row, 'price3'))
-            if hasattr(product, 'quantity3'):
-                product.quantity3 = to_int(row_value(row, 'quantity3'))
-
-            # Manufacturing, tax, and cost auditing
-            if hasattr(product, 'purchase_cost'):
-                product.purchase_cost = to_float(row_value(row, 'purchase_cost'))
-            if hasattr(product, 'making_charges'):
-                product.making_charges = to_float(row_value(row, 'making_charges'))
-            if hasattr(product, 'weight_grams'):
-                product.weight_grams = to_float(row_value(row, 'weight_grams'))
-            if hasattr(product, 'material'):
-                product.material = row_value(row, 'material')
-            if hasattr(product, 'hsn_code'):
-                product.hsn_code = row_value(row, 'hsn_code')
-            if hasattr(product, 'gst_percent'):
-                product.gst_percent = to_float(row_value(row, 'gst_percent'))
-
-            # Operations, logistics, and visibility
-            if hasattr(product, 'stock_total'):
-                product.stock_total = to_int(row_value(row, 'stock_total'))
-            if hasattr(product, 'box_packing_type'):
-                product.box_packing_type = row_value(row, 'box_packing_type')
-            if hasattr(product, 'vendor_id'):
-                product.vendor_id = row_value(row, 'vendor_id')
-            if hasattr(product, 'status'):
-                product.status = row_value(row, 'status')
-            if hasattr(product, 'is_active'):
-                product.is_active = to_bool(row_value(row, 'is_active'), default=True)
-            if hasattr(product, 'is_featured'):
-                product.is_featured = to_bool(row_value(row, 'is_featured'), default=False)
-
-            # Keep existing cloud image unless explicitly overridden by sheet.
             sheet_image = row_value(row, 'image_field')
-            if sheet_image and hasattr(product, 'image_field'):
-                product.image_field = str(sheet_image)
+            final_image = str(sheet_image) if sheet_image else existing_image
 
-            processed_rows += 1
+            values = (
+                row_value(row, 'name'),
+                row_value(row, 'slug'),
+                row_value(row, 'category'),
+                row_value(row, 'sub_category'),
+                row_value(row, 'collection'),
+                row_value(row, 'size'),
+                to_float(row_value(row, 'retail_price')),
+                to_float(row_value(row, 'mrp_price')),
+                to_float(row_value(row, 'retail_discount_percent')),
+                to_float(row_value(row, 'wholesale_price')),
+                to_int(row_value(row, 'min_wholesale_qty')),
+                to_int(row_value(row, 'sets_count')),
+                final_image,
+                to_float(row_value(row, 'price1')),
+                to_int(row_value(row, 'quantity1')),
+                to_float(row_value(row, 'price2')),
+                to_int(row_value(row, 'quantity2')),
+                to_float(row_value(row, 'price3')),
+                to_int(row_value(row, 'quantity3')),
+                to_float(row_value(row, 'purchase_cost')),
+                to_float(row_value(row, 'making_charges')),
+                to_float(row_value(row, 'weight_grams')),
+                row_value(row, 'material'),
+                row_value(row, 'hsn_code'),
+                to_float(row_value(row, 'gst_percent')),
+                to_int(row_value(row, 'stock_total'), default=0),
+                row_value(row, 'box_packing_type'),
+                row_value(row, 'vendor_id'),
+                row_value(row, 'status'),
+                1 if to_bool(row_value(row, 'is_active'), default=True) else 0,
+                1 if to_bool(row_value(row, 'is_featured'), default=False) else 0,
+                to_float(row_value(row, 'weight')),
+                to_float(row_value(row, 'length')),
+                to_float(row_value(row, 'breadth')),
+                to_float(row_value(row, 'height')),
+            )
+
             if is_new:
+                conn.execute(
+                    '''INSERT INTO products
+                       (name, slug, category, sub_category, collection, size,
+                        retail_price, mrp_price, retail_discount_percent, wholesale_price,
+                        min_wholesale_qty, sets_count, image_field,
+                        price1, quantity1, price2, quantity2, price3, quantity3,
+                        purchase_cost, making_charges, weight_grams, material,
+                        hsn_code, gst_percent, stock_total, box_packing_type,
+                        vendor_id, status, is_active, is_featured,
+                        weight, length, breadth, height, sku)
+                       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',
+                    values + (row_sku,)
+                )
                 created_rows += 1
             else:
+                conn.execute(
+                    '''UPDATE products SET
+                       name=?, slug=?, category=?, sub_category=?, collection=?, size=?,
+                       retail_price=?, mrp_price=?, retail_discount_percent=?, wholesale_price=?,
+                       min_wholesale_qty=?, sets_count=?, image_field=?,
+                       price1=?, quantity1=?, price2=?, quantity2=?, price3=?, quantity3=?,
+                       purchase_cost=?, making_charges=?, weight_grams=?, material=?,
+                       hsn_code=?, gst_percent=?, stock_total=?, box_packing_type=?,
+                       vendor_id=?, status=?, is_active=?, is_featured=?,
+                       weight=?, length=?, breadth=?, height=?
+                       WHERE sku=?''',
+                    values + (row_sku,)
+                )
                 updated_rows += 1
 
-        db.session.commit()
+            processed_rows += 1
+
+        conn.commit()
         flash(
             f'Inventory synchronization complete. Processed {processed_rows} rows '
             f'({created_rows} created, {updated_rows} updated).'
         )
         return redirect(url_for('admin_dashboard'))
     except Exception as exc:
-        db.session.rollback()
         flash(f'Catalog sync failed: {exc}')
         return redirect(url_for('admin_dashboard'))
 

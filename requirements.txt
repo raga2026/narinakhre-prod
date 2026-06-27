@@ -6,7 +6,7 @@ Flask-SQLAlchemy
 Werkzeug
 supabase
 pyotp
+psycopg2-binary
 pandas
 openpyxl
-selenium
 Pillow
