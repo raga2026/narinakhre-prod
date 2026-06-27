@@ -1376,7 +1376,7 @@ def admin_upload_excel():
         return value
 
     def to_float(value, default=0.0):
-        value = normalize_value(value)
+    value = normalize_value(value)
         if value is None:
             return default
         try:
