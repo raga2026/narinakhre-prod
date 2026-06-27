@@ -1368,15 +1368,18 @@ def admin_upload_excel():
         return redirect(url_for('admin_dashboard'))
 
     def normalize_value(value):
-        if pd.isna(value):
-            return None
+        try:
+            if pd.isna(value):
+                return None
+        except Exception:
+            pass
         if isinstance(value, str):
             cleaned = value.strip()
             return cleaned if cleaned else None
         return value
 
     def to_float(value, default=0.0):
-    value = normalize_value(value)
+        value = normalize_value(value)
         if value is None:
             return default
         try:
@@ -1425,6 +1428,7 @@ def admin_upload_excel():
 
         df.columns = df.columns.str.lower().str.strip()
 
+        conn = get_db()
         processed_rows = 0
         created_rows = 0
         updated_rows = 0
@@ -1435,101 +1439,96 @@ def admin_upload_excel():
                 continue
             row_sku = str(row_sku).strip()
 
-            product = Product.query.filter_by(sku=row_sku).first()
-            is_new = product is None
-            if is_new:
-                product = Product(sku=row_sku)
-                db.session.add(product)
+            existing = conn.execute(
+                'SELECT id FROM products WHERE sku = ?', (row_sku,)
+            ).fetchone()
+            is_new = existing is None
 
-            # Core identity and basics
-            if hasattr(product, 'name'):
-                product.name = row_value(row, 'name')
-            if hasattr(product, 'slug'):
-                product.slug = row_value(row, 'slug')
-            if hasattr(product, 'category'):
-                product.category = row_value(row, 'category')
-            if hasattr(product, 'sub_category'):
-                product.sub_category = row_value(row, 'sub_category')
-            if hasattr(product, 'collection'):
-                product.collection = row_value(row, 'collection')
-            if hasattr(product, 'size'):
-                product.size = row_value(row, 'size')
+            # Preserve existing image unless sheet provides one
+            existing_image = None
+            if not is_new:
+                img_row = conn.execute(
+                    'SELECT image_field FROM products WHERE sku = ?', (row_sku,)
+                ).fetchone()
+                if img_row:
+                    existing_image = img_row['image_field']
 
-            # Unified pricing layer
-            if hasattr(product, 'retail_price'):
-                product.retail_price = to_float(row_value(row, 'retail_price'))
-            if hasattr(product, 'mrp_price'):
-                product.mrp_price = to_float(row_value(row, 'mrp_price'))
-            if hasattr(product, 'retail_discount_percent'):
-                product.retail_discount_percent = to_float(row_value(row, 'retail_discount_percent'))
-            if hasattr(product, 'wholesale_price'):
-                product.wholesale_price = to_float(row_value(row, 'wholesale_price'))
-            if hasattr(product, 'min_wholesale_qty'):
-                product.min_wholesale_qty = to_int(row_value(row, 'min_wholesale_qty'))
-            if hasattr(product, 'sets_count'):
-                product.sets_count = to_int(row_value(row, 'sets_count'))
-
-            # Legacy wholesale tier assignments
-            if hasattr(product, 'price1'):
-                product.price1 = to_float(row_value(row, 'price1'))
-            if hasattr(product, 'quantity1'):
-                product.quantity1 = to_int(row_value(row, 'quantity1'))
-            if hasattr(product, 'price2'):
-                product.price2 = to_float(row_value(row, 'price2'))
-            if hasattr(product, 'quantity2'):
-                product.quantity2 = to_int(row_value(row, 'quantity2'))
-            if hasattr(product, 'price3'):
-                product.price3 = to_float(row_value(row, 'price3'))
-            if hasattr(product, 'quantity3'):
-                product.quantity3 = to_int(row_value(row, 'quantity3'))
-
-            # Manufacturing, tax, and cost auditing
-            if hasattr(product, 'purchase_cost'):
-                product.purchase_cost = to_float(row_value(row, 'purchase_cost'))
-            if hasattr(product, 'making_charges'):
-                product.making_charges = to_float(row_value(row, 'making_charges'))
-            if hasattr(product, 'weight_grams'):
-                product.weight_grams = to_float(row_value(row, 'weight_grams'))
-            if hasattr(product, 'material'):
-                product.material = row_value(row, 'material')
-            if hasattr(product, 'hsn_code'):
-                product.hsn_code = row_value(row, 'hsn_code')
-            if hasattr(product, 'gst_percent'):
-                product.gst_percent = to_float(row_value(row, 'gst_percent'))
-
-            # Operations, logistics, and visibility
-            if hasattr(product, 'stock_total'):
-                product.stock_total = to_int(row_value(row, 'stock_total'))
-            if hasattr(product, 'box_packing_type'):
-                product.box_packing_type = row_value(row, 'box_packing_type')
-            if hasattr(product, 'vendor_id'):
-                product.vendor_id = row_value(row, 'vendor_id')
-            if hasattr(product, 'status'):
-                product.status = row_value(row, 'status')
-            if hasattr(product, 'is_active'):
-                product.is_active = to_bool(row_value(row, 'is_active'), default=True)
-            if hasattr(product, 'is_featured'):
-                product.is_featured = to_bool(row_value(row, 'is_featured'), default=False)
-
-            # Keep existing cloud image unless explicitly overridden by sheet.
             sheet_image = row_value(row, 'image_field')
-            if sheet_image and hasattr(product, 'image_field'):
-                product.image_field = str(sheet_image)
+            final_image = str(sheet_image) if sheet_image else existing_image
 
-            processed_rows += 1
+            values = (
+                row_value(row, 'name'),
+                row_value(row, 'slug'),
+                row_value(row, 'category'),
+                row_value(row, 'sub_category'),
+                row_value(row, 'collection'),
+                row_value(row, 'size'),
+                to_float(row_value(row, 'retail_price')),
+                to_float(row_value(row, 'mrp_price')),
+                to_float(row_value(row, 'retail_discount_percent')),
+                to_float(row_value(row, 'wholesale_price')),
+                to_int(row_value(row, 'min_wholesale_qty')),
+                to_int(row_value(row, 'sets_count')),
+                final_image,
+                to_float(row_value(row, 'price1')),
+                to_int(row_value(row, 'quantity1')),
+                to_float(row_value(row, 'price2')),
+                to_int(row_value(row, 'quantity2')),
+                to_float(row_value(row, 'price3')),
+                to_int(row_value(row, 'quantity3')),
+                to_float(row_value(row, 'purchase_cost')),
+                to_float(row_value(row, 'making_charges')),
+                to_float(row_value(row, 'weight_grams')),
+                row_value(row, 'material'),
+                row_value(row, 'hsn_code'),
+                to_float(row_value(row, 'gst_percent')),
+                to_int(row_value(row, 'stock_total'), default=0),
+                row_value(row, 'box_packing_type'),
+                row_value(row, 'vendor_id'),
+                row_value(row, 'status'),
+                1 if to_bool(row_value(row, 'is_active'), default=True) else 0,
+                1 if to_bool(row_value(row, 'is_featured'), default=False) else 0,
+            )
+
             if is_new:
+                conn.execute(
+                    '''INSERT INTO products
+                       (name, slug, category, sub_category, collection, size,
+                        retail_price, mrp_price, retail_discount_percent, wholesale_price,
+                        min_wholesale_qty, sets_count, image_field,
+                        price1, quantity1, price2, quantity2, price3, quantity3,
+                        purchase_cost, making_charges, weight_grams, material,
+                        hsn_code, gst_percent, stock_total, box_packing_type,
+                        vendor_id, status, is_active, is_featured, sku)
+                       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',
+                    values + (row_sku,)
+                )
                 created_rows += 1
             else:
+                conn.execute(
+                    '''UPDATE products SET
+                       name=?, slug=?, category=?, sub_category=?, collection=?, size=?,
+                       retail_price=?, mrp_price=?, retail_discount_percent=?, wholesale_price=?,
+                       min_wholesale_qty=?, sets_count=?, image_field=?,
+                       price1=?, quantity1=?, price2=?, quantity2=?, price3=?, quantity3=?,
+                       purchase_cost=?, making_charges=?, weight_grams=?, material=?,
+                       hsn_code=?, gst_percent=?, stock_total=?, box_packing_type=?,
+                       vendor_id=?, status=?, is_active=?, is_featured=?
+                       WHERE sku=?''',
+                    values + (row_sku,)
+                )
                 updated_rows += 1
 
-        db.session.commit()
+            processed_rows += 1
+
+        conn.commit()
         flash(
             f'Inventory synchronization complete. Processed {processed_rows} rows '
             f'({created_rows} created, {updated_rows} updated).'
         )
         return redirect(url_for('admin_dashboard'))
+
     except Exception as exc:
-        db.session.rollback()
         flash(f'Catalog sync failed: {exc}')
         return redirect(url_for('admin_dashboard'))
 
