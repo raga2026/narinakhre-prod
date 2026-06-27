@@ -126,7 +126,7 @@ class Product(db.Model):
 def upload_image_to_supabase(file_storage_object, filename):
     supabase_url = (os.environ.get('SUPABASE_URL') or '').rstrip('/')
     supabase_key = os.environ.get('SUPABASE_KEY')
-    bucket_name = os.environ.get('SUPABASE_BUCKET_NAME')
+    bucket_name = os.environ.get('SUPABASE_BUCKET_NAME', 'products')
 
     if not supabase_url or not supabase_key or not bucket_name:
         app.logger.error('Supabase configuration missing for image upload.')
@@ -1188,12 +1188,175 @@ def admin_upload_images():
 
 
 @app.route('/admin/dashboard', methods=['GET'])
-@admin_required@app.route('/admin/dashboard')
 @admin_required
 def admin_dashboard():
     db = get_db()
     products = db.execute('SELECT * FROM products ORDER BY id DESC').fetchall()
-    return render_template('admin/admin.html', products=products)
+    quotes = db.execute('SELECT * FROM quotes ORDER BY id DESC').fetchall()
+    return render_template('admin/admin.html', products=products, quotes=quotes)
+
+
+@app.route('/admin/manage-images', methods=['GET'])
+@admin_required
+def admin_manage_images():
+    db = get_db()
+    sku_search = request.args.get('sku_search', '').strip()
+    if sku_search:
+        products = db.execute(
+            'SELECT * FROM products WHERE sku LIKE ? ORDER BY sku',
+            (f'%{sku_search}%',)
+        ).fetchall()
+    else:
+        products = db.execute('SELECT * FROM products ORDER BY sku').fetchall()
+    return render_template('admin/admin_manage_images.html', products=products, sku_search=sku_search)
+
+
+@app.route('/admin/edit-product-details', methods=['GET', 'POST'])
+@admin_required
+def admin_edit_product_details():
+    db = get_db()
+    if request.method == 'POST':
+        sku = request.form.get('sku', '').strip()
+        name = request.form.get('name', '').strip()
+        retail_price = request.form.get('retail_price', 0)
+        mrp_price = request.form.get('mrp_price', 0)
+        stock_total = request.form.get('stock_total', 0)
+        category = request.form.get('category', '').strip()
+        material = request.form.get('material', '').strip()
+        slug = request.form.get('slug', '').strip()
+        db.execute(
+            '''UPDATE products SET name=?, retail_price=?, mrp_price=?,
+               stock_total=?, category=?, material=?, slug=? WHERE sku=?''',
+            (name, retail_price, mrp_price, stock_total, category, material, slug, sku)
+        )
+        db.commit()
+        flash(f'Product {sku} updated successfully.')
+        return redirect(url_for('admin_edit_product_details'))
+    products = db.execute('SELECT * FROM products ORDER BY sku').fetchall()
+    return render_template('admin/admin_edit_product_details.html', products=products)
+
+
+@app.route('/admin/delete-products', methods=['GET'])
+@admin_required
+def admin_delete_products():
+    db = get_db()
+    products = db.execute('SELECT * FROM products ORDER BY sku').fetchall()
+    return render_template('admin/admin_delete_products.html', products=products)
+
+
+@app.route('/admin/delete-product/<int:product_id>', methods=['GET'])
+@admin_required
+def admin_delete_product(product_id):
+    db = get_db()
+    db.execute('DELETE FROM products WHERE id=?', (product_id,))
+    db.commit()
+    flash('Product deleted successfully.')
+    return redirect(url_for('admin_delete_products'))
+
+
+@app.route('/admin/inbox', methods=['GET'])
+@admin_required
+def admin_inbox():
+    db = get_db()
+    quotes = db.execute('SELECT * FROM quotes ORDER BY id DESC').fetchall()
+    return render_template('admin/admin_inbox.html', quotes=quotes)
+
+
+@app.route('/admin/quote/<int:quote_id>', methods=['GET', 'POST'])
+@admin_required
+def admin_quote_view(quote_id):
+    db = get_db()
+    quote = db.execute('SELECT * FROM quotes WHERE id=?', (quote_id,)).fetchone()
+    if not quote:
+        flash('Quote not found.')
+        return redirect(url_for('admin_inbox'))
+    cart_items = []
+    try:
+        cart_items = json.loads(quote['items_json'] or '[]')
+    except Exception:
+        cart_items = []
+    if request.method == 'POST' and request.form.get('mark_contacted'):
+        db.execute('UPDATE quotes SET status=? WHERE id=?', ('Contacted', quote_id))
+        db.commit()
+        flash('Quote marked as contacted.')
+        return redirect(url_for('admin_quote_view', quote_id=quote_id))
+    return render_template('admin/admin_quote_view.html', quote=quote, cart_items=cart_items)
+
+
+@app.route('/admin/add-product', methods=['GET', 'POST'])
+@admin_required
+def admin_add_product():
+    db = get_db()
+    if request.method == 'POST':
+        sku = request.form.get('sku', '').strip()
+        name = request.form.get('name', '').strip()
+        category = request.form.get('category', '').strip()
+        retail_price = float(request.form.get('retail_price', 0) or 0)
+        mrp_price = float(request.form.get('mrp_price', 0) or 0)
+        wholesale_price = float(request.form.get('wholesale_price', 0) or 0)
+        stock_total = int(request.form.get('stock_total', 0) or 0)
+        material = request.form.get('material', '').strip()
+        slug = request.form.get('slug', '').strip()
+        price1 = float(request.form.get('price1', 0) or 0)
+        quantity1 = int(request.form.get('quantity1', 0) or 0)
+        price2 = float(request.form.get('price2', 0) or 0)
+        quantity2 = int(request.form.get('quantity2', 0) or 0)
+        price3 = float(request.form.get('price3', 0) or 0)
+        quantity3 = int(request.form.get('quantity3', 0) or 0)
+
+        if not sku:
+            flash('SKU is required.')
+            return redirect(url_for('admin_add_product'))
+
+        existing = db.execute('SELECT id FROM products WHERE sku=?', (sku,)).fetchone()
+        if existing:
+            flash(f'A product with SKU {sku} already exists.')
+            return redirect(url_for('admin_add_product'))
+
+        image_url = None
+        image_file = request.files.get('image')
+        if image_file and image_file.filename:
+            filename = f"{sku}_1.webp"
+            image_url = upload_image_to_supabase(image_file, filename)
+
+        db.execute(
+            '''INSERT INTO products
+               (sku, name, category, retail_price, mrp_price, wholesale_price,
+                stock_total, material, slug, price1, quantity1, price2, quantity2,
+                price3, quantity3, image_field, is_active)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,1)''',
+            (sku, name, category, retail_price, mrp_price, wholesale_price,
+             stock_total, material, slug, price1, quantity1, price2, quantity2,
+             price3, quantity3, image_url)
+        )
+        db.commit()
+        flash(f'Product {sku} added successfully.')
+        return redirect(url_for('admin_dashboard'))
+
+    return render_template('admin/admin_add_product.html')
+
+
+@app.route('/admin/download-users-excel', methods=['GET'])
+@admin_required
+def download_users_excel():
+    flash('Users export coming soon.')
+    return redirect(url_for('admin_dashboard'))
+
+
+@app.route('/admin/download-quotes-excel', methods=['GET'])
+@admin_required
+def download_quotes_excel():
+    flash('Quotes export coming soon.')
+    return redirect(url_for('admin_dashboard'))
+
+
+@app.route('/admin/download-products-excel', methods=['GET'])
+@admin_required
+def download_products_excel():
+    flash('Products export coming soon.')
+    return redirect(url_for('admin_dashboard'))
+
+
 @app.route('/admin/upload-excel', methods=['POST'])
 @admin_required
 def admin_upload_excel():
