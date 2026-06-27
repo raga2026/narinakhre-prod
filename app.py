@@ -1188,15 +1188,12 @@ def admin_upload_images():
 
 
 @app.route('/admin/dashboard', methods=['GET'])
+@admin_required@app.route('/admin/dashboard')
 @admin_required
 def admin_dashboard():
-    return (
-        '<h2>Admin Dashboard</h2>'
-        '<p>Catalog sync endpoint is active.</p>'
-        '<p>Use POST /admin/upload-excel with form field <code>excel_file</code>.</p>'
-    )
-
-
+    db = get_db()
+    products = db.execute('SELECT * FROM products ORDER BY id DESC').fetchall()
+    return render_template('admin/admin.html', products=products)
 @app.route('/admin/upload-excel', methods=['POST'])
 @admin_required
 def admin_upload_excel():
