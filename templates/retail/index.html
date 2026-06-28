@@ -1,280 +1,402 @@
 {% extends "retail/base.html" %}
 {% block content %}
+<style>
+    /* ── Hero ── */
+    .hero-section {
+        background: linear-gradient(135deg, #fdf2f8, #fce7f3);
+        background-size: cover;
+        background-position: center;
+        position: relative;
+        padding: 48px 16px;
+        text-align: center;
+    }
+    .hero-section::before {
+        content: "";
+        position: absolute;
+        inset: 0;
+        background: rgba(255, 241, 242, 0.82);
+        z-index: 0;
+    }
+    .hero-content {
+        position: relative;
+        z-index: 1;
+    }
 
-<section class="bg-rose-50 py-16 text-center">
-    <h1 class="text-5xl font-serif font-black text-rose-900">Nari Nakhre™</h1>
-    <p class="italic text-pink-800">Premium Handcrafted Jewelry</p>
-    <a href="#shop-section" class="btn-retail-main mt-6 inline-block px-8 py-3 text-lg">Shop Now</a>
+    /* ── Product grid ── */
+    .retail-grid {
+        display: grid;
+        grid-template-columns: repeat(2, 1fr);
+        gap: 12px;
+    }
+    @media (min-width: 640px) {
+        .retail-grid { grid-template-columns: repeat(3, 1fr); gap: 16px; }
+    }
+    @media (min-width: 1024px) {
+        .retail-grid { grid-template-columns: repeat(4, 1fr); gap: 20px; }
+    }
+
+    /* ── Product card ── */
+    .product-card {
+        background: white;
+        border-radius: 20px;
+        padding: 10px;
+        box-shadow: 0 1px 6px rgba(0,0,0,0.07);
+        border: 1px solid #fff1f2;
+        display: flex;
+        flex-direction: column;
+        position: relative;
+    }
+    .product-card img.prod-img {
+        width: 100%;
+        height: 140px;
+        object-fit: contain;
+        border-radius: 14px;
+    }
+    @media (min-width: 768px) {
+        .product-card img.prod-img { height: 200px; }
+    }
+
+    /* ── Product name ── */
+    .prod-name {
+        font-weight: bold;
+        font-size: 0.88rem;
+        margin-top: 8px;
+        margin-bottom: 4px;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        color: #1e293b;
+    }
+    @media (min-width: 768px) {
+        .prod-name { font-size: 1rem; }
+    }
+
+    /* ── Price ── */
+    .prod-price {
+        font-size: 1rem;
+        font-weight: 900;
+        color: #9f1239;
+        margin-bottom: 10px;
+    }
+
+    /* ── Share button ── */
+    .share-btn {
+        position: absolute;
+        top: 8px;
+        right: 8px;
+        background: #ffe4e6;
+        border: none;
+        border-radius: 50%;
+        padding: 6px;
+        cursor: pointer;
+        z-index: 2;
+    }
+
+    /* ── Size select ── */
+    .input-field {
+        width: 100%;
+        border: 1px solid #e2e8f0;
+        border-radius: 8px;
+        padding: 5px 8px;
+        font-size: 0.82rem;
+        margin-bottom: 6px;
+    }
+
+    /* ── Cart buttons ── */
+    .btn-add-cart {
+        width: 100%;
+        padding: 8px 0;
+        border-radius: 30px;
+        font-weight: 600;
+        font-size: 0.82rem;
+        border: 1px solid #a88734;
+        background: linear-gradient(180deg, #f7dfa5 0%, #f0c14b 100%);
+        color: #111;
+        cursor: pointer;
+        margin-bottom: 6px;
+        letter-spacing: 0.01em;
+    }
+    @media (min-width: 768px) {
+        .btn-add-cart { font-size: 0.92rem; }
+    }
+    .btn-buy-now {
+        width: 100%;
+        padding: 8px 0;
+        border-radius: 30px;
+        font-weight: 600;
+        font-size: 0.82rem;
+        border: 1px solid #b84c0c;
+        background: linear-gradient(180deg, #f5b186 0%, #df5f12 100%);
+        color: white;
+        cursor: pointer;
+        letter-spacing: 0.01em;
+    }
+    @media (min-width: 768px) {
+        .btn-buy-now { font-size: 0.92rem; }
+    }
+    .unit-counter {
+        border: 1px solid #e2e8f0;
+        background: #fffbeb;
+        border-radius: 30px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 4px 12px;
+        margin-bottom: 6px;
+    }
+    .unit-counter button {
+        font-size: 1.1rem;
+        font-weight: bold;
+        color: #555;
+        background: none;
+        border: none;
+        cursor: pointer;
+        padding: 2px 6px;
+    }
+    .qty-display { font-weight: bold; font-size: 1rem; }
+</style>
+
+<!-- ── HERO ── -->
+<section id="hero-section" class="hero-section">
+    <div class="hero-content">
+        <h1 class="text-4xl md:text-5xl font-serif font-black text-rose-900 mb-2"
+            style="font-family:'Playfair Display',serif;">
+            Nari Nakhre™
+        </h1>
+        <p class="italic text-pink-800 text-base md:text-lg mb-6">
+            Premium Handcrafted Jewelry
+        </p>
+        <a href="#shop-section"
+           class="btn-retail-main inline-block px-8 py-3 text-base md:text-lg"
+           onclick="document.getElementById('shop-section').scrollIntoView({behavior:'smooth'}); return false;">
+            Shop Now
+        </a>
+    </div>
 </section>
 
-<div id="shop-section" class="container mx-auto px-4 py-12">
+<!-- ── PRODUCTS ── -->
+<div id="shop-section" class="container mx-auto px-3 py-8">
     {% for category, products in grouped_products.items() %}
-    <div class="mb-16">
-        <h2 class="text-3xl font-serif font-bold text-rose-800 border-b mb-8">
+    <div class="mb-10">
+        <h2 class="text-xl md:text-3xl font-serif font-bold text-rose-800 border-b border-rose-100 mb-4 pb-1">
             <a href="/retail/category/{{ category }}" class="hover:underline">{{ category }}</a>
         </h2>
-        <div class="grid grid-cols-2 md:grid-cols-4 gap-8">
+        <div class="retail-grid">
             {% for product in products[:4] %}
-            <div class="bg-white rounded-3xl p-4 shadow-sm border border-rose-50 product-card flex flex-col relative">
-                <button class="absolute top-2 right-2 bg-rose-100 hover:bg-rose-200 rounded-full p-2 shadow" onclick="shareProduct({{ product.name|tojson|forceescape }}, {{ (request.url_root.rstrip('/') ~ '/retail/product/' ~ product.id)|tojson|forceescape }}, {{ product.images[0]|tojson|forceescape }})">
-                    <img src="{{ url_for('static', filename='assets/share.svg') }}" alt="Share" class="w-5 h-5" />
+            <div class="product-card">
+
+                <!-- Share -->
+                <button class="share-btn"
+                    onclick="shareProduct(
+                        {{ product.name|tojson|forceescape }},
+                        {{ (request.url_root.rstrip('/') ~ '/retail/product/' ~ product.id)|tojson|forceescape }},
+                        {{ product.images[0]|tojson|forceescape if product.images else ''|tojson }})">
+                    <img src="{{ url_for('static', filename='assets/share.svg') }}"
+                         alt="Share" style="width:16px;height:16px;" />
                 </button>
+
+                <!-- Image carousel -->
                 <a href="/retail/product/{{ product.id }}">
-                    <div class="carousel-container relative">
-                        {% set first_image = product.images[0] if product.images and product.images|length > 0 else '' %}
-                        {% set first_image_clean = first_image.replace('assets/products/', '') if first_image else '' %}
-                        {% set first_image_src = first_image if first_image and (first_image.startswith('http://') or first_image.startswith('https://') or first_image.startswith('/static/')) else (url_for('static', filename='assets/products/' ~ first_image_clean) if first_image_clean else url_for('static', filename='assets/products/default.jpg')) %}
-                        {% if product.images|length > 1 %}
-                            <img id="carousel-img-{{ product.id }}" src="{{ first_image_src }}" class="carousel-img w-full h-48 object-contain rounded-2xl" data-images='{{ product.images|tojson }}' data-index="0" onerror="this.src='{{ url_for('static', filename='assets/products/default.jpg') }}'">
-                        {% else %}
-                            <img src="{{ first_image_src }}" class="w-full h-48 object-contain rounded-2xl" onerror="this.src='{{ url_for('static', filename='assets/products/default.jpg') }}'">
-                        {% endif %}
-                    </div>
+                    {% set img_src = product.images[0] if product.images and product.images|length > 0 else '/static/assets/products/default.jpg' %}
+                    <img id="carousel-img-{{ product.id }}"
+                         class="prod-img carousel-img"
+                         src="{{ img_src }}"
+                         alt="{{ product.name }}"
+                         data-images='{{ product.images|tojson }}'
+                         data-index="0"
+                         onerror="this.onerror=null;this.src='/static/assets/products/default.jpg';" />
                 </a>
-                <div class="mt-4 font-bold truncate">{{ product.name }}</div>
-                <div class="text-xl font-black text-rose-900 mb-4">{{ product.price1 }}</div>
+
+                <!-- Name -->
+                <div class="prod-name">{{ product.name }}</div>
+
+                <!-- Price -->
+                <div class="prod-price">₹{{ product.retail_price or product.price1 }}</div>
+
+                <!-- Size select for bangles -->
                 {% set is_bangle = 'bangle' in (product.category|lower if product.category else '') or 'bangle' in (product.name|lower if product.name else '') %}
                 {% if is_bangle %}
-                <div class="w-full mb-2">
-                    <label for="size-{{ product.sku }}" class="block text-xs font-semibold text-rose-500 mb-1 ml-1">Size</label>
-                    <select class="input-field size-select w-full" style="font-size:0.95rem;" id="size-{{ product.sku }}">
-                        <option value="2.4" selected>2.4</option>
-                        <option value="2.6">2.6</option>
-                        <option value="2.8">2.8</option>
-                    </select>
-                </div>
-                {% elif product.sizes %}
-                <div class="w-full mb-2">
-                    <label for="size-{{ product.sku }}" class="block text-xs font-semibold text-rose-500 mb-1 ml-1">Size</label>
-                    <select class="input-field size-select w-full" style="font-size:0.95rem;" id="size-{{ product.sku }}">
-                        {% for size in product.sizes.split(',') %}
-                            {% set size_val = size|trim %}
-                            <option value="{{ size_val }}">{{ size_val }}</option>
-                        {% endfor %}
-                    </select>
-                </div>
+                <select class="input-field size-select" id="size-{{ product.sku }}">
+                    <option value="2.4">2.4</option>
+                    <option value="2.6">2.6</option>
+                    <option value="2.8">2.8</option>
+                </select>
+                {% elif product.size %}
+                <select class="input-field size-select" id="size-{{ product.sku }}">
+                    {% for s in product.size.split(',') %}
+                    <option value="{{ s|trim }}">{{ s|trim }}</option>
+                    {% endfor %}
+                </select>
                 {% endif %}
-                <div class="cart-container mt-auto" id="cart-action-{{product.sku}}">
-                    <div class="flex flex-col space-y-2">
-                        <!-- Quantity Dropdown -->
-                        <div class="w-full">
-                            <label for="qty-{{product.sku}}" class="block text-xs font-medium text-amber-700 mb-1 ml-1">Quantity</label>
-                            <select class="qty-select w-full rounded-full border border-slate-200 bg-white px-3 py-2 text-base font-medium antialiased" id="qty-{{product.sku}}">
-                                <option value="1" selected>1</option>
-                                <option value="2">2</option>
-                                <option value="3">3</option>
-                                <option value="4">4</option>
-                                <option value="5">5</option>
-                            </select>
-                        </div>
-                        <!-- Add to Cart Button (shown by default) -->
-                        <button class="add-to-cart-btn w-full py-2 font-medium rounded-full shadow-lg antialiased transition-all duration-200 text-base drop-shadow-lg"
-                            data-sku="{{product.sku}}" data-price="{{product.price1}}" data-name="{{product.name}}"
-                            style="background: linear-gradient(180deg, #f7dfa5 0%, #f0c14b 100%); border: 1px solid #a88734; color: #111111; letter-spacing:0.02em; box-shadow:0 4px 16px #f7dfa533;"
-                            onclick="retailAddToCart(this)">
-                            Add to Cart
-                        </button>
-                        <!-- Unit Counter (hidden by default, replaces Add to Cart) -->
-                        <div class="unit-counter border border-slate-200 bg-amber-50 rounded-full flex flex-row items-center justify-between px-3 py-1 shadow-sm hidden" style="min-width:120px;">
-                            <button class="decrement-btn px-2 py-1 text-lg font-medium text-gray-700 hover:text-amber-600 focus:outline-none">-</button>
-                            <span class="qty-display text-xl font-medium text-gray-900 mx-2 select-none">1</span>
-                            <button class="increment-btn px-2 py-1 text-lg font-medium text-gray-700 hover:text-amber-600 focus:outline-none">+</button>
-                        </div>
-                        <!-- Buy Now Button (always at bottom) -->
-                        <button class="buy-now-btn w-full py-2 font-medium rounded-full shadow-lg antialiased transition-all duration-200 text-base drop-shadow-lg"
-                            data-sku="{{product.sku}}" data-price="{{product.price1}}" data-name="{{product.name}}"
-                            style="background: linear-gradient(180deg, #f5b186 0%, #df5f12 100%); border: 1px solid #b84c0c; color: #ffffff; letter-spacing:0.02em; box-shadow:0 4px 16px #df5f1233;"
-                            onclick="retailBuyNow(this)">
-                            Buy Now
-                        </button>
+
+                <!-- Cart actions -->
+                <div class="cart-container mt-auto" id="cart-action-{{ product.sku }}">
+                    <!-- Qty select -->
+                    <select class="input-field qty-select" id="qty-{{ product.sku }}">
+                        <option value="1" selected>1</option>
+                        <option value="2">2</option>
+                        <option value="3">3</option>
+                        <option value="4">4</option>
+                        <option value="5">5</option>
+                    </select>
+                    <!-- Add to Cart -->
+                    <button class="btn-add-cart add-to-cart-btn"
+                            data-sku="{{ product.sku }}"
+                            data-price="{{ product.retail_price or product.price1 }}"
+                            data-name="{{ product.name }}">
+                        Add to Cart
+                    </button>
+                    <!-- Unit counter (hidden by default) -->
+                    <div class="unit-counter hidden">
+                        <button class="decrement-btn">-</button>
+                        <span class="qty-display">1</span>
+                        <button class="increment-btn">+</button>
                     </div>
+                    <!-- Buy Now -->
+                    <button class="btn-buy-now buy-now-btn"
+                            data-sku="{{ product.sku }}"
+                            data-price="{{ product.retail_price or product.price1 }}"
+                            data-name="{{ product.name }}">
+                        Buy Now
+                    </button>
                 </div>
             </div>
             {% endfor %}
         </div>
+
         {% if products|length > 4 %}
-        <div class="text-center mt-6">
-            <a href="/retail/category/{{ category|urlencode }}" class="btn-retail-main px-8 py-3 text-lg">View {{ category }}</a>
+        <div class="text-center mt-4">
+            <a href="/retail/category/{{ category|urlencode }}"
+               class="btn-retail-main inline-block px-8 py-3 text-base">
+                View All {{ category }}
+            </a>
         </div>
         {% endif %}
     </div>
     {% endfor %}
-    </div>
 </div>
+
 <script>
+/* ── Share ── */
 async function shareProduct(name, url, imageUrl) {
-    const shareData = {
-        title: name,
-        text: 'Check out this product on Nari Nakhre: ' + name,
-        url: url
-    };
-    const absoluteImageUrl = imageUrl ? new URL(imageUrl, window.location.origin).href : '';
-    if (absoluteImageUrl && navigator.canShare && window.File) {
+    const shareData = { title: name, text: 'Check out ' + name + ' on Nari Nakhre', url: url };
+    if (imageUrl && navigator.canShare && window.File) {
         try {
-            const response = await fetch(absoluteImageUrl, { mode: 'cors' });
-            if (response.ok) {
-                const blob = await response.blob();
-                const fileName = (name || 'product').replace(/[^a-z0-9]+/gi, '-').toLowerCase() + '.jpg';
-                const file = new File([blob], fileName, { type: blob.type || 'image/jpeg' });
-                const shareWithFiles = { ...shareData, files: [file] };
-                if (navigator.canShare(shareWithFiles)) {
-                    await navigator.share(shareWithFiles);
-                    return;
-                }
+            const r = await fetch(imageUrl, { mode: 'cors' });
+            if (r.ok) {
+                const blob = await r.blob();
+                const file = new File([blob], name.replace(/\W+/g,'-').toLowerCase()+'.jpg', { type: blob.type });
+                const sd = { ...shareData, files: [file] };
+                if (navigator.canShare(sd)) { await navigator.share(sd); return; }
             }
-        } catch (e) {}
+        } catch(e) {}
     }
-    if (navigator.share) {
-        navigator.share(shareData).catch(()=>{});
-    } else {
-        const msg = encodeURIComponent(`${shareData.text} ${shareData.url}${absoluteImageUrl ? ' ' + absoluteImageUrl : ''}`);
-        window.open(`https://wa.me/?text=${msg}`, '_blank');
+    if (navigator.share) { navigator.share(shareData).catch(()=>{}); }
+    else {
+        const msg = encodeURIComponent(shareData.text + ' ' + shareData.url);
+        window.open('https://wa.me/?text=' + msg, '_blank');
     }
 }
 
-// Auto-advancing product image carousel (matches wholesale logic)
-document.addEventListener('DOMContentLoaded', function() {
-    document.querySelectorAll('.carousel-img[data-images]').forEach(function(imgEl) {
-        var imagesRaw = imgEl.getAttribute('data-images');
-        var images = [];
-        try {
-            images = JSON.parse(imagesRaw);
-        } catch (e) {
-            console.error('Carousel JSON parse error for', imgEl.id, e);
+document.addEventListener('DOMContentLoaded', function () {
+
+    /* ── Hero background from Supabase ── */
+    var heroSec = document.getElementById('hero-section');
+    var heroImages = {{ hero_images|tojson if hero_images else '[]' }};
+    if (heroImages.length > 0) {
+        var heroIdx = 0;
+        function setHero() {
+            heroSec.style.backgroundImage = "url('" + heroImages[heroIdx] + "')";
+            heroIdx = (heroIdx + 1) % heroImages.length;
         }
-        if (Array.isArray(images) && images.length > 1) {
-            var currentIdx = 0;
-            setInterval(function() {
-                currentIdx = (currentIdx + 1) % images.length;
-                imgEl.src = images[currentIdx];
+        setHero();
+        setInterval(setHero, 5000);
+    }
+
+    /* ── Product image carousel ── */
+    document.querySelectorAll('.carousel-img[data-images]').forEach(function (img) {
+        var imgs = [];
+        try { imgs = JSON.parse(img.getAttribute('data-images') || '[]'); } catch(e) {}
+        if (imgs.length > 1) {
+            var idx = 0;
+            setInterval(function () {
+                idx = (idx + 1) % imgs.length;
+                img.src = imgs[idx];
             }, 3000);
         }
     });
 
-    // --- Retail Cart UI Logic ---
+    /* ── Cart logic ── */
     function getSize(container) {
-        const sizeSel = container.querySelector('.size-select');
-        return sizeSel ? sizeSel.value : 'Standard';
+        const s = container.querySelector('.size-select');
+        return s ? s.value : 'Standard';
     }
-    function getQty(container) {
-        const qtySel = container.querySelector('.qty-select');
-        return qtySel ? parseInt(qtySel.value) : 1;
+    function updateCartCount(data) {
+        const el = document.getElementById('cart-count');
+        if (el && data && typeof data.cart_count !== 'undefined') el.textContent = data.cart_count;
     }
-    function updateCartCount(count) {
-        const cartCount = document.getElementById('cart-count');
-        if (cartCount) cartCount.textContent = count;
-    }
-    document.querySelectorAll('.cart-container').forEach(function(container) {
+
+    document.querySelectorAll('.cart-container').forEach(function (container) {
         const addBtn = container.querySelector('.add-to-cart-btn');
         const buyBtn = container.querySelector('.buy-now-btn');
-        const unitCounter = container.querySelector('.unit-counter');
+        const counter = container.querySelector('.unit-counter');
         const qtySel = container.querySelector('.qty-select');
         const minusBtn = container.querySelector('.decrement-btn');
         const plusBtn = container.querySelector('.increment-btn');
         const qtyDisplay = container.querySelector('.qty-display');
-        // Add to Cart
+
+        function getQty() { return parseInt(qtySel ? qtySel.value : 1); }
+        function postCart(sku, qty, price, size) {
+            return fetch('/update-cart', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ product_id: sku, qty: qty, price: price, size: size })
+            }).then(r => r.json());
+        }
+
         if (addBtn) {
-            addBtn.addEventListener('click', function(e) {
+            addBtn.addEventListener('click', function (e) {
                 e.preventDefault();
-                const sku = addBtn.getAttribute('data-sku');
-                const price = addBtn.getAttribute('data-price');
-                const name = addBtn.getAttribute('data-name');
-                const size = getSize(container);
-                const qty = getQty(container);
-                fetch('/update-cart', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ product_id: sku, qty: qty, price: price, size: size })
-                })
-                .then(res => res.json())
-                .then(data => {
+                const sku = addBtn.dataset.sku, price = addBtn.dataset.price;
+                postCart(sku, getQty(), price, getSize(container)).then(data => {
                     addBtn.style.display = 'none';
-                    if (unitCounter) {
-                        unitCounter.classList.remove('hidden');
-                        if (qtyDisplay) qtyDisplay.textContent = qty;
-                    }
-                    if (data && typeof data.cart_count !== 'undefined') updateCartCount(data.cart_count);
+                    if (counter) { counter.classList.remove('hidden'); if (qtyDisplay) qtyDisplay.textContent = getQty(); }
+                    updateCartCount(data);
                 });
             });
         }
-        // Buy Now
         if (buyBtn) {
-            buyBtn.addEventListener('click', function(e) {
+            buyBtn.addEventListener('click', function (e) {
                 e.preventDefault();
-                const sku = buyBtn.getAttribute('data-sku');
-                const price = buyBtn.getAttribute('data-price');
-                const name = buyBtn.getAttribute('data-name');
-                const size = getSize(container);
-                const qty = getQty(container);
-                fetch('/update-cart', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ product_id: sku, qty: qty, price: price, size: size })
-                })
-                .then(() => { window.location.href = '/retail/checkout'; });
+                const sku = buyBtn.dataset.sku, price = buyBtn.dataset.price;
+                postCart(sku, getQty(), price, getSize(container)).then(() => { window.location.href = '/retail/checkout'; });
             });
         }
-        // Unit Counter logic
-        if (minusBtn && plusBtn && qtyDisplay && qtySel) {
-            minusBtn.addEventListener('click', function() {
+        if (minusBtn) {
+            minusBtn.addEventListener('click', function () {
                 let val = parseInt(qtyDisplay.textContent);
+                const sku = addBtn.dataset.sku, price = addBtn.dataset.price;
                 if (val > 1) {
                     val--;
                     qtyDisplay.textContent = val;
-                    qtySel.value = val;
-                    // Update cart
-                    const sku = addBtn.getAttribute('data-sku');
-                    const price = addBtn.getAttribute('data-price');
-                    const size = getSize(container);
-                    fetch('/update-cart', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ product_id: sku, qty: val, price: price, size: size })
-                    })
-                    .then(res => res.json())
-                    .then(data => { if (data && typeof data.cart_count !== 'undefined') updateCartCount(data.cart_count); });
+                    postCart(sku, val, price, getSize(container)).then(updateCartCount);
                 } else {
-                    // Remove from cart, reset UI
-                    const sku = addBtn.getAttribute('data-sku');
-                    const price = addBtn.getAttribute('data-price');
-                    const size = getSize(container);
-                    fetch('/update-cart', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ product_id: sku, qty: 0, price: price, size: size })
-                    })
-                    .then(res => res.json())
-                    .then(data => { if (data && typeof data.cart_count !== 'undefined') updateCartCount(data.cart_count); });
-                    unitCounter.classList.add('hidden');
+                    postCart(sku, 0, price, getSize(container)).then(updateCartCount);
+                    counter.classList.add('hidden');
                     addBtn.style.display = '';
-                    qtySel.value = 1;
-                    qtyDisplay.textContent = 1;
+                    if (qtyDisplay) qtyDisplay.textContent = 1;
                 }
             });
-            plusBtn.addEventListener('click', function() {
+        }
+        if (plusBtn) {
+            plusBtn.addEventListener('click', function () {
                 let val = parseInt(qtyDisplay.textContent);
                 if (val < 5) {
                     val++;
                     qtyDisplay.textContent = val;
-                    qtySel.value = val;
-                    // Update cart
-                    const sku = addBtn.getAttribute('data-sku');
-                    const price = addBtn.getAttribute('data-price');
-                    const size = getSize(container);
-                    fetch('/update-cart', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ product_id: sku, qty: val, price: price, size: size })
-                    })
-                    .then(res => res.json())
-                    .then(data => { if (data && typeof data.cart_count !== 'undefined') updateCartCount(data.cart_count); });
+                    const sku = addBtn.dataset.sku, price = addBtn.dataset.price;
+                    postCart(sku, val, price, getSize(container)).then(updateCartCount);
                 }
-            });
-        }
-        // Sync dropdown and counter
-        if (qtySel && qtyDisplay && unitCounter) {
-            qtySel.addEventListener('change', function() {
-                qtyDisplay.textContent = qtySel.value;
             });
         }
     });

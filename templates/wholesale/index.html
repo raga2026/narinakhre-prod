@@ -1,85 +1,201 @@
 {% extends "wholesale/base.html" %}
 {% block content %}
 <style>
-        .product-title {
-            color: #be185d;
-            font-size: 1.08rem;
-            font-weight: bold;
-            margin-bottom: 7px;
-            text-decoration: underline;
-            font-family: 'Merriweather', serif;
-            max-height: 4.05em;
-            line-height: 1.35;
-            min-height: 2.7em;
-            overflow: hidden;
-            display: block;
-        }
-    /* Smooth transition for the background image change */
+    /* ── Product title ── */
+    .product-title {
+        color: #be185d;
+        font-size: 0.95rem;
+        font-weight: bold;
+        margin-bottom: 6px;
+        font-family: 'Merriweather', serif;
+        line-height: 1.35;
+        min-height: 2.7em;
+        max-height: 2.7em;
+        overflow: hidden;
+        display: block;
+        text-align: center;
+    }
+
+    /* ── Hero ── */
     .hero-premium-bg {
-        transition: background-image 1.5s ease-in-out;
         background-size: cover;
         background-position: center;
         position: relative;
+        min-height: 320px;
     }
-    /* Ensuring the translucent overlay stays consistent */
+    @media (min-width: 768px) {
+        .hero-premium-bg { min-height: 420px; }
+    }
     .hero-premium-bg::before {
         content: "";
         position: absolute;
-        top: 0; left: 0; right: 0; bottom: 0;
-        background: rgba(255, 241, 242, 0.85); /* Adjust opacity here for translucency */
+        inset: 0;
+        background: rgba(255, 241, 242, 0.85);
         z-index: 0;
     }
     .hero-content-wrapper {
         position: relative;
         z-index: 10;
     }
+
+    /* ── Product grid ── */
+    .product-grid {
+        display: grid;
+        grid-template-columns: repeat(2, 1fr);
+        gap: 12px;
+    }
+    @media (min-width: 640px) {
+        .product-grid { grid-template-columns: repeat(3, 1fr); }
+    }
+    @media (min-width: 1024px) {
+        .product-grid { grid-template-columns: repeat(4, 1fr); }
+    }
+
+    /* ── Product card ── */
+    .product-card {
+        background: white;
+        border-radius: 16px;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+        padding: 10px;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        position: relative;
+    }
+    .product-card img.product-img {
+        width: 100%;
+        height: 140px;
+        object-fit: contain;
+        border-radius: 10px;
+        background: #f1f5f9;
+    }
+    @media (min-width: 768px) {
+        .product-card img.product-img { height: 200px; }
+    }
+
+    /* ── Buttons ── */
+    .btn-quote {
+        width: 100%;
+        padding: 8px 0;
+        background: #e11d48;
+        color: white;
+        border-radius: 10px;
+        font-weight: bold;
+        font-size: 0.85rem;
+        border: none;
+        cursor: pointer;
+        margin-top: auto;
+    }
+    .btn-quote:hover { background: #be185d; }
+
+    /* ── Tier / Size selects ── */
+    .input-field {
+        width: 100%;
+        border: 1px solid #fda4af;
+        border-radius: 8px;
+        padding: 5px 8px;
+        font-size: 0.82rem;
+        color: #1e293b;
+        background: #fff;
+        margin-bottom: 6px;
+    }
+
+    /* ── Price ── */
+    .product-price {
+        font-size: 0.9rem;
+        font-weight: bold;
+        color: #be185d;
+        margin-bottom: 6px;
+        text-align: center;
+        width: 100%;
+    }
+
+    /* ── Share button ── */
+    .share-btn {
+        position: absolute;
+        top: 8px;
+        right: 8px;
+        background: #ffe4e6;
+        border: none;
+        border-radius: 50%;
+        padding: 6px;
+        cursor: pointer;
+        z-index: 2;
+    }
+    .share-btn:hover { background: #fecdd3; }
+
+    /* ── View more ── */
+    .view-more-btn {
+        display: inline-block;
+        background: #000;
+        color: #fff;
+        font-weight: bold;
+        padding: 10px 28px;
+        border-radius: 14px;
+        font-size: 1rem;
+        margin-top: 14px;
+        text-decoration: none;
+        transition: background 0.2s;
+    }
+    .view-more-btn:hover { background: #374151; }
 </style>
 
-<section id="hero-section" class="w-full min-h-[420px] flex flex-col items-center justify-center py-12 px-4 overflow-hidden hero-premium-bg">
-    <div class="hero-content-wrapper flex flex-col md:flex-row items-center justify-center gap-10 w-full max-w-5xl mx-auto">
-        <div class="flex flex-col items-center justify-center text-center gap-4 w-full">
-            <h1 class="text-5xl md:text-6xl font-serif font-extrabold text-rose-900 mb-2 flex items-center justify-center w-full" style="font-family:'Playfair Display',serif;">
-                <span class="mx-auto flex items-center justify-center">
-                    Nari Nakhre<span class="align-super text-base ml-1">™</span>
-                </span>
-            </h1>
-            <div class="italic text-lg md:text-2xl text-pink-900/90 mb-2 md:mb-4" style="font-family:'Playfair Display',serif;">
-                Premium Handcrafted Ethnic Jewelry
-            </div>
-            <div class="flex justify-center w-full mt-2">
-                <a href="#products" class="bg-pink-600 text-white px-8 py-3 rounded-full font-bold text-lg shadow-lg hover:bg-pink-700 transition mx-auto" style="min-width: 180px;" onclick="document.getElementById('products').scrollIntoView({behavior:'smooth'}); return false;">
-                    Shop Now
-                </a>
-            </div>
-        </div>
+<!-- ── HERO ── -->
+<section id="hero-section"
+         class="w-full flex flex-col items-center justify-center py-10 px-4 overflow-hidden hero-premium-bg">
+    <div class="hero-content-wrapper flex flex-col items-center justify-center text-center gap-4 w-full max-w-3xl mx-auto">
+        <h1 class="text-4xl md:text-6xl font-extrabold text-rose-900"
+            style="font-family:'Playfair Display',serif;">
+            Nari Nakhre<span class="align-super text-sm ml-1">™</span>
+        </h1>
+        <p class="italic text-base md:text-2xl text-pink-900/90"
+           style="font-family:'Playfair Display',serif;">
+            Premium Handcrafted Ethnic Jewelry
+        </p>
+        <a href="#products"
+           class="bg-pink-600 text-white px-8 py-3 rounded-full font-bold text-base md:text-lg shadow-lg hover:bg-pink-700 transition"
+           onclick="document.getElementById('products').scrollIntoView({behavior:'smooth'}); return false;">
+            Shop Now
+        </a>
     </div>
 </section>
 
-<div id="products" class="container mx-auto px-2">
+<!-- ── PRODUCTS ── -->
+<div id="products" class="container mx-auto px-3 py-4">
     {% for category, products in grouped_products.items() %}
-        <h2 class="text-2xl md:text-3xl font-serif font-bold text-rose-700 mt-10 mb-4">{{ category }}</h2>
-        <div class="grid grid-cols-2 md:grid-cols-4 gap-5">
+        <h2 class="text-xl md:text-3xl font-serif font-bold text-rose-700 mt-8 mb-3">{{ category }}</h2>
+        <div class="product-grid">
             {% for product in products[:4] %}
-            <div class="bg-white rounded-2xl shadow p-3 flex flex-col items-center relative product-card">
-                <button class="absolute top-2 right-2 bg-rose-100 hover:bg-rose-200 rounded-full p-2 shadow" onclick="shareProduct({{ product.name|tojson|forceescape }}, {{ url_for('product_detail', product_id=product.id, _external=True)|tojson|forceescape }}, {{ product.images[0]|tojson|forceescape }})">
-                    <img src="{{ url_for('static', filename='assets/share.svg') }}" alt="Share" class="w-5 h-5" />
+            <div class="product-card">
+
+                <!-- Share button -->
+                <button class="share-btn"
+                    onclick="shareProduct(
+                        {{ product.name|tojson|forceescape }},
+                        {{ url_for('product_detail', product_id=product.id, _external=True)|tojson|forceescape }},
+                        {{ product.images[0]|tojson|forceescape if product.images else ''|tojson }})">
+                    <img src="{{ url_for('static', filename='assets/share.svg') }}" alt="Share" style="width:18px;height:18px;" />
                 </button>
+
+                <!-- Product image -->
                 <a href="{{ url_for('product_detail', product_id=product.id) }}" class="block w-full">
-                    {% set first_image = product.images[0] if product.images and product.images|length > 0 else '' %}
-                    {% set first_image_clean = first_image.replace('assets/products/', '') if first_image else '' %}
-                    {% set first_image_src = first_image if first_image and (first_image.startswith('http://') or first_image.startswith('https://') or first_image.startswith('/static/')) else (url_for('static', filename='assets/products/' ~ first_image_clean) if first_image_clean else url_for('static', filename='assets/products/default.jpg')) %}
-                    <img id="carousel-img-{{ product.id }}" 
-                        src="{{ first_image_src }}" 
-                         alt="{{ product.name }}" 
-                         class="w-full h-32 md:h-48 object-contain rounded-xl bg-slate-100 transition-opacity duration-500" 
-                        data-images='{{ product.images|tojson }}' 
-                        onerror="this.src='{{ url_for('static', filename='assets/products/default.jpg') }}'" />
+                    {% set img_src = product.images[0] if product.images and product.images|length > 0 else '/static/assets/products/default.jpg' %}
+                    <img id="carousel-img-{{ product.id }}"
+                         class="product-img"
+                         src="{{ img_src }}"
+                         alt="{{ product.name }}"
+                         data-images='{{ product.images|tojson }}'
+                         onerror="this.onerror=null;this.src='/static/assets/products/default.jpg';" />
                 </a>
-                <a href="{{ url_for('product_detail', product_id=product.id) }}" class="mt-2 w-full block text-center font-semibold text-slate-800 product-title whitespace-normal overflow-hidden text-ellipsis" style="font-family:'Playfair Display',serif; font-size:1.08rem; max-height:2.7em; line-height:1.35; min-height:2.7em;">
+
+                <!-- Product name -->
+                <a href="{{ url_for('product_detail', product_id=product.id) }}"
+                   class="product-title mt-2 w-full">
                     {{ product.name }}
                 </a>
-                <div style="height:0.5em;"></div>
-                <div class="w-full text-center product-price mb-1">
+
+                <!-- Price -->
+                <div class="product-price">
                     {% if product.tiers and product.tiers|length > 0 %}
                         {% set min_tier = (product.tiers | sort(attribute='price'))[0] %}
                         ₹{{ min_tier.price }} / Unit
@@ -87,44 +203,50 @@
                         ₹{{ product.price1 }} / Unit
                     {% endif %}
                 </div>
+
+                <!-- Tier select -->
                 {% if product.tiers and product.tiers|length > 0 %}
-                <div class="w-full mb-2">
-                    <label for="tier-select-{{ product.sku }}" class="block text-xs font-semibold text-rose-500 mb-1 ml-1">Tier</label>
-                    <select class="input-field tier-select w-full" style="font-size:0.95rem;" id="tier-select-{{ product.sku }}">
+                <div class="w-full">
+                    <label for="tier-select-{{ product.sku }}"
+                           class="block text-xs font-semibold text-rose-500 mb-1">Tier</label>
+                    <select class="input-field tier-select" id="tier-select-{{ product.sku }}">
                         {% for tier in product.tiers %}
                             {% if tier.price %}
-                                <option value="{{ tier.qty }}" data-price="{{ tier.price }}">{{ tier.qty }} units @ ₹{{ tier.price }}</option>
+                            <option value="{{ tier.qty }}" data-price="{{ tier.price }}">
+                                {{ tier.qty }} units @ ₹{{ tier.price }}
+                            </option>
                             {% endif %}
                         {% endfor %}
                     </select>
                 </div>
                 {% endif %}
-                {% if product.sizes %}
-                <div class="w-full mb-2">
-                    <label for="size-{{ product.sku }}" class="block text-xs font-semibold text-rose-500 mb-1 ml-1">Size</label>
-                    <select class="input-field size-select w-full" style="font-size:0.95rem;" id="size-{{ product.sku }}">
-                        {% for size in product.sizes.split(',') %}
-                            {% set size_val = size|trim %}
-                            <option value="{{ size_val }}">{{ size_val }}</option>
+
+                <!-- Size select -->
+                {% if product.size %}
+                <div class="w-full">
+                    <label for="size-{{ product.sku }}"
+                           class="block text-xs font-semibold text-rose-500 mb-1">Size</label>
+                    <select class="input-field size-select" id="size-{{ product.sku }}">
+                        {% for size in product.size.split(',') %}
+                            <option value="{{ size|trim }}">{{ size|trim }}</option>
                         {% endfor %}
                     </select>
                 </div>
                 {% endif %}
-                <button class="w-full py-2 bg-rose-600 text-white rounded-xl font-bold hover:bg-rose-700 transition add-to-quote-btn" data-product-id="{{ product.sku }}">
+
+                <!-- Add to quote -->
+                <button class="btn-quote add-to-quote-btn"
+                        data-product-id="{{ product.sku }}">
                     Add to Quote
                 </button>
             </div>
             {% endfor %}
         </div>
+
         {% if products|length > 4 %}
-        <div class="text-center mt-4">
-            <a href="{{ url_for('category_products', category=category) }}"
-               class="inline-block bg-black text-white font-bold py-3 px-8 rounded-2xl text-lg shadow hover:bg-gray-800 transition">
-                {% if category.lower() == 'bangles' %}
-                    View More Bangles
-                {% else %}
-                    View More {{ category }}
-                {% endif %}
+        <div class="text-center mt-2 mb-4">
+            <a href="{{ url_for('category_products', category=category) }}" class="view-more-btn">
+                View More {{ category }}
             </a>
         </div>
         {% endif %}
@@ -132,70 +254,54 @@
 </div>
 
 <script>
+/* ── Share ── */
 async function shareProduct(name, url, imageUrl) {
-    const shareData = {
-        title: name,
-        text: 'Check out this product on Nari Nakhre: ' + name,
-        url: url
-    };
-    const absoluteImageUrl = imageUrl ? new URL(imageUrl, window.location.origin).href : '';
-    if (absoluteImageUrl && navigator.canShare && window.File) {
+    const shareData = { title: name, text: 'Check out ' + name + ' on Nari Nakhre', url: url };
+    if (imageUrl && navigator.canShare && window.File) {
         try {
-            const response = await fetch(absoluteImageUrl, { mode: 'cors' });
-            if (response.ok) {
-                const blob = await response.blob();
-                const fileName = (name || 'product').replace(/[^a-z0-9]+/gi, '-').toLowerCase() + '.jpg';
-                const file = new File([blob], fileName, { type: blob.type || 'image/jpeg' });
-                const shareWithFiles = { ...shareData, files: [file] };
-                if (navigator.canShare(shareWithFiles)) {
-                    await navigator.share(shareWithFiles);
-                    return;
-                }
+            const r = await fetch(imageUrl, { mode: 'cors' });
+            if (r.ok) {
+                const blob = await r.blob();
+                const file = new File([blob], name.replace(/\W+/g,'-').toLowerCase()+'.jpg', { type: blob.type });
+                const sd = { ...shareData, files: [file] };
+                if (navigator.canShare(sd)) { await navigator.share(sd); return; }
             }
-        } catch (e) {}
+        } catch(e) {}
     }
-    if (navigator.share) {
-        navigator.share(shareData).catch(()=>{});
-    } else {
-        const msg = encodeURIComponent(`${shareData.text} ${shareData.url}${absoluteImageUrl ? ' ' + absoluteImageUrl : ''}`);
-        window.open(`https://wa.me/?text=${msg}`, '_blank');
+    if (navigator.share) { navigator.share(shareData).catch(()=>{}); }
+    else {
+        const msg = encodeURIComponent(shareData.text + ' ' + shareData.url);
+        window.open('https://wa.me/?text=' + msg, '_blank');
     }
 }
 
-document.addEventListener('DOMContentLoaded', function() {
-    // 1. Hero Background Image Randomizer & Carousel
+document.addEventListener('DOMContentLoaded', function () {
+
+    /* ── Hero background from Supabase ── */
     var heroSec = document.getElementById('hero-section');
-    var heroImages = [
-        '/static/images/hero1.jpg',
-        '/static/images/hero2.jpg',
-        '/static/images/hero3.jpg',
-        '/static/images/hero4.jpg'
-    ];
-    
-    function changeHeroBackground() {
-        var randomIdx = Math.floor(Math.random() * heroImages.length);
-        heroSec.style.backgroundImage = "url('" + heroImages[randomIdx] + "')";
+    var heroImages = {{ hero_images|tojson if hero_images else '[]' }};
+
+    if (heroImages.length === 0) {
+        heroSec.style.background = 'linear-gradient(135deg,#fdf2f8,#fce7f3)';
+    } else {
+        var heroIdx = 0;
+        function setHero() {
+            heroSec.style.backgroundImage = "url('" + heroImages[heroIdx] + "')";
+            heroIdx = (heroIdx + 1) % heroImages.length;
+        }
+        setHero();
+        setInterval(setHero, 5000);
     }
 
-    // Set initial image and start interval
-    changeHeroBackground();
-    setInterval(changeHeroBackground, 5000); // Changes every 5 seconds
-
-    // 2. Product Card Auto-Carousel Logic
-    document.querySelectorAll('img[id^="carousel-img-"]').forEach(function(imgEl) {
-        var imagesRaw = imgEl.getAttribute('data-images');
-        var images = [];
-        try {
-            images = JSON.parse(imagesRaw);
-        } catch (e) {
-            console.error('Carousel JSON parse error for', imgEl.id, e);
-        }
-
-        if (Array.isArray(images) && images.length > 1) {
-            var currentIdx = 0;
-            setInterval(function() {
-                currentIdx = (currentIdx + 1) % images.length;
-                imgEl.src = images[currentIdx];
+    /* ── Product image carousel ── */
+    document.querySelectorAll('img[id^="carousel-img-"]').forEach(function (img) {
+        var imgs = [];
+        try { imgs = JSON.parse(img.getAttribute('data-images') || '[]'); } catch(e) {}
+        if (imgs.length > 1) {
+            var idx = 0;
+            setInterval(function () {
+                idx = (idx + 1) % imgs.length;
+                img.src = imgs[idx];
             }, 3000);
         }
     });

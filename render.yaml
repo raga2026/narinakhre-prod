@@ -1,7 +1,7 @@
 services:
   - type: web
     name: narinakhre-test
-    plan: free
+    plan: starter
     runtime: python
     region: singapore
     buildCommand: "pip install -r requirements.txt"
@@ -12,7 +12,7 @@ services:
 
   - type: web
     name: narinakhre-production
-    plan: free
+    plan: Free
     runtime: python
     region: singapore
     buildCommand: "pip install -r requirements.txt"
