@@ -516,6 +516,87 @@ def render_site(template_name, **kwargs):
     kwargs['categories'] = categories
     return render_template(f"{site_type}/{template_name}", **kwargs)
 
+# --- IMAGE HELPERS ---
+def get_supabase_image_urls(sku):
+    """Build Supabase image URLs for a SKU — _1 through _9."""
+    base = (os.environ.get('SUPABASE_URL') or '').rstrip('/')
+    if not base:
+        return []
+    bucket = 'products'
+    return [f"{base}/storage/v1/object/public/{bucket}/{sku}_{i}.webp" for i in range(1, 10)]
+
+
+def get_product_images(p_dict):
+    """
+    Return image URL list for a product.
+    Uses image_field from database (Supabase URL) if available.
+    Falls back to building Supabase URLs from SKU.
+    Never uses local static paths.
+    """
+    sku = p_dict.get('sku', '')
+    image_field = p_dict.get('image_field') or ''
+    if image_field.startswith('http'):
+        # Has a known first image — build the full series from SKU
+        all_urls = get_supabase_image_urls(sku)
+        return [image_field] + [u for u in all_urls if u != image_field]
+    # No image_field — build from SKU
+    urls = get_supabase_image_urls(sku)
+    return urls if urls else ['/static/assets/products/default.jpg']
+
+
+def get_product_tiers(p_dict):
+    """Extract wholesale tier pricing from a product dict."""
+    tiers = []
+    for i in range(1, 4):
+        qty = p_dict.get(f'quantity{i}')
+        price = p_dict.get(f'price{i}')
+        if qty and price:
+            try:
+                if int(qty) > 0 and float(price) > 0:
+                    tiers.append({'qty': int(qty), 'price': float(price)})
+            except Exception:
+                continue
+    return tiers if tiers else [{'qty': 1, 'price': 0}]
+
+
+def get_random_hero_images(db, count=4):
+    """Pick random product images from Supabase for hero banners."""
+    rows = db.execute(
+        "SELECT image_field, sku FROM products WHERE image_field IS NOT NULL AND image_field LIKE 'http%' ORDER BY RANDOM() LIMIT ?",
+        (count,)
+    ).fetchall()
+    images = [r['image_field'] for r in rows if r['image_field']]
+    # If not enough from DB, build from SKUs
+    if len(images) < count:
+        skus = db.execute("SELECT sku FROM products ORDER BY RANDOM() LIMIT ?", (count,)).fetchall()
+        for row in skus:
+            url = get_supabase_image_urls(row['sku'])
+            if url:
+                images.append(url[0])
+            if len(images) >= count:
+                break
+    return images[:count]
+
+
+# --- KEEP-ALIVE: Ping Supabase twice a week to prevent free plan pausing ---
+import threading
+import time as _time
+
+def _supabase_keepalive():
+    """Background thread that pings Supabase every 3 days to keep the project active."""
+    while True:
+        _time.sleep(3 * 24 * 60 * 60)  # 3 days
+        try:
+            client = get_supabase()
+            client.rpc('execute_sql', {'query': 'SELECT 1'}).execute()
+            app.logger.info('Supabase keep-alive ping sent.')
+        except Exception as e:
+            app.logger.warning(f'Supabase keep-alive failed: {e}')
+
+_keepalive_thread = threading.Thread(target=_supabase_keepalive, daemon=True)
+_keepalive_thread.start()
+
+
 # --- ROUTES: HOME & CATEGORY ---
 @app.route('/')
 @app.route('/retail')
@@ -525,90 +606,38 @@ def index():
         g.site_type = 'retail'
     elif request.path.startswith('/wholesale'):
         g.site_type = 'wholesale'
-    
+
     db = get_db()
-    # For retail, group products by the 'category' column
-    if request.path.startswith('/retail'):
-        products = db.execute('SELECT * FROM products').fetchall()
+    hero_images = get_random_hero_images(db, count=4)
+
+    if g.site_type == 'retail':
+        products = db.execute('SELECT * FROM products WHERE is_active=1').fetchall()
         grouped_products = {}
         for p in products:
             cat = p['category'] or 'New Arrivals'
             if cat not in grouped_products:
                 grouped_products[cat] = []
             p_dict = dict(p)
-            image_dir = os.path.join(app.root_path, 'static', 'assets', 'products')
-            images = []
-            for i in range(1, 10):
-                img_filename = f"{p['sku']}_{i}.jpg"
-                img_path = os.path.join(image_dir, img_filename)
-                if os.path.exists(img_path):
-                    images.append(url_for('static', filename=f"assets/products/{img_filename}"))
-                else:
-                    break
-            if not images:
-                images = [url_for('static', filename=f"assets/products/default.jpg")]
-            p_dict['images'] = images
-            tiers = []
-            for i in range(1, 4):
-                qty_key = f'quantity{i}'
-                price_key = f'price{i}'
-                qty = p_dict.get(qty_key)
-                price = p_dict.get(price_key)
-                if qty and price:
-                    try:
-                        qty_val = int(qty)
-                        price_val = float(price)
-                        if qty_val > 0 and price_val > 0:
-                            tiers.append({'qty': qty_val, 'price': price_val})
-                    except Exception:
-                        continue
-            if not tiers:
-                tiers = [{'qty': 1, 'price': 0}]
-            p_dict['tiers'] = tiers
+            p_dict['images'] = get_product_images(p_dict)
+            p_dict['tiers'] = get_product_tiers(p_dict)
             grouped_products[cat].append(p_dict)
-        return render_site('index.html', grouped_products=grouped_products)
-    # For wholesale, keep the old logic
+        return render_site('index.html', grouped_products=grouped_products, hero_images=hero_images)
+
     products = db.execute('''
         SELECT p.*, c.name as category_name FROM products p
         LEFT JOIN categories c ON p.category_id = c.id
+        WHERE p.is_active=1
     ''').fetchall()
     grouped_products = {}
     for p in products:
-        cat = p['category_name'] or 'New Arrivals'
+        cat = p['category_name'] or p['category'] or 'New Arrivals'
         if cat not in grouped_products:
             grouped_products[cat] = []
         p_dict = dict(p)
-        image_dir = os.path.join(app.root_path, 'static', 'assets', 'products')
-        images = []
-        for i in range(1, 10):
-            img_filename = f"{p['sku']}_{i}.jpg"
-            img_path = os.path.join(image_dir, img_filename)
-            if os.path.exists(img_path):
-                images.append(url_for('static', filename=f"assets/products/{img_filename}"))
-            else:
-                break
-        if not images:
-            images = [url_for('static', filename=f"assets/products/default.jpg")]
-        p_dict['images'] = images
-        tiers = []
-        for i in range(1, 4):
-            qty_key = f'quantity{i}'
-            price_key = f'price{i}'
-            qty = p_dict.get(qty_key)
-            price = p_dict.get(price_key)
-            if qty and price:
-                try:
-                    qty_val = int(qty)
-                    price_val = float(price)
-                    if qty_val > 0 and price_val > 0:
-                        tiers.append({'qty': qty_val, 'price': price_val})
-                except Exception:
-                    continue
-        if not tiers:
-            tiers = [{'qty': 1, 'price': 0}]
-        p_dict['tiers'] = tiers
+        p_dict['images'] = get_product_images(p_dict)
+        p_dict['tiers'] = get_product_tiers(p_dict)
         grouped_products[cat].append(p_dict)
-    return render_site('index.html', grouped_products=grouped_products)
+    return render_site('index.html', grouped_products=grouped_products, hero_images=hero_images)
 
 @app.route('/category/<category>')
 @app.route('/retail/category/<category>')
@@ -630,36 +659,10 @@ def category_products(category):
             WHERE c.name = ?
         ''', (category,)).fetchall()
     products = []
-    image_dir = os.path.join(app.root_path, 'static', 'assets', 'products')
     for p in raw_products:
         p_dict = dict(p)
-        images = []
-        for i in range(1, 10):
-            img_filename = f"{p['sku']}_{i}.jpg"
-            img_path = os.path.join(image_dir, img_filename)
-            if os.path.exists(img_path):
-                images.append(url_for('static', filename=f"assets/products/{img_filename}"))
-            else:
-                break
-        if not images:
-            images = [url_for('static', filename=f"assets/products/default.jpg")]
-        p_dict['images'] = images
-        
-        tiers = []
-        for i in range(1, 4):
-            qty_key = f'quantity{i}'
-            price_key = f'price{i}'
-            qty = p_dict.get(qty_key)
-            price = p_dict.get(price_key)
-            if qty and price:
-                try:
-                    qty_val = int(qty)
-                    price_val = float(price)
-                    if qty_val > 0 and price_val > 0:
-                        tiers.append({'qty': qty_val, 'price': price_val})
-                except Exception:
-                    continue
-        p_dict['tiers'] = tiers
+        p_dict['images'] = get_product_images(p_dict)
+        p_dict['tiers'] = get_product_tiers(p_dict)
         products.append(p_dict)
     return render_site('category_products.html', category=category, products=products)
 
@@ -676,53 +679,17 @@ def product_detail(product_id):
     product = db.execute('SELECT * FROM products WHERE id = ?', (product_id,)).fetchone()
     if not product: return "Not Found", 404
     p_dict = dict(product)
-    
-    image_dir = os.path.join(app.root_path, 'static', 'assets', 'products')
-    image_urls = []
-    for i in range(1, 10):
-        img_filename = f"{p_dict['sku']}_{i}.jpg"
-        img_path = os.path.join(image_dir, img_filename)
-        if os.path.exists(img_path):
-            image_urls.append(f"assets/products/{p_dict['sku']}_{i}.jpg")
-        else:
-            break
-    if not image_urls:
-        image_urls = [f"assets/products/default.jpg"]
-    
-    tiers = []
-    for i in range(1, 4):
-        qty_key = f'quantity{i}'
-        price_key = f'price{i}'
-        qty = p_dict.get(qty_key)
-        price = p_dict.get(price_key)
-        if qty and price:
-            try:
-                qty_val = int(qty)
-                price_val = float(price)
-                if qty_val > 0 and price_val > 0:
-                    tiers.append({'qty': qty_val, 'price': price_val})
-            except Exception:
-                continue
-    p_dict['tiers'] = tiers
-    # Find 4 random products (not the current one) for cross-sell
-    related = db.execute('''
-        SELECT * FROM products WHERE id != ? ORDER BY RANDOM() LIMIT 4
-    ''', (product_id,)).fetchall()
+    image_urls = get_product_images(p_dict)
+    p_dict['tiers'] = get_product_tiers(p_dict)
+
+    related = db.execute(
+        'SELECT * FROM products WHERE id != ? ORDER BY RANDOM() LIMIT 4',
+        (product_id,)
+    ).fetchall()
     related_products = []
-    image_dir = os.path.join(app.root_path, 'static', 'assets', 'products')
     for r in related:
         r_dict = dict(r)
-        r_images = []
-        for i in range(1, 10):
-            img_filename = f"{r_dict['sku']}_{i}.jpg"
-            img_path = os.path.join(image_dir, img_filename)
-            if os.path.exists(img_path):
-                r_images.append(f"assets/products/{img_filename}")
-            else:
-                break
-        if not r_images:
-            r_images = ["assets/products/default.jpg"]
-        r_dict['images'] = r_images
+        r_dict['images'] = get_product_images(r_dict)
         related_products.append(r_dict)
     return render_site('product_detail.html', product=p_dict, image_urls=image_urls, related_products=related_products)
 
