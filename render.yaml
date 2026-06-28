@@ -1,1 +1,23 @@
-s#test 
+services:
+  - type: web
+    name: narinakhre-test
+    plan: free
+    runtime: python
+    region: singapore
+    buildCommand: "pip install -r requirements.txt"
+    startCommand: "gunicorn app:app"
+    domains:
+      - test-retail.narinakhre.com
+      - test-wholesale.narinakhre.com
+
+  - type: web
+    name: narinakhre-production
+    plan: free
+    runtime: python
+    region: singapore
+    buildCommand: "pip install -r requirements.txt"
+    startCommand: "gunicorn app:app"
+    domains:
+      - narinakhre.com
+      - www.narinakhre.com
+      - wholesale.narinakhre.com
