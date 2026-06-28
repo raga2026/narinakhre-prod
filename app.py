@@ -578,23 +578,26 @@ def get_random_hero_images(db, count=4):
     return images[:count]
 
 
-# --- KEEP-ALIVE: Ping Supabase twice a week to prevent free plan pausing ---
+# --- KEEP-ALIVE: Ping Supabase to prevent free plan pausing ---
 import threading
 import time as _time
 
 def _supabase_keepalive():
     """Background thread that pings Supabase every 3 days to keep the project active."""
+    _time.sleep(30)  # Wait 30 seconds after startup before first ping
     while True:
-        _time.sleep(3 * 24 * 60 * 60)  # 3 days
         try:
             client = get_supabase()
             client.rpc('execute_sql', {'query': 'SELECT 1'}).execute()
             app.logger.info('Supabase keep-alive ping sent.')
         except Exception as e:
             app.logger.warning(f'Supabase keep-alive failed: {e}')
+        _time.sleep(3 * 24 * 60 * 60)  # 3 days
 
-_keepalive_thread = threading.Thread(target=_supabase_keepalive, daemon=True)
-_keepalive_thread.start()
+# Start keepalive only in the main Gunicorn worker process
+if os.environ.get('SERVER_SOFTWARE', '').startswith('gunicorn') or True:
+    _t = threading.Thread(target=_supabase_keepalive, daemon=True)
+    _t.start()
 
 
 # --- ROUTES: HOME & CATEGORY ---
