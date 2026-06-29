@@ -4,349 +4,63 @@
     {% block meta %}{% endblock %}
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{% if g.site_type == 'retail' %}Nari Nakhre — Retail{% else %}Nari Nakhre — Wholesale{% endif %}</title>
+    <title>{% block title %}Nari Nakhre{% endblock %}</title>
+    <link rel="icon" type="image/png" href="{{ url_for('static', filename='assets/logo.png') }}">
+    {% block meta_description %}{% endblock %}
     <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
     <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700;900&family=Merriweather:ital,wght@0,400;0,700;1,400&display=swap" rel="stylesheet">
 
     <style>
-        /* ── Base ── */
-        body {
-            background: #fdf2f8;
-            color: #312e2e;
-            font-family: 'Merriweather', serif;
-            scroll-behavior: smooth;
-        }
+        /* ── Shared base styles ── */
+        body { color: #312e2e; font-family: 'Merriweather', 'Georgia', serif; scroll-behavior: smooth; }
         .font-serif { font-family: 'Playfair Display', serif; }
         .rose-accent { color: #be185d; }
         .hidden { display: none; }
-
-        /* ── Buttons ── */
         .btn-retail-main {
             background: linear-gradient(90deg, #be185d 0%, #f472b6 100%);
-            color: #fff !important;
-            border-radius: 30px;
-            font-weight: bold;
-            transition: all 0.3s ease;
-            box-shadow: 0 4px 12px rgba(190, 24, 93, 0.2);
-            text-align: center;
-            border: none;
-            display: inline-block;
+            color: #fff !important; border-radius: 30px; font-weight: bold;
+            transition: all 0.3s ease; box-shadow: 0 4px 12px rgba(190,24,93,0.2);
+            text-align: center; border: none; display: inline-block;
         }
-        .btn-black {
-            background: #000;
-            color: #fff;
-            border-radius: 12px;
-            font-weight: bold;
-            transition: 0.3s;
-        }
-
-        /* ── Cart badge ── */
-        .cart-count {
-            background: #be185d;
-            color: white;
-            border-radius: 50%;
-            padding: 2px 6px;
-            font-size: 10px;
-            position: absolute;
-            top: -5px;
-            right: -10px;
-        }
-
-        /* ── Header ── */
-        .site-header {
-            position: sticky;
-            top: 0;
-            z-index: 50;
-            background: white;
-            border-bottom: 2px solid #be185d;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.06);
-        }
-        .header-inner {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            padding: 12px 16px;
-        }
-        .site-logo {
-            font-family: 'Playfair Display', serif;
-            font-size: 1.4rem;
-            font-weight: 900;
-            color: #be185d;
-            text-decoration: none;
-            flex-shrink: 0;
-        }
-        @media (min-width: 768px) {
-            .site-logo { font-size: 1.8rem; }
-        }
-
-        /* ── Hamburger ── */
-        .hamburger {
-            display: flex;
-            flex-direction: column;
-            justify-content: center;
-            gap: 5px;
-            background: none;
-            border: none;
-            cursor: pointer;
-            padding: 4px;
-        }
-        .hamburger span {
-            display: block;
-            width: 24px;
-            height: 2px;
-            background: #be185d;
-            border-radius: 2px;
-            transition: 0.3s;
-        }
-        @media (min-width: 768px) {
-            .hamburger { display: none; }
-        }
-
-        /* ── Desktop nav ── */
-        .desktop-nav {
-            display: none;
-            align-items: center;
-            gap: 20px;
-            font-weight: bold;
-        }
-        @media (min-width: 768px) {
-            .desktop-nav { display: flex; }
-        }
-        .desktop-nav a {
-            color: #be185d;
-            text-decoration: none;
-            font-size: 0.95rem;
-        }
-        .desktop-nav a:hover { text-decoration: underline; }
-
-        /* ── Mobile nav drawer ── */
-        .mobile-nav {
-            display: none;
-            flex-direction: column;
-            background: white;
-            border-top: 1px solid #fecdd3;
-            padding: 8px 0;
-        }
-        .mobile-nav.open { display: flex; }
-        .mobile-nav a {
-            padding: 12px 20px;
-            color: #be185d;
-            font-weight: bold;
-            font-size: 1rem;
-            text-decoration: none;
-            border-bottom: 1px solid #fff1f2;
-        }
-        .mobile-nav a:hover { background: #fff1f2; }
-
-        /* ── Categories dropdown (desktop) ── */
-        .cat-dropdown {
-            position: relative;
-        }
-        .cat-dropdown-btn {
-            color: #be185d;
-            font-weight: bold;
-            font-size: 0.95rem;
-            background: none;
-            border: none;
-            cursor: pointer;
-        }
-        .cat-dropdown-menu {
-            display: none;
-            position: absolute;
-            left: 0;
-            top: 100%;
-            margin-top: 8px;
-            width: 200px;
-            background: white;
-            border: 1px solid #fecdd3;
-            border-radius: 12px;
-            box-shadow: 0 4px 16px rgba(0,0,0,0.1);
-            z-index: 100;
-        }
-        .cat-dropdown:hover .cat-dropdown-menu { display: block; }
-        .cat-dropdown-menu a {
-            display: block;
-            padding: 10px 16px;
-            color: #be185d;
-            font-weight: 600;
-            text-decoration: none;
-            font-size: 0.9rem;
-        }
-        .cat-dropdown-menu a:hover { background: #fff1f2; }
-
-        /* ── Pincode bar ── */
-        .pincode-bar {
-            background: #fff1f2;
-            padding: 6px 16px;
-            display: flex;
-            align-items: center;
-            justify-content: flex-end;
-            gap: 8px;
-            flex-wrap: wrap;
-        }
-        .pincode-bar input {
-            border: 1px solid #fecdd3;
-            border-radius: 6px;
-            padding: 4px 8px;
-            font-size: 0.8rem;
-            width: 90px;
-        }
-
-        /* ── Footer ── */
-        .site-footer {
-            background: white;
-            border-top: 2px solid #be185d;
-            padding: 24px 16px;
-            margin-top: 40px;
-        }
-        .footer-links {
-            display: flex;
-            flex-wrap: wrap;
-            gap: 12px;
-            justify-content: center;
-            margin-bottom: 12px;
-        }
-        .footer-links a {
-            color: #be185d;
-            font-weight: bold;
-            text-decoration: none;
-            font-size: 0.9rem;
-        }
-        .footer-copy {
-            text-align: center;
-            font-size: 0.75rem;
-            color: #6b7280;
-        }
+        .btn-black { background: #000; color: #fff; border-radius: 12px; font-weight: bold; transition: 0.3s; }
     </style>
+
+    {% block extra_styles %}{% endblock %}
 </head>
-<body class="flex flex-col min-h-screen">
+<body class="flex flex-col min-h-screen {% block body_class %}{% endblock %}">
 
-    <!-- ── HEADER ── -->
-    <header class="site-header">
-        <div class="header-inner">
-            <a href="/" class="site-logo">Nari Nakhre</a>
+    {% block header %}{% endblock %}
 
-            <!-- Desktop nav -->
-            <nav class="desktop-nav">
-                <a href="/">Home</a>
+    <main class="{% block main_class %}flex-grow{% endblock %}">
+        {% block content %}{% endblock %}
+    </main>
 
-                {% if categories %}
-                <div class="cat-dropdown">
-                    <button class="cat-dropdown-btn">Categories ▾</button>
-                    <div class="cat-dropdown-menu">
-                        {% for cat in categories %}
-                        <a href="/retail/category/{{ cat }}">{{ cat }}</a>
-                        {% endfor %}
-                    </div>
-                </div>
-                {% else %}
-                <a href="/retail/categories">Categories</a>
-                {% endif %}
+    {% block footer %}{% endblock %}
 
-                <a href="/retail/checkout" class="relative" style="position:relative;">
-                    Cart
-                    <span id="cart-count" class="cart-count">{{ session.get('cart', {})|length }}</span>
-                </a>
-                <a href="/retail/contact">Contact Us</a>
-            </nav>
-
-            <!-- Hamburger (mobile) -->
-            <button class="hamburger" id="hamburger-btn"
-                    aria-label="Open navigation menu"
-                    onclick="toggleMobileNav()">
-                <span></span>
-                <span></span>
-                <span></span>
-            </button>
-        </div>
-
-        <!-- Mobile nav drawer -->
-        <nav class="mobile-nav" id="mobile-nav" role="navigation" aria-label="Mobile navigation">
-            <a href="/">Home</a>
-            <a href="/retail/categories">Categories</a>
-            <a href="/retail/checkout">
-                Cart
-                <span id="cart-count-mobile" class="cart-count" style="position:relative;top:0;right:0;margin-left:6px;">{{ session.get('cart', {})|length }}</span>
-            </a>
-            <a href="/retail/contact">Contact Us</a>
-        </nav>
-
-        <!-- Pincode check bar (retail only) -->
-        {% if g.site_type == 'retail' %}
-        <div class="pincode-bar">
-            <input id="pincode-input" type="text" placeholder="Enter Pincode"
-                   aria-label="Enter your pincode to check delivery">
-            <button class="btn-black px-3 py-1 text-xs" onclick="verifyService()">Check Delivery</button>
-            <span id="pincode-result" class="text-xs font-bold" aria-live="polite"></span>
-        </div>
-        {% endif %}
-    </header>
-
-    <!-- ── MAIN CONTENT ── -->
-    <main class="flex-grow">{% block content %}{% endblock %}</main>
-
-    <!-- ── FOOTER ── -->
-    <footer class="site-footer">
-        <div class="footer-links">
-            <a href="/">Home</a>
-            <a href="/retail/categories">Categories</a>
-            <a href="/retail/checkout">Cart</a>
-            <a href="/retail/contact">Contact Us</a>
-        </div>
-        <div class="footer-copy">
-            <div>Nari Nakhre &copy; 2026. All Rights Reserved.</div>
-            <div>Handcrafted with <span style="color:#be185d">&#10084;</span> in India.
-                &nbsp;|&nbsp;
-                <a href="mailto:info@narinakhre.com"
-                   style="color:#be185d;">info@narinakhre.com</a>
-            </div>
-        </div>
-    </footer>
+    <script src="/static/js/cart_global.js"></script>
+    <script src="/static/js/retail_unit_counter.js"></script>
+    <script src="/static/js/retail_cart_state.js"></script>
 
     <script>
-    /* ── Mobile nav toggle ── */
-    function toggleMobileNav() {
-        const nav = document.getElementById('mobile-nav');
-        nav.classList.toggle('open');
-    }
-
-    /* ── Sync cart count to mobile nav ── */
+    /* ── Shared: sync cart count ── */
     function syncCartCount(count) {
-        const desktop = document.getElementById('cart-count');
-        const mobile  = document.getElementById('cart-count-mobile');
-        if (desktop) desktop.innerText = count;
-        if (mobile)  mobile.innerText  = count;
+        const d = document.getElementById('cart-count');
+        const m = document.getElementById('cart-count-mobile');
+        if (d) d.innerText = count;
+        if (m) m.innerText = count;
     }
 
-    /* ── Delivery pincode check ── */
-    function verifyService() {
-        const pin = document.getElementById('pincode-input').value;
-        const res = document.getElementById('pincode-result');
-        if (!pin) { res.innerText = 'Enter a pincode'; res.className = 'text-xs font-bold text-gray-500'; return; }
-        fetch('/api/delhivery/check/' + pin)
-            .then(r => r.json())
-            .then(data => {
-                res.innerText  = data.status ? 'Deliverable ✓' : 'Not Serviceable ✗';
-                res.className  = 'text-xs font-bold ' + (data.status ? 'text-green-600' : 'text-red-600');
-            })
-            .catch(() => { res.innerText = 'Check failed'; res.className = 'text-xs font-bold text-red-500'; });
-    }
-
-    /* ── Amazon-style Retail Cart Logic ── */
+    /* ── Shared: retail cart actions ── */
     function retailAddToCart(btn) {
         const container = btn.closest('.cart-container');
-        const sku   = btn.getAttribute('data-sku');
+        const sku = btn.getAttribute('data-sku');
         const price = btn.getAttribute('data-price');
         let size = 'Standard';
         const sizeSelect = container.querySelector('.size-select') || document.getElementById('size-main');
         if (sizeSelect) size = sizeSelect.value;
-        fetch('/update-cart', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ product_id: sku, qty: 1, price: price, size: size })
-        })
-        .then(r => r.json())
-        .then(data => {
+        fetch('/update-cart', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ product_id: sku, qty: 1, price: price, size: size }) })
+        .then(r => r.json()).then(data => {
             if (data.status === 'success') {
                 syncCartCount(data.new_total || data.cart_count || '1');
                 btn.classList.add('hidden');
@@ -359,50 +73,39 @@
             }
         });
     }
-
     function retailIncrement(btn) {
         const container = btn.closest('.cart-container');
-        const counter   = btn.closest('.unit-counter');
-        const sku   = container.querySelector('.add-to-cart-btn').getAttribute('data-sku');
+        const counter = btn.closest('.unit-counter');
+        const sku = container.querySelector('.add-to-cart-btn').getAttribute('data-sku');
         const price = container.querySelector('.add-to-cart-btn').getAttribute('data-price');
         let size = 'Standard';
         const sizeSelect = container.querySelector('.size-select') || document.getElementById('size-main');
         if (sizeSelect) size = sizeSelect.value;
         let qty = parseInt(counter.querySelector('.qty-display').innerText) || 1;
-        if (qty >= 5) return;
-        qty++;
-        fetch('/update-cart', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ product_id: sku, qty: qty, price: price, size: size })
-        })
-        .then(r => r.json())
-        .then(data => {
+        qty += 1;
+        fetch('/update-cart', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ product_id: sku, qty: qty, price: price, size: size }) })
+        .then(r => r.json()).then(data => {
             if (data.status === 'success') {
                 counter.querySelector('.qty-display').innerText = qty;
                 syncCartCount(data.new_total || data.cart_count || '1');
             }
         });
     }
-
     function retailDecrement(btn) {
         const container = btn.closest('.cart-container');
-        const counter   = btn.closest('.unit-counter');
-        const addBtn    = container.querySelector('.add-to-cart-btn');
-        const sku   = addBtn.getAttribute('data-sku');
+        const counter = btn.closest('.unit-counter');
+        const addBtn = container.querySelector('.add-to-cart-btn');
+        const sku = addBtn.getAttribute('data-sku');
         const price = addBtn.getAttribute('data-price');
         let size = 'Standard';
         const sizeSelect = container.querySelector('.size-select') || document.getElementById('size-main');
         if (sizeSelect) size = sizeSelect.value;
         let qty = parseInt(counter.querySelector('.qty-display').innerText) || 1;
         if (qty <= 1) {
-            fetch('/update-cart', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ product_id: sku, qty: 0, price: price, size: size })
-            })
-            .then(r => r.json())
-            .then(data => {
+            fetch('/update-cart', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ product_id: sku, qty: 0, price: price, size: size }) })
+            .then(r => r.json()).then(data => {
                 if (data.status === 'success') {
                     counter.classList.add('hidden');
                     if (addBtn) addBtn.classList.remove('hidden');
@@ -411,24 +114,19 @@
             });
             return;
         }
-        qty--;
-        fetch('/update-cart', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ product_id: sku, qty: qty, price: price, size: size })
-        })
-        .then(r => r.json())
-        .then(data => {
+        qty -= 1;
+        fetch('/update-cart', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ product_id: sku, qty: qty, price: price, size: size }) })
+        .then(r => r.json()).then(data => {
             if (data.status === 'success') {
                 counter.querySelector('.qty-display').innerText = qty;
                 syncCartCount(data.new_total || data.cart_count || '1');
             }
         });
     }
-
     function retailBuyNow(btn) {
         const container = btn.closest('.cart-container');
-        const sku   = btn.getAttribute('data-sku');
+        const sku = btn.getAttribute('data-sku');
         const price = btn.getAttribute('data-price');
         let size = 'Standard';
         const sizeSelect = container.querySelector('.size-select') || document.getElementById('size-main');
@@ -438,13 +136,9 @@
         if (counter && !counter.classList.contains('hidden')) {
             qty = parseInt(counter.querySelector('.qty-display').innerText) || 1;
         }
-        fetch('/update-cart', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ product_id: sku, qty: qty, price: price, size: size })
-        })
-        .then(r => r.json())
-        .then(data => {
+        fetch('/update-cart', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ product_id: sku, qty: qty, price: price, size: size }) })
+        .then(r => r.json()).then(data => {
             if (data.status === 'success') {
                 syncCartCount(data.new_total || data.cart_count || '1');
                 window.location.href = '/retail/checkout';
@@ -452,5 +146,7 @@
         });
     }
     </script>
+
+    {% block extra_scripts %}{% endblock %}
 </body>
 </html>
