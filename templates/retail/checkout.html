@@ -144,24 +144,103 @@ document.addEventListener('DOMContentLoaded', function() {
                     });
                     </script>
                 </div>
-                <div class="space-y-4">
+                <div class="space-y-3" id="cart-items-list">
                     {% for item in display_cart %}
-                    <div class="flex items-center gap-4 bg-white border border-rose-100 rounded-2xl shadow p-4">
-                        <img src="{{ item.image_url or url_for('static', filename='assets/products/' ~ item.sku ~ '_1.jpg') }}" alt="{{ item.name }}" class="w-20 h-20 object-contain rounded-xl border border-rose-50 bg-slate-50">
-                        <div class="flex-1">
-                            <div class="font-bold text-lg text-rose-900">{{ item.name }}</div>
-                            <div class="text-xs text-gray-500 mt-1">
-                                {%- set clean_size = item.size if item.size and item.size not in ['Standard', 'standard', 'STANDARD', 'None', ''] else '' -%}
-                                {%- if clean_size -%}
-                                Size: <span class="font-semibold">{{ clean_size }}</span>
-                                {%- endif -%}
-                            </div>
-                            <div class="text-xs text-gray-500">Qty: <span class="font-semibold">{{ item.units }}</span></div>
+                    {%- set clean_size = item.size if item.size and item.size not in ['Standard', 'standard', ''] else '' -%}
+                    <div class="flex items-center gap-3 bg-white border border-rose-100 rounded-xl p-3"
+                         data-sku="{{ item.sku }}" data-size="{{ item.size }}" data-price="{{ item.price }}">
+                        <!-- Image -->
+                        <img src="{{ item.image_url or url_for('static', filename='assets/logo.png') }}"
+                             alt="{{ item.name }}"
+                             class="w-14 h-14 object-contain rounded-lg border border-rose-50 bg-slate-50 flex-shrink-0"
+                             onerror="this.src='{{ url_for('static', filename='assets/logo.png') }}'">
+                        <!-- Name + size -->
+                        <div class="flex-1 min-w-0">
+                            <div class="font-semibold text-sm text-rose-900 truncate">{{ item.name }}</div>
+                            {% if clean_size %}
+                            <div class="text-xs text-gray-400 mt-0.5">Size: {{ clean_size }}</div>
+                            {% endif %}
                         </div>
-                        <div class="font-black text-xl text-rose-700">₹{{ (item.price * item.units)|round(2) }}</div>
+                        <!-- +/- controls -->
+                        <div class="flex items-center gap-1 flex-shrink-0">
+                            <button onclick="cartDecrement(this)"
+                                    class="w-7 h-7 rounded-full bg-rose-50 border border-rose-200 text-rose-700 font-bold text-base flex items-center justify-center hover:bg-rose-100">−</button>
+                            <span class="qty-val w-6 text-center text-sm font-bold text-rose-800">{{ item.units }}</span>
+                            <button onclick="cartIncrement(this)"
+                                    class="w-7 h-7 rounded-full bg-rose-50 border border-rose-200 text-rose-700 font-bold text-base flex items-center justify-center hover:bg-rose-100">+</button>
+                        </div>
+                        <!-- Line total -->
+                        <div class="font-black text-sm text-rose-700 flex-shrink-0 w-14 text-right line-total">
+                            ₹{{ (item.price * item.units)|round(0)|int }}
+                        </div>
                     </div>
                     {% endfor %}
                 </div>
+                <script>
+                function cartDecrement(btn) {
+                    const row = btn.closest('[data-sku]');
+                    const sku = row.dataset.sku;
+                    const size = row.dataset.size;
+                    const price = parseFloat(row.dataset.price);
+                    const qtyEl = row.querySelector('.qty-val');
+                    let qty = parseInt(qtyEl.textContent) - 1;
+                    if (qty <= 0) {
+                        // Remove item
+                        fetch('/update-cart', { method:'POST', headers:{'Content-Type':'application/json'},
+                            body: JSON.stringify({product_id: sku, qty: 0, price: price, size: size})})
+                        .then(r => r.json()).then(d => {
+                            if (d.status === 'success') {
+                                row.remove();
+                                if (typeof syncCartCount === 'function') syncCartCount(d.new_total || 0);
+                                if (!document.querySelector('[data-sku]')) location.reload();
+                            }
+                        });
+                        return;
+                    }
+                    fetch('/update-cart', { method:'POST', headers:{'Content-Type':'application/json'},
+                        body: JSON.stringify({product_id: sku, qty: qty, price: price, size: size})})
+                    .then(r => r.json()).then(d => {
+                        if (d.status === 'success') {
+                            qtyEl.textContent = qty;
+                            const total = (qty * price).toFixed(0);
+                            row.querySelector('.line-total').textContent = '₹' + total;
+                            if (typeof syncCartCount === 'function') syncCartCount(d.new_total || 0);
+                            updateOrderSummary();
+                        }
+                    });
+                }
+                function cartIncrement(btn) {
+                    const row = btn.closest('[data-sku]');
+                    const sku = row.dataset.sku;
+                    const size = row.dataset.size;
+                    const price = parseFloat(row.dataset.price);
+                    const qtyEl = row.querySelector('.qty-val');
+                    const qty = parseInt(qtyEl.textContent) + 1;
+                    fetch('/update-cart', { method:'POST', headers:{'Content-Type':'application/json'},
+                        body: JSON.stringify({product_id: sku, qty: qty, price: price, size: size})})
+                    .then(r => r.json()).then(d => {
+                        if (d.status === 'success') {
+                            qtyEl.textContent = qty;
+                            const total = (qty * price).toFixed(0);
+                            row.querySelector('.line-total').textContent = '₹' + total;
+                            if (typeof syncCartCount === 'function') syncCartCount(d.new_total || 0);
+                            updateOrderSummary();
+                        }
+                    });
+                }
+                function updateOrderSummary() {
+                    let subtotal = 0;
+                    document.querySelectorAll('[data-sku]').forEach(row => {
+                        const price = parseFloat(row.dataset.price);
+                        const qty = parseInt(row.querySelector('.qty-val').textContent);
+                        subtotal += price * qty;
+                    });
+                    const subtotalEl = document.getElementById('s-subtotal');
+                    const totalEl = document.getElementById('s-total');
+                    if (subtotalEl) subtotalEl.textContent = subtotal.toFixed(2);
+                    if (totalEl) totalEl.textContent = subtotal.toFixed(2);
+                }
+                </script>
             </div>
         </div>
 
