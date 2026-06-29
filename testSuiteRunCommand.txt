@@ -1,0 +1,10 @@
+pip install requests
+# Against live test site:
+NARINAKHRE_URL=https://test-retail.narinakhre.com python test_suite.py
+
+# Against local:
+python test_suite.py
+
+# With pytest for CI:
+pip install pytest
+NARINAKHRE_URL=https://test-retail.narinakhre.com python -m pytest test_suite.py -v

@@ -755,12 +755,33 @@ class ColouredRunner(unittest.TextTestRunner):
     resultclass = ColouredResult
 
 
+LOG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'test_results.log')
+
+class TeeStream:
+    """Writes to both stdout and a file simultaneously."""
+    def __init__(self, *streams):
+        self.streams = streams
+    def write(self, text):
+        for s in self.streams:
+            s.write(text)
+    def writeln(self, text=''):
+        self.write(text + '\n')
+    def flush(self):
+        for s in self.streams:
+            s.flush()
+
+
 if __name__ == '__main__':
-    print(c('bold', f'\n{"═"*60}'))
-    print(c('bold', '  NariNakhre Test Suite'))
-    print(c('bold', f'  Target: {BASE_URL}'))
-    print(c('bold', f'  Time:   {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}'))
-    print(c('bold', f'{"═"*60}\n'))
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    header = (
+        f'\n{"═"*60}\n'
+        f'  NariNakhre Test Suite\n'
+        f'  Target: {BASE_URL}\n'
+        f'  Time:   {timestamp}\n'
+        f'{"═"*60}\n'
+    )
+
+    print(c('bold', header))
 
     loader = unittest.TestLoader()
     suite  = unittest.TestSuite()
@@ -779,19 +800,50 @@ if __name__ == '__main__':
     ]:
         suite.addTests(loader.loadTestsFromTestCase(cls))
 
-    runner = ColouredRunner(verbosity=2, stream=sys.stdout)
-    result = runner.run(suite)
+    with open(LOG_FILE, 'w', encoding='utf-8') as log:
+        log.write(f'NariNakhre Test Suite\n')
+        log.write(f'Target : {BASE_URL}\n')
+        log.write(f'Run at : {timestamp}\n')
+        log.write(f'{"═"*60}\n\n')
 
-    print(c('bold', f'\n{"═"*60}'))
-    total   = result.testsRun
-    passed  = total - len(result.failures) - len(result.errors) - len(result.skipped)
-    print(c('green',  f'  Passed:  {passed}/{total}'))
-    if result.failures:
-        print(c('red',    f'  Failed:  {len(result.failures)}'))
-    if result.errors:
-        print(c('red',    f'  Errors:  {len(result.errors)}'))
-    if result.skipped:
-        print(c('yellow', f'  Skipped: {len(result.skipped)}'))
-    print(c('bold', f'{"═"*60}\n'))
+        tee = TeeStream(sys.stdout, log)
+        runner = ColouredRunner(verbosity=2, stream=tee)
+        result = runner.run(suite)
+
+        total   = result.testsRun
+        passed  = total - len(result.failures) - len(result.errors) - len(result.skipped)
+
+        summary = (
+            f'\n{"═"*60}\n'
+            f'  Passed:  {passed}/{total}\n'
+        )
+        if result.failures:
+            summary += f'  Failed:  {len(result.failures)}\n'
+            summary += '\nFAILURES\n'
+            summary += '─'*60 + '\n'
+            for test, traceback in result.failures:
+                summary += f'  FAIL: {test}\n'
+                summary += f'  {traceback.strip()}\n\n'
+        if result.errors:
+            summary += f'  Errors:  {len(result.errors)}\n'
+            summary += '\nERRORS\n'
+            summary += '─'*60 + '\n'
+            for test, traceback in result.errors:
+                summary += f'  ERROR: {test}\n'
+                summary += f'  {traceback.strip()}\n\n'
+        if result.skipped:
+            summary += f'  Skipped: {len(result.skipped)}\n'
+            summary += '\nSKIPPED\n'
+            summary += '─'*60 + '\n'
+            for test, reason in result.skipped:
+                summary += f'  SKIP: {test} — {reason}\n'
+        summary += f'{"═"*60}\n'
+        summary += f'Full log saved to: {LOG_FILE}\n'
+
+        tee.writeln(summary)
+        log.write(summary)
+
+    print(c('green' if result.wasSuccessful() else 'red',
+        f'\n  Results saved to: {LOG_FILE}\n'))
 
     sys.exit(0 if result.wasSuccessful() else 1)
