@@ -19,11 +19,11 @@ Or for a quick smoke test:
     python test_suite.py
 
 Set env vars before running:
-    NARINAKHRE_URL=https://test-retail.narinakhre.com  (default: http://127.0.0.1:5000)
-    ADMIN_PASSWORD=yourpassword
+    NARINAKHRE_URL=https://test-retail.narinakhre.com
+    ADMIN_PASSWORD= Raghav@1989
     RAZORPAY_KEY_ID=rzp_test_xxx
     RAZORPAY_KEY_SECRET=yourSecret
-    DELHIVERY_API_KEY=yourKey
+    DELHIVERY_API_KEY = 070b26681f13da4c8cf5d8a6dbf441614c992e7c
 """
 
 import os

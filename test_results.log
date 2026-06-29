@@ -1,0 +1,32 @@
+NariNakhre Test Suite
+Target : http://127.0.0.1:5000
+Run at : 2026-06-29 15:49:10
+════════════════════════════════════════════════════════════
+
+test_admin_add_product_requires_auth (__main__.SecurityTests.test_admin_add_product_requires_auth) ... ERROR
+[91m  ✗ ERROR[0m
+test_admin_dashboard_requires_auth (__main__.SecurityTests.test_admin_dashboard_requires_auth) ... ERROR
+[91m  ✗ ERROR[0m
+test_admin_delete_product_requires_auth (__main__.SecurityTests.test_admin_delete_product_requires_auth) ... ERROR
+[91m  ✗ ERROR[0m
+test_admin_download_excel_requires_auth (__main__.SecurityTests.test_admin_download_excel_requires_auth) ... ERROR
+[91m  ✗ ERROR[0m
+test_admin_edit_product_requires_auth (__main__.SecurityTests.test_admin_edit_product_requires_auth) ... ERROR
+[91m  ✗ ERROR[0m
+test_admin_manage_images_requires_auth (__main__.SecurityTests.test_admin_manage_images_requires_auth) ... ERROR
+[91m  ✗ ERROR[0m
+test_admin_upload_excel_requires_auth (__main__.SecurityTests.test_admin_upload_excel_requires_auth) ... ERROR
+[91m  ✗ ERROR[0m
+test_content_type_on_api_responses (__main__.SecurityTests.test_content_type_on_api_responses) ... ERROR
+[91m  ✗ ERROR[0m
+test_create_order_requires_cart (__main__.SecurityTests.test_create_order_requires_cart)
+Cannot create a Razorpay order with zero amount. ... ERROR
+[91m  ✗ ERROR[0m
+test_delhivery_check_blocked_for_wholesale (__main__.SecurityTests.test_delhivery_check_blocked_for_wholesale)
+Delhivery API should only serve retail requests. ... ERROR
+[91m  ✗ ERROR[0m
+test_fake_razorpay_signature_rejected (__main__.SecurityTests.test_fake_razorpay_signature_rejected) ... ERROR
+[91m  ✗ ERROR[0m
+test_no_server_header_leakage (__main__.SecurityTests.test_no_server_header_leakage) ... ERROR
+[91m  ✗ ERROR[0m
+test_sqli_in_cart_update (__main__.SecurityTests.test_sqli_in_cart_update) ... 
