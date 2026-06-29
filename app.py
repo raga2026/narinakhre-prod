@@ -1106,18 +1106,34 @@ def delhivery_check_pincode(pincode):
 def calculate_checkout_shipping():
     if g.site_type != 'retail':
         return jsonify({"status": False, "msg": "Unauthorized"}), 403
-    data = request.get_json()
-    pincode = data.get('pincode')
+    import re as _re2
+    data = request.get_json(silent=True) or {}
+    pincode = str(data.get('pincode') or data.get('destination') or '').strip()
     payment_mode = data.get('mode', 'Prepaid')
-    cart = session.get('cart', {})
-    total_weight = sum(item['qty'] for item in cart.values()) * 250
-    provider = get_shipping_provider(
-        app.config['SHIPPING_PROVIDER'],
-        api_token=app.config.get('DELHIVERY_API_KEY')
-    )
-    # If provider has get_rates, use it; else, return mock
-    rates = provider.get_rates(app.config['WAREHOUSE_PIN'], pincode, total_weight)
-    return jsonify({"shipping_cost": rates.get('rate', 0)})
+    if not _re2.match(r'^[0-9]{6}$', pincode):
+        return jsonify({"status": False, "shipping_charge": 0,
+                        "cod_fee": 0, "msg": "Invalid pincode format"}), 400
+    try:
+        cart = session.get('cart', {})
+        total_weight = max(sum(item.get('qty', 1) for item in cart.values()) * 250, 250)
+        provider = get_shipping_provider(
+            app.config['SHIPPING_PROVIDER'],
+            api_token=app.config.get('DELHIVERY_API_KEY')
+        )
+        rates = provider.get_rates(app.config.get('WAREHOUSE_PIN', ''), pincode, total_weight)
+        shipping_charge = rates.get('rate', 0) or rates.get('shipping_charge', 0)
+        cod_fee = rates.get('cod_fee', 0) if payment_mode == 'COD' else 0
+        return jsonify({
+            "status": True,
+            "shipping_charge": shipping_charge,
+            "cod_fee": cod_fee,
+            "payment_mode": payment_mode
+        })
+    except Exception as e:
+        app.logger.error(f'Delhivery shipping calc error: {e}')
+        return jsonify({"status": False, "shipping_charge": 0,
+                        "cod_fee": 0, "msg": "Shipping rate unavailable"}), 200
+
 
 @app.route('/retail/place_order', methods=['POST'])
 def place_order():

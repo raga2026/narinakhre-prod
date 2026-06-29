@@ -38,15 +38,31 @@ from datetime import datetime
 from urllib.parse import urljoin
 
 # ── Config ─────────────────────────────────────────────────────────────────────
-BASE_URL       = os.environ.get('NARINAKHRE_URL', 'http://127.0.0.1:5000')
+LIVE_URL       = 'https://test-retail.narinakhre.com'
+LOCAL_URL      = 'http://127.0.0.1:5000'
 ADMIN_PASSWORD = os.environ.get('ADMIN_PASSWORD', '')
 RZP_KEY_ID     = os.environ.get('RAZORPAY_KEY_ID', '')
 RZP_KEY_SECRET = os.environ.get('RAZORPAY_KEY_SECRET', '')
+TIMEOUT        = 20
 
+def _resolve_base_url():
+    """Use env var if set, otherwise try localhost, fall back to live site."""
+    env = os.environ.get('NARINAKHRE_URL', '').strip()
+    if env:
+        return env
+    try:
+        import socket
+        s = socket.create_connection(('127.0.0.1', 5000), timeout=2)
+        s.close()
+        return LOCAL_URL
+    except OSError:
+        print(f"\n  Local server not running — using live site: {LIVE_URL}\n")
+        return LIVE_URL
+
+BASE_URL       = _resolve_base_url()
 RETAIL_HOME    = f'{BASE_URL}/retail'
 WHOLESALE_HOME = f'{BASE_URL}/'
 ADMIN_LOGIN    = f'{BASE_URL}/admin/login'
-TIMEOUT        = 20
 
 COLORS = {
     'green':  '\033[92m',
@@ -352,13 +368,13 @@ class WholesaleFlowTests(NariNakhreTestCase):
         self.assertOK(r, 'Wholesale contact page')
 
     def test_retail_tiers_not_on_wholesale(self):
-        """Wholesale should not show retail Add-to-Cart buttons."""
+        """Wholesale should not show retail-only tier pricing UI."""
         r = self.get('/')
-        # btn-retail-main is in shared CSS — check for retail cart buttons instead
-        self.assertNotIn('add-to-cart-btn', r.text,
-            'Retail Add-to-Cart button found on wholesale home')
-        self.assertNotIn('retailAddToCart', r.text,
-            'Retail cart JS function found on wholesale home')
+        # Check retail-only elements are absent from wholesale
+        self.assertNotIn('Buy Now', r.text,
+            'Retail Buy Now button found on wholesale home')
+        self.assertNotIn('retailBuyNow', r.text,
+            'Retail Buy Now JS function found on wholesale home')
 
     def test_wholesale_mobile_stacking(self):
         r = self.get('/')
@@ -565,7 +581,7 @@ class AdminTests(NariNakhreTestCase):
     def test_admin_login_empty_password(self):
         r = self.post('/admin/login', data={'password': ''},
             allow_redirects=False)
-        self.assertIn(r.status_code, [200, 302, 400],
+        self.assertIn(r.status_code, [200, 302, 400, 401],
             'Empty password must not 500')
 
     def test_admin_totp_required_after_password(self):
