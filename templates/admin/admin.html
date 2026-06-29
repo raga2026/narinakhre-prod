@@ -36,6 +36,11 @@
         <div class="bg-gray-50 rounded-lg p-6 shadow flex flex-col items-center">
           <h3 class="text-lg font-semibold mb-4 text-gray-800">Inventory & Store Management</h3>
           <div class="flex flex-col space-y-3 w-full">
+            <a href="{{ url_for('admin_add_product') }}"
+               class="w-full bg-rose-600 text-white py-2 rounded-lg font-semibold shadow hover:bg-rose-700 transition text-center"
+               aria-label="Add a single new product with image upload">
+              ＋ Add New Product
+            </a>
             <a href="{{ url_for('admin_edit_product_details') }}"
                class="w-full bg-blue-700 text-white py-2 rounded-lg font-semibold shadow hover:bg-blue-800 transition text-center"
                aria-label="Edit product details including retail and wholesale prices">

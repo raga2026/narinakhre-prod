@@ -17,6 +17,8 @@ from werkzeug.routing import BuildError
 from supabase import create_client, Client as SupabaseClient
 
 from utils.shipping_manager import get_shipping_provider
+import io
+from PIL import Image as PILImage
 
 
 def load_env_file(env_path):
@@ -143,17 +145,37 @@ def upload_image_to_supabase(file_storage_object, filename):
         return None
 
     try:
+        # Read raw bytes from the file-like object
         if hasattr(file_storage_object, 'stream') and hasattr(file_storage_object.stream, 'seek'):
             file_storage_object.stream.seek(0)
         elif hasattr(file_storage_object, 'seek'):
             file_storage_object.seek(0)
+        raw_bytes = file_storage_object.read()
 
-        binary_payload = file_storage_object.read()
+        # Convert & compress to WebP using PIL
+        try:
+            img = PILImage.open(io.BytesIO(raw_bytes))
+            if img.mode in ('RGBA', 'P', 'LA'):
+                img = img.convert('RGBA')
+            else:
+                img = img.convert('RGB')
+            buf = io.BytesIO()
+            img.save(buf, format='WEBP', quality=85, method=6)
+            binary_payload = buf.getvalue()
+            content_type = 'image/webp'
+            # Always use .webp extension in the stored filename
+            if not filename.lower().endswith('.webp'):
+                filename = filename.rsplit('.', 1)[0] + '.webp'
+        except Exception as pil_exc:
+            app.logger.warning('WebP conversion failed, uploading original: %s', pil_exc)
+            binary_payload = raw_bytes
+            content_type = getattr(file_storage_object, 'mimetype', 'application/octet-stream')
+
         upload_url = f"{supabase_url}/storage/v1/object/{bucket_name}/{filename}"
         headers = {
             'Authorization': f'Bearer {supabase_key}',
             'apikey': supabase_key,
-            'Content-Type': getattr(file_storage_object, 'mimetype', 'application/octet-stream'),
+            'Content-Type': content_type,
             'x-upsert': 'true',
         }
         response = requests.put(upload_url, headers=headers, data=binary_payload, timeout=30)
@@ -1315,18 +1337,34 @@ def admin_add_product():
         sku = request.form.get('sku', '').strip()
         name = request.form.get('name', '').strip()
         category = request.form.get('category', '').strip()
+        sub_category = request.form.get('sub_category', '').strip()
+        collection = request.form.get('collection', '').strip()
         retail_price = float(request.form.get('retail_price', 0) or 0)
         mrp_price = float(request.form.get('mrp_price', 0) or 0)
         wholesale_price = float(request.form.get('wholesale_price', 0) or 0)
         stock_total = int(request.form.get('stock_total', 0) or 0)
         material = request.form.get('material', '').strip()
-        slug = request.form.get('slug', '').strip()
+        size = request.form.get('size', '').strip()
+        hsn_code = request.form.get('hsn_code', '').strip()
+        gst_percent = float(request.form.get('gst_percent', 3) or 3)
+        weight_grams = float(request.form.get('weight_grams', 0) or 0)
+        length = float(request.form.get('length', 0) or 0)
+        breadth = float(request.form.get('breadth', 0) or 0)
+        height = float(request.form.get('height', 0) or 0)
+        sets_count = int(request.form.get('sets_count', 1) or 1)
+        min_wholesale_qty = int(request.form.get('min_wholesale_qty', 0) or 0)
         price1 = float(request.form.get('price1', 0) or 0)
         quantity1 = int(request.form.get('quantity1', 0) or 0)
         price2 = float(request.form.get('price2', 0) or 0)
         quantity2 = int(request.form.get('quantity2', 0) or 0)
         price3 = float(request.form.get('price3', 0) or 0)
         quantity3 = int(request.form.get('quantity3', 0) or 0)
+
+        # Auto-generate slug from name if not provided
+        slug = request.form.get('slug', '').strip()
+        if not slug and name:
+            import re
+            slug = re.sub(r'[^a-z0-9]+', '-', name.lower()).strip('-')
 
         if not sku:
             flash('SKU is required.')
@@ -1345,12 +1383,20 @@ def admin_add_product():
 
         db.execute(
             '''INSERT INTO products
-               (sku, name, category, retail_price, mrp_price, wholesale_price,
-                stock_total, material, slug, price1, quantity1, price2, quantity2,
+               (sku, name, category, sub_category, collection,
+                retail_price, mrp_price, wholesale_price,
+                stock_total, material, size, hsn_code, gst_percent,
+                weight_grams, length, breadth, height,
+                sets_count, min_wholesale_qty,
+                slug, price1, quantity1, price2, quantity2,
                 price3, quantity3, image_field, is_active)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,1)''',
-            (sku, name, category, retail_price, mrp_price, wholesale_price,
-             stock_total, material, slug, price1, quantity1, price2, quantity2,
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,1)''',
+            (sku, name, category, sub_category, collection,
+             retail_price, mrp_price, wholesale_price,
+             stock_total, material, size, hsn_code, gst_percent,
+             weight_grams, length, breadth, height,
+             sets_count, min_wholesale_qty,
+             slug, price1, quantity1, price2, quantity2,
              price3, quantity3, image_url)
         )
         db.commit()
