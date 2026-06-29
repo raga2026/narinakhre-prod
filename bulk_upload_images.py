@@ -1,6 +1,6 @@
 #Bulk Uploa to Superbase
 import os
-import io
+import io   
 import sqlite3
 import requests
 from PIL import Image
