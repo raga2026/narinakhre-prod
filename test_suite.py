@@ -368,13 +368,14 @@ class WholesaleFlowTests(NariNakhreTestCase):
         self.assertOK(r, 'Wholesale contact page')
 
     def test_retail_tiers_not_on_wholesale(self):
-        """Wholesale should not show retail-only tier pricing UI."""
+        """Wholesale should not show retail-only UI buttons."""
         r = self.get('/')
-        # Check retail-only elements are absent from wholesale
-        self.assertNotIn('Buy Now', r.text,
-            'Retail Buy Now button found on wholesale home')
-        self.assertNotIn('retailBuyNow', r.text,
-            'Retail Buy Now JS function found on wholesale home')
+        # Wholesale should have quote-style buttons
+        self.assertIn('Add to Quote', r.text,
+            'Wholesale home missing Add to Quote button')
+        # Should NOT have retail checkout link
+        self.assertNotIn('/retail/checkout', r.text,
+            'Retail checkout link found on wholesale home')
 
     def test_wholesale_mobile_stacking(self):
         r = self.get('/')
