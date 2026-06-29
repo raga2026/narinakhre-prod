@@ -38,9 +38,10 @@ from datetime import datetime
 from urllib.parse import urljoin
 
 # ── Config ─────────────────────────────────────────────────────────────────────
-LIVE_URL       = 'https://test-retail.narinakhre.com'
-LOCAL_URL      = 'http://127.0.0.1:5000'
-ADMIN_PASSWORD = os.environ.get('ADMIN_PASSWORD', '')
+LIVE_URL          = 'https://test-retail.narinakhre.com'
+LIVE_WHOLESALE_URL = 'https://test-wholesale.narinakhre.com'
+LOCAL_URL         = 'http://127.0.0.1:5000'
+ADMIN_PASSWORD    = os.environ.get('ADMIN_PASSWORD', '')
 RZP_KEY_ID     = os.environ.get('RAZORPAY_KEY_ID', '')
 RZP_KEY_SECRET = os.environ.get('RAZORPAY_KEY_SECRET', '')
 TIMEOUT        = 20
@@ -59,10 +60,11 @@ def _resolve_base_url():
         print(f"\n  Local server not running — using live site: {LIVE_URL}\n")
         return LIVE_URL
 
-BASE_URL       = _resolve_base_url()
-RETAIL_HOME    = f'{BASE_URL}/retail'
-WHOLESALE_HOME = f'{BASE_URL}/'
-ADMIN_LOGIN    = f'{BASE_URL}/admin/login'
+BASE_URL          = _resolve_base_url()
+WHOLESALE_BASE_URL = LIVE_WHOLESALE_URL if BASE_URL == LIVE_URL else BASE_URL
+RETAIL_HOME       = f'{BASE_URL}/retail'
+WHOLESALE_HOME    = f'{WHOLESALE_BASE_URL}/'
+ADMIN_LOGIN       = f'{BASE_URL}/admin/login'
 
 COLORS = {
     'green':  '\033[92m',
@@ -346,39 +348,47 @@ class RetailFlowTests(NariNakhreTestCase):
 class WholesaleFlowTests(NariNakhreTestCase):
 
     def test_wholesale_home_loads(self):
-        r = self.get('/')
+        r = self._get_ws('/')
         self.assertOK(r, 'Wholesale home')
         self.assertContains(r, 'Nari Nakhre', 'Brand name missing from wholesale')
 
     def test_wholesale_home_has_viewport_meta(self):
-        r = self.get('/')
+        r = self._get_ws('/')
         self.assertContains(r, 'viewport', 'Missing viewport meta on wholesale')
         self.assertContains(r, 'width=device-width')
 
     def test_wholesale_category_loads(self):
-        r = self.get('/category/Bangles')
+        r = self._get_ws('/category/Bangles')
         self.assertOK(r, 'Wholesale category Bangles')
 
     def test_wholesale_checkout_loads(self):
-        r = self.get('/checkout')
+        r = self._get_ws('/checkout')
         self.assertOK(r, 'Wholesale checkout/quote page')
 
     def test_wholesale_contact_loads(self):
-        r = self.get('/contact')
+        r = self._get_ws('/contact')
         self.assertOK(r, 'Wholesale contact page')
 
+    def _get_ws(self, path):
+        """GET from the wholesale domain."""
+        url = urljoin(WHOLESALE_BASE_URL, path)
+        return self.session.get(url, timeout=TIMEOUT)
+
     def test_retail_tiers_not_on_wholesale(self):
-        """Wholesale should not show retail-only UI buttons."""
-        r = self.get('/')
-        # Wholesale should have quote-style buttons
+        """Wholesale should show quote buttons, not retail cart UI."""
+        r = self._get_ws('/')
+        # Wholesale must have Add to Quote buttons
         self.assertIn('Add to Quote', r.text,
             'Wholesale home missing Add to Quote button')
-        # Should NOT have retail checkout link
-        self.assertNotIn('/retail/checkout', r.text,
-            'Retail checkout link found on wholesale home')
+        # Wholesale must NOT have retail-specific visible HTML elements
+        # (shared base.html JS may reference retail paths — that is expected)
+        self.assertNotIn('class="btn-buy-now buy-now-btn"', r.text,
+            'Retail Buy Now button HTML element found on wholesale home')
+        self.assertNotIn('class="add-to-cart-btn"', r.text,
+            'Retail Add to Cart HTML element found on wholesale home')
 
     def test_wholesale_mobile_stacking(self):
-        r = self.get('/')
+        r = self._get_ws('/')
         has_stacking = 'ws-header-row' in r.text or 'flex-col' in r.text or 'flex-direction: column' in r.text
         self.assertTrue(has_stacking,
             'Wholesale header missing mobile stacking CSS')

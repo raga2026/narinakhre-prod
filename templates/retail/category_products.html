@@ -1,4 +1,15 @@
 {% extends "retail/base.html" %}
+{% block seo_tags %}
+<meta property="og:title" content="{{ category }} Jewellery | Nari Nakhre">
+<meta property="og:description" content="Shop {{ category }} jewellery at Nari Nakhre. Handcrafted ethnic accessories for every occasion.">
+<meta property="og:image" content="{{ request.url_root }}static/assets/logo.png">
+<meta property="og:url" content="{{ request.url }}">
+<meta property="og:type" content="website">
+<meta name="description" content="Buy {{ category }} jewellery online at Nari Nakhre. Handcrafted premium ethnic accessories.">
+<meta name="keywords" content="{{ category }}, ethnic jewelry, Indian jewelry, handcrafted, Nari Nakhre">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:image" content="{{ request.url_root }}static/assets/logo.png">
+{% endblock %}
 {% block content %}
 <div class="container mx-auto py-10 text-center">
     <h1 class="text-4xl font-serif font-black rose-accent">{{ category }}</h1>
@@ -60,27 +71,25 @@
                         <option value="5">5</option>
                     </select>
                 </div>
-                <!-- Add to Cart Button -->
-                <button class="add-to-cart-btn w-full py-2 font-bold rounded-full transition-all duration-200 text-sm"
+                <!-- Add to Cart Button (shown by default) -->
+                <button class="add-to-cart-btn w-full py-2 font-medium rounded-full shadow-lg antialiased transition-all duration-200 text-base drop-shadow-lg"
                     data-sku="{{product.sku}}" data-price="{{product.price1}}" data-name="{{product.name}}"
-                    style="background:white; border:2px solid #be185d; color:#be185d; letter-spacing:0.03em;"
-                    onmouseenter="this.style.background='#fff1f2'" onmouseleave="this.style.background='white'"
+                    style="background: linear-gradient(180deg, #f7dfa5 0%, #f0c14b 100%); border: 1px solid #a88734; color: #111111; letter-spacing:0.02em; box-shadow:0 4px 16px #f7dfa533;"
                     onclick="retailAddToCart(this)">
-                    🛒 Add to Cart
+                    Add to Cart
                 </button>
-                <!-- Unit Counter (hidden by default) -->
-                <div class="unit-counter border-2 border-rose-300 bg-rose-50 rounded-full flex flex-row items-center justify-between px-2 py-1 hidden">
-                    <button class="decrement-btn w-7 h-7 rounded-full bg-rose-100 text-rose-700 font-bold text-base hover:bg-rose-200 focus:outline-none flex items-center justify-center">−</button>
-                    <span class="qty-display text-base font-bold text-rose-800 mx-2 select-none">1</span>
-                    <button class="increment-btn w-7 h-7 rounded-full bg-rose-100 text-rose-700 font-bold text-base hover:bg-rose-200 focus:outline-none flex items-center justify-center">+</button>
+                <!-- Unit Counter (hidden by default, replaces Add to Cart) -->
+                <div class="unit-counter border border-slate-200 bg-amber-50 rounded-full flex flex-row items-center justify-between px-3 py-1 shadow-sm hidden" style="min-width:120px;">
+                    <button class="decrement-btn px-2 py-1 text-lg font-medium text-gray-700 hover:text-amber-600 focus:outline-none">-</button>
+                    <span class="qty-display text-xl font-medium text-gray-900 mx-2 select-none">1</span>
+                    <button class="increment-btn px-2 py-1 text-lg font-medium text-gray-700 hover:text-amber-600 focus:outline-none">+</button>
                 </div>
-                <!-- Buy Now Button -->
-                <button class="buy-now-btn w-full py-2 font-bold rounded-full transition-all duration-200 text-sm mt-2"
+                <!-- Buy Now Button (always at bottom) -->
+                <button class="buy-now-btn w-full py-2 font-medium rounded-full shadow-lg antialiased transition-all duration-200 text-base drop-shadow-lg"
                     data-sku="{{product.sku}}" data-price="{{product.price1}}" data-name="{{product.name}}"
-                    style="background:linear-gradient(135deg,#be185d 0%,#f472b6 100%); border:none; color:#fff; letter-spacing:0.03em; box-shadow:0 3px 10px rgba(190,24,93,0.25);"
-                    onmouseenter="this.style.opacity='0.9'" onmouseleave="this.style.opacity='1'"
+                    style="background: linear-gradient(180deg, #f5b186 0%, #df5f12 100%); border: 1px solid #b84c0c; color: #ffffff; letter-spacing:0.02em; box-shadow:0 4px 16px #df5f1233;"
                     onclick="retailBuyNow(this)">
-                    ⚡ Buy Now
+                    Buy Now
                 </button>
             </div>
         </div>

@@ -5,8 +5,23 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{% block title %}Nari Nakhre{% endblock %}</title>
-    <link rel="icon" type="image/png" href="{{ url_for('static', filename='assets/logo.png') }}">
+    <link rel="icon" type="image/x-icon" href="/favicon.ico">
+    <link rel="icon" type="image/png" sizes="32x32" href="{{ url_for('static', filename='assets/favicon-32.png') }}">
+    <link rel="icon" type="image/png" sizes="16x16" href="{{ url_for('static', filename='assets/favicon-16.png') }}">
+    <link rel="apple-touch-icon" sizes="180x180" href="{{ url_for('static', filename='assets/apple-touch-icon.png') }}">
+    <meta name="theme-color" content="#be185d">
     {% block meta_description %}{% endblock %}
+    {% block seo_tags %}
+    <!-- Default OG tags — overridden per page -->
+    <meta property="og:site_name" content="Nari Nakhre">
+    <meta property="og:locale" content="en_IN">
+    <meta property="og:image" content="{{ request.url_root }}static/assets/logo.png">
+    <meta property="og:image:width" content="512">
+    <meta property="og:image:height" content="512">
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:site" content="@narinakhre">
+    {% endblock %}
+    <link rel="canonical" href="{{ request.url }}">
     <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
     <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700;900&family=Merriweather:ital,wght@0,400;0,700;1,400&display=swap" rel="stylesheet">
     <style>
@@ -49,7 +64,7 @@ function retailAddToCart(btn) {
     const c = btn.closest('.cart-container');
     const sku = btn.getAttribute('data-sku'), price = btn.getAttribute('data-price');
     const ss = c.querySelector('.size-select') || document.getElementById('size-main');
-    const size = ss ? ss.value : 'Standard';
+    const size = (ss && ss.value && ss.value !== 'Standard') ? ss.value : (ss ? ss.value : '');
     fetch('/update-cart', {method:'POST',headers:{'Content-Type':'application/json'},
         body: JSON.stringify({product_id:sku,qty:1,price,size})})
     .then(r=>r.json()).then(d=>{
@@ -66,7 +81,7 @@ function retailIncrement(btn) {
     const ab = c.querySelector('.add-to-cart-btn');
     const sku = ab.getAttribute('data-sku'), price = ab.getAttribute('data-price');
     const ss = c.querySelector('.size-select') || document.getElementById('size-main');
-    const size = ss ? ss.value : 'Standard';
+    const size = (ss && ss.value && ss.value !== 'Standard') ? ss.value : (ss ? ss.value : '');
     let qty = parseInt(uc.querySelector('.qty-display').innerText)||1; qty++;
     fetch('/update-cart',{method:'POST',headers:{'Content-Type':'application/json'},
         body:JSON.stringify({product_id:sku,qty,price,size})})
@@ -79,7 +94,7 @@ function retailDecrement(btn) {
     const ab = c.querySelector('.add-to-cart-btn');
     const sku = ab.getAttribute('data-sku'), price = ab.getAttribute('data-price');
     const ss = c.querySelector('.size-select') || document.getElementById('size-main');
-    const size = ss ? ss.value : 'Standard';
+    const size = (ss && ss.value && ss.value !== 'Standard') ? ss.value : (ss ? ss.value : '');
     let qty = parseInt(uc.querySelector('.qty-display').innerText)||1;
     if(qty<=1){
         fetch('/update-cart',{method:'POST',headers:{'Content-Type':'application/json'},
@@ -99,7 +114,7 @@ function retailBuyNow(btn) {
     const c = btn.closest('.cart-container');
     const sku = btn.getAttribute('data-sku'), price = btn.getAttribute('data-price');
     const ss = c.querySelector('.size-select') || document.getElementById('size-main');
-    const size = ss ? ss.value : 'Standard';
+    const size = (ss && ss.value && ss.value !== 'Standard') ? ss.value : (ss ? ss.value : '');
     const uc = c.querySelector('.unit-counter');
     const qty = (uc && !uc.classList.contains('hidden')) ? (parseInt(uc.querySelector('.qty-display').innerText)||1) : 1;
     fetch('/update-cart',{method:'POST',headers:{'Content-Type':'application/json'},

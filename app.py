@@ -718,6 +718,37 @@ def product_detail(product_id):
         related_products.append(r_dict)
     return render_site('product_detail.html', product=p_dict, image_urls=image_urls, related_products=related_products)
 
+@app.route('/favicon.ico')
+def favicon():
+    return app.send_static_file('assets/favicon.ico')
+
+@app.route('/robots.txt')
+def robots():
+    return app.response_class(
+        "User-agent: *\nAllow: /\nDisallow: /admin/\nDisallow: /checkout/\nSitemap: https://narinakhre.com/sitemap.xml\n",
+        mimetype='text/plain'
+    )
+
+@app.route('/sitemap.xml')
+def sitemap():
+    db = get_db()
+    products = db.execute("SELECT id, slug, name FROM products WHERE is_active=1").fetchall()
+    categories = db.execute("SELECT DISTINCT category FROM products WHERE is_active=1").fetchall()
+    base = "https://narinakhre.com"
+    lines = ['<?xml version="1.0" encoding="UTF-8"?>',
+             '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">']
+    for path in ['/', '/retail', '/wholesale/contact', '/retail/contact']:
+        lines.append(f'  <url><loc>{base}{path}</loc><changefreq>weekly</changefreq><priority>1.0</priority></url>')
+    for cat in categories:
+        lines.append(f'  <url><loc>{base}/retail/category/{cat["category"]}</loc><changefreq>daily</changefreq><priority>0.8</priority></url>')
+        lines.append(f'  <url><loc>{base}/category/{cat["category"]}</loc><changefreq>daily</changefreq><priority>0.8</priority></url>')
+    for p in products:
+        slug = p["slug"] or str(p["id"])
+        lines.append(f'  <url><loc>{base}/retail/product/{p["id"]}</loc><changefreq>weekly</changefreq><priority>0.7</priority></url>')
+        lines.append(f'  <url><loc>{base}/wholesale/product/{p["id"]}</loc><changefreq>weekly</changefreq><priority>0.6</priority></url>')
+    lines.append('</urlset>')
+    return app.response_class('\n'.join(lines), mimetype='application/xml')
+
 # --- CART & CHECKOUT ---
 @app.route('/update-cart', methods=['POST'])
 def update_cart():

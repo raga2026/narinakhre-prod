@@ -1,4 +1,15 @@
 {% extends "retail/base.html" %}
+{% block seo_tags %}
+<meta property="og:title" content="Nari Nakhre | Premium Ethnic Jewellery &amp; Accessories">
+<meta property="og:description" content="Shop premium handcrafted Indian jewellery — bangles, bridal sets, hair accessories and more. Free delivery across India.">
+<meta property="og:image" content="{{ request.url_root }}static/assets/logo.png">
+<meta property="og:url" content="{{ request.url }}">
+<meta property="og:type" content="website">
+<meta name="description" content="Shop premium handcrafted Indian jewellery — bangles, bridal sets, hair accessories and more. Free delivery across India.">
+<meta name="keywords" content="ethnic jewelry, Indian jewelry, bangles, bridal jewelry, hair accessories, Nari Nakhre">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:image" content="{{ request.url_root }}static/assets/logo.png">
+{% endblock %}
 {% block content %}
 <style>
     /* ── Hero ── */
@@ -26,10 +37,7 @@
     .retail-grid {
         display: grid;
         grid-template-columns: repeat(2, 1fr);
-        gap: 10px;
-        padding: 0 8px;
-        box-sizing: border-box;
-        width: 100%;
+        gap: 12px;
     }
     @media (min-width: 640px) {
         .retail-grid { grid-template-columns: repeat(3, 1fr); gap: 16px; }
@@ -41,16 +49,13 @@
     /* ── Product card ── */
     .product-card {
         background: white;
-        border-radius: 16px;
-        padding: 8px;
+        border-radius: 20px;
+        padding: 10px;
         box-shadow: 0 1px 6px rgba(0,0,0,0.07);
         border: 1px solid #fff1f2;
         display: flex;
         flex-direction: column;
         position: relative;
-        overflow: hidden;
-        min-width: 0;
-        box-sizing: border-box;
     }
     .product-card img.prod-img {
         width: 100%;
@@ -110,36 +115,56 @@
 
     /* ── Cart buttons ── */
     .btn-add-cart {
-        width: 100%; padding: 10px 0; border-radius: 30px;
-        font-weight: 700; font-size: 0.82rem;
-        border: 2px solid #be185d; background: white; color: #be185d;
-        cursor: pointer; letter-spacing: 0.03em; transition: background 0.15s;
+        width: 100%;
+        padding: 8px 0;
+        border-radius: 30px;
+        font-weight: 600;
+        font-size: 0.82rem;
+        border: 1px solid #a88734;
+        background: linear-gradient(180deg, #f7dfa5 0%, #f0c14b 100%);
+        color: #111;
+        cursor: pointer;
+        margin-bottom: 6px;
+        letter-spacing: 0.01em;
     }
-    .btn-add-cart:hover { background: #fff1f2; }
-    @media (min-width: 768px) { .btn-add-cart { font-size: 0.92rem; } }
+    @media (min-width: 768px) {
+        .btn-add-cart { font-size: 0.92rem; }
+    }
     .btn-buy-now {
-        width: 100%; padding: 10px 0; border-radius: 30px;
-        font-weight: 700; font-size: 0.82rem; border: none;
-        background: linear-gradient(135deg, #be185d 0%, #f472b6 100%);
-        color: white; cursor: pointer; letter-spacing: 0.03em;
-        box-shadow: 0 3px 10px rgba(190,24,93,0.25);
-        margin-top: 8px; transition: opacity 0.15s;
+        width: 100%;
+        padding: 8px 0;
+        border-radius: 30px;
+        font-weight: 600;
+        font-size: 0.82rem;
+        border: 1px solid #b84c0c;
+        background: linear-gradient(180deg, #f5b186 0%, #df5f12 100%);
+        color: white;
+        cursor: pointer;
+        letter-spacing: 0.01em;
     }
-    .btn-buy-now:hover { opacity: 0.9; }
-    @media (min-width: 768px) { .btn-buy-now { font-size: 0.92rem; } }
+    @media (min-width: 768px) {
+        .btn-buy-now { font-size: 0.92rem; }
+    }
     .unit-counter {
-        border: 2px solid #fda4af; background: #fff1f2; border-radius: 30px;
-        display: flex; align-items: center; justify-content: space-between;
-        padding: 3px 8px; margin-bottom: 8px;
+        border: 1px solid #e2e8f0;
+        background: #fffbeb;
+        border-radius: 30px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 4px 12px;
+        margin-bottom: 6px;
     }
     .unit-counter button {
-        width: 28px; height: 28px; border-radius: 50%;
-        background: #ffe4e6; border: none; font-size: 1rem;
-        font-weight: bold; color: #be185d; cursor: pointer;
-        display: flex; align-items: center; justify-content: center;
+        font-size: 1.1rem;
+        font-weight: bold;
+        color: #555;
+        background: none;
+        border: none;
+        cursor: pointer;
+        padding: 2px 6px;
     }
-    .unit-counter button:hover { background: #fecdd3; }
-    .qty-display { font-weight: bold; font-size: 1rem; color: #9f1239; }
+    .qty-display { font-weight: bold; font-size: 1rem; }
 </style>
 
 <!-- ── HERO ── -->
@@ -230,7 +255,7 @@
                             data-sku="{{ product.sku }}"
                             data-price="{{ product.retail_price or product.price1 }}"
                             data-name="{{ product.name }}">
-                        🛒 Add to Cart
+                        Add to Cart
                     </button>
                     <!-- Unit counter (hidden by default) -->
                     <div class="unit-counter hidden">
@@ -243,7 +268,7 @@
                             data-sku="{{ product.sku }}"
                             data-price="{{ product.retail_price or product.price1 }}"
                             data-name="{{ product.name }}">
-                        ⚡ Buy Now
+                        Buy Now
                     </button>
                 </div>
             </div>
@@ -265,7 +290,14 @@
 <script>
 /* ── Share ── */
 async function shareProduct(name, url, imageUrl) {
-    const shareData = { title: name, text: 'Check out ' + name + ' on Nari Nakhre', url: url };
+    // Social platforms (WhatsApp, Facebook, Twitter) read OG tags from the URL
+    // Web Share API on mobile also supports sharing files
+    const shareData = {
+        title: name + ' | Nari Nakhre',
+        text: '✨ ' + name + ' — Premium Ethnic Jewellery by Nari Nakhre',
+        url: url
+    };
+    // Try native share with image file (works on Android/iOS)
     if (imageUrl && navigator.canShare && window.File) {
         try {
             const r = await fetch(imageUrl, { mode: 'cors' });
@@ -277,11 +309,14 @@ async function shareProduct(name, url, imageUrl) {
             }
         } catch(e) {}
     }
-    if (navigator.share) { navigator.share(shareData).catch(()=>{}); }
-    else {
-        const msg = encodeURIComponent(shareData.text + ' ' + shareData.url);
-        window.open('https://wa.me/?text=' + msg, '_blank');
+    // Native share without file
+    if (navigator.share) {
+        navigator.share(shareData).catch(()=>{});
+        return;
     }
+    // Desktop fallback: WhatsApp with product link (OG tags show image preview)
+    const msg = encodeURIComponent(shareData.text + '\n' + url);
+    window.open('https://wa.me/?text=' + msg, '_blank');
 }
 
 document.addEventListener('DOMContentLoaded', function () {

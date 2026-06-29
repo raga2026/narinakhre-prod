@@ -91,29 +91,27 @@
                     </select>
                 </div>
 
-                <!-- Add to Cart Button -->
-                <button class="add-to-cart-btn w-full py-3 font-bold rounded-full transition-all duration-200 text-base"
+                <!-- Add to Cart Button (Top) -->
+                <button class="add-to-cart-btn w-full py-3.5 font-medium rounded-full shadow-lg antialiased transition-all duration-200 text-lg"
                     data-sku="{{product.sku}}" data-price="{{product.retail_price}}" data-name="{{product.name}}"
-                    style="background:white; border:2px solid #be185d; color:#be185d; letter-spacing:0.03em;"
-                    onmouseenter="this.style.background='#fff1f2'" onmouseleave="this.style.background='white'"
+                    style="background: linear-gradient(180deg, #f7dfa5 0%, #f0c14b 100%); border: 1px solid #a88734; color: #111111; letter-spacing:0.02em;"
                     onclick="retailAddToCart(this)">
-                    🛒 Add to Cart
+                    Add to Cart
                 </button>
 
-                <!-- Unit Counter (hidden by default) -->
-                <div class="unit-counter border-2 border-rose-300 bg-rose-50 rounded-full flex flex-row items-center justify-between px-4 py-2 hidden w-full">
-                    <button class="decrement-btn w-8 h-8 rounded-full bg-rose-100 text-rose-700 font-bold text-xl hover:bg-rose-200 focus:outline-none flex items-center justify-center">−</button>
-                    <span class="qty-display text-xl font-bold text-rose-800 mx-2 select-none">1</span>
-                    <button class="increment-btn w-8 h-8 rounded-full bg-rose-100 text-rose-700 font-bold text-xl hover:bg-rose-200 focus:outline-none flex items-center justify-center">+</button>
+                <!-- Unit Counter (Hidden by default, replaces Add to Cart on click) -->
+                <div class="unit-counter border border-slate-200 bg-amber-50 rounded-full flex flex-row items-center justify-between px-4 py-1.5 shadow-sm hidden w-full h-12">
+                    <button class="decrement-btn px-3 py-1 text-xl font-bold text-gray-700 hover:text-amber-600 focus:outline-none">-</button>
+                    <span class="qty-display text-xl font-bold text-gray-900 mx-2 select-none">1</span>
+                    <button class="increment-btn px-3 py-1 text-xl font-bold text-gray-700 hover:text-amber-600 focus:outline-none">+</button>
                 </div>
 
-                <!-- Buy Now Button -->
-                <button class="buy-now-btn w-full py-3 font-bold rounded-full transition-all duration-200 text-base mt-2"
+                <!-- Buy Now Button (Always at Bottom) -->
+                <button class="buy-now-btn w-full py-3.5 font-medium rounded-full shadow-lg antialiased transition-all duration-200 text-lg"
                     data-sku="{{product.sku}}" data-price="{{product.retail_price}}" data-name="{{product.name}}"
-                    style="background:linear-gradient(135deg,#be185d 0%,#f472b6 100%); border:none; color:#fff; letter-spacing:0.03em; box-shadow:0 3px 10px rgba(190,24,93,0.25);"
-                    onmouseenter="this.style.opacity='0.9'" onmouseleave="this.style.opacity='1'"
+                    style="background: linear-gradient(180deg, #f5b186 0%, #df5f12 100%); border: 1px solid #b84c0c; color: #ffffff; letter-spacing:0.02em;"
                     onclick="retailBuyNow(this)">
-                    ⚡ Buy Now
+                    Buy Now
                 </button>
             </div>
         </div>
@@ -183,26 +181,24 @@
 
                 <!-- Related Product Cart Action Block -->
                 <div class="cart-container mt-auto space-y-2">
-                    <button class="add-to-cart-btn w-full py-2 text-xs font-bold rounded-full transition-all duration-200"
-                        style="background:white; border:2px solid #be185d; color:#be185d; letter-spacing:0.03em;"
-                        onmouseenter="this.style.background='#fff1f2'" onmouseleave="this.style.background='white'"
+                    <button class="add-to-cart-btn w-full py-2 text-xs font-medium rounded-full shadow-sm text-slate-900" 
+                        style="background: linear-gradient(180deg, #f7dfa5 0%, #f0c14b 100%); border: 1px solid #a88734;"
                         data-sku="{{rel.sku}}" data-price="{{rel.retail_price}}" data-name="{{rel.name}}"
                         onclick="retailAddToCart(this)">
-                        🛒 Add to Cart
+                        Add to Cart
                     </button>
-
-                    <div class="unit-counter hidden items-center justify-between bg-rose-50 border-2 border-rose-300 rounded-full p-0.5 h-8 w-full">
-                        <button class="decrement-btn w-6 h-6 flex items-center justify-center bg-rose-100 rounded-full text-rose-700 font-bold hover:bg-rose-200 text-sm">−</button>
-                        <span class="qty-display font-bold text-rose-800 text-xs">1</span>
-                        <button class="increment-btn w-6 h-6 flex items-center justify-center bg-rose-100 rounded-full text-rose-700 font-bold hover:bg-rose-200 text-sm">+</button>
+                    
+                    <div class="unit-counter hidden items-center justify-between bg-amber-50 border border-amber-300 rounded-full p-0.5 h-8 w-full shadow-inner">
+                        <button class="decrement-btn w-6 h-6 flex items-center justify-center bg-white rounded-full text-slate-700 font-bold shadow-sm hover:bg-slate-50 text-xs">-</button>
+                        <span class="qty-display font-bold text-slate-800 text-xs">1</span>
+                        <button class="increment-btn w-6 h-6 flex items-center justify-center bg-white rounded-full text-slate-700 font-bold shadow-sm hover:bg-slate-50 text-xs">+</button>
                     </div>
 
-                    <button class="buy-now-btn w-full py-2 text-xs font-bold rounded-full transition-all duration-200 mt-2"
-                        style="background:linear-gradient(135deg,#be185d 0%,#f472b6 100%); border:none; color:#fff; letter-spacing:0.03em; box-shadow:0 2px 8px rgba(190,24,93,0.2);"
-                        onmouseenter="this.style.opacity='0.9'" onmouseleave="this.style.opacity='1'"
+                    <button class="buy-now-btn w-full py-2 text-xs font-medium rounded-full shadow-sm text-slate-900" 
+                        style="background: linear-gradient(180deg, #f5b186 0%, #df5f12 100%); border: 1px solid #b84c0c; color: white !important;"
                         data-sku="{{rel.sku}}" data-price="{{rel.retail_price}}" data-name="{{rel.name}}"
                         onclick="retailBuyNow(this)">
-                        ⚡ Buy Now
+                        Buy Now
                     </button>
                 </div>
             </div>
@@ -445,14 +441,48 @@ document.addEventListener('DOMContentLoaded', function() {
 });
 </script>
 {% block meta %}
-    <meta property="og:title" content="{{ product.name }} | Nari Nakhre" />
-    <meta property="og:description" content="{{ product.description|default('Premium ethnic jewelry and accessories.')|striptags|truncate(120) }}" />
-    <meta property="og:image" content="{{ url_for('static', filename=image_urls[0], _external=True) }}" />
-    <meta property="og:url" content="{{ request.url }}" />
-    <meta property="og:type" content="product" />
-    <meta name="twitter:card" content="summary_large_image" />
-    <meta name="twitter:title" content="{{ product.name }} | Nari Nakhre" />
-    <meta name="twitter:description" content="{{ product.description|default('Premium ethnic jewelry and accessories.')|striptags|truncate(120) }}" />
-    <meta name="twitter:image" content="{{ url_for('static', filename=image_urls[0], _external=True) }}" />
+    {%- set prod_desc = product.description|default('Buy ' ~ product.name ~ ' at Nari Nakhre. Premium handcrafted ethnic jewelry for weddings and festivals.')|striptags|truncate(155) -%}
+    {%- set prod_img = image_urls[0] if image_urls else 'assets/logo.png' -%}
+    {%- set prod_img_url = prod_img if prod_img.startswith('http') else request.url_root.rstrip('/') ~ '/' ~ prod_img -%}
+    <title>{{ product.name }} | Buy Online | Nari Nakhre</title>
+    <meta name="description" content="{{ prod_desc }}">
+    <meta name="keywords" content="{{ product.name }}, {{ product.category or 'jewelry' }}, ethnic jewelry, Indian jewelry, Nari Nakhre, handcrafted">
+    <!-- Open Graph — controls image preview on WhatsApp, Facebook, Twitter -->
+    <meta property="og:title" content="{{ product.name }} | Nari Nakhre">
+    <meta property="og:description" content="{{ prod_desc }}">
+    <meta property="og:image" content="{{ prod_img_url }}">
+    <meta property="og:image:width" content="800">
+    <meta property="og:image:height" content="800">
+    <meta property="og:image:alt" content="{{ product.name }}">
+    <meta property="og:url" content="{{ request.url }}">
+    <meta property="og:type" content="product">
+    <meta property="og:site_name" content="Nari Nakhre">
+    <meta property="product:price:amount" content="{{ product.retail_price }}">
+    <meta property="product:price:currency" content="INR">
+    <!-- Twitter Card -->
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="{{ product.name }} | Nari Nakhre">
+    <meta name="twitter:description" content="{{ prod_desc }}">
+    <meta name="twitter:image" content="{{ prod_img_url }}">
+    <meta name="twitter:image:alt" content="{{ product.name }}">
+    <!-- JSON-LD Structured Data -->
+    <script type="application/ld+json">
+    {
+        "@context": "https://schema.org",
+        "@type": "Product",
+        "name": {{ product.name|tojson }},
+        "description": {{ (product.description or prod_desc)|striptags|tojson }},
+        "image": {{ prod_img_url|tojson }},
+        "sku": {{ product.sku|tojson }},
+        "brand": { "@type": "Brand", "name": "Nari Nakhre" },
+        "offers": {
+            "@type": "Offer",
+            "priceCurrency": "INR",
+            "price": {{ product.retail_price|default(0) }},
+            "availability": "{% if product.stock_total and product.stock_total > 0 %}https://schema.org/InStock{% else %}https://schema.org/OutOfStock{% endif %}",
+            "url": {{ request.url|tojson }}
+        }
+    }
+    </script>
 {% endblock %}
 {% endblock %}
