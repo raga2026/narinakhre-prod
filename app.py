@@ -1088,11 +1088,19 @@ def verify_payment():
 def delhivery_check_pincode(pincode):
     if g.site_type != 'retail':
         return jsonify({"status": False, "msg": "Unauthorized"}), 403
-    provider = get_shipping_provider(
-        app.config['SHIPPING_PROVIDER'],
-        api_token=app.config.get('DELHIVERY_API_KEY')
-    )
-    return jsonify(provider.verify_pincode(pincode))
+    # Validate pincode format before hitting Delhivery API
+    import re as _re
+    if not _re.match(r'^\d{6}$', str(pincode)):
+        return jsonify({"status": False, "serviceable": False, "msg": "Invalid pincode format"}), 400
+    try:
+        provider = get_shipping_provider(
+            app.config['SHIPPING_PROVIDER'],
+            api_token=app.config.get('DELHIVERY_API_KEY')
+        )
+        return jsonify(provider.verify_pincode(pincode))
+    except Exception as e:
+        app.logger.error(f'Delhivery pincode check error: {e}')
+        return jsonify({"status": False, "serviceable": False, "msg": "Service unavailable"}), 200
 
 @app.route('/api/delhivery/shipping', methods=['POST'])
 def calculate_checkout_shipping():
