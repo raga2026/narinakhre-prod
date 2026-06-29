@@ -60,27 +60,25 @@
                         <option value="5">5</option>
                     </select>
                 </div>
-                <!-- Add to Cart Button (shown by default) -->
-                <button class="add-to-cart-btn w-full py-2 font-bold rounded-full antialiased transition-all duration-200 text-sm"
+                <!-- Add to Cart Button -->
+                <button class="add-to-cart-btn w-full py-2 font-bold rounded-full transition-all duration-200 text-sm"
                     data-sku="{{product.sku}}" data-price="{{product.price1}}" data-name="{{product.name}}"
-                    style="background: white; border: 2px solid #be185d; color: #be185d; letter-spacing:0.03em;"
-                    onmouseenter="this.style.background='#fff1f2'"
-                    onmouseleave="this.style.background='white'"
+                    style="background:white; border:2px solid #be185d; color:#be185d; letter-spacing:0.03em;"
+                    onmouseenter="this.style.background='#fff1f2'" onmouseleave="this.style.background='white'"
                     onclick="retailAddToCart(this)">
                     🛒 Add to Cart
                 </button>
-                <!-- Unit Counter (hidden by default, replaces Add to Cart) -->
-                <div class="unit-counter border-2 border-rose-300 bg-rose-50 rounded-full flex flex-row items-center justify-between px-2 py-1 shadow-sm hidden">
-                    <button class="decrement-btn w-7 h-7 rounded-full bg-rose-100 text-rose-700 font-bold text-lg hover:bg-rose-200 focus:outline-none flex items-center justify-center">−</button>
+                <!-- Unit Counter (hidden by default) -->
+                <div class="unit-counter border-2 border-rose-300 bg-rose-50 rounded-full flex flex-row items-center justify-between px-2 py-1 hidden">
+                    <button class="decrement-btn w-7 h-7 rounded-full bg-rose-100 text-rose-700 font-bold text-base hover:bg-rose-200 focus:outline-none flex items-center justify-center">−</button>
                     <span class="qty-display text-base font-bold text-rose-800 mx-2 select-none">1</span>
-                    <button class="increment-btn w-7 h-7 rounded-full bg-rose-100 text-rose-700 font-bold text-lg hover:bg-rose-200 focus:outline-none flex items-center justify-center">+</button>
+                    <button class="increment-btn w-7 h-7 rounded-full bg-rose-100 text-rose-700 font-bold text-base hover:bg-rose-200 focus:outline-none flex items-center justify-center">+</button>
                 </div>
-                <!-- Buy Now Button (always at bottom) — gap via mt-2 -->
-                <button class="buy-now-btn w-full py-2 font-bold rounded-full antialiased transition-all duration-200 text-sm mt-2"
+                <!-- Buy Now Button -->
+                <button class="buy-now-btn w-full py-2 font-bold rounded-full transition-all duration-200 text-sm mt-2"
                     data-sku="{{product.sku}}" data-price="{{product.price1}}" data-name="{{product.name}}"
-                    style="background: linear-gradient(135deg, #be185d 0%, #f472b6 100%); border: none; color: #ffffff; letter-spacing:0.03em; box-shadow: 0 3px 10px rgba(190,24,93,0.25);"
-                    onmouseenter="this.style.opacity='0.9'"
-                    onmouseleave="this.style.opacity='1'"
+                    style="background:linear-gradient(135deg,#be185d 0%,#f472b6 100%); border:none; color:#fff; letter-spacing:0.03em; box-shadow:0 3px 10px rgba(190,24,93,0.25);"
+                    onmouseenter="this.style.opacity='0.9'" onmouseleave="this.style.opacity='1'"
                     onclick="retailBuyNow(this)">
                     ⚡ Buy Now
                 </button>

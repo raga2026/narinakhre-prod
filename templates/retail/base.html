@@ -1,112 +1,58 @@
 {% extends "base.html" %}
 
 {% block title %}Nari Nakhre | Premium Ethnic Jewellery & Accessories{% endblock %}
-
-{% block meta_description %}
-<meta name="description" content="Shop premium Indian jewellery, bridal sets, bangles and ethnic accessories for weddings and festivals.">
-{% endblock %}
-
+{% block meta_description %}<meta name="description" content="Shop premium Indian jewellery, bridal sets, bangles and ethnic accessories for weddings and festivals.">{% endblock %}
 {% block body_class %}retail{% endblock %}
 
 {% block extra_styles %}
 <style>
     body.retail { background: #fdf2f8; }
 
-    /* ── Cart badge ── */
-    .cart-count {
-        background: #be185d; color: white; border-radius: 50%;
-        padding: 2px 6px; font-size: 10px;
-        position: absolute; top: -5px; right: -10px;
-    }
-
     /* ── Header ── */
-    .site-header {
-        position: sticky; top: 0; z-index: 50;
-        background: white; border-bottom: 2px solid #be185d;
-        box-shadow: 0 2px 8px rgba(0,0,0,0.06);
-    }
-    .header-inner {
-        display: flex; align-items: center;
-        justify-content: space-between; padding: 10px 16px;
-    }
+    .site-header { position: sticky; top: 0; z-index: 50; background: white; border-bottom: 2px solid #be185d; box-shadow: 0 2px 8px rgba(0,0,0,0.06); }
+    .header-inner { display: flex; align-items: center; justify-content: space-between; padding: 10px 16px; }
 
     /* ── Logo ── */
     .site-logo { display: flex; align-items: center; gap: 8px; text-decoration: none; flex-shrink: 0; }
     .site-logo img { height: 36px; object-fit: contain; }
-    .site-logo span { font-family: 'Playfair Display', serif; font-size: 1.3rem; font-weight: 900; color: #be185d; }
-    @media (min-width: 768px) {
-        .site-logo img { height: 44px; }
-        .site-logo span { font-size: 1.7rem; }
-    }
+    .site-logo span { font-family: 'Playfair Display', serif; font-size: 1.25rem; font-weight: 900; color: #be185d; }
+    @media (min-width: 768px) { .site-logo img { height: 44px; } .site-logo span { font-size: 1.7rem; } }
 
-    /* ── Hamburger ── */
-    .hamburger {
-        display: flex; flex-direction: column; justify-content: center;
-        gap: 5px; background: none; border: none; cursor: pointer; padding: 6px;
-    }
-    .hamburger span { display: block; width: 24px; height: 2px; background: #be185d; border-radius: 2px; transition: 0.3s; }
+    /* ── Hamburger — mobile only ── */
+    .hamburger { display: flex; flex-direction: column; justify-content: center; gap: 5px; background: none; border: none; cursor: pointer; padding: 6px; }
+    .hamburger span { display: block; width: 24px; height: 2px; background: #be185d; border-radius: 2px; }
     @media (min-width: 768px) { .hamburger { display: none; } }
 
     /* ── Desktop nav ── */
-    .desktop-nav { display: none; align-items: center; gap: 4px; font-weight: bold; }
+    .desktop-nav { display: none; align-items: center; gap: 4px; }
     @media (min-width: 768px) { .desktop-nav { display: flex; } }
-    .desktop-nav a {
-        color: #be185d; text-decoration: none; font-size: 0.9rem;
-        padding: 6px 12px; border-radius: 999px; transition: background 0.15s;
-    }
+    .desktop-nav a { color: #be185d; text-decoration: none; font-size: 0.9rem; font-weight: 700; padding: 6px 12px; border-radius: 999px; transition: background 0.15s; }
     .desktop-nav a:hover { background: #fff1f2; }
+    .cart-badge { position: relative; }
+    .cart-count { background: #be185d; color: white; border-radius: 50%; padding: 1px 5px; font-size: 10px; position: absolute; top: -5px; right: -8px; }
 
-    /* ── Categories dropdown — desktop ── */
+    /* ── Categories dropdown ── */
     .cat-dropdown { position: relative; }
-    .cat-dropdown-btn {
-        color: #be185d; font-weight: bold; font-size: 0.9rem;
-        background: none; border: none; cursor: pointer;
-        padding: 6px 12px; border-radius: 999px; transition: background 0.15s;
-    }
+    .cat-dropdown-btn { color: #be185d; font-weight: 700; font-size: 0.9rem; background: none; border: none; cursor: pointer; padding: 6px 12px; border-radius: 999px; transition: background 0.15s; }
     .cat-dropdown-btn:hover { background: #fff1f2; }
-    .cat-dropdown-menu {
-        display: none; position: absolute; left: 0; top: 100%; margin-top: 6px;
-        min-width: 180px; background: white; border: 1px solid #fecdd3;
-        border-radius: 14px; box-shadow: 0 8px 24px rgba(190,24,93,0.12);
-        z-index: 100; overflow: hidden;
-    }
-    .cat-dropdown:hover .cat-dropdown-menu { display: block; }
-    .cat-dropdown-menu a {
-        display: block; padding: 10px 16px; color: #be185d;
-        font-weight: 600; text-decoration: none; font-size: 0.88rem;
-        font-family: 'Playfair Display', serif;
-    }
-    .cat-dropdown-menu a:hover { background: #fff1f2; }
+    .cat-menu { display: none; position: absolute; left: 0; top: calc(100% + 4px); min-width: 180px; background: white; border: 1px solid #fecdd3; border-radius: 14px; box-shadow: 0 8px 24px rgba(190,24,93,0.12); z-index: 200; overflow: hidden; }
+    .cat-dropdown:hover .cat-menu { display: block; }
+    .cat-menu a { display: block; padding: 10px 16px; color: #be185d; font-weight: 600; text-decoration: none; font-size: 0.88rem; font-family: 'Playfair Display', serif; }
+    .cat-menu a:hover { background: #fff1f2; }
 
-    /* ── Mobile nav drawer ── */
+    /* ── Mobile drawer ── */
     .mobile-nav { display: none; flex-direction: column; background: white; border-top: 1px solid #fecdd3; }
     .mobile-nav.open { display: flex; }
-    .mobile-nav > a {
-        padding: 14px 20px; color: #be185d; font-weight: bold;
-        font-size: 1rem; text-decoration: none; border-bottom: 1px solid #fff1f2;
-        font-family: 'Playfair Display', serif;
-    }
+    .mobile-nav > a { padding: 14px 20px; color: #be185d; font-weight: 700; font-size: 0.95rem; text-decoration: none; border-bottom: 1px solid #fff1f2; font-family: 'Playfair Display', serif; }
     .mobile-nav > a:hover { background: #fff1f2; }
-    .mobile-cat-toggle {
-        width: 100%; padding: 14px 20px; color: #be185d; font-weight: bold;
-        font-size: 1rem; text-align: left; background: none; border: none;
-        border-bottom: 1px solid #fff1f2; font-family: 'Playfair Display', serif;
-        cursor: pointer; display: flex; justify-content: space-between; align-items: center;
-    }
+    .mobile-cat-toggle { width: 100%; padding: 14px 20px; color: #be185d; font-weight: 700; font-size: 0.95rem; text-align: left; background: none; border: none; border-bottom: 1px solid #fff1f2; font-family: 'Playfair Display', serif; cursor: pointer; display: flex; justify-content: space-between; align-items: center; }
     .mobile-cat-list { display: none; flex-direction: column; background: #fff8fb; }
     .mobile-cat-list.open { display: flex; }
-    .mobile-cat-list a {
-        padding: 10px 32px; font-size: 0.9rem; color: #be185d;
-        text-decoration: none; border-bottom: 1px solid #fce7f3; font-weight: 600;
-    }
+    .mobile-cat-list a { padding: 10px 32px; font-size: 0.88rem; color: #be185d; text-decoration: none; border-bottom: 1px solid #fce7f3; font-weight: 600; }
     .mobile-cat-list a:hover { background: #fff1f2; }
 
     /* ── Pincode bar ── */
-    .pincode-bar {
-        background: #fff1f2; padding: 6px 16px;
-        display: flex; align-items: center; justify-content: flex-end;
-        gap: 8px; flex-wrap: wrap;
-    }
+    .pincode-bar { background: #fff1f2; padding: 6px 16px; display: flex; align-items: center; justify-content: flex-end; gap: 8px; flex-wrap: wrap; }
     .pincode-bar input { border: 1px solid #fecdd3; border-radius: 6px; padding: 4px 8px; font-size: 0.8rem; width: 90px; }
 
     /* ── Footer ── */
@@ -121,60 +67,45 @@
 <header class="site-header">
     <div class="header-inner">
         <a href="/retail" class="site-logo">
-            <img src="/static/assets/logo.png" alt="Nari Nakhre Logo">
+            <img src="/static/assets/logo.png" alt="Nari Nakhre">
             <span>Nari Nakhre</span>
         </a>
-
-        <!-- Desktop nav -->
         <nav class="desktop-nav">
             <a href="/retail">Home</a>
             {% if categories and categories|length > 0 %}
             <div class="cat-dropdown">
                 <button class="cat-dropdown-btn">Categories ▾</button>
-                <div class="cat-dropdown-menu">
-                    {% for cat in categories %}
-                    <a href="/retail/category/{{ cat }}">{{ cat }}</a>
-                    {% endfor %}
+                <div class="cat-menu">
+                    {% for cat in categories %}<a href="/retail/category/{{ cat }}">{{ cat }}</a>{% endfor %}
                 </div>
             </div>
             {% else %}
             <a href="/retail/categories">Categories</a>
             {% endif %}
-            <a href="/retail/checkout" style="position:relative;">
+            <a href="/retail/checkout" class="cart-badge">
                 Cart <span id="cart-count" class="cart-count">{{ session.get('cart', {})|length }}</span>
             </a>
             <a href="/retail/contact">Contact Us</a>
         </nav>
-
-        <!-- Hamburger (mobile only) -->
-        <button class="hamburger" id="hamburger-btn" aria-label="Open menu" onclick="toggleMobileNav()">
+        <button class="hamburger" onclick="toggleMobileNav()" aria-label="Menu">
             <span></span><span></span><span></span>
         </button>
     </div>
-
-    <!-- Mobile drawer -->
     <nav class="mobile-nav" id="mobile-nav">
         <a href="/retail">Home</a>
-        <button class="mobile-cat-toggle" onclick="toggleMobileCats(this)">
-            Categories <span>▾</span>
-        </button>
+        <button class="mobile-cat-toggle" onclick="toggleMobileCats(this)">Categories <span>▾</span></button>
         <div class="mobile-cat-list" id="mobile-cat-list">
             {% if categories and categories|length > 0 %}
-                {% for cat in categories %}
-                <a href="/retail/category/{{ cat }}">{{ cat }}</a>
-                {% endfor %}
+                {% for cat in categories %}<a href="/retail/category/{{ cat }}">{{ cat }}</a>{% endfor %}
             {% else %}
                 <a href="/retail/categories">All Categories</a>
             {% endif %}
         </div>
-        <a href="/retail/checkout" style="display:flex; align-items:center; gap:8px;">
-            Cart
-            <span id="cart-count-mobile" style="background:#be185d;color:white;border-radius:50%;padding:2px 7px;font-size:11px;">{{ session.get('cart', {})|length }}</span>
+        <a href="/retail/checkout" style="display:flex;align-items:center;gap:8px;">
+            Cart <span id="cart-count-mobile" style="background:#be185d;color:white;border-radius:50%;padding:1px 6px;font-size:11px;">{{ session.get('cart', {})|length }}</span>
         </a>
         <a href="/retail/contact">Contact Us</a>
     </nav>
-
-    <!-- Pincode bar -->
     <div class="pincode-bar">
         <input id="pincode-input" type="text" placeholder="Enter Pincode">
         <button class="btn-black px-3 py-1 text-xs" onclick="verifyService()">Check Delivery</button>
@@ -193,8 +124,7 @@
     </div>
     <div class="footer-copy">
         <div>Nari Nakhre &copy; 2026. All Rights Reserved.</div>
-        <div>Handcrafted with <span style="color:#be185d">&#10084;</span> in India.
-            &nbsp;|&nbsp;
+        <div>Handcrafted with <span style="color:#be185d">&#10084;</span> in India. &nbsp;|&nbsp;
             <a href="mailto:info@narinakhre.com" style="color:#be185d;">info@narinakhre.com</a>
         </div>
     </div>
@@ -209,20 +139,16 @@ function toggleMobileNav() {
 function toggleMobileCats(btn) {
     const list = document.getElementById('mobile-cat-list');
     list.classList.toggle('open');
-    const arrow = btn.querySelector('span');
-    if (arrow) arrow.textContent = list.classList.contains('open') ? '▴' : '▾';
+    btn.querySelector('span').textContent = list.classList.contains('open') ? '▴' : '▾';
 }
 function verifyService() {
     const pin = document.getElementById('pincode-input').value;
     const res = document.getElementById('pincode-result');
-    if (!pin) { res.innerText = 'Enter a pincode'; res.className = 'text-xs font-bold text-gray-500'; return; }
-    fetch('/api/delhivery/check/' + pin)
-        .then(r => r.json())
-        .then(data => {
-            res.innerText = data.status ? 'Deliverable ✓' : 'Not Serviceable ✗';
-            res.className = 'text-xs font-bold ' + (data.status ? 'text-green-600' : 'text-red-600');
-        })
-        .catch(() => { res.innerText = 'Check failed'; res.className = 'text-xs font-bold text-red-500'; });
+    if (!pin) { res.innerText = 'Enter a pincode'; res.style.color = '#6b7280'; return; }
+    fetch('/api/delhivery/check/' + pin).then(r=>r.json()).then(d=>{
+        res.innerText = d.status ? 'Deliverable ✓' : 'Not Serviceable ✗';
+        res.style.color = d.status ? '#16a34a' : '#dc2626';
+    }).catch(()=>{ res.innerText = 'Check failed'; res.style.color = '#dc2626'; });
 }
 </script>
 {% endblock %}
