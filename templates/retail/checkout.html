@@ -1,412 +1,433 @@
-</script>
-<script>
-// Show address modal on button click
-document.addEventListener('DOMContentLoaded', function() {
-    var showBtn = document.getElementById('show-address-btn');
-    var modal = document.getElementById('address-modal');
-    if (showBtn && modal) {
-        showBtn.addEventListener('click', function(e) {
-            e.preventDefault();
-            modal.classList.remove('hidden');
-            // Focus first input
-            var firstInput = modal.querySelector('input, textarea');
-            if (firstInput) firstInput.focus();
-        });
-    }
-});
-</script>
 {% extends "retail/base.html" %}
-{% block title %}Checkout | Nari Nakhre Premium{% endblock %}
+{% block title %}Cart & Checkout | Nari Nakhre{% endblock %}
+
 {% block content %}
-
 <style>
-    :root {
-        --primary-rose: #be185d;
-        --soft-pink: #fdf2f8;
-        --deep-slate: #1e293b;
-    }
+    :root { --rose: #be185d; }
+    body { background: #fdf2f8 !important; }
 
-    body { background-color: #fdfafb !important; }
-
-    /* Professional Step Indicator */
-    .checkout-stepper {
-        display: flex;
-        justify-content: center;
-        margin-bottom: 3rem;
-        gap: 1rem;
-    }
-    .step {
-        height: 8px;
-        width: 60px;
-        border-radius: 4px;
-        background: #e2e8f0;
-    }
-    .step.active { background: var(--primary-rose); }
-
-    /* Glassmorphism Card Effect */
     .checkout-card {
-        background: rgba(255, 255, 255, 0.9);
-        backdrop-filter: blur(10px);
-        border: 1px solid rgba(190, 24, 93, 0.1);
-        border-radius: 24px;
-        box-shadow: 0 10px 30px -10px rgba(0, 0, 0, 0.05);
+        background: white; border: 1px solid #fce7f3;
+        border-radius: 20px; box-shadow: 0 4px 20px rgba(190,24,93,0.06);
     }
-
     .form-input {
-        width: 100%;
-        padding: 1rem 1.25rem;
-        border: 2px solid #f1f5f9;
-        border-radius: 16px;
-        transition: all 0.3s ease;
-        font-family: 'Lato', sans-serif;
+        width: 100%; padding: 12px 16px;
+        border: 2px solid #f1f5f9; border-radius: 12px;
+        font-size: 0.95rem; transition: border-color 0.2s;
+        background: #fdf2f8; color: #1e293b;
     }
-    .form-input:focus {
-        border-color: var(--primary-rose);
-        background: #fff;
-        outline: none;
-        box-shadow: 0 0 0 4px rgba(190, 24, 93, 0.05);
+    .form-input:focus { border-color: var(--rose); outline: none; background: white; }
+    .summary-box {
+        background: #1e293b; color: white;
+        border-radius: 20px; padding: 24px;
     }
-
-    .order-summary-badge {
-        background: var(--deep-slate);
-        color: white;
-        padding: 2rem;
-        border-radius: 20px;
-    }
-
-    /* Professional Payment Button */
     .btn-pay {
-        background: linear-gradient(120deg, #f9fafb 0%, #be185d 60%, #9d174d 100%);
-        color: #fff;
-        font-weight: 900;
-        letter-spacing: 0.5px;
-        box-shadow: 0 8px 24px 0 rgba(190,24,93,0.18), 0 1.5px 4px 0 rgba(30,41,59,0.08);
-        border: none;
-        border-radius: 1.5rem;
-        transition: all 0.3s cubic-bezier(0.4,0,0.2,1);
-        position: relative;
-        overflow: hidden;
-        min-width: 220px;
-        max-width: 320px;
-        margin-left: auto;
-        margin-right: auto;
-        display: block;
-        font-size: 1.1rem;
-        padding: 0.9rem 0;
-        box-shadow: 0 6px 24px 0 rgba(190,24,93,0.18), 0 1.5px 4px 0 rgba(30,41,59,0.08);
-        text-shadow: 0 1px 8px rgba(190,24,93,0.12);
+        width: 100%; padding: 14px; border-radius: 14px; border: none;
+        background: linear-gradient(135deg, #be185d 0%, #f472b6 100%);
+        color: white; font-weight: 900; font-size: 1.1rem;
+        box-shadow: 0 6px 20px rgba(190,24,93,0.3);
+        cursor: pointer; transition: opacity 0.2s;
     }
-    .btn-pay:hover, .btn-pay:focus {
-        background: linear-gradient(120deg, #be185d 0%, #9d174d 100%);
-        transform: translateY(-2px) scale(1.03);
-        box-shadow: 0 18px 36px 0 rgba(190,24,93,0.22), 0 2px 8px 0 rgba(30,41,59,0.10);
-        outline: none;
+    .btn-pay:hover { opacity: 0.92; }
+    .btn-pay:disabled { opacity: 0.5; cursor: not-allowed; }
+
+    /* Step bar */
+    .steps { display: flex; gap: 8px; justify-content: center; margin-bottom: 28px; }
+    .step { height: 6px; width: 50px; border-radius: 3px; background: #fce7f3; }
+    .step.active { background: var(--rose); }
+
+    /* Cart item */
+    .cart-item {
+        display: flex; align-items: center; gap: 12px;
+        background: white; border: 1px solid #fce7f3;
+        border-radius: 14px; padding: 12px;
+    }
+    .cart-item img { width: 64px; height: 64px; object-fit: contain; border-radius: 10px; background: #fdf2f8; }
+
+    /* Pincode status */
+    .pin-ok { color: #16a34a; font-size: 0.78rem; font-weight: 700; }
+    .pin-err { color: #dc2626; font-size: 0.78rem; font-weight: 700; }
+    .pin-loading { color: #be185d; font-size: 0.78rem; font-weight: 700; }
+
+    /* Modal */
+    .modal-overlay {
+        position: fixed; inset: 0; background: rgba(0,0,0,0.45);
+        display: flex; align-items: center; justify-content: center;
+        z-index: 100; padding: 16px;
+    }
+    .modal-box {
+        background: white; border-radius: 24px;
+        padding: 28px; width: 100%; max-width: 500px;
+        max-height: 90vh; overflow-y: auto;
+        box-shadow: 0 20px 60px rgba(0,0,0,0.2);
+    }
+    @media (max-width: 640px) {
+        .modal-box { padding: 20px; border-radius: 18px; }
+        .form-input { font-size: 16px; } /* prevents zoom on iOS */
     }
 </style>
 
-<div class="max-w-5xl mx-auto px-4 py-12">
-    <div class="checkout-stepper">
+<div class="max-w-5xl mx-auto px-3 py-8 sm:px-6">
+    <div class="steps">
         <div class="step active"></div>
         <div class="step active"></div>
         <div class="step"></div>
     </div>
 
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
 
-    <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
-        <!-- Order Summary Left -->
-        <div class="lg:col-span-2 space-y-8">
-            <div class="checkout-card p-8">
-                <div class="flex justify-between items-center mb-8">
-                    <h1 class="text-3xl font-serif font-black text-slate-800">Your Cart</h1>
-                    <form id="clear-cart-form" method="POST" action="/clear_quote">
-                        <button type="submit" class="text-sm font-bold text-rose-600 hover:underline">Clear Cart</button>
-                    </form>
-                    <script>
-                    document.addEventListener('DOMContentLoaded', function() {
-                        var clearCartForm = document.getElementById('clear-cart-form');
-                        if (clearCartForm) {
-                            clearCartForm.addEventListener('submit', function(e) {
-                                e.preventDefault();
-                                fetch('/clear_quote', {
-                                    method: 'POST',
-                                    headers: { 'X-Requested-With': 'XMLHttpRequest' }
-                                })
-                                .then(function(response) {
-                                    if (response.ok) {
-                                        // Also clear retail cart and reset unit counters on all retail pages
-                                        if (window.clearRetailCart) clearRetailCart();
-                                        if (window.syncRetailUnitCounters) syncRetailUnitCounters();
-                                        window.location.reload();
-                                    }
-                                });
-                            });
-                        }
-                    });
-                    </script>
+        <!-- ── Cart Items ── -->
+        <div class="lg:col-span-2 space-y-4">
+            <div class="checkout-card p-6">
+                <div class="flex justify-between items-center mb-5">
+                    <h1 class="text-2xl font-bold text-slate-800 font-serif">Your Cart</h1>
+                    <button onclick="clearCart()" class="text-sm font-bold text-rose-500 hover:underline">Clear Cart</button>
                 </div>
-                <div class="space-y-4">
+
+                {% if display_cart %}
+                <div class="space-y-3" id="cart-items">
                     {% for item in display_cart %}
-                    <div class="flex items-center gap-4 bg-white border border-rose-100 rounded-2xl shadow p-4">
-                        <img src="{{ item.image_url or url_for('static', filename='assets/products/' ~ item.sku ~ '_1.jpg') }}" alt="{{ item.name }}" class="w-20 h-20 object-contain rounded-xl border border-rose-50 bg-slate-50">
-                        <div class="flex-1">
-                            <div class="font-bold text-lg text-rose-900">{{ item.name }}</div>
-                            <div class="text-xs text-gray-500 mt-1">Size: <span class="font-semibold">
-                                {%- set is_bangle = 'bangle' in (item.name|lower if item.name else '') or 'bangle' in (item.category|lower if item.category is defined and item.category else '') -%}
-                                {%- if is_bangle and (not item.size or item.size == 'Standard') -%}
-                                    2.4
-                                {%- else -%}
-                                    {{ item.size or 'Standard' }}
-                                {%- endif -%}
-                            </span></div>
-                            <div class="text-xs text-gray-500">Qty: <span class="font-semibold">{{ item.units }}</span></div>
+                    <div class="cart-item">
+                        <img src="{{ item.image_url or url_for('static', filename='assets/logo.png') }}" alt="{{ item.name }}">
+                        <div class="flex-1 min-w-0">
+                            <div class="font-bold text-slate-800 text-sm truncate">{{ item.name }}</div>
+                            <div class="text-xs text-gray-500 mt-0.5">
+                                Size: {{ item.size or 'Standard' }} &nbsp;·&nbsp; Qty: {{ item.units }}
+                            </div>
                         </div>
-                        <div class="font-black text-xl text-rose-700">₹{{ (item.price * item.units)|round(2) }}</div>
+                        <div class="font-black text-rose-700 text-lg whitespace-nowrap">₹{{ (item.price * item.units)|round(2) }}</div>
                     </div>
                     {% endfor %}
                 </div>
+                {% else %}
+                <div class="text-center py-12 text-gray-400">
+                    <div class="text-5xl mb-3">🛒</div>
+                    <div class="font-bold text-lg">Your cart is empty</div>
+                    <a href="/retail" class="mt-4 inline-block text-rose-600 font-bold hover:underline">Continue Shopping</a>
+                </div>
+                {% endif %}
             </div>
         </div>
 
-        <!-- Sticky Order Summary & Address Stepper -->
+        <!-- ── Order Summary ── -->
         <div class="lg:col-span-1">
-            <div class="sticky top-8 space-y-6">
-                <div class="order-summary-badge shadow-2xl">
-                    <h2 class="text-xl font-serif font-bold mb-6 border-b border-slate-700 pb-4">Order Summary</h2>
-                    <!-- Coupon code at the top -->
-                    <form method="POST" class="mb-4 flex gap-2 items-center justify-center">
-                        <input type="text" name="coupon" value="{{ coupon_code or '' }}" placeholder="Coupon code" class="form-input w-2/3" style="max-width:160px;">
-                        <button type="submit" class="btn-retail-main px-4 py-2 text-xs">Apply</button>
-                        {% if discount_percent %}
-                        <span class="ml-2 text-green-600 font-bold text-xs">{{ discount_percent }}% OFF Applied!</span>
-                        {% endif %}
-                    </form>
-                    {% if discount and discount > 0 %}
-                    <div class="mb-2 flex justify-center">
-                        <div class="rounded-lg shadow-lg px-6 py-3 bg-gradient-to-r from-green-200 via-green-50 to-green-100 border border-green-400 flex items-center gap-2 animate-fade-in">
-                            <span class="text-2xl">🎉</span>
-                            <span class="font-semibold text-green-800 text-base">Congrats!</span>
-                            <span class="text-green-700 text-base">You saved</span>
-                            <span class="font-bold text-green-900 text-lg">₹{{ discount|round(2) }}</span>
-                            <span class="text-green-700 text-base">on your order.</span>
+            <div class="sticky top-20 space-y-4">
+                <div class="summary-box">
+                    <h2 class="text-lg font-bold mb-4 pb-3 border-b border-slate-600">Order Summary</h2>
+                    <div class="space-y-2 text-sm">
+                        <div class="flex justify-between text-slate-300">
+                            <span>Subtotal</span><span>₹<span id="s-subtotal">{{ subtotal|round(2) }}</span></span>
                         </div>
-                    </div>
-                    {% if max_amount %}
-                    <div class="mb-4 text-center text-xs text-gray-600">
-                        Max discount for this coupon: ₹{{ max_amount|round(2) }}
-                    </div>
-                    {% endif %}
-                    {% endif %}
-                    <div class="space-y-3 pt-4 border-t border-slate-700">
-                        <div class="flex justify-between text-slate-400">
-                            <span>Subtotal</span>
-                            <span>₹{{ subtotal|round(2) }}</span>
+                        <div class="flex justify-between text-slate-300">
+                            <span>GST</span><span>₹<span id="s-gst">{{ total_tax|round(2) }}</span></span>
                         </div>
-                        <div class="flex justify-between text-slate-400">
-                            <span>GST</span>
-                            <span>₹{{ total_tax|round(2) }}</span>
-                        </div>
-                        <div class="flex justify-between text-slate-400">
+                        <div class="flex justify-between text-slate-300">
                             <span>Shipping</span>
-                            <span id="shipping-charge" class="text-green-400 font-bold">FREE</span>
+                            <span id="s-shipping" class="text-green-400 font-bold">—</span>
                         </div>
-                        <div id="cod-fee-row" class="flex justify-between text-slate-400 hidden">
-                            <span>COD Fee</span>
-                            <span id="cod-fee" class="text-yellow-500 font-bold">₹0</span>
+                        <div class="flex justify-between text-slate-300 hidden" id="s-cod-row">
+                            <span>COD Fee</span><span id="s-cod" class="text-yellow-400 font-bold">₹0</span>
                         </div>
-                        {% if discount and discount > 0 %}
-                        <div class="flex justify-between text-green-600 font-bold">
-                            <span>Coupon Discount</span>
-                            <span>-₹{{ discount|round(2) }}</span>
-                        </div>
-                        {% endif %}
-                        <div class="flex justify-between text-xl font-black text-rose-400 pt-4">
-                            <span>Total</span>
-                            <span id="grand-total">₹{{ grand_total|round(2) }}</span>
+                        <div class="flex justify-between text-xl font-black text-rose-400 pt-3 border-t border-slate-600">
+                            <span>Total</span><span>₹<span id="s-total">{{ subtotal|round(2) }}</span></span>
                         </div>
                     </div>
                 </div>
-                <button id="show-address-btn" class="btn-pay mt-4">
-                    <span style="display: flex; align-items: center; justify-content: center; gap: 0.5rem;">
-                        <svg width="22" height="22" fill="none" viewBox="0 0 24 24" stroke="currentColor" style="margin-right: 0.2rem;"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 9V7a5 5 0 00-10 0v2M5 12h14l-1.5 9h-11L5 12z" /></svg>
-                        <span>Proceed to Payment</span>
-                    </span>
+
+                {% if display_cart %}
+                <button class="btn-pay" id="proceed-btn" onclick="openAddressModal()">
+                    🔒 Proceed to Payment
                 </button>
-                <p class="text-center text-[10px] text-slate-400 uppercase tracking-widest">Secure encrypted checkout via Razorpay</p>
+                <p class="text-center text-xs text-gray-400 mt-1">Secured by Razorpay</p>
+                {% endif %}
             </div>
         </div>
     </div>
+</div>
 
-    <!-- Address Modal/Step (hidden by default) -->
-    <div id="address-modal" class="fixed inset-0 bg-black/40 flex items-center justify-center z-50 hidden">
-        <div class="bg-white rounded-3xl shadow-2xl p-8 max-w-lg w-full relative">
-            <button onclick="document.getElementById('address-modal').classList.add('hidden')" class="absolute top-4 right-4 text-rose-400 hover:text-rose-700 text-2xl">&times;</button>
-            <h2 class="text-2xl font-bold mb-6 text-rose-800">Shipping Details</h2>
-            <form id="retail-checkout-form" class="space-y-6">
-                <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    <div class="space-y-2">
-                        <label class="text-sm font-bold text-slate-600 ml-1">Full Name</label>
-                        <input type="text" name="name" required class="form-input" placeholder="e.g. Ananya Sharma">
+<!-- ── Address + Payment Modal ── -->
+<div class="modal-overlay hidden" id="address-modal">
+    <div class="modal-box">
+        <div class="flex justify-between items-center mb-5">
+            <h2 class="text-xl font-bold text-rose-800">Shipping & Payment</h2>
+            <button onclick="closeAddressModal()" class="text-gray-400 hover:text-rose-600 text-2xl leading-none">&times;</button>
+        </div>
+
+        <form id="checkout-form" onsubmit="handleCheckout(event)">
+            <div class="space-y-4">
+
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                        <label class="block text-xs font-bold text-slate-600 mb-1">Full Name *</label>
+                        <input type="text" name="consignee_name" required class="form-input" placeholder="Ananya Sharma">
                     </div>
-                    <div class="space-y-2">
-                        <label class="text-sm font-bold text-slate-600 ml-1">Phone Number</label>
-                        <input type="tel" name="phone" required class="form-input" placeholder="10-digit mobile">
+                    <div>
+                        <label class="block text-xs font-bold text-slate-600 mb-1">Phone *</label>
+                        <input type="tel" name="consignee_phone" required maxlength="10" inputmode="numeric" class="form-input" placeholder="10-digit mobile">
                     </div>
                 </div>
-                <div class="space-y-2">
-                    <label class="text-sm font-bold text-slate-600 ml-1">Email Address</label>
+
+                <div>
+                    <label class="block text-xs font-bold text-slate-600 mb-1">Email *</label>
                     <input type="email" name="email" required class="form-input" placeholder="name@example.com">
                 </div>
-                <div class="space-y-2">
-                    <label class="text-sm font-bold text-slate-600 ml-1">Complete Address</label>
-                    <textarea name="address" rows="3" required class="form-input" placeholder="House No, Building, Street, Area"></textarea>
-                </div>
-                <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    <div class="space-y-2">
-                        <label class="text-sm font-bold text-slate-600 ml-1">Pincode</label>
-                        <input type="text" id="pincode" name="pincode" required maxlength="6" class="form-input" placeholder="6-digit PIN" oninput="checkDelhiveryService()">
-                        <div id="pincode-loader" class="hidden text-xs text-rose-500 font-bold animate-pulse">Checking Delhivery serviceability...</div>
-                        <div id="pincode-success" class="hidden text-xs text-green-600 font-bold">✓ Area Serviceable by Delhivery</div>
-                        <div id="pincode-error" class="hidden text-xs text-red-600 font-bold">Not Serviceable by Delhivery</div>
-                    </div>
-                    <div class="space-y-2">
-                        <label class="text-sm font-bold text-slate-600 ml-1">City / State</label>
-                        <input type="text" id="city-state" readonly class="form-input bg-slate-50 cursor-not-allowed" placeholder="Auto-detected">
-                    </div>
-                </div>
-                <div class="space-y-2">
-                    <label class="text-sm font-bold text-slate-600 ml-1">Payment Method</label>
-                    <div class="flex gap-4">
-                        <label class="flex items-center gap-2">
-                            <input type="radio" name="payment_mode" value="Prepaid" checked onchange="updateShippingSummary()"> Prepaid
-                        </label>
-                        <label class="flex items-center gap-2">
-                            <input type="radio" name="payment_mode" value="COD" onchange="updateShippingSummary()"> Cash on Delivery (COD)
-                        </label>
-                    </div>
-                </div>
-                <button id="complete-purchase-btn" type="submit" class="btn-pay w-full py-4 rounded-2xl text-lg shadow-xl mt-4">Complete Purchase</button>
-            </form>
-        </div>
-    </div>
 
-        <!-- ...existing code... -->
+                <div>
+                    <label class="block text-xs font-bold text-slate-600 mb-1">Address *</label>
+                    <textarea name="consignee_address" rows="2" required class="form-input" placeholder="House No, Street, Area"></textarea>
+                </div>
+
+                <div class="grid grid-cols-2 gap-3">
+                    <div>
+                        <label class="block text-xs font-bold text-slate-600 mb-1">Pincode *</label>
+                        <input type="text" name="consignee_pincode" id="modal-pincode" required maxlength="6" inputmode="numeric" class="form-input" placeholder="6-digit PIN" oninput="liveCheckPincode(this.value)">
+                        <div id="pin-status" class="mt-1 min-h-[16px]"></div>
+                    </div>
+                    <div>
+                        <label class="block text-xs font-bold text-slate-600 mb-1">City</label>
+                        <input type="text" name="consignee_city" id="modal-city" class="form-input" placeholder="Auto-filled">
+                    </div>
+                </div>
+
+                <div>
+                    <label class="block text-xs font-bold text-slate-600 mb-1">State</label>
+                    <input type="text" name="consignee_state" id="modal-state" class="form-input" placeholder="Auto-filled">
+                </div>
+
+                <div>
+                    <label class="block text-xs font-bold text-slate-600 mb-1">Payment Mode</label>
+                    <div class="flex gap-6 mt-1">
+                        <label class="flex items-center gap-2 cursor-pointer font-semibold text-sm">
+                            <input type="radio" name="payment_mode" value="Prepaid" checked onchange="onPaymentModeChange()"> Prepaid (Online)
+                        </label>
+                        <label class="flex items-center gap-2 cursor-pointer font-semibold text-sm">
+                            <input type="radio" name="payment_mode" value="COD" onchange="onPaymentModeChange()"> Cash on Delivery
+                        </label>
+                    </div>
+                </div>
+
+                <!-- Live total inside modal -->
+                <div class="bg-rose-50 rounded-14 p-3 text-sm flex justify-between items-center rounded-xl">
+                    <span class="font-bold text-slate-700">Amount to Pay</span>
+                    <span class="font-black text-rose-700 text-lg">₹<span id="modal-total">{{ subtotal|round(2) }}</span></span>
+                </div>
+
+                <button type="submit" id="pay-btn" class="btn-pay mt-2" disabled>
+                    <span id="pay-btn-text">Enter pincode to continue</span>
+                </button>
+            </div>
+        </form>
     </div>
 </div>
 
 <script src="https://checkout.razorpay.com/v1/checkout.js"></script>
 <script>
+const SUBTOTAL   = {{ subtotal|round(2) }};
+const GST        = {{ total_tax|round(2) }};
+const DISCOUNT   = {{ discount|round(2) }};
+const RZP_KEY    = {{ config['RAZORPAY_KEY_ID']|tojson }};
 
-    // Delhivery Pincode Live Serviceability & Shipping
-    let delhiveryServiceable = false;
-    let delhiveryShipping = 0;
-    let delhiveryCODFee = 0;
-    function checkDelhiveryService() {
-        const pin = document.getElementById('pincode').value.trim();
-        const loader = document.getElementById('pincode-loader');
-        const success = document.getElementById('pincode-success');
-        const error = document.getElementById('pincode-error');
-        const cityState = document.getElementById('city-state');
-        loader.classList.add('hidden');
-        success.classList.add('hidden');
-        error.classList.add('hidden');
-        cityState.value = '';
-        delhiveryServiceable = false;
-        if (pin.length === 6 && /^\d{6}$/.test(pin)) {
-            loader.classList.remove('hidden');
-            fetch(`/api/delhivery/check/${pin}`)
-                .then(r => r.json())
-                .then(data => {
-                    loader.classList.add('hidden');
-                    if (data.serviceable) {
-                        success.classList.remove('hidden');
-                        cityState.value = data.city || '';
-                        delhiveryServiceable = true;
-                        fetchDelhiveryShipping(pin);
-                    } else {
-                        error.classList.remove('hidden');
-                        delhiveryServiceable = false;
-                        updateShippingSummary();
-                    }
-                })
-                .catch(() => {
-                    loader.classList.add('hidden');
-                    error.classList.remove('hidden');
-                    delhiveryServiceable = false;
-                    updateShippingSummary();
-                });
-        } else {
-            updateShippingSummary();
-        }
+let shippingCharge = 0;
+let codFee = 0;
+let pincodeOk = false;
+let detectedCity = '';
+let detectedState = '';
+
+function calcTotal() {
+    const mode = document.querySelector('input[name="payment_mode"]:checked')?.value || 'Prepaid';
+    const cod = (mode === 'COD') ? codFee : 0;
+    return +(SUBTOTAL + GST + shippingCharge + cod - DISCOUNT).toFixed(2);
+}
+
+function updateSummary() {
+    const mode = document.querySelector('input[name="payment_mode"]:checked')?.value || 'Prepaid';
+    const cod = (mode === 'COD') ? codFee : 0;
+    const total = calcTotal();
+
+    document.getElementById('s-shipping').textContent = pincodeOk ? `₹${shippingCharge}` : '—';
+    const codRow = document.getElementById('s-cod-row');
+    if (codRow) codRow.classList.toggle('hidden', mode !== 'COD');
+    const codEl = document.getElementById('s-cod');
+    if (codEl) codEl.textContent = `₹${cod}`;
+    document.getElementById('s-total').textContent = total;
+    const modalTotal = document.getElementById('modal-total');
+    if (modalTotal) modalTotal.textContent = total;
+}
+
+function onPaymentModeChange() {
+    updateSummary();
+    updatePayBtn();
+}
+
+function updatePayBtn() {
+    const btn = document.getElementById('pay-btn');
+    const txt = document.getElementById('pay-btn-text');
+    if (!btn) return;
+    if (!pincodeOk) {
+        btn.disabled = true;
+        txt.textContent = 'Enter valid pincode to continue';
+    } else {
+        btn.disabled = false;
+        const mode = document.querySelector('input[name="payment_mode"]:checked')?.value || 'Prepaid';
+        txt.textContent = mode === 'COD' ? `Place COD Order — ₹${calcTotal()}` : `Pay ₹${calcTotal()} via Razorpay`;
     }
+}
 
-    function fetchDelhiveryShipping(pin) {
-        // You may want to pass origin, weight, and payment_mode as needed
-        const paymentMode = document.querySelector('input[name="payment_mode"]:checked')?.value || 'Prepaid';
-        fetch(`/api/delhivery/shipping?destination=${pin}&payment_mode=${paymentMode}`)
-            .then(r => r.json())
-            .then(data => {
-                delhiveryShipping = data.shipping_charge || 0;
-                delhiveryCODFee = data.cod_fee || 0;
-                updateShippingSummary();
-            })
-            .catch(() => {
-                delhiveryShipping = 0;
-                delhiveryCODFee = 0;
-                updateShippingSummary();
-            });
+let pincodeTimer = null;
+function liveCheckPincode(val) {
+    clearTimeout(pincodeTimer);
+    const status = document.getElementById('pin-status');
+    pincodeOk = false;
+    updatePayBtn();
+    if (val.length !== 6 || !/^\d{6}$/.test(val)) {
+        status.innerHTML = '';
+        return;
     }
-
-    function updateShippingSummary() {
-        const shippingEl = document.getElementById('shipping-charge');
-        const codRow = document.getElementById('cod-fee-row');
-        const codFeeEl = document.getElementById('cod-fee');
-        const totalEl = document.getElementById('grand-total');
-        const proceedBtn = document.getElementById('show-address-btn');
-        const paymentMode = document.querySelector('input[name="payment_mode"]:checked')?.value || 'Prepaid';
-        let subtotal = {{ subtotal|round(2) }};
-        let gst = {{ total_tax|round(2) }};
-        let discount = {{ discount|round(2) }};
-        let shipping = delhiveryServiceable ? delhiveryShipping : 0;
-        let codFee = (paymentMode === 'COD' && delhiveryServiceable) ? delhiveryCODFee : 0;
-        let total = subtotal + gst + shipping + codFee - discount;
-        if (shippingEl) shippingEl.textContent = delhiveryServiceable ? `₹${shipping}` : 'N/A';
-        if (codRow) codRow.classList.toggle('hidden', paymentMode !== 'COD');
-        if (codFeeEl) codFeeEl.textContent = `₹${codFee}`;
-        if (totalEl) totalEl.textContent = `₹${total.toFixed(2)}`;
-        if (proceedBtn) proceedBtn.disabled = !delhiveryServiceable;
-    }
-
-    // Listen for payment mode change
-    document.addEventListener('DOMContentLoaded', function() {
-        document.querySelectorAll('input[name="payment_mode"]').forEach(function(radio) {
-            radio.addEventListener('change', function() {
-                updateShippingSummary();
-            });
+    status.innerHTML = '<span class="pin-loading">Checking serviceability…</span>';
+    pincodeTimer = setTimeout(() => {
+        fetch(`/api/delhivery/check/${val}`)
+        .then(r => r.json())
+        .then(data => {
+            // API returns either data.status or data.serviceable
+            const ok = data.status === true || data.serviceable === true;
+            if (ok) {
+                pincodeOk = true;
+                detectedCity  = data.city  || data.postcode_details?.city  || '';
+                detectedState = data.state || data.postcode_details?.state || '';
+                document.getElementById('modal-city').value  = detectedCity;
+                document.getElementById('modal-state').value = detectedState;
+                status.innerHTML = '<span class="pin-ok">✓ Deliverable by Delhivery</span>';
+                fetchShipping(val);
+            } else {
+                pincodeOk = false;
+                status.innerHTML = '<span class="pin-err">✗ Not serviceable in this area</span>';
+                shippingCharge = 0; codFee = 0;
+                updateSummary(); updatePayBtn();
+            }
+        })
+        .catch(() => {
+            // If API fails, allow checkout anyway with warning
+            pincodeOk = true;
+            status.innerHTML = '<span class="pin-ok" style="color:#d97706;">⚠ Could not verify — proceeding anyway</span>';
+            shippingCharge = 0; codFee = 0;
+            updateSummary(); updatePayBtn();
         });
-    });
+    }, 500);
+}
 
-    // Razorpay Integration logic
-    document.getElementById('retail-checkout-form').addEventListener('submit', function(e) {
-        e.preventDefault();
-        
+function fetchShipping(pin) {
+    const mode = document.querySelector('input[name="payment_mode"]:checked')?.value || 'Prepaid';
+    fetch(`/api/delhivery/shipping`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pincode: pin, mode: mode })
+    })
+    .then(r => r.json())
+    .then(data => {
+        shippingCharge = data.shipping_charge || 0;
+        codFee = data.cod_fee || 0;
+        updateSummary(); updatePayBtn();
+    })
+    .catch(() => { shippingCharge = 0; codFee = 0; updateSummary(); updatePayBtn(); });
+}
+
+function openAddressModal() {
+    document.getElementById('address-modal').classList.remove('hidden');
+    document.body.style.overflow = 'hidden';
+    document.getElementById('modal-pincode').focus();
+}
+function closeAddressModal() {
+    document.getElementById('address-modal').classList.add('hidden');
+    document.body.style.overflow = '';
+}
+document.getElementById('address-modal').addEventListener('click', function(e) {
+    if (e.target === this) closeAddressModal();
+});
+
+async function handleCheckout(e) {
+    e.preventDefault();
+    const form = document.getElementById('checkout-form');
+    const data = Object.fromEntries(new FormData(form));
+    const mode = data.payment_mode || 'Prepaid';
+    const total = calcTotal();
+    const btn = document.getElementById('pay-btn');
+    const txt = document.getElementById('pay-btn-text');
+    btn.disabled = true; txt.textContent = 'Processing…';
+
+    try {
+        // Step 1: Save shipping + create Delhivery waybill
+        const shipRes = await fetch('/checkout/process', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: new URLSearchParams(data).toString()
+        });
+
+        // Step 2: COD path — just redirect to thank you
+        if (mode === 'COD') {
+            window.location.href = '/retail/thank-you';
+            return;
+        }
+
+        // Step 3: Create Razorpay order
+        const orderRes = await fetch('/api/create-order', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ amount: total })
+        });
+        const orderData = await orderRes.json();
+        if (orderData.status !== 'success') throw new Error(orderData.message || 'Order creation failed');
+
+        // Step 4: Open Razorpay
         const options = {
-            "key": "rzp_test_YOUR_KEY", 
-            "amount": "{{ (grand_total * 100)|int }}",
-            "currency": "INR",
-            "name": "Nari Nakhre Retail",
-            "description": "Boutique Jewelry Order",
-            "handler": function (response){
-                window.location.href = "/payment_success?ref=" + response.razorpay_payment_id;
-            },
-            "prefill": {
-                "name": document.getElementsByName('name')[0].value,
-                "email": document.getElementsByName('email')[0].value,
-                "contact": document.getElementsByName('phone')[0].value
-            },
-            "theme": { "color": "#be185d" }
+            key: RZP_KEY,
+            amount: orderData.amount,
+            currency: 'INR',
+            name: 'Nari Nakhre',
+            description: 'Jewellery Order',
+            order_id: orderData.razorpay_order_id,
+            prefill: { name: data.consignee_name, email: data.email, contact: data.consignee_phone },
+            theme: { color: '#be185d' },
+            handler: async function(response) {
+                // Step 5: Verify payment
+                const verRes = await fetch('/api/verify-payment', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        razorpay_payment_id: response.razorpay_payment_id,
+                        razorpay_order_id:   response.razorpay_order_id,
+                        razorpay_signature:  response.razorpay_signature
+                    })
+                });
+                const verData = await verRes.json();
+                if (verData.status === 'success') {
+                    window.location.href = '/retail/thank-you';
+                } else {
+                    alert('Payment verification failed. Please contact support.');
+                    btn.disabled = false; txt.textContent = `Pay ₹${total} via Razorpay`;
+                }
+            }
         };
         const rzp = new Razorpay(options);
+        rzp.on('payment.failed', function() {
+            btn.disabled = false; txt.textContent = `Pay ₹${total} via Razorpay`;
+            alert('Payment failed. Please try again.');
+        });
         rzp.open();
-    });
+
+    } catch(err) {
+        console.error(err);
+        btn.disabled = false; txt.textContent = `Pay ₹${total} via Razorpay`;
+        alert('Something went wrong. Please try again.');
+    }
+}
+
+function clearCart() {
+    if (!confirm('Clear all items from your cart?')) return;
+    fetch('/clear_quote', { method: 'POST' })
+    .then(() => { if (window.syncCartCount) syncCartCount(0); window.location.reload(); });
+}
+
+// Init
+updateSummary();
 </script>
 {% endblock %}

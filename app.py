@@ -878,10 +878,12 @@ def checkout_process():
     }
     session.modified = True
 
-    try:
-        return redirect(url_for('payment_gateway_router'))
-    except BuildError:
-        return 'Checkout processed and Delhivery manifest attempted.', 200
+    # Return 200 OK for the fetch() call from checkout.html AJAX
+    return jsonify({
+        'status': 'ok',
+        'internal_order_id': internal_order_id,
+        'waybill': waybill
+    }), 200
 
 @app.route('/payment/gateway', methods=['GET'])
 @app.route('/retail/payment/gateway', methods=['GET'])
@@ -892,9 +894,10 @@ def payment_gateway_router():
     internal_order_id = checkout_handover.get('internal_order_id')
     waybill = checkout_handover.get('waybill')
     
-    if not internal_order_id or not waybill:
-        flash('Order ID or tracking number missing. Please complete shipping details again.', 'error')
+    if not internal_order_id:
+        flash('Order ID missing. Please complete shipping details again.', 'error')
         return redirect(url_for('checkout_shipping'))
+    # waybill may be None if Delhivery API was unavailable — allow checkout to proceed
     
     # Calculate amount from current cart
     cart = session.get('cart', {})
@@ -1069,16 +1072,16 @@ def verify_payment():
         session.pop('checkout_handover', None)
         session.modified = True
 
-        return jsonify({
-            'status': 'success',
-            'message': 'Payment verified and order finalized'
-        }), 200
+        # If called via AJAX (fetch), return JSON; if form POST, redirect
+        if request.is_json or request.headers.get('X-Requested-With') == 'XMLHttpRequest' or request.content_type == 'application/json':
+            return jsonify({'status': 'success', 'message': 'Payment verified and order finalized'}), 200
+        return redirect(url_for('retail_thank_you'))
     except Exception as e:
         app.logger.error(f'Payment verification error: {e}')
-        return jsonify({
-            'status': 'error',
-            'message': 'Unable to finalize verified payment'
-        }), 500
+        if request.is_json or request.headers.get('X-Requested-With') == 'XMLHttpRequest' or request.content_type == 'application/json':
+            return jsonify({'status': 'error', 'message': 'Unable to finalize verified payment'}), 500
+        flash('Payment verification failed. Please contact support.', 'error')
+        return redirect(url_for('checkout'))
 
 # --- DELHIVERY API ROUTES (Retail Only) ---
 @app.route('/api/delhivery/check/<pincode>', methods=['GET'])
