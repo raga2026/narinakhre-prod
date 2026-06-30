@@ -43,6 +43,7 @@ SUPABASE_KEY = os.environ.get('SUPABASE_KEY', '')
 
 app.config['SHIPPING_PROVIDER'] = os.environ.get('SHIPPING_PROVIDER', 'mock')
 app.config['DELHIVERY_API_KEY'] = os.environ.get('DELHIVERY_API_KEY', '')
+app.config['WAREHOUSE_PIN'] = os.environ.get('WAREHOUSE_PIN', '110001')
 app.config['WAREHOUSE_PIN'] = os.environ.get('WAREHOUSE_PIN', '400001')
 app.config['RAZORPAY_KEY_ID'] = os.environ.get('RAZORPAY_KEY_ID', '')
 app.config['RAZORPAY_KEY_SECRET'] = os.environ.get('RAZORPAY_KEY_SECRET', '')
@@ -1162,7 +1163,7 @@ def calculate_checkout_shipping():
             app.config['SHIPPING_PROVIDER'],
             api_token=app.config.get('DELHIVERY_API_KEY')
         )
-        rates = provider.get_rates(app.config.get('WAREHOUSE_PIN', ''), pincode, total_weight)
+        rates = provider.get_rates(app.config.get('WAREHOUSE_PIN', ''), pincode, total_weight, mode=payment_mode)
         shipping_charge = rates.get('rate', 0) or rates.get('shipping_charge', 0)
         cod_fee = rates.get('cod_fee', 0) if payment_mode == 'COD' else 0
         return jsonify({
