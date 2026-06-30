@@ -391,12 +391,23 @@ def initialize_database_if_needed():
             status TEXT NOT NULL DEFAULT 'pending',
             consignee_name TEXT NOT NULL,
             consignee_phone TEXT NOT NULL,
+            consignee_email TEXT,
             consignee_address TEXT NOT NULL,
             consignee_city TEXT NOT NULL,
             consignee_state TEXT NOT NULL,
             consignee_pincode TEXT NOT NULL,
             internal_order_id TEXT NOT NULL UNIQUE,
-            delhivery_waybill TEXT
+            delhivery_waybill TEXT,
+            subtotal_amount FLOAT DEFAULT 0.0,
+            gst_amount FLOAT DEFAULT 0.0,
+            discount_amount FLOAT DEFAULT 0.0,
+            shipping_amount FLOAT DEFAULT 0.0,
+            cod_fee_amount FLOAT DEFAULT 0.0,
+            total_amount FLOAT DEFAULT 0.0,
+            coupon_code TEXT,
+            payment_mode TEXT,
+            razorpay_payment_id TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )''',
         '''CREATE TABLE IF NOT EXISTS coupons (
             id BIGSERIAL PRIMARY KEY,
@@ -565,6 +576,45 @@ def get_supabase_image_urls(sku):
         return []
     bucket = 'products'
     return [f"{base}/storage/v1/object/public/{bucket}/{sku}_{i}.webp" for i in range(1, 10)]
+
+
+def calculate_inclusive_gst(display_cart, discount=0.0, full_subtotal=0.0):
+    """
+    Calculate the GST component that is ALREADY INCLUDED in retail_price.
+    Prices in this store are GST-inclusive (the customer-facing price already
+    has tax baked in) — GST is never added on top of the displayed total.
+
+    Each product carries its own gst_percent (jewelry is typically 3% in India,
+    not a flat 18%). If a coupon discount is applied, we proportionally reduce
+    the GST component too, since the discount lowers the actual taxable value.
+
+    Formula per line item: gst_component = price_incl_gst - (price_incl_gst / (1 + rate/100))
+    """
+    db = get_db()
+    total_gst = 0.0
+    for item in display_cart:
+        line_total = item.get('price', 0) * item.get('units', item.get('qty', 1))
+        if line_total <= 0:
+            continue
+        gst_rate = 3.0  # sensible default for jewelry if a product's rate is missing
+        sku = item.get('sku')
+        if sku:
+            try:
+                prod = db.execute('SELECT gst_percent FROM products WHERE sku=?', (sku,)).fetchone()
+                if prod and prod['gst_percent']:
+                    gst_rate = float(prod['gst_percent'])
+            except Exception:
+                pass
+        line_gst = line_total - (line_total / (1 + gst_rate / 100.0))
+        total_gst += line_gst
+
+    # Proportionally reduce GST by the same ratio the discount reduced the subtotal,
+    # since a coupon discount lowers the actual taxable transaction value.
+    if discount and full_subtotal and full_subtotal > 0:
+        discount_ratio = min(discount / full_subtotal, 1.0)
+        total_gst = total_gst * (1 - discount_ratio)
+
+    return round(total_gst, 2)
 
 
 def get_product_images(p_dict):
@@ -829,7 +879,12 @@ def checkout():
     coupon_code = applied_coupon['code'] if applied_coupon else ''
     grand_total = max(subtotal - discount, 0)
 
-    return render_site('checkout.html', display_cart=display_cart, subtotal=subtotal, total_tax=0.0,
+    # GST is INCLUSIVE in retail_price (prices shown to customers already include GST).
+    # We extract the GST component for display purposes only — it does NOT get added
+    # on top of the total. Each product carries its own gst_percent (e.g. 3% for jewelry).
+    total_tax = calculate_inclusive_gst(display_cart, discount, subtotal)
+
+    return render_site('checkout.html', display_cart=display_cart, subtotal=subtotal, total_tax=total_tax,
                         discount=discount, grand_total=grand_total, coupon_code=coupon_code)
 
 @app.route('/checkout/shipping', methods=['GET', 'POST'])
@@ -852,6 +907,8 @@ def checkout_process():
     consignee_city = (request.form.get('consignee_city') or '').strip()
     consignee_state = (request.form.get('consignee_state') or '').strip()
     consignee_pincode = (request.form.get('consignee_pincode') or '').strip()
+    consignee_email = (request.form.get('email') or '').strip()
+    payment_mode = (request.form.get('payment_mode') or 'Prepaid').strip()
 
     # Delhivery-safe string formatter: strip forbidden symbols and normalize spaces.
     def sanitize_for_delhivery(value):
@@ -866,14 +923,48 @@ def checkout_process():
     internal_order_id = f"NN-SHP-{datetime.now().strftime('%Y%m%d%H%M%S')}-{consignee_phone[-4:]}"
     user_id = session.get('user_id')
 
+    # Capture the financial breakdown at the moment of order creation.
+    cart = session.get('cart', {})
+    display_cart_for_amount = list(cart.values())
+    subtotal_amount = sum(item.get('price', 0) * item.get('units', item.get('qty', 1)) for item in display_cart_for_amount)
+    applied_coupon = session.get('applied_coupon')
+    discount_amount = applied_coupon['discount_amount'] if applied_coupon else 0.0
+    coupon_code = applied_coupon['code'] if applied_coupon else None
+    gst_amount = calculate_inclusive_gst(display_cart_for_amount, discount_amount, subtotal_amount)
+
+    # GST-inclusive pricing: total payable = subtotal + shipping - discount
+    # (GST is already IN the retail price, never added on top)
+    total_before_shipping = max(subtotal_amount - discount_amount, 0)
+
+    # Get shipping charge from Delhivery for this pincode
+    shipping_amount = 0.0
+    cod_fee_amount = 0.0
+    try:
+        provider = get_shipping_provider(
+            app.config['SHIPPING_PROVIDER'],
+            api_token=app.config.get('DELHIVERY_API_KEY')
+        )
+        cart_weight = max(sum(item.get('units', 1) for item in display_cart_for_amount) * 250, 250)
+        rates = provider.get_rates(app.config.get('WAREHOUSE_PIN', '482001'), consignee_pincode, cart_weight, mode=payment_mode)
+        shipping_amount = float(rates.get('shipping_charge', 0) or 0)
+        cod_fee_amount = float(rates.get('cod_fee', 0) or 0) if payment_mode == 'COD' else 0.0
+    except Exception as e:
+        app.logger.warning(f'Could not fetch shipping rate during checkout_process: {e}')
+
+    total_amount = total_before_shipping + shipping_amount + cod_fee_amount
+
     conn = get_db()
     conn.execute(
         '''INSERT INTO order_shipping
-           (user_id, consignee_name, consignee_phone, consignee_address,
-            consignee_city, consignee_state, consignee_pincode, internal_order_id, status)
-           VALUES (?,?,?,?,?,?,?,?,'pending')''',
-        (user_id, cleaned_name, consignee_phone, cleaned_address,
-         consignee_city, consignee_state, consignee_pincode, internal_order_id)
+           (user_id, consignee_name, consignee_phone, consignee_email, consignee_address,
+            consignee_city, consignee_state, consignee_pincode, internal_order_id, status,
+            subtotal_amount, gst_amount, discount_amount, shipping_amount, cod_fee_amount,
+            total_amount, coupon_code, payment_mode)
+           VALUES (?,?,?,?,?,?,?,?,?,'pending',?,?,?,?,?,?,?,?)''',
+        (user_id, cleaned_name, consignee_phone, consignee_email, cleaned_address,
+         consignee_city, consignee_state, consignee_pincode, internal_order_id,
+         subtotal_amount, gst_amount, discount_amount, shipping_amount, cod_fee_amount,
+         total_amount, coupon_code, payment_mode)
     )
     conn.commit()
 
@@ -1010,9 +1101,15 @@ def create_razorpay_order():
     try:
         requested_amount = payload.get('amount')
         if requested_amount is None:
+            # Fallback: recompute server-side from the actual session cart + coupon,
+            # rather than trusting a client-supplied figure that could be stale.
+            # GST is inclusive in retail_price, so subtotal alone IS the payable amount
+            # before shipping/COD fee — it is never increased by a flat 18% on top.
             cart = session.get('cart', {})
-            subtotal = sum(item['price'] * item['qty'] for item in cart.values())
-            requested_amount = subtotal + (subtotal * 0.18)
+            subtotal = sum(item['price'] * item.get('units', item.get('qty', 1)) for item in cart.values())
+            applied_coupon = session.get('applied_coupon')
+            discount = applied_coupon['discount_amount'] if applied_coupon else 0.0
+            requested_amount = max(subtotal - discount, 0)
 
         amount_paise = int(round(float(requested_amount) * 100))
         if amount_paise <= 0:
@@ -1127,8 +1224,8 @@ def verify_payment():
             }), 400
 
         conn.execute(
-            'UPDATE order_shipping SET status=? WHERE internal_order_id=?',
-            ('paid', internal_order_id)
+            'UPDATE order_shipping SET status=?, razorpay_payment_id=? WHERE internal_order_id=?',
+            ('paid', razorpay_payment_id, internal_order_id)
         )
         conn.commit()
 
@@ -1484,23 +1581,43 @@ def clear_quote():
 
 @app.route('/thank_you')
 def thank_you():
-    # Pull order_id/waybill from session (set during checkout_process) if not passed via query
-    order_id = request.args.get('ref') or session.get('internal_order_id', '')
+    # Pull order_id/waybill from session (set during checkout_process) if not passed via query.
+    # checkout_process() stores both under session['checkout_handover'], not as flat session keys —
+    # this was the actual bug causing order_id to always be empty here.
     checkout_handover = session.get('checkout_handover', {})
+    order_id = request.args.get('ref') or checkout_handover.get('internal_order_id') or session.get('internal_order_id', '')
     waybill = checkout_handover.get('waybill') or session.get('waybill', '')
 
-    # If still missing, try to look up the most recent waybill for this internal_order_id
-    if order_id and not waybill:
+    amount_paid = None
+    order_date = None
+    payment_mode = None
+
+    if order_id:
         conn = get_db()
         row = conn.execute(
-            'SELECT delhivery_waybill FROM order_shipping WHERE internal_order_id=? ORDER BY id DESC LIMIT 1',
+            'SELECT delhivery_waybill, total_amount, shipping_amount, cod_fee_amount, '
+            'payment_mode, created_at FROM order_shipping WHERE internal_order_id=? ORDER BY id DESC LIMIT 1',
             (order_id,)
         ).fetchone()
-        if row and row['delhivery_waybill']:
-            waybill = row['delhivery_waybill']
+        if row:
+            if not waybill and row['delhivery_waybill']:
+                waybill = row['delhivery_waybill']
+            shipping = row['shipping_amount'] or 0
+            cod_fee = row['cod_fee_amount'] or 0
+            amount_paid = (row['total_amount'] or 0) + shipping + cod_fee
+            payment_mode = row['payment_mode']
+            if row['created_at']:
+                try:
+                    created = row['created_at']
+                    if isinstance(created, str):
+                        created = datetime.fromisoformat(created.replace('Z', ''))
+                    order_date = created.strftime('%d %b %Y, %I:%M %p')
+                except Exception:
+                    order_date = str(row['created_at'])
 
     tracking_url = url_for('track_order_page', waybill=waybill, _external=True) if waybill else None
-    return render_site('thank_you.html', order_id=order_id, waybill=waybill, tracking_url=tracking_url)
+    return render_site('thank_you.html', order_id=order_id, waybill=waybill, tracking_url=tracking_url,
+                        amount_paid=amount_paid, order_date=order_date, payment_mode=payment_mode)
 
 
 def admin_required(view_func):

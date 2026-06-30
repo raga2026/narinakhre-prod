@@ -1,0 +1,13 @@
+Observations:
+1. The razorpay initially said it couldn't cereate an order and then the payment went through and i made the payment.
+2. I added 600 worth items andapplied the NNJULY10 coupon and got 10 percent off and toal amount was 540 rupees , the gst should be calculated from this amount, that is the sellingprice would be inclusive of gst, in the break up , this has to be handled.
+3. While the total was 540 i paid 612.41 im not sure why that was the case
+4. After the payment was made,it took me to the tank you page, which was jus the thank you pagei made for wholesale cusomers which had no information as such. it just saidthank you for your intest or your request has been received and for details contact infor@narinakhre.com it did not have any details abou the rder placed ot payment made
+5. It should actually show a green beautifully designed tick mark which says Order Placed successfully wih otder id, tracing number etc
+6. There should be an order processing console in the admin panel which should be able to process the order, i.e accept or cancel the order , process it, print the shipping label and also track the status in one page for all orders which are lovive and which have been fulfilled along with payment details, shipping charge , coupon applied etc
+7. The user would be really benefitted if he or she has an account with basic details and the order details there, the order they have place and which allows them to view the order  and maneg thei profile
+8. UShould have a reward system which offers 50 reward points for every order above 1000 and they can use this to convert into actual money at 3 reward points for 1 rupee and max 100 points which can be used at the same time
+9. the referral system while logging in, if they refer somene , they would get 200 reward points, each user will have a referral code, this referral code  whn applied to another user will be converted into reward points only when the user which he or she refered completes an order above 500 rupess.
+10. there should be an email triggered to the admin, mohinicosmetics.india@gmail.com  and also to the user when an order i created from info@narinakhre.com
+
+1

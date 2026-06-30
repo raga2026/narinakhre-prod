@@ -291,7 +291,7 @@ function ckRecalc() {
         sub += +r.dataset.price * +r.querySelector('.ck-qty').textContent;
     });
     document.getElementById('s-subtotal').textContent = '₹'+sub.toFixed(0);
-    const total = sub + gstBase + ckShip + ckCodFee - discountBase;
+    const total = sub + ckShip + ckCodFee - discountBase;
     document.getElementById('s-total').textContent = '₹'+total.toFixed(0);
 }
 
@@ -384,7 +384,7 @@ function ckUpdateSummary() {
     const cod = (mode==='COD'&&ckServiceable)?ckCodFee:0;
     codRow.style.display = (mode==='COD')?'flex':'none';
     if(codFeeEl) codFeeEl.textContent='₹'+cod;
-    const total = sub+gstBase+(ckServiceable?ckShip:0)+cod-discountBase;
+    const total = sub+(ckServiceable?ckShip:0)+cod-discountBase;
     document.getElementById('s-total').textContent='₹'+total.toFixed(0);
 }
 
@@ -425,7 +425,9 @@ document.getElementById('ck-form').addEventListener('submit', function(e) {
     });
     const shipping = ckShip;
     const cod = (mode==='COD') ? ckCodFee : 0;
-    const totalRupees = (sub + gstBase + shipping + cod - discountBase);
+    // GST is already INCLUDED in retail_price — never add it on top.
+    // The correct payable amount is: product total + shipping + COD fee - coupon discount.
+    const totalRupees = (sub + shipping + cod - discountBase);
 
     // Step 1: Create the shipment / order record (form-encoded, matches backend)
     const fd = new FormData();
