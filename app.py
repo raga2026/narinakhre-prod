@@ -418,11 +418,14 @@ ensure_checkout_tables_exist()
 
 
 def send_contact_email(to_email, subject, body):
-    # Configure your SMTP server here
-    SMTP_SERVER = 'smtp.gmail.com'
-    SMTP_PORT = 587
-    SMTP_USER = 'info@narinakhre.com'  # Replace with your email
-    SMTP_PASS = 'yourpassword'         # Replace with your password or app password
+    # SMTP credentials are read from environment variables — never hardcode secrets.
+    SMTP_SERVER = os.environ.get('SMTP_SERVER', 'smtp.gmail.com')
+    SMTP_PORT = int(os.environ.get('SMTP_PORT', '587'))
+    SMTP_USER = os.environ.get('SMTP_USER', '')
+    SMTP_PASS = os.environ.get('SMTP_PASS', '')
+    if not SMTP_USER or not SMTP_PASS:
+        print('Email send skipped: SMTP_USER/SMTP_PASS not configured in environment')
+        return False
     msg = MIMEMultipart()
     msg['From'] = SMTP_USER
     msg['To'] = to_email
@@ -434,8 +437,10 @@ def send_contact_email(to_email, subject, body):
         server.login(SMTP_USER, SMTP_PASS)
         server.sendmail(SMTP_USER, to_email, msg.as_string())
         server.quit()
+        return True
     except Exception as e:
         print('Email send failed:', e)
+        return False
 
 @app.route('/retail/contact', methods=['GET', 'POST'])
 def retail_contact():
@@ -1294,8 +1299,49 @@ def place_order():
     )
     conn.commit()
     session.pop('cart', None)
-    tracking_url = f"https://www.delhivery.com/track/package/{waybill}" if waybill else None
+
+    # Use our own branded, shareable tracking page instead of the raw Delhivery URL
+    tracking_url = url_for('track_order_page', waybill=waybill, _external=True) if waybill else None
+
+    # Email the order confirmation + tracking link to the customer (best-effort, never blocks checkout)
+    if email and waybill:
+        try:
+            track_body = (
+                f"Hi {name},\n\n"
+                f"Your Nari Nakhre order ({order_id}) has been placed successfully!\n\n"
+                f"Track your order here: {tracking_url}\n\n"
+                f"Thank you for shopping with us.\n- Team Nari Nakhre"
+            )
+            send_contact_email(email, "Your Nari Nakhre order is confirmed!", track_body)
+        except Exception as e:
+            app.logger.warning(f"Order confirmation email failed: {e}")
+
     return render_site('thank_you.html', order_id=order_id, waybill=waybill, tracking_url=tracking_url)
+
+@app.route('/api/track/<waybill>', methods=['GET'])
+def api_track_shipment(waybill):
+    """Live tracking status for a shipment, used by the public tracking page."""
+    provider = get_shipping_provider(
+        app.config['SHIPPING_PROVIDER'],
+        api_token=app.config.get('DELHIVERY_API_KEY')
+    )
+    try:
+        result = provider.track_shipment(waybill)
+        return jsonify(result)
+    except Exception as e:
+        app.logger.error(f'Tracking error: {e}')
+        return jsonify({"status": False, "msg": "Could not fetch tracking info"}), 200
+
+
+@app.route('/track/<waybill>')
+def track_order_page(waybill):
+    """Public, shareable order-tracking page for customers."""
+    conn = get_db()
+    order = conn.execute(
+        'SELECT * FROM order_shipping WHERE delhivery_waybill=?', (waybill,)
+    ).fetchone()
+    return render_site('track_order.html', waybill=waybill, order=order)
+
 
 @app.route('/clear_quote', methods=['POST'])
 def clear_quote():
@@ -1306,7 +1352,23 @@ def clear_quote():
 
 @app.route('/thank_you')
 def thank_you():
-    return render_site('thank_you.html')
+    # Pull order_id/waybill from session (set during checkout_process) if not passed via query
+    order_id = request.args.get('ref') or session.get('internal_order_id', '')
+    checkout_handover = session.get('checkout_handover', {})
+    waybill = checkout_handover.get('waybill') or session.get('waybill', '')
+
+    # If still missing, try to look up the most recent waybill for this internal_order_id
+    if order_id and not waybill:
+        conn = get_db()
+        row = conn.execute(
+            'SELECT delhivery_waybill FROM order_shipping WHERE internal_order_id=? ORDER BY id DESC LIMIT 1',
+            (order_id,)
+        ).fetchone()
+        if row and row['delhivery_waybill']:
+            waybill = row['delhivery_waybill']
+
+    tracking_url = url_for('track_order_page', waybill=waybill, _external=True) if waybill else None
+    return render_site('thank_you.html', order_id=order_id, waybill=waybill, tracking_url=tracking_url)
 
 
 def admin_required(view_func):

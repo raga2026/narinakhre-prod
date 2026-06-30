@@ -1,0 +1,127 @@
+{% extends "retail/base.html" %}
+{% block title %}Track Your Order | Nari Nakhre{% endblock %}
+{% block seo_tags %}
+<meta name="robots" content="noindex">
+{% endblock %}
+{% block content %}
+<style>
+  .tk-wrap { max-width: 480px; margin: 0 auto; padding: 16px 12px 60px; }
+  .tk-card { background:white; border:1px solid #fce7f3; border-radius:20px; padding:18px; margin-bottom:14px; }
+  .tk-waybill { font-size:0.75rem; color:#9f9f9f; text-align:center; margin-bottom:4px; }
+  .tk-status-badge {
+    display:block; text-align:center; font-size:1.15rem; font-weight:900;
+    color:#be185d; margin-bottom:4px;
+  }
+  .tk-status-sub { text-align:center; font-size:0.78rem; color:#9f1239; margin-bottom:14px; }
+  .tk-eta { text-align:center; font-size:0.78rem; color:#64748b; background:#fdf2f8; border-radius:12px; padding:8px; margin-bottom:8px; }
+
+  .tk-timeline { position:relative; padding-left:22px; }
+  .tk-timeline::before {
+    content:''; position:absolute; left:7px; top:6px; bottom:6px; width:2px; background:#fce7f3;
+  }
+  .tk-step { position:relative; padding-bottom:18px; }
+  .tk-step:last-child { padding-bottom:0; }
+  .tk-step::before {
+    content:''; position:absolute; left:-22px; top:2px; width:14px; height:14px;
+    border-radius:50%; background:#be185d; border:3px solid #fce7f3;
+  }
+  .tk-step.future::before { background:#e2e8f0; }
+  .tk-step-title { font-size:0.85rem; font-weight:700; color:#881337; }
+  .tk-step-meta { font-size:0.72rem; color:#9f9f9f; margin-top:2px; }
+
+  .tk-share-row { display:flex; gap:8px; margin-top:14px; }
+  .tk-btn {
+    flex:1; padding:10px; border-radius:14px; border:none;
+    font-weight:700; font-size:0.82rem; cursor:pointer; text-align:center;
+  }
+  .tk-btn-copy { background:#fff1f2; color:#be185d; border:2px solid #fda4af; }
+  .tk-btn-wa { background:#25D366; color:white; }
+  .tk-loading { text-align:center; padding:30px 0; color:#9f9f9f; font-size:0.85rem; }
+  .tk-empty { text-align:center; padding:30px 0; color:#9f9f9f; font-size:0.85rem; }
+</style>
+
+<div class="tk-wrap">
+  <h1 style="font-size:1.15rem;font-weight:800;color:#881337;text-align:center;margin-bottom:14px;">
+    📦 Track Your Order
+  </h1>
+
+  <div class="tk-card">
+    <div class="tk-waybill">Waybill: {{ waybill }}</div>
+    <div id="tk-content">
+      <div class="tk-loading">Fetching latest status…</div>
+    </div>
+  </div>
+
+  <div class="tk-share-row">
+    <button class="tk-btn tk-btn-copy" onclick="tkCopyLink()">🔗 Copy Link</button>
+    <button class="tk-btn tk-btn-wa" onclick="tkShareWhatsapp()">💬 Share on WhatsApp</button>
+  </div>
+</div>
+
+<script>
+const WAYBILL = {{ waybill|tojson }};
+const TRACK_URL = window.location.href;
+
+function tkCopyLink() {
+    navigator.clipboard.writeText(TRACK_URL).then(()=>{
+        alert('Tracking link copied!');
+    });
+}
+function tkShareWhatsapp() {
+    const text = '📦 Track my Nari Nakhre order: ' + TRACK_URL;
+    if (navigator.share) {
+        navigator.share({ title: 'Track my order', text: text, url: TRACK_URL }).catch(()=>{});
+    } else {
+        window.open('https://wa.me/?text=' + encodeURIComponent(text), '_blank');
+    }
+}
+
+function renderTracking(data) {
+    const el = document.getElementById('tk-content');
+    if (!data.status) {
+        el.innerHTML = `<div class="tk-empty">${data.msg || 'No tracking information available yet. Please check back soon.'}</div>`;
+        return;
+    }
+    const statusColors = {
+        'Delivered': '#16a34a',
+        'In Transit': '#be185d',
+        'Pending': '#d97706',
+        'Dispatched': '#be185d',
+        'RTO': '#dc2626',
+        'Cancelled': '#dc2626'
+    };
+    const color = statusColors[data.current_status] || '#be185d';
+
+    let html = `
+        <div class="tk-status-badge" style="color:${color};">${data.current_status || 'Processing'}</div>
+        ${data.status_location ? `<div class="tk-status-sub">📍 ${data.status_location}</div>` : ''}
+        ${data.expected_delivery ? `<div class="tk-eta">Expected delivery: <strong>${data.expected_delivery}</strong></div>` : ''}
+    `;
+
+    if (data.scans && data.scans.length > 0) {
+        html += '<div class="tk-timeline" style="margin-top:16px;">';
+        // Show most recent first
+        const scans = [...data.scans].reverse();
+        scans.forEach((s, i) => {
+            html += `
+                <div class="tk-step ${i === 0 ? '' : ''}">
+                    <div class="tk-step-title">${s.status || 'Update'}</div>
+                    <div class="tk-step-meta">${s.location || ''} ${s.datetime ? '· ' + s.datetime : ''}</div>
+                </div>
+            `;
+        });
+        html += '</div>';
+    }
+
+    el.innerHTML = html;
+}
+
+fetch('/api/track/' + encodeURIComponent(WAYBILL))
+    .then(r => r.json())
+    .then(renderTracking)
+    .catch(() => {
+        document.getElementById('tk-content').innerHTML =
+            '<div class="tk-empty">Could not load tracking info. Please try again later.</div>';
+    });
+</script>
+{% endblock %}

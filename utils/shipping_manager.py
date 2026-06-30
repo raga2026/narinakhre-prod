@@ -157,6 +157,51 @@ class DelhiveryProvider(BaseShippingProvider):
             print(f"Error fetching shipping rates: {e}")
             return {"rate": 0, "shipping_charge": 0, "cod_fee": 0, "msg": str(e)}
 
+    def track_shipment(self, waybill):
+        """
+        Get the live tracking status for a shipment by waybill number.
+        Production endpoint: GET /api/v1/packages/json/?waybill=<waybill>
+        """
+        if not waybill:
+            return {"status": False, "msg": "No waybill provided"}
+        if not self.api_token:
+            return {"status": False, "msg": "Delhivery API key not configured"}
+        url = f"{self.base_url}/api/v1/packages/json/"
+        params = {"waybill": waybill}
+        try:
+            response = requests.get(url, params=params, headers=self.headers, timeout=10)
+            data = response.json()
+            shipments = data.get("ShipmentData") or data.get("shipment_data") or []
+            if not shipments:
+                return {"status": False, "msg": "No tracking data found for this waybill"}
+            shipment = shipments[0].get("Shipment") or shipments[0]
+            status_block = shipment.get("Status") or {}
+            scans = shipment.get("Scans") or []
+            scan_list = []
+            for s in scans:
+                sd = s.get("ScanDetail") or s
+                scan_list.append({
+                    "status": sd.get("Scan") or sd.get("ScanType"),
+                    "location": sd.get("ScannedLocation"),
+                    "datetime": sd.get("ScanDateTime"),
+                    "instructions": sd.get("Instructions"),
+                })
+            return {
+                "status": True,
+                "waybill": waybill,
+                "current_status": status_block.get("Status"),
+                "status_type": status_block.get("StatusType"),
+                "status_datetime": status_block.get("StatusDateTime"),
+                "status_location": status_block.get("StatusLocation"),
+                "destination": shipment.get("Destination"),
+                "origin": shipment.get("Origin"),
+                "expected_delivery": shipment.get("ExpectedDeliveryDate") or shipment.get("PromisedDeliveryDate"),
+                "scans": scan_list,
+            }
+        except Exception as e:
+            print(f"Delhivery tracking error: {e}")
+            return {"status": False, "msg": f"Could not fetch tracking info: {e}"}
+
     def create_shipment(self, order_data, pickup_location_name=None):
         import os as _os
         url = f"{self.base_url}/api/cmu/create.json"
@@ -213,6 +258,23 @@ class MockShippingProvider(BaseShippingProvider):
             "status": True,
             "waybill": "MOCK-AWB-123",
             "msg": "Order created successfully (Mock)"
+        }
+
+    def track_shipment(self, waybill):
+        return {
+            "status": True,
+            "waybill": waybill,
+            "current_status": "In Transit",
+            "status_type": "UD",
+            "status_datetime": "",
+            "status_location": "Mock Hub",
+            "destination": "Mock City",
+            "origin": "Mock Warehouse",
+            "expected_delivery": "",
+            "scans": [
+                {"status": "Pickup Scheduled", "location": "Mock Warehouse", "datetime": "", "instructions": ""},
+                {"status": "In Transit", "location": "Mock Hub", "datetime": "", "instructions": ""},
+            ],
         }
 
 

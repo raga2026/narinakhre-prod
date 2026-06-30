@@ -1,84 +1,51 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <title>Thank You</title>
-    <link rel="stylesheet" href="/static/assets/style.css">
-    <style>
-        .thank-you-container {
-            max-width: 500px;
-            margin: 80px auto;
-            padding: 40px;
-            background: #fffbe6;
-            border-radius: 16px;
-            box-shadow: 0 2px 16px rgba(0,0,0,0.07);
-            text-align: center;
-        }
-        .thank-you-title {
-            font-size: 2rem;
-            color: #bfa14a;
-            margin-bottom: 16px;
-        }
-        .thank-you-message {
-            font-size: 1.2rem;
-            color: #333;
-        }
-        .luxury-btn {
-            display: inline-block;
-            margin-top: 32px;
-            padding: 12px 32px;
-            background: linear-gradient(90deg, #bfa14a 0%, #e6c97a 100%);
-            color: #fff;
-            font-weight: 600;
-            border: none;
-            border-radius: 8px;
-            font-size: 1.1rem;
-            text-decoration: none;
-            box-shadow: 0 2px 8px rgba(191,161,74,0.12);
-            transition: background 0.2s;
-        }
-        .luxury-btn:focus {
-            outline: 2px solid #bfa14a;
-        }
-        .logo {
-            height: 60px;
-            margin-bottom: 24px;
-        }
-        .bouquet {
-            height: 80px;
-            margin-bottom: 24px;
-        }
-    </style>
-</head>
-<body>
-    <div class="thank-you-container">
-        <img src="/static/assets/logo.png" alt="Nari Nakhre Logo" class="logo">
-        <img src="/static/assets/bouquet.webp" alt="Bouquet" class="bouquet">
-        {% if order_id %}
-        <div class="thank-you-title" style="color:#be185d;text-shadow:0 2px 8px #f43f5e44;">Thank you for your order!</div>
-        <div class="thank-you-message" style="color:#222;font-size:1.2em;margin-top:16px;background:#fffbe6;padding:12px 0;border-radius:8px;">
-            <span style="color:#be185d;font-weight:bold;">Your order has been placed successfully.</span><br>
-            <span style="color:#222;">Order ID: <b>{{ order_id }}</b></span><br>
-            {% if tracking_url and waybill %}
-            <span style="color:#222;">Track your package: <a href="{{ tracking_url }}" target="_blank" style="color:#be185d;text-decoration:underline;font-weight:bold;">{{ waybill }}</a></span><br>
-            {% endif %}
-            <span style="color:#222;">For help, contact <a href="mailto:info@narinakhre.com" style="color:#be185d;text-decoration:underline;font-weight:bold;">info@narinakhre.com</a>.</span>
-        </div>
-        {% else %}
-        <div class="thank-you-title" style="color:#be185d;text-shadow:0 2px 8px #f43f5e44;">Thank you!</div>
-        <div class="thank-you-message" style="color:#222;font-size:1.2em;margin-top:16px;background:#fffbe6;padding:12px 0;border-radius:8px;">
-            <span style="color:#be185d;font-weight:bold;">Your request has been received.</span><br>
-            <span style="color:#222;">For more information or assistance, please contact <a href="mailto:info@narinakhre.com" style="color:#be185d;text-decoration:underline;font-weight:bold;">info@narinakhre.com</a>.</span>
-        </div>
-        {% endif %}
-        <a href="/" class="rose-btn" style="margin-top:32px;display:inline-block;padding:14px 36px;font-size:1.2rem;font-weight:bold;border-radius:12px;background:linear-gradient(90deg,#be185d 0%,#f43f5e 100%);color:#fff;box-shadow:0 2px 12px #be185d44;text-decoration:none;">Shop More</a>
-    </div>
-    <script>
-        localStorage.removeItem('quoteCart');
-        localStorage.removeItem('retail_cart'); // Clear retail cart after payment
-    </script>
-    <script>
-        localStorage.removeItem('quoteCart');
-    </script>
-</body>
-</html>
+{% extends "retail/base.html" %}
+{% block title %}Order Confirmed | Nari Nakhre{% endblock %}
+{% block seo_tags %}
+<meta name="robots" content="noindex">
+{% endblock %}
+{% block content %}
+<style>
+  .ty-wrap { max-width: 480px; margin: 0 auto; padding: 30px 16px 60px; text-align:center; }
+  .ty-icon { font-size: 3.2rem; margin-bottom: 10px; }
+  .ty-title { font-size: 1.3rem; font-weight: 900; color:#881337; margin-bottom: 6px; }
+  .ty-sub { font-size: 0.88rem; color:#6b7280; margin-bottom: 22px; }
+  .ty-card { background:white; border:1px solid #fce7f3; border-radius:20px; padding:18px; margin-bottom:14px; text-align:left; }
+  .ty-row { display:flex; justify-content:space-between; font-size:0.85rem; padding:6px 0; border-bottom:1px solid #fdf2f8; }
+  .ty-row:last-child { border-bottom:none; }
+  .ty-label { color:#9f9f9f; }
+  .ty-value { font-weight:700; color:#881337; }
+  .ty-track-btn {
+    display:block; width:100%; padding:14px; border-radius:30px; border:none;
+    background:linear-gradient(135deg,#be185d,#f472b6); color:white;
+    font-weight:900; font-size:0.95rem; text-decoration:none; margin-top:10px;
+    box-shadow:0 4px 14px rgba(190,24,93,0.3);
+  }
+  .ty-home-link { display:inline-block; margin-top:16px; color:#be185d; font-weight:700; font-size:0.85rem; text-decoration:none; }
+</style>
+
+<div class="ty-wrap">
+  <div class="ty-icon">🎉</div>
+  <div class="ty-title">Order Confirmed!</div>
+  <div class="ty-sub">Thank you for shopping with Nari Nakhre. We'll have your order on its way soon.</div>
+
+  <div class="ty-card">
+    {% if order_id %}
+    <div class="ty-row"><span class="ty-label">Order ID</span><span class="ty-value">{{ order_id }}</span></div>
+    {% endif %}
+    {% if waybill %}
+    <div class="ty-row"><span class="ty-label">Tracking ID (AWB)</span><span class="ty-value">{{ waybill }}</span></div>
+    {% else %}
+    <div class="ty-row"><span class="ty-label">Status</span><span class="ty-value">Processing</span></div>
+    {% endif %}
+  </div>
+
+  {% if waybill %}
+  <a href="/track/{{ waybill }}" class="ty-track-btn">📦 Track Your Order</a>
+  <div style="font-size:0.7rem;color:#9f9f9f;margin-top:8px;">
+    Save this link — you can also share it via WhatsApp or email.
+  </div>
+  {% endif %}
+
+  <a href="/retail" class="ty-home-link">← Continue Shopping</a>
+</div>
+{% endblock %}
