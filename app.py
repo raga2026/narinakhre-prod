@@ -1127,6 +1127,42 @@ def verify_payment():
         return redirect(url_for('checkout'))
 
 # --- DELHIVERY API ROUTES (Retail Only) ---
+@app.route('/api/delhivery/debug/<pincode>', methods=['GET'])
+def delhivery_debug_pincode(pincode):
+    """TEMPORARY debug route — shows raw Delhivery response and config status.
+    Remove this route once Delhivery integration is confirmed working."""
+    import re as _re3
+    token = app.config.get('DELHIVERY_API_KEY', '')
+    provider_name = app.config.get('SHIPPING_PROVIDER', '')
+    debug_info = {
+        "provider_configured": provider_name,
+        "token_present": bool(token),
+        "token_length": len(token) if token else 0,
+        "token_preview": (token[:6] + '...' + token[-4:]) if len(token) > 12 else token,
+    }
+    if not _re3.match(r'^\d{6}$', str(pincode)):
+        debug_info["error"] = "Invalid pincode format"
+        return jsonify(debug_info), 400
+    try:
+        import requests as _req
+        url = "https://track.delhivery.com/c/api/pin-codes/json/"
+        headers = {
+            "Authorization": f"Token {token}",
+            "Accept": "application/json",
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Flask/NariNakhre"
+        }
+        resp = _req.get(url, headers=headers, params={"filter_codes": pincode}, timeout=10)
+        debug_info["raw_status_code"] = resp.status_code
+        debug_info["raw_response_text"] = resp.text[:500]
+        try:
+            debug_info["raw_response_json"] = resp.json()
+        except Exception:
+            debug_info["raw_response_json"] = None
+        return jsonify(debug_info)
+    except Exception as e:
+        debug_info["exception"] = f"{type(e).__name__}: {str(e)}"
+        return jsonify(debug_info)
+
 @app.route('/api/delhivery/check/<pincode>', methods=['GET'])
 def delhivery_check_pincode(pincode):
     if g.site_type != 'retail':
@@ -1140,10 +1176,14 @@ def delhivery_check_pincode(pincode):
             app.config['SHIPPING_PROVIDER'],
             api_token=app.config.get('DELHIVERY_API_KEY')
         )
-        return jsonify(provider.verify_pincode(pincode))
+        result = provider.verify_pincode(pincode)
+        # Surface the real reason in logs for debugging (visible in Render logs)
+        if not result.get('serviceable') and not result.get('status'):
+            app.logger.error(f"Delhivery pincode {pincode} check failed: {result.get('msg')}")
+        return jsonify(result)
     except Exception as e:
-        app.logger.error(f'Delhivery pincode check error: {e}')
-        return jsonify({"status": False, "serviceable": False, "msg": "Service unavailable"}), 200
+        app.logger.error(f'Delhivery pincode check exception: {type(e).__name__}: {e}')
+        return jsonify({"status": False, "serviceable": False, "msg": f"Service unavailable: {type(e).__name__}"}), 200
 
 @app.route('/api/delhivery/shipping', methods=['POST'])
 def calculate_checkout_shipping():
