@@ -168,7 +168,18 @@
     <!-- Info block -->
     <div class="mt-2 md:mt-0">
       <h1 class="pd-title">{{ product.name }}</h1>
-      <div class="pd-price">₹{{ product.retail_price }}</div>
+      {%- set mrp = product.mrp_price or 0 -%}
+      {%- set rp  = product.retail_price or 0 -%}
+      {%- set disc = ((mrp - rp) / mrp * 100)|round(0)|int if mrp and mrp > rp else 0 -%}
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:10px 0;">
+          {% if mrp and mrp > rp %}
+          <span style="font-size:1rem;color:#9f9f9f;text-decoration:line-through;">₹{{ mrp|round(0)|int }}</span>
+          {% endif %}
+          <span class="pd-price" style="margin:0;">₹{{ rp|round(0)|int }}</span>
+          {% if disc > 0 %}
+          <span style="font-size:0.8rem;font-weight:800;color:#16a34a;background:#dcfce7;border-radius:8px;padding:2px 8px;">{{ disc }}% off</span>
+          {% endif %}
+      </div>
 
       {% if product.color and product.color != 'N/A' %}
       <div class="text-sm text-gray-600 mb-1"><span class="font-semibold text-rose-700">Color:</span> {{ product.color }}</div>
@@ -235,7 +246,14 @@
                onerror="this.src='{{ url_for('static', filename='assets/logo.png') }}'">
         </a>
         <div class="pd-rel-name">{{ rel.name }}</div>
-        <div class="pd-rel-price">₹{{ rel.retail_price }}</div>
+        {%- set relmrp = rel.mrp_price or 0 -%}
+        {%- set relrp  = rel.retail_price or 0 -%}
+        <div style="display:flex;align-items:center;gap:4px;flex-wrap:wrap;">
+            {% if relmrp and relmrp > relrp %}
+            <span style="font-size:0.7rem;color:#9f9f9f;text-decoration:line-through;">₹{{ relmrp|round(0)|int }}</span>
+            {% endif %}
+            <span class="pd-rel-price" style="margin:0;">₹{{ relrp|round(0)|int }}</span>
+        </div>
         <div class="cart-container">
           <button class="add-to-cart-btn pd-rel-add"
                   data-sku="{{ rel.sku }}" data-price="{{ rel.retail_price }}" data-name="{{ rel.name }}"

@@ -85,6 +85,9 @@
     }
 
     /* ── Price ── */
+    .prod-price-wrap { display:flex; align-items:center; gap:6px; flex-wrap:wrap; margin:4px 0; }
+    .prod-mrp { font-size:0.75rem; color:#9f9f9f; text-decoration:line-through; }
+    .prod-disc { font-size:0.72rem; font-weight:800; color:#16a34a; background:#dcfce7; border-radius:6px; padding:1px 5px; }
     .prod-price {
         font-size: 1rem;
         font-weight: 900;
@@ -203,7 +206,18 @@
                 <div class="prod-name">{{ product.name }}</div>
 
                 <!-- Price -->
-                <div class="prod-price">₹{{ product.retail_price or product.price1 }}</div>
+                <div class="prod-price-wrap">
+                    {%- set mrp = product.mrp_price or 0 -%}
+                    {%- set rp  = product.retail_price or product.price1 or 0 -%}
+                    {%- set disc = ((mrp - rp) / mrp * 100)|round(0)|int if mrp and mrp > rp else 0 -%}
+                    {% if mrp and mrp > rp %}
+                    <span class="prod-mrp">₹{{ mrp|round(0)|int }}</span>
+                    {% endif %}
+                    <span class="prod-price">₹{{ rp|round(0)|int }}</span>
+                    {% if disc > 0 %}
+                    <span class="prod-disc">{{ disc }}% off</span>
+                    {% endif %}
+                </div>
 
                 <!-- Size select for bangles -->
                 {% set is_bangle = 'bangle' in (product.category|lower if product.category else '') or 'bangle' in (product.name|lower if product.name else '') %}

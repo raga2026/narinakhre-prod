@@ -580,15 +580,19 @@ def get_supabase_image_urls(sku):
 
 def calculate_inclusive_gst(display_cart, discount=0.0, full_subtotal=0.0):
     """
-    Calculate the GST component that is ALREADY INCLUDED in retail_price.
-    Prices in this store are GST-inclusive (the customer-facing price already
-    has tax baked in) — GST is never added on top of the displayed total.
+    Calculate the GST component ALREADY INCLUDED in retail_price.
+    Prices are GST-inclusive — GST is never added on top of the displayed total.
 
-    Each product carries its own gst_percent (jewelry is typically 3% in India,
-    not a flat 18%). If a coupon discount is applied, we proportionally reduce
-    the GST component too, since the discount lowers the actual taxable value.
+    Returns a dict with:
+      total_gst  - total GST component
+      cgst       - Central GST (half of total_gst, for GST filing)
+      sgst       - State GST  (half of total_gst, for GST filing)
 
-    Formula per line item: gst_component = price_incl_gst - (price_incl_gst / (1 + rate/100))
+    Formula per line: gst_component = price - (price / (1 + rate/100))
+    For intra-state supply (which retail jewelry typically is):
+      CGST = SGST = total_gst / 2
+    For inter-state, IGST = total_gst (admin report will show CGST+SGST columns;
+    if delivery state differs from warehouse state, treat as IGST in filing).
     """
     db = get_db()
     total_gst = 0.0
@@ -596,7 +600,7 @@ def calculate_inclusive_gst(display_cart, discount=0.0, full_subtotal=0.0):
         line_total = item.get('price', 0) * item.get('units', item.get('qty', 1))
         if line_total <= 0:
             continue
-        gst_rate = 3.0  # sensible default for jewelry if a product's rate is missing
+        gst_rate = 3.0  # default for jewelry (HSN 7117)
         sku = item.get('sku')
         if sku:
             try:
@@ -608,13 +612,17 @@ def calculate_inclusive_gst(display_cart, discount=0.0, full_subtotal=0.0):
         line_gst = line_total - (line_total / (1 + gst_rate / 100.0))
         total_gst += line_gst
 
-    # Proportionally reduce GST by the same ratio the discount reduced the subtotal,
-    # since a coupon discount lowers the actual taxable transaction value.
     if discount and full_subtotal and full_subtotal > 0:
         discount_ratio = min(discount / full_subtotal, 1.0)
         total_gst = total_gst * (1 - discount_ratio)
 
-    return round(total_gst, 2)
+    total_gst = round(total_gst, 2)
+    half = round(total_gst / 2, 2)
+    return {
+        'total_gst': total_gst,
+        'cgst': half,
+        'sgst': round(total_gst - half, 2),  # handles odd paise rounding
+    }
 
 
 def get_product_images(p_dict):
@@ -882,7 +890,8 @@ def checkout():
     # GST is INCLUSIVE in retail_price (prices shown to customers already include GST).
     # We extract the GST component for display purposes only — it does NOT get added
     # on top of the total. Each product carries its own gst_percent (e.g. 3% for jewelry).
-    total_tax = calculate_inclusive_gst(display_cart, discount, subtotal)
+    gst_breakdown = calculate_inclusive_gst(display_cart, discount, subtotal)
+    total_tax = gst_breakdown['total_gst']
 
     return render_site('checkout.html', display_cart=display_cart, subtotal=subtotal, total_tax=total_tax,
                         discount=discount, grand_total=grand_total, coupon_code=coupon_code)
@@ -930,15 +939,17 @@ def checkout_process():
     applied_coupon = session.get('applied_coupon')
     discount_amount = applied_coupon['discount_amount'] if applied_coupon else 0.0
     coupon_code = applied_coupon['code'] if applied_coupon else None
-    gst_amount = calculate_inclusive_gst(display_cart_for_amount, discount_amount, subtotal_amount)
+    gst_breakdown = calculate_inclusive_gst(display_cart_for_amount, discount_amount, subtotal_amount)
+    gst_amount = gst_breakdown['total_gst']
+    cgst_amount = gst_breakdown['cgst']
+    sgst_amount = gst_breakdown['sgst']
 
-    # GST-inclusive pricing: total payable = subtotal + shipping - discount
+    # GST-inclusive pricing: total payable = subtotal - discount (shipping is FREE)
     # (GST is already IN the retail price, never added on top)
-    total_before_shipping = max(subtotal_amount - discount_amount, 0)
-
-    # Get shipping charge from Delhivery for this pincode
-    shipping_amount = 0.0
+    # Shipping is FREE for customers — fetch real rate for admin reporting only
+    shipping_amount = 0.0  # customer pays nothing for shipping
     cod_fee_amount = 0.0
+    actual_shipping_cost = 0.0  # real cost we absorb, stored for admin P&L reporting
     try:
         provider = get_shipping_provider(
             app.config['SHIPPING_PROVIDER'],
@@ -946,24 +957,26 @@ def checkout_process():
         )
         cart_weight = max(sum(item.get('units', 1) for item in display_cart_for_amount) * 250, 250)
         rates = provider.get_rates(app.config.get('WAREHOUSE_PIN', '482001'), consignee_pincode, cart_weight, mode=payment_mode)
-        shipping_amount = float(rates.get('shipping_charge', 0) or 0)
-        cod_fee_amount = float(rates.get('cod_fee', 0) or 0) if payment_mode == 'COD' else 0.0
+        actual_shipping_cost = float(rates.get('shipping_charge', 0) or 0)
     except Exception as e:
         app.logger.warning(f'Could not fetch shipping rate during checkout_process: {e}')
 
-    total_amount = total_before_shipping + shipping_amount + cod_fee_amount
+    # Customer pays: subtotal - discount (shipping FREE, no COD fee)
+    total_amount = max(subtotal_amount - discount_amount, 0)
 
     conn = get_db()
     conn.execute(
         '''INSERT INTO order_shipping
            (user_id, consignee_name, consignee_phone, consignee_email, consignee_address,
             consignee_city, consignee_state, consignee_pincode, internal_order_id, status,
-            subtotal_amount, gst_amount, discount_amount, shipping_amount, cod_fee_amount,
+            subtotal_amount, gst_amount, cgst_amount, sgst_amount, discount_amount,
+            shipping_amount, actual_shipping_cost, cod_fee_amount,
             total_amount, coupon_code, payment_mode)
-           VALUES (?,?,?,?,?,?,?,?,?,'pending',?,?,?,?,?,?,?,?)''',
+           VALUES (?,?,?,?,?,?,?,?,?,'pending',?,?,?,?,?,?,?,?,?,?,?)''',
         (user_id, cleaned_name, consignee_phone, consignee_email, cleaned_address,
          consignee_city, consignee_state, consignee_pincode, internal_order_id,
-         subtotal_amount, gst_amount, discount_amount, shipping_amount, cod_fee_amount,
+         subtotal_amount, gst_amount, cgst_amount, sgst_amount, discount_amount,
+         shipping_amount, actual_shipping_cost, cod_fee_amount,
          total_amount, coupon_code, payment_mode)
     )
     conn.commit()

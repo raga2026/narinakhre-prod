@@ -291,7 +291,7 @@ function ckRecalc() {
         sub += +r.dataset.price * +r.querySelector('.ck-qty').textContent;
     });
     document.getElementById('s-subtotal').textContent = '₹'+sub.toFixed(0);
-    const total = sub + ckShip + ckCodFee - discountBase;
+    const total = sub - discountBase;
     document.getElementById('s-total').textContent = '₹'+total.toFixed(0);
 }
 
@@ -377,14 +377,16 @@ function ckUpdateSummary() {
         sub += +r.dataset.price * +r.querySelector('.ck-qty').textContent;
     });
     document.getElementById('s-subtotal').textContent='₹'+sub.toFixed(0);
-    document.getElementById('s-ship').textContent = ckServiceable?'₹'+ckShip:'FREE';
-    document.getElementById('s-ship').style.color = ckServiceable?'#f9a8d4':'#4ade80';
+    // Shipping is FREE for customers — the cost is absorbed in product pricing
+    document.getElementById('s-ship').textContent = 'FREE';
+    document.getElementById('s-ship').style.color = '#4ade80';
     const codRow=document.getElementById('s-cod-row');
     const codFeeEl=document.getElementById('s-cod');
-    const cod = (mode==='COD'&&ckServiceable)?ckCodFee:0;
     codRow.style.display = (mode==='COD')?'flex':'none';
     if(codFeeEl) codFeeEl.textContent='₹'+cod;
-    const total = sub+(ckServiceable?ckShip:0)+cod-discountBase;
+    // Shipping FREE — not added to customer total
+    const cod = (mode==='COD'&&ckServiceable)?ckCodFee:0;
+    const total = sub + cod - discountBase;
     document.getElementById('s-total').textContent='₹'+total.toFixed(0);
 }
 
@@ -426,8 +428,9 @@ document.getElementById('ck-form').addEventListener('submit', function(e) {
     const shipping = ckShip;
     const cod = (mode==='COD') ? ckCodFee : 0;
     // GST is already INCLUDED in retail_price — never add it on top.
-    // The correct payable amount is: product total + shipping + COD fee - coupon discount.
-    const totalRupees = (sub + shipping + cod - discountBase);
+    // Shipping is FREE for customers — absorbed in product pricing.
+    // Payable = product total - coupon discount only.
+    const totalRupees = (sub - discountBase);
 
     // Step 1: Create the shipment / order record (form-encoded, matches backend)
     const fd = new FormData();
