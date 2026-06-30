@@ -7,6 +7,13 @@
     <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
     <style>
         body { background: #0f172a; color: #f8fafc; }
+        input:-webkit-autofill,
+        input:-webkit-autofill:hover,
+        input:-webkit-autofill:focus {
+            -webkit-text-fill-color: #ffffff !important;
+            -webkit-box-shadow: 0 0 0px 1000px #0f172a inset !important;
+            caret-color: #ffffff;
+        }
         .rose-btn { background: linear-gradient(90deg, #be185d 0%, #f43f5e 100%); color: white; }
         .rose-accent { color: #be185d; }
         .glow-pink { box-shadow: 0 0 16px rgba(190,24,93,0.4); }
@@ -53,7 +60,8 @@
                     placeholder="000000"
                     required
                     autocomplete="one-time-code"
-                    class="totp-input w-full bg-slate-900 border border-pink-500/30 rounded-xl p-3 text-white placeholder-slate-600 focus:outline-none focus:border-pink-500 transition">
+                    style="color:#ffffff;-webkit-text-fill-color:#ffffff;background-color:#0f172a;"
+                    class="totp-input w-full bg-slate-900 border border-pink-500/30 rounded-xl p-3 placeholder-slate-600 focus:outline-none focus:border-pink-500 transition">
             </div>
 
             <button type="submit" class="rose-btn glow-pink w-full py-3 rounded-2xl font-bold text-lg shadow-lg transition hover:opacity-90">

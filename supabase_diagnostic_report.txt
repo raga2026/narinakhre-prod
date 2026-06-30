@@ -1,0 +1,842 @@
+NARI NAKHRE — SUPABASE DIAGNOSTIC REPORT
+Generated: 2026-06-30T21:14:07.992764
+
+==============================================================================
+  1. ENVIRONMENT CHECK
+==============================================================================
+SUPABASE_URL present: True
+SUPABASE key present:  True
+SUPABASE_URL (normalized, full): https://eopqwvssznmxfxrfzqbx.supabase.co
+Key length: 208, preview: eyJhbG...tdPI
+
+==============================================================================
+  1b. RAW HTTP CHECK (bypassing supabase-py client)
+==============================================================================
+POST https://eopqwvssznmxfxrfzqbx.supabase.co/rest/v1/rpc/execute_sql
+Status code: 404
+Response body: {"code":"PGRST202","details":"Searched for the function graphql_public.execute_sql with parameter query or with a single unnamed json/jsonb parameter, but no matches were found in the schema cache.","hint":null,"message":"Could not find the function graphql_public.execute_sql(query) in the schema cache"}
+
+GET https://eopqwvssznmxfxrfzqbx.supabase.co/rest/v1/ (checking PostgREST's known RPC list)
+Status code: 401
+RPC functions PostgREST currently knows about (0 total):
+  (none found — execute_sql is NOT registered in PostgREST's schema cache)
+
+==============================================================================
+  2. EXECUTE_SQL RPC SANITY CHECK
+==============================================================================
+If this section shows 'PGRST125 Invalid path specified', it means
+the execute_sql function does not exist in this Supabase project.
+Run create_execute_sql_function.sql in the Supabase SQL Editor, then
+re-run this diagnostic script to confirm it's fixed.
+
+--- Query: Basic connectivity test ---
+SQL: SELECT 1 as ok
+Raw response type: list
+
+--- Result ---
+[
+  {
+    "ok": 1
+  }
+]
+
+==============================================================================
+  3. EXECUTE_SQL FUNCTION SOURCE CODE
+==============================================================================
+
+--- Query: execute_sql function definition ---
+SQL: SELECT proname, prosrc FROM pg_proc WHERE proname = 'execute_sql'
+Raw response type: list
+
+--- Result ---
+[
+  {
+    "prosrc": "\r\nDECLARE\r\n    result jsonb;\r\n    trimmed_query text;\r\nBEGIN\r\n    trimmed_query := trim(query);\r\n\r\n    IF trimmed_query ILIKE 'SELECT%' OR trimmed_query ILIKE 'WITH%' THEN\r\n        EXECUTE 'SELECT jsonb_agg(t) FROM (' || query || ') t' INTO result;\r\n        RETURN COALESCE(result, '[]'::jsonb);\r\n    ELSE\r\n        EXECUTE query;\r\n        RETURN '[]'::jsonb;\r\n    END IF;\r\nEND;\r\n",
+    "proname": "execute_sql"
+  }
+]
+
+==============================================================================
+  4. ALL CUSTOM FUNCTIONS IN PUBLIC SCHEMA
+==============================================================================
+
+--- Query: All public functions ---
+SQL: SELECT proname, prosrc FROM pg_proc WHERE pronamespace = 'public'::regnamespace
+Raw response type: list
+
+--- Result ---
+[
+  {
+    "prosrc": "\r\nDECLARE\r\n    result jsonb;\r\n    trimmed_query text;\r\nBEGIN\r\n    trimmed_query := trim(query);\r\n\r\n    IF trimmed_query ILIKE 'SELECT%' OR trimmed_query ILIKE 'WITH%' THEN\r\n        EXECUTE 'SELECT jsonb_agg(t) FROM (' || query || ') t' INTO result;\r\n        RETURN COALESCE(result, '[]'::jsonb);\r\n    ELSE\r\n        EXECUTE query;\r\n        RETURN '[]'::jsonb;\r\n    END IF;\r\nEND;\r\n",
+    "proname": "execute_sql"
+  }
+]
+
+==============================================================================
+  5. FULL TABLE SCHEMA (all columns, all tables)
+==============================================================================
+
+--- Query: All columns in public schema ---
+SQL: SELECT table_name, column_name, data_type, is_nullable, column_default FROM information_schema.columns WHERE table_schema = 'public' ORDER BY table_name, ordinal_position
+Raw response type: list
+
+--- Result ---
+[
+  {
+    "data_type": "bigint",
+    "table_name": "categories",
+    "column_name": "id",
+    "is_nullable": "NO",
+    "column_default": "nextval('categories_id_seq'::regclass)"
+  },
+  {
+    "data_type": "text",
+    "table_name": "categories",
+    "column_name": "name",
+    "is_nullable": "YES",
+    "column_default": null
+  },
+  {
+    "data_type": "bigint",
+    "table_name": "coupons",
+    "column_name": "id",
+    "is_nullable": "NO",
+    "column_default": "nextval('coupons_id_seq'::regclass)"
+  },
+  {
+    "data_type": "text",
+    "table_name": "coupons",
+    "column_name": "code",
+    "is_nullable": "NO",
+    "column_default": null
+  },
+  {
+    "data_type": "double precision",
+    "table_name": "coupons",
+    "column_name": "discount_percent",
+    "is_nullable": "YES",
+    "column_default": "0.0"
+  },
+  {
+    "data_type": "double precision",
+    "table_name": "coupons",
+    "column_name": "min_order_amount",
+    "is_nullable": "YES",
+    "column_default": "0.0"
+  },
+  {
+    "data_type": "text",
+    "table_name": "coupons",
+    "column_name": "category",
+    "is_nullable": "YES",
+    "column_default": null
+  },
+  {
+    "data_type": "text",
+    "table_name": "coupons",
+    "column_name": "sub_category",
+    "is_nullable": "YES",
+    "column_default": null
+  },
+  {
+    "data_type": "date",
+    "table_name": "coupons",
+    "column_name": "expiry_date",
+    "is_nullable": "YES",
+    "column_default": null
+  },
+  {
+    "data_type": "integer",
+    "table_name": "coupons",
+    "column_name": "is_active",
+    "is_nullable": "YES",
+    "column_default": "1"
+  },
+  {
+    "data_type": "integer",
+    "table_name": "coupons",
+    "column_name": "usage_limit",
+    "is_nullable": "YES",
+    "column_default": "0"
+  },
+  {
+    "data_type": "integer",
+    "table_name": "coupons",
+    "column_name": "times_used",
+    "is_nullable": "YES",
+    "column_default": "0"
+  },
+  {
+    "data_type": "timestamp without time zone",
+    "table_name": "coupons",
+    "column_name": "created_at",
+    "is_nullable": "YES",
+    "column_default": "CURRENT_TIMESTAMP"
+  },
+  {
+    "data_type": "bigint",
+    "table_name": "order_shipping",
+    "column_name": "id",
+    "is_nullable": "NO",
+    "column_default": "nextval('order_shipping_id_seq'::regclass)"
+  },
+  {
+    "data_type": "bigint",
+    "table_name": "order_shipping",
+    "column_name": "user_id",
+    "is_nullable": "YES",
+    "column_default": null
+  },
+  {
+    "data_type": "text",
+    "table_name": "order_shipping",
+    "column_name": "status",
+    "is_nullable": "NO",
+    "column_default": "'pending'::text"
+  },
+  {
+    "data_type": "text",
+    "table_name": "order_shipping",
+    "column_name": "consignee_name",
+    "is_nullable": "NO",
+    "column_default": null
+  },
+  {
+    "data_type": "text",
+    "table_name": "order_shipping",
+    "column_name": "consignee_phone",
+    "is_nullable": "NO",
+    "column_default": null
+  },
+  {
+    "data_type": "text",
+    "table_name": "order_shipping",
+    "column_name": "consignee_address",
+    "is_nullable": "NO",
+    "column_default": null
+  },
+  {
+    "data_type": "text",
+    "table_name": "order_shipping",
+    "column_name": "consignee_city",
+    "is_nullable": "NO",
+    "column_default": null
+  },
+  {
+    "data_type": "text",
+    "table_name": "order_shipping",
+    "column_name": "consignee_state",
+    "is_nullable": "NO",
+    "column_default": null
+  },
+  {
+    "data_type": "text",
+    "table_name": "order_shipping",
+    "column_name": "consignee_pincode",
+    "is_nullable": "NO",
+    "column_default": null
+  },
+  {
+    "data_type": "text",
+    "table_name": "order_shipping",
+    "column_name": "internal_order_id",
+    "is_nullable": "NO",
+    "column_default": null
+  },
+  {
+    "data_type": "text",
+    "table_name": "order_shipping",
+    "column_name": "delhivery_waybill",
+    "is_nullable": "YES",
+    "column_default": null
+  },
+  {
+    "data_type": "bigint",
+    "table_name": "products",
+    "column_name": "id",
+    "is_nullable": "NO",
+    "column_default": "nextval('products_id_seq'::regclass)"
+  },
+  {
+    "data_type": "text",
+    "table_name": "products",
+    "column_name": "sku",
+    "is_nullable": "NO",
+    "column_default": null
+  },
+  {
+    "data_type": "text",
+    "table_name": "products",
+    "column_name": "name",
+    "is_nullable": "YES",
+    "column_default": null
+  },
+  {
+    "data_type": "text",
+    "table_name": "products",
+    "column_name": "slug",
+    "is_nullable": "YES",
+    "column_default": null
+  },
+  {
+    "data_type": "text",
+    "table_name": "products",
+    "column_name": "category",
+    "is_nullable": "YES",
+    "column_default": null
+  },
+  {
+    "data_type": "text",
+    "table_name": "products",
+    "column_name": "sub_category",
+    "is_nullable": "YES",
+    "column_default": null
+  },
+  {
+    "data_type": "text",
+    "table_name": "products",
+    "column_name": "collection",
+    "is_nullable": "YES",
+    "column_default": null
+  },
+  {
+    "data_type": "text",
+    "table_name": "products",
+    "column_name": "size",
+    "is_nullable": "YES",
+    "column_default": null
+  },
+  {
+    "data_type": "double precision",
+    "table_name": "products",
+    "column_name": "retail_price",
+    "is_nullable": "YES",
+    "column_default": "0.0"
+  },
+  {
+    "data_type": "double precision",
+    "table_name": "products",
+    "column_name": "mrp_price",
+    "is_nullable": "YES",
+    "column_default": "0.0"
+  },
+  {
+    "data_type": "double precision",
+    "table_name": "products",
+    "column_name": "retail_discount_percent",
+    "is_nullable": "YES",
+    "column_default": "0.0"
+  },
+  {
+    "data_type": "double precision",
+    "table_name": "products",
+    "column_name": "wholesale_price",
+    "is_nullable": "YES",
+    "column_default": "0.0"
+  },
+  {
+    "data_type": "integer",
+    "table_name": "products",
+    "column_name": "min_wholesale_qty",
+    "is_nullable": "YES",
+    "column_default": "0"
+  },
+  {
+    "data_type": "integer",
+    "table_name": "products",
+    "column_name": "sets_count",
+    "is_nullable": "YES",
+    "column_default": "0"
+  },
+  {
+    "data_type": "text",
+    "table_name": "products",
+    "column_name": "image_field",
+    "is_nullable": "YES",
+    "column_default": null
+  },
+  {
+    "data_type": "integer",
+    "table_name": "products",
+    "column_name": "quantity1",
+    "is_nullable": "YES",
+    "column_default": "0"
+  },
+  {
+    "data_type": "double precision",
+    "table_name": "products",
+    "column_name": "price1",
+    "is_nullable": "YES",
+    "column_default": "0.0"
+  },
+  {
+    "data_type": "integer",
+    "table_name": "products",
+    "column_name": "quantity2",
+    "is_nullable": "YES",
+    "column_default": "0"
+  },
+  {
+    "data_type": "double precision",
+    "table_name": "products",
+    "column_name": "price2",
+    "is_nullable": "YES",
+    "column_default": "0.0"
+  },
+  {
+    "data_type": "integer",
+    "table_name": "products",
+    "column_name": "quantity3",
+    "is_nullable": "YES",
+    "column_default": "0"
+  },
+  {
+    "data_type": "double precision",
+    "table_name": "products",
+    "column_name": "price3",
+    "is_nullable": "YES",
+    "column_default": "0.0"
+  },
+  {
+    "data_type": "double precision",
+    "table_name": "products",
+    "column_name": "purchase_cost",
+    "is_nullable": "YES",
+    "column_default": "0.0"
+  },
+  {
+    "data_type": "double precision",
+    "table_name": "products",
+    "column_name": "making_charges",
+    "is_nullable": "YES",
+    "column_default": "0.0"
+  },
+  {
+    "data_type": "double precision",
+    "table_name": "products",
+    "column_name": "weight_grams",
+    "is_nullable": "YES",
+    "column_default": "0.0"
+  },
+  {
+    "data_type": "text",
+    "table_name": "products",
+    "column_name": "material",
+    "is_nullable": "YES",
+    "column_default": null
+  },
+  {
+    "data_type": "text",
+    "table_name": "products",
+    "column_name": "hsn_code",
+    "is_nullable": "YES",
+    "column_default": null
+  },
+  {
+    "data_type": "double precision",
+    "table_name": "products",
+    "column_name": "gst_percent",
+    "is_nullable": "YES",
+    "column_default": "0.0"
+  },
+  {
+    "data_type": "integer",
+    "table_name": "products",
+    "column_name": "stock_total",
+    "is_nullable": "YES",
+    "column_default": "0"
+  },
+  {
+    "data_type": "text",
+    "table_name": "products",
+    "column_name": "box_packing_type",
+    "is_nullable": "YES",
+    "column_default": null
+  },
+  {
+    "data_type": "text",
+    "table_name": "products",
+    "column_name": "vendor_id",
+    "is_nullable": "YES",
+    "column_default": null
+  },
+  {
+    "data_type": "text",
+    "table_name": "products",
+    "column_name": "status",
+    "is_nullable": "YES",
+    "column_default": null
+  },
+  {
+    "data_type": "integer",
+    "table_name": "products",
+    "column_name": "is_active",
+    "is_nullable": "YES",
+    "column_default": "1"
+  },
+  {
+    "data_type": "integer",
+    "table_name": "products",
+    "column_name": "is_featured",
+    "is_nullable": "YES",
+    "column_default": "0"
+  },
+  {
+    "data_type": "bigint",
+    "table_name": "products",
+    "column_name": "category_id",
+    "is_nullable": "YES",
+    "column_default": null
+  },
+  {
+    "data_type": "double precision",
+    "table_name": "products",
+    "column_name": "weight",
+    "is_nullable": "YES",
+    "column_default": "0.0"
+  },
+  {
+    "data_type": "double precision",
+    "table_name": "products",
+    "column_name": "length",
+    "is_nullable": "YES",
+    "column_default": "0.0"
+  },
+  {
+    "data_type": "double precision",
+    "table_name": "products",
+    "column_name": "breadth",
+    "is_nullable": "YES",
+    "column_default": "0.0"
+  },
+  {
+    "data_type": "double precision",
+    "table_name": "products",
+    "column_name": "height",
+    "is_nullable": "YES",
+    "column_default": "0.0"
+  },
+  {
+    "data_type": "bigint",
+    "table_name": "quotes",
+    "column_name": "id",
+    "is_nullable": "NO",
+    "column_default": "nextval('quotes_id_seq'::regclass)"
+  },
+  {
+    "data_type": "text",
+    "table_name": "quotes",
+    "column_name": "request_id",
+    "is_nullable": "YES",
+    "column_default": null
+  },
+  {
+    "data_type": "text",
+    "table_name": "quotes",
+    "column_name": "name",
+    "is_nullable": "YES",
+    "column_default": null
+  },
+  {
+    "data_type": "text",
+    "table_name": "quotes",
+    "column_name": "whatsapp",
+    "is_nullable": "YES",
+    "column_default": null
+  },
+  {
+    "data_type": "text",
+    "table_name": "quotes",
+    "column_name": "email",
+    "is_nullable": "YES",
+    "column_default": null
+  },
+  {
+    "data_type": "text",
+    "table_name": "quotes",
+    "column_name": "items_json",
+    "is_nullable": "YES",
+    "column_default": null
+  },
+  {
+    "data_type": "double precision",
+    "table_name": "quotes",
+    "column_name": "total_amount",
+    "is_nullable": "YES",
+    "column_default": "0.0"
+  },
+  {
+    "data_type": "text",
+    "table_name": "quotes",
+    "column_name": "status",
+    "is_nullable": "YES",
+    "column_default": "'New'::text"
+  },
+  {
+    "data_type": "timestamp without time zone",
+    "table_name": "quotes",
+    "column_name": "created_at",
+    "is_nullable": "YES",
+    "column_default": "CURRENT_TIMESTAMP"
+  },
+  {
+    "data_type": "bigint",
+    "table_name": "users",
+    "column_name": "id",
+    "is_nullable": "NO",
+    "column_default": "nextval('users_id_seq'::regclass)"
+  }
+]
+
+==============================================================================
+  6. LIST OF ALL TABLES
+==============================================================================
+
+--- Query: All table names ---
+SQL: SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' AND table_type = 'BASE TABLE' ORDER BY table_name
+Raw response type: list
+
+--- Result ---
+[
+  {
+    "table_name": "categories"
+  },
+  {
+    "table_name": "coupons"
+  },
+  {
+    "table_name": "order_shipping"
+  },
+  {
+    "table_name": "products"
+  },
+  {
+    "table_name": "quotes"
+  },
+  {
+    "table_name": "users"
+  }
+]
+
+==============================================================================
+  7. COUPONS TABLE — FULL CONTENTS
+==============================================================================
+
+--- Query: All coupons ---
+SQL: SELECT * FROM coupons ORDER BY id DESC
+Raw response type: list
+
+--- Result ---
+[]
+
+==============================================================================
+  8. COUPONS TABLE — ROW COUNT
+==============================================================================
+
+--- Query: Coupon count ---
+SQL: SELECT COUNT(*) as total FROM coupons
+Raw response type: list
+
+--- Result ---
+[
+  {
+    "total": 0
+  }
+]
+
+==============================================================================
+  9. LIVE INSERT TEST (creates a temporary test coupon)
+==============================================================================
+
+--- Query: Test INSERT ---
+SQL: INSERT INTO coupons (code, discount_percent, min_order_amount, category, sub_category, expiry_date, usage_limit, is_active) VALUES ('DIAG_TEST_1782834252', 10.0, 0.0, NULL, NULL, NULL, 0, 1)
+Raw response type: list
+
+--- Result ---
+[]
+
+--- Query: Read-back of test coupon (should show 1 row if INSERT worked) ---
+SQL: SELECT * FROM coupons WHERE code = 'DIAG_TEST_1782834252'
+Raw response type: list
+
+--- Result ---
+[
+  {
+    "id": 2,
+    "code": "DIAG_TEST_1782834252",
+    "category": null,
+    "is_active": 1,
+    "created_at": "2026-06-30T15:44:12.238769",
+    "times_used": 0,
+    "expiry_date": null,
+    "usage_limit": 0,
+    "sub_category": null,
+    "discount_percent": 10,
+    "min_order_amount": 0
+  }
+]
+
+--- Query: Cleanup: delete test coupon ---
+SQL: DELETE FROM coupons WHERE code = 'DIAG_TEST_1782834252'
+Raw response type: list
+
+--- Result ---
+[]
+
+==============================================================================
+  10. KEY TABLE SPOT-CHECKS (all 6 tables app.py expects)
+==============================================================================
+
+--- Query: Sample row from 'categories' ---
+SQL: SELECT * FROM categories LIMIT 1
+Raw response type: list
+
+--- Result ---
+[]
+
+--- Query: Row count for 'categories' ---
+SQL: SELECT COUNT(*) as total FROM categories
+Raw response type: list
+
+--- Result ---
+[
+  {
+    "total": 0
+  }
+]
+
+--- Query: Sample row from 'products' ---
+SQL: SELECT * FROM products LIMIT 1
+Raw response type: list
+
+--- Result ---
+[
+  {
+    "id": 1,
+    "sku": "012025BNGRE014",
+    "name": "Nari Nakhre Vibrant Yellow Silk Thread Bangle Set with Intricate Silver Stone Studded Kada (Pack of 20)",
+    "size": "2.4,2.6,2.8",
+    "slug": "nari-nakhre-vibrant-yellow-silk-thread-bangle-set-with-intricate-silver-stone-st",
+    "height": 0,
+    "length": 0,
+    "price1": 150,
+    "price2": 175,
+    "price3": 250,
+    "status": "active",
+    "weight": 0,
+    "breadth": 0,
+    "category": "Bangles",
+    "hsn_code": "71171910",
+    "material": "material",
+    "is_active": 1,
+    "mrp_price": 250,
+    "quantity1": 200,
+    "quantity2": 100,
+    "quantity3": 1,
+    "vendor_id": null,
+    "collection": null,
+    "sets_count": 1,
+    "category_id": null,
+    "gst_percent": 3,
+    "image_field": "https://eopqwvssznmxfxrfzqbx.supabase.co/storage/v1/object/public/products/012025BNGRE014_1.webp",
+    "is_featured": 0,
+    "stock_total": 100,
+    "retail_price": 200,
+    "sub_category": "Chudas",
+    "weight_grams": 0,
+    "purchase_cost": 0,
+    "making_charges": 0,
+    "wholesale_price": 250,
+    "box_packing_type": null,
+    "min_wholesale_qty": 1,
+    "retail_discount_percent": 20
+  }
+]
+
+--- Query: Row count for 'products' ---
+SQL: SELECT COUNT(*) as total FROM products
+Raw response type: list
+
+--- Result ---
+[
+  {
+    "total": 61
+  }
+]
+
+--- Query: Sample row from 'quotes' ---
+SQL: SELECT * FROM quotes LIMIT 1
+Raw response type: list
+
+--- Result ---
+[]
+
+--- Query: Row count for 'quotes' ---
+SQL: SELECT COUNT(*) as total FROM quotes
+Raw response type: list
+
+--- Result ---
+[
+  {
+    "total": 0
+  }
+]
+
+--- Query: Sample row from 'users' ---
+SQL: SELECT * FROM users LIMIT 1
+Raw response type: list
+
+--- Result ---
+[]
+
+--- Query: Row count for 'users' ---
+SQL: SELECT COUNT(*) as total FROM users
+Raw response type: list
+
+--- Result ---
+[
+  {
+    "total": 0
+  }
+]
+
+--- Query: Sample row from 'order_shipping' ---
+SQL: SELECT * FROM order_shipping LIMIT 1
+Raw response type: list
+
+--- Result ---
+[]
+
+--- Query: Row count for 'order_shipping' ---
+SQL: SELECT COUNT(*) as total FROM order_shipping
+Raw response type: list
+
+--- Result ---
+[
+  {
+    "total": 0
+  }
+]
+
+--- Query: Sample row from 'coupons' ---
+SQL: SELECT * FROM coupons LIMIT 1
+Raw response type: list
+
+--- Result ---
+[]
+
+--- Query: Row count for 'coupons' ---
+SQL: SELECT COUNT(*) as total FROM coupons
+Raw response type: list
+
+--- Result ---
+[
+  {
+    "total": 0
+  }
+]
+
+==============================================================================
+  REPORT COMPLETE
+==============================================================================
+Send this file (supabase_diagnostic_report.txt) back for review.
