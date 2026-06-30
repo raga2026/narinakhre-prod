@@ -79,16 +79,35 @@ class DelhiveryProvider(BaseShippingProvider):
             if "Login or API Key Required" in response.text:
                 return {"status": False, "serviceable": False, "msg": "Authentication Error: Invalid Token"}
             data = response.json()
-            if not data or not isinstance(data, list):
+
+            # Delhivery's real response shape: {"delivery_codes": [{"postal_code": {...}}]}
+            postal_code = None
+            if isinstance(data, dict) and "delivery_codes" in data:
+                codes = data.get("delivery_codes") or []
+                if codes and isinstance(codes, list):
+                    postal_code = codes[0].get("postal_code")
+            elif isinstance(data, list) and data:
+                # Fallback for older/alternate response shape: [{"city":..., "remark":...}]
+                postal_code = data[0]
+
+            if not postal_code:
                 return {"status": False, "serviceable": False, "msg": "Location not serviceable"}
-            pincode_info = data[0]
-            if pincode_info.get("remark", "").strip().lower() == "embargo":
+
+            remark = (postal_code.get("remarks") or postal_code.get("remark") or "").strip().lower()
+            if remark == "embargo":
                 return {"status": False, "serviceable": False, "msg": "Location under embargo"}
+
+            # 'pre_paid' and 'cod' fields indicate whether prepaid/COD delivery is offered here
+            pre_paid_ok = postal_code.get("pre_paid", "Y") == "Y"
+            cod_ok = postal_code.get("cod", "Y") == "Y"
+
             return {
                 "status": True,
                 "serviceable": True,
-                "city": pincode_info.get("city"),
-                "state": pincode_info.get("state_code"),
+                "city": postal_code.get("city") or postal_code.get("district"),
+                "state": postal_code.get("state_code"),
+                "prepaid_available": pre_paid_ok,
+                "cod_available": cod_ok,
                 "msg": "Serviceable"
             }
         except Exception as e:
@@ -125,11 +144,12 @@ class DelhiveryProvider(BaseShippingProvider):
             print(f"Error fetching shipping rates: {e}")
             return {"rate": 0, "shipping_charge": 0, "cod_fee": 0, "msg": str(e)}
 
-    def create_shipment(self, order_data):
+    def create_shipment(self, order_data, pickup_location_name=None):
+        import os as _os
         url = f"{self.base_url}/api/cmu/create.json"
         payload = {
             "shipments": [order_data],
-            "pickup_location": {"name": "YOUR_WAREHOUSE_NAME"}
+            "pickup_location": {"name": pickup_location_name or _os.environ.get('DELHIVERY_PICKUP_LOCATION', 'NARI NAKHRE')}
         }
         data_string = {
             "format": "json",

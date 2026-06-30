@@ -43,7 +43,7 @@ SUPABASE_KEY = os.environ.get('SUPABASE_KEY', '')
 
 app.config['SHIPPING_PROVIDER'] = os.environ.get('SHIPPING_PROVIDER', 'mock')
 app.config['DELHIVERY_API_KEY'] = os.environ.get('DELHIVERY_API_KEY', '')
-app.config['WAREHOUSE_PIN'] = os.environ.get('WAREHOUSE_PIN', '110001')
+app.config['WAREHOUSE_PIN'] = os.environ.get('WAREHOUSE_PIN', '482001')
 app.config['WAREHOUSE_PIN'] = os.environ.get('WAREHOUSE_PIN', '400001')
 app.config['RAZORPAY_KEY_ID'] = os.environ.get('RAZORPAY_KEY_ID', '')
 app.config['RAZORPAY_KEY_SECRET'] = os.environ.get('RAZORPAY_KEY_SECRET', '')
@@ -1158,6 +1158,21 @@ def delhivery_debug_pincode(pincode):
             debug_info["raw_response_json"] = resp.json()
         except Exception:
             debug_info["raw_response_json"] = None
+
+        # Also test the shipping rate endpoint
+        try:
+            rate_url = "https://track.delhivery.com/api/kinko/v1/invoice/charges/.json"
+            rate_params = {
+                "ss": "R", "md": "Prepaid",
+                "o_pin": app.config.get('WAREHOUSE_PIN', ''),
+                "d_pin": pincode, "wt": "250", "cod": "0"
+            }
+            rate_resp = _req.get(rate_url, params=rate_params, headers=headers, timeout=10)
+            debug_info["shipping_rate_status_code"] = rate_resp.status_code
+            debug_info["shipping_rate_response"] = rate_resp.text[:500]
+        except Exception as e2:
+            debug_info["shipping_rate_error"] = str(e2)
+
         return jsonify(debug_info)
     except Exception as e:
         debug_info["exception"] = f"{type(e).__name__}: {str(e)}"
