@@ -55,7 +55,7 @@
 <script src="/static/js/retail_cart_state.js"></script>
 <script>
 function syncCartCount(count) {
-    ['cart-count','cart-count-mobile'].forEach(id => {
+    ['cart-count','cart-count-mobile','cart-count-icon'].forEach(id => {
         const el = document.getElementById(id);
         if (el) el.innerText = count;
     });

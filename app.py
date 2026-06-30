@@ -787,10 +787,21 @@ def checkout():
     
     cart = session.get('cart', {})
     display_cart = []
+    db = get_db()
     for item in cart.values():
         item_dict = dict(item)
         if 'units' not in item_dict:
             item_dict['units'] = item_dict.get('qty', 1)
+        # Look up product image for display using the same helper as product_detail
+        if not item_dict.get('image_url'):
+            p = db.execute('SELECT sku, image_field FROM products WHERE sku = ?', (item_dict.get('sku'),)).fetchone()
+            if p:
+                try:
+                    imgs = get_product_images(dict(p))
+                    if imgs and len(imgs) > 0 and imgs[0].startswith('http'):
+                        item_dict['image_url'] = imgs[0]
+                except Exception:
+                    pass
         display_cart.append(item_dict)
     
     subtotal = sum(item['price'] * item['units'] for item in display_cart)
@@ -1106,7 +1117,7 @@ def verify_payment():
         # If called via AJAX (fetch), return JSON; if form POST, redirect
         if request.is_json or request.headers.get('X-Requested-With') == 'XMLHttpRequest' or request.content_type == 'application/json':
             return jsonify({'status': 'success', 'message': 'Payment verified and order finalized'}), 200
-        return redirect(url_for('retail_thank_you'))
+        return redirect(url_for('thank_you'))
     except Exception as e:
         app.logger.error(f'Payment verification error: {e}')
         if request.is_json or request.headers.get('X-Requested-With') == 'XMLHttpRequest' or request.content_type == 'application/json':
