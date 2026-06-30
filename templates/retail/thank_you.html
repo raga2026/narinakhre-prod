@@ -1,51 +1,78 @@
-{% extends "retail/base.html" %}
-{% block title %}Order Confirmed | Nari Nakhre{% endblock %}
-{% block seo_tags %}
-<meta name="robots" content="noindex">
-{% endblock %}
-{% block content %}
-<style>
-  .ty-wrap { max-width: 480px; margin: 0 auto; padding: 30px 16px 60px; text-align:center; }
-  .ty-icon { font-size: 3.2rem; margin-bottom: 10px; }
-  .ty-title { font-size: 1.3rem; font-weight: 900; color:#881337; margin-bottom: 6px; }
-  .ty-sub { font-size: 0.88rem; color:#6b7280; margin-bottom: 22px; }
-  .ty-card { background:white; border:1px solid #fce7f3; border-radius:20px; padding:18px; margin-bottom:14px; text-align:left; }
-  .ty-row { display:flex; justify-content:space-between; font-size:0.85rem; padding:6px 0; border-bottom:1px solid #fdf2f8; }
-  .ty-row:last-child { border-bottom:none; }
-  .ty-label { color:#9f9f9f; }
-  .ty-value { font-weight:700; color:#881337; }
-  .ty-track-btn {
-    display:block; width:100%; padding:14px; border-radius:30px; border:none;
-    background:linear-gradient(135deg,#be185d,#f472b6); color:white;
-    font-weight:900; font-size:0.95rem; text-decoration:none; margin-top:10px;
-    box-shadow:0 4px 14px rgba(190,24,93,0.3);
-  }
-  .ty-home-link { display:inline-block; margin-top:16px; color:#be185d; font-weight:700; font-size:0.85rem; text-decoration:none; }
-</style>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="robots" content="noindex">
+    <title>Order Confirmed | Nari Nakhre</title>
+    <link rel="icon" type="image/x-icon" href="/favicon.ico">
+    <style>
+        * { box-sizing: border-box; }
+        body {
+            margin: 0; font-family: 'Georgia', serif;
+            background: linear-gradient(180deg, #fff1f2 0%, #fdf2f8 100%);
+            min-height: 100vh;
+        }
+        .ty-wrap { max-width: 480px; margin: 0 auto; padding: 36px 16px 50px; text-align: center; }
+        .ty-logo { height: 44px; margin-bottom: 18px; }
+        .ty-icon { font-size: 3rem; margin-bottom: 8px; }
+        .ty-title { font-size: 1.4rem; font-weight: 900; color: #881337; margin-bottom: 6px; }
+        .ty-sub { font-size: 0.88rem; color: #6b7280; margin-bottom: 22px; line-height: 1.5; }
+        .ty-card {
+            background: white; border: 1px solid #fce7f3; border-radius: 20px;
+            padding: 18px; margin-bottom: 16px; text-align: left;
+        }
+        .ty-row { display: flex; justify-content: space-between; font-size: 0.85rem; padding: 8px 0; border-bottom: 1px solid #fdf2f8; }
+        .ty-row:last-child { border-bottom: none; }
+        .ty-label { color: #9f9f9f; }
+        .ty-value { font-weight: 700; color: #881337; }
+        .ty-track-btn {
+            display: block; width: 100%; padding: 14px; border-radius: 30px; border: none;
+            background: linear-gradient(135deg, #be185d, #f472b6); color: white;
+            font-weight: 900; font-size: 0.95rem; text-decoration: none; margin-top: 4px;
+            box-shadow: 0 4px 14px rgba(190,24,93,0.3);
+        }
+        .ty-hint { font-size: 0.7rem; color: #9f9f9f; margin-top: 10px; }
+        .ty-home-link {
+            display: inline-block; margin-top: 22px; color: #be185d;
+            font-weight: 700; font-size: 0.85rem; text-decoration: none;
+        }
+        .ty-contact { font-size: 0.78rem; color: #6b7280; margin-top: 18px; }
+        .ty-contact a { color: #be185d; font-weight: 700; text-decoration: none; }
+    </style>
+</head>
+<body>
+    <div class="ty-wrap">
+        <img src="/static/assets/logo.png" alt="Nari Nakhre" class="ty-logo">
+        <div class="ty-icon">🎉</div>
 
-<div class="ty-wrap">
-  <div class="ty-icon">🎉</div>
-  <div class="ty-title">Order Confirmed!</div>
-  <div class="ty-sub">Thank you for shopping with Nari Nakhre. We'll have your order on its way soon.</div>
+        {% if order_id %}
+        <div class="ty-title">Order Confirmed!</div>
+        <div class="ty-sub">Thank you for shopping with Nari Nakhre.<br>We'll have your order on its way soon.</div>
 
-  <div class="ty-card">
-    {% if order_id %}
-    <div class="ty-row"><span class="ty-label">Order ID</span><span class="ty-value">{{ order_id }}</span></div>
-    {% endif %}
-    {% if waybill %}
-    <div class="ty-row"><span class="ty-label">Tracking ID (AWB)</span><span class="ty-value">{{ waybill }}</span></div>
-    {% else %}
-    <div class="ty-row"><span class="ty-label">Status</span><span class="ty-value">Processing</span></div>
-    {% endif %}
-  </div>
+        <div class="ty-card">
+            <div class="ty-row"><span class="ty-label">Order ID</span><span class="ty-value">{{ order_id }}</span></div>
+            {% if waybill %}
+            <div class="ty-row"><span class="ty-label">Tracking ID (AWB)</span><span class="ty-value">{{ waybill }}</span></div>
+            {% endif %}
+        </div>
 
-  {% if waybill %}
-  <a href="/track/{{ waybill }}" class="ty-track-btn">📦 Track Your Order</a>
-  <div style="font-size:0.7rem;color:#9f9f9f;margin-top:8px;">
-    Save this link — you can also share it via WhatsApp or email.
-  </div>
-  {% endif %}
+        {% if tracking_url and waybill %}
+        <a href="{{ tracking_url }}" class="ty-track-btn">📦 Track Your Order</a>
+        <div class="ty-hint">Save this link — you can share it via WhatsApp or email.</div>
+        {% endif %}
 
-  <a href="/retail" class="ty-home-link">← Continue Shopping</a>
-</div>
-{% endblock %}
+        <div class="ty-contact">Need help? Contact <a href="mailto:info@narinakhre.com">info@narinakhre.com</a></div>
+        {% else %}
+        <div class="ty-title">Thank you!</div>
+        <div class="ty-sub">Your request has been received.<br>For assistance, contact <a href="mailto:info@narinakhre.com" style="color:#be185d;">info@narinakhre.com</a>.</div>
+        {% endif %}
+
+        <a href="/retail" class="ty-home-link">← Continue Shopping</a>
+    </div>
+    <script>
+        localStorage.removeItem('quoteCart');
+        localStorage.removeItem('retail_cart');
+    </script>
+</body>
+</html>
