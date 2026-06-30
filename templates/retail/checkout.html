@@ -151,6 +151,19 @@
     </div>
   </div>
 
+  <!-- Coupon -->
+  <div class="ck-coupon">
+    <input type="text" id="ck-coupon" placeholder="Coupon code" value="{{ coupon_code or '' }}">
+    <button onclick="applyCoupon()">Apply</button>
+  </div>
+  <div id="ck-coupon-msg" style="font-size:0.75rem;margin:-6px 0 10px;display:none;"></div>
+  {% if coupon_code %}
+  <div style="display:flex;align-items:center;justify-content:space-between;background:#f0fdf4;border:1.5px solid #86efac;border-radius:12px;padding:8px 12px;margin-bottom:10px;">
+    <span style="font-size:0.8rem;font-weight:700;color:#15803d;">✓ {{ coupon_code }} applied</span>
+    <button onclick="removeCoupon()" style="background:none;border:none;color:#dc2626;font-size:0.75rem;font-weight:700;cursor:pointer;">Remove</button>
+  </div>
+  {% endif %}
+
   <!-- Order summary -->
   <div class="ck-summary">
     <div class="ck-summary-title">Order Summary</div>
@@ -280,6 +293,36 @@ function ckRecalc() {
     document.getElementById('s-subtotal').textContent = '₹'+sub.toFixed(0);
     const total = sub + gstBase + ckShip + ckCodFee - discountBase;
     document.getElementById('s-total').textContent = '₹'+total.toFixed(0);
+}
+
+/* ── Coupon ── */
+function applyCoupon() {
+    const code = document.getElementById('ck-coupon').value.trim();
+    const msgEl = document.getElementById('ck-coupon-msg');
+    if (!code) return;
+    fetch('/apply_coupon', { method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({coupon: code}) })
+    .then(r => r.json())
+    .then(d => {
+        msgEl.style.display = 'block';
+        if (d.status === 'success') {
+            msgEl.style.color = '#15803d';
+            msgEl.textContent = d.message;
+            setTimeout(() => location.reload(), 600);
+        } else {
+            msgEl.style.color = '#dc2626';
+            msgEl.textContent = d.message || 'Could not apply coupon';
+        }
+    })
+    .catch(() => {
+        msgEl.style.display = 'block';
+        msgEl.style.color = '#dc2626';
+        msgEl.textContent = 'Could not apply coupon. Please try again.';
+    });
+}
+function removeCoupon() {
+    fetch('/remove_coupon', { method:'POST' })
+    .then(() => location.reload());
 }
 
 /* ── Clear cart ── */

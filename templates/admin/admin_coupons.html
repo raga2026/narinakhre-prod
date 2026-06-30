@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Coupon Manager - NariNakhre Admin</title>
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+    <style>
+        .badge-active { background:#dcfce7; color:#15803d; }
+        .badge-inactive { background:#f1f5f9; color:#64748b; }
+        .badge-expired { background:#fee2e2; color:#b91c1c; }
+        .badge-maxed { background:#fef3c7; color:#b45309; }
+        tr:hover { background:#fff7f8; }
+        .edit-row { display:none; }
+        .edit-row.open { display:table-row; }
+    </style>
+</head>
+<body class="bg-gray-100 min-h-screen">
+    <div class="max-w-7xl mx-auto p-6">
+        <div class="flex justify-between items-center mb-6">
+            <div>
+                <h2 class="text-2xl font-extrabold text-gray-900">🎟️ Coupon Manager</h2>
+                <a href="{{ url_for('admin_dashboard') }}" class="text-sm text-rose-600 hover:underline">← Back to Dashboard</a>
+            </div>
+            <a href="{{ url_for('admin_logout') }}" class="px-4 py-2 rounded-lg font-bold shadow bg-rose-600 text-white hover:bg-rose-700 transition">Logout</a>
+        </div>
+
+        {% with messages = get_flashed_messages() %}
+          {% if messages %}
+            <div class="mb-4">
+              {% for message in messages %}
+                <div class="bg-rose-50 border border-rose-300 text-rose-700 px-4 py-2 rounded mb-2 font-medium">{{ message }}</div>
+              {% endfor %}
+            </div>
+          {% endif %}
+        {% endwith %}
+
+        <!-- Create coupon form -->
+        <div class="bg-white rounded-xl shadow p-6 mb-8">
+            <h3 class="text-lg font-bold text-gray-800 mb-4">Create New Coupon</h3>
+            <form method="POST" action="{{ url_for('admin_coupon_create') }}" class="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-4 gap-4">
+                <div>
+                    <label class="block text-xs font-bold text-gray-600 mb-1">Coupon Code *</label>
+                    <input type="text" name="code" required placeholder="WELCOME10"
+                           class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm uppercase focus:border-rose-500 focus:ring-1 focus:ring-rose-500 outline-none"
+                           style="text-transform:uppercase;">
+                </div>
+                <div>
+                    <label class="block text-xs font-bold text-gray-600 mb-1">Discount (%) *</label>
+                    <input type="number" name="discount_percent" min="1" max="100" required placeholder="10"
+                           class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:border-rose-500 focus:ring-1 focus:ring-rose-500 outline-none">
+                </div>
+                <div>
+                    <label class="block text-xs font-bold text-gray-600 mb-1">Min Order Amount (₹)</label>
+                    <input type="number" name="min_order_amount" min="0" step="0.01" placeholder="0"
+                           class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:border-rose-500 focus:ring-1 focus:ring-rose-500 outline-none">
+                </div>
+                <div>
+                    <label class="block text-xs font-bold text-gray-600 mb-1">Expiry Date</label>
+                    <input type="date" name="expiry_date" min="{{ today_str }}"
+                           class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:border-rose-500 focus:ring-1 focus:ring-rose-500 outline-none">
+                </div>
+                <div>
+                    <label class="block text-xs font-bold text-gray-600 mb-1">Category</label>
+                    <select name="category" class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:border-rose-500 focus:ring-1 focus:ring-rose-500 outline-none">
+                        <option value="">All Categories</option>
+                        {% for c in categories %}
+                        <option value="{{ c.category }}">{{ c.category }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-xs font-bold text-gray-600 mb-1">Sub-Category</label>
+                    <select name="sub_category" class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:border-rose-500 focus:ring-1 focus:ring-rose-500 outline-none">
+                        <option value="">All Sub-Categories</option>
+                        {% for sc in sub_categories %}
+                        <option value="{{ sc.sub_category }}">{{ sc.sub_category }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-xs font-bold text-gray-600 mb-1">Usage Limit</label>
+                    <input type="number" name="usage_limit" min="0" placeholder="0 = unlimited"
+                           class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:border-rose-500 focus:ring-1 focus:ring-rose-500 outline-none">
+                </div>
+                <div class="flex items-end">
+                    <button type="submit" class="w-full bg-rose-600 text-white py-2 rounded-lg font-bold shadow hover:bg-rose-700 transition">
+                        + Create Coupon
+                    </button>
+                </div>
+            </form>
+        </div>
+
+        <!-- Coupons table -->
+        <div class="bg-white rounded-xl shadow overflow-hidden">
+            <div class="px-6 py-4 border-b border-gray-100 flex items-center justify-between">
+                <h3 class="text-lg font-bold text-gray-800">All Coupons ({{ coupons|length }})</h3>
+            </div>
+            <div class="overflow-x-auto">
+                <table class="min-w-full text-sm">
+                    <thead class="bg-gray-50">
+                        <tr>
+                            <th class="py-3 px-4 text-left font-semibold text-gray-600">Code</th>
+                            <th class="py-3 px-4 text-left font-semibold text-gray-600">Discount</th>
+                            <th class="py-3 px-4 text-left font-semibold text-gray-600">Min Order</th>
+                            <th class="py-3 px-4 text-left font-semibold text-gray-600">Category</th>
+                            <th class="py-3 px-4 text-left font-semibold text-gray-600">Sub-Category</th>
+                            <th class="py-3 px-4 text-left font-semibold text-gray-600">Expiry</th>
+                            <th class="py-3 px-4 text-left font-semibold text-gray-600">Usage</th>
+                            <th class="py-3 px-4 text-left font-semibold text-gray-600">Status</th>
+                            <th class="py-3 px-4 text-left font-semibold text-gray-600">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y divide-gray-100">
+                        {% for c in coupons %}
+                        {%- set is_expired = c.expiry_date and c.expiry_date|string < today_str -%}
+                        {%- set is_maxed = c.usage_limit and c.usage_limit > 0 and c.times_used >= c.usage_limit -%}
+                        <tr>
+                            <td class="py-3 px-4 font-bold text-rose-700">{{ c.code }}</td>
+                            <td class="py-3 px-4">{{ c.discount_percent|int }}%</td>
+                            <td class="py-3 px-4">{% if c.min_order_amount %}₹{{ c.min_order_amount|round(0)|int }}{% else %}—{% endif %}</td>
+                            <td class="py-3 px-4">{{ c.category or 'All' }}</td>
+                            <td class="py-3 px-4">{{ c.sub_category or 'All' }}</td>
+                            <td class="py-3 px-4">{{ c.expiry_date or 'No expiry' }}</td>
+                            <td class="py-3 px-4">
+                                {{ c.times_used }}{% if c.usage_limit %} / {{ c.usage_limit }}{% else %} / ∞{% endif %}
+                            </td>
+                            <td class="py-3 px-4">
+                                {% if is_expired %}
+                                <span class="px-2 py-1 rounded-full text-xs font-bold badge-expired">Expired</span>
+                                {% elif is_maxed %}
+                                <span class="px-2 py-1 rounded-full text-xs font-bold badge-maxed">Limit Reached</span>
+                                {% elif c.is_active %}
+                                <span class="px-2 py-1 rounded-full text-xs font-bold badge-active">Active</span>
+                                {% else %}
+                                <span class="px-2 py-1 rounded-full text-xs font-bold badge-inactive">Disabled</span>
+                                {% endif %}
+                            </td>
+                            <td class="py-3 px-4">
+                                <div class="flex gap-2 flex-wrap">
+                                    <button type="button" onclick="toggleEdit({{ c.id }})"
+                                            class="text-xs font-semibold text-blue-600 hover:underline">Edit</button>
+                                    <form method="POST" action="{{ url_for('admin_coupon_toggle', coupon_id=c.id) }}" style="display:inline;">
+                                        <button type="submit" class="text-xs font-semibold {% if c.is_active %}text-amber-600{% else %}text-green-600{% endif %} hover:underline">
+                                            {% if c.is_active %}Disable{% else %}Enable{% endif %}
+                                        </button>
+                                    </form>
+                                    <form method="POST" action="{{ url_for('admin_coupon_delete', coupon_id=c.id) }}" style="display:inline;"
+                                          onsubmit="return confirm('Delete coupon {{ c.code }}? This cannot be undone.');">
+                                        <button type="submit" class="text-xs font-semibold text-red-600 hover:underline">Delete</button>
+                                    </form>
+                                </div>
+                            </td>
+                        </tr>
+                        <tr id="edit-row-{{ c.id }}" class="edit-row bg-rose-50">
+                            <td colspan="9" class="py-4 px-4">
+                                <form method="POST" action="{{ url_for('admin_coupon_edit', coupon_id=c.id) }}"
+                                      class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-3 items-end">
+                                    <div>
+                                        <label class="block text-xs font-bold text-gray-600 mb-1">Discount (%)</label>
+                                        <input type="number" name="discount_percent" min="1" max="100" value="{{ c.discount_percent|int }}" required
+                                               class="w-full px-2 py-1.5 border border-gray-300 rounded text-sm">
+                                    </div>
+                                    <div>
+                                        <label class="block text-xs font-bold text-gray-600 mb-1">Min Order (₹)</label>
+                                        <input type="number" name="min_order_amount" min="0" step="0.01" value="{{ c.min_order_amount or 0 }}"
+                                               class="w-full px-2 py-1.5 border border-gray-300 rounded text-sm">
+                                    </div>
+                                    <div>
+                                        <label class="block text-xs font-bold text-gray-600 mb-1">Expiry</label>
+                                        <input type="date" name="expiry_date" value="{{ c.expiry_date or '' }}"
+                                               class="w-full px-2 py-1.5 border border-gray-300 rounded text-sm">
+                                    </div>
+                                    <div>
+                                        <label class="block text-xs font-bold text-gray-600 mb-1">Category</label>
+                                        <select name="category" class="w-full px-2 py-1.5 border border-gray-300 rounded text-sm">
+                                            <option value="">All</option>
+                                            {% for cat in categories %}
+                                            <option value="{{ cat.category }}" {% if cat.category == c.category %}selected{% endif %}>{{ cat.category }}</option>
+                                            {% endfor %}
+                                        </select>
+                                    </div>
+                                    <div>
+                                        <label class="block text-xs font-bold text-gray-600 mb-1">Sub-Category</label>
+                                        <select name="sub_category" class="w-full px-2 py-1.5 border border-gray-300 rounded text-sm">
+                                            <option value="">All</option>
+                                            {% for sc in sub_categories %}
+                                            <option value="{{ sc.sub_category }}" {% if sc.sub_category == c.sub_category %}selected{% endif %}>{{ sc.sub_category }}</option>
+                                            {% endfor %}
+                                        </select>
+                                    </div>
+                                    <div>
+                                        <label class="block text-xs font-bold text-gray-600 mb-1">Usage Limit</label>
+                                        <input type="number" name="usage_limit" min="0" value="{{ c.usage_limit or 0 }}"
+                                               class="w-full px-2 py-1.5 border border-gray-300 rounded text-sm">
+                                    </div>
+                                    <div class="col-span-2 md:col-span-4 lg:col-span-6 flex gap-2">
+                                        <button type="submit" class="bg-rose-600 text-white px-4 py-1.5 rounded text-sm font-bold hover:bg-rose-700">Save Changes</button>
+                                        <button type="button" onclick="toggleEdit({{ c.id }})" class="bg-gray-200 text-gray-700 px-4 py-1.5 rounded text-sm font-bold hover:bg-gray-300">Cancel</button>
+                                    </div>
+                                </form>
+                            </td>
+                        </tr>
+                        {% else %}
+                        <tr>
+                            <td colspan="9" class="py-8 text-center text-gray-400">No coupons created yet. Use the form above to create your first one.</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        function toggleEdit(id) {
+            const row = document.getElementById('edit-row-' + id);
+            row.classList.toggle('open');
+        }
+        // Force coupon code input to uppercase as the admin types
+        document.addEventListener('DOMContentLoaded', function() {
+            const codeInput = document.querySelector('input[name="code"]');
+            if (codeInput) {
+                codeInput.addEventListener('input', function() {
+                    this.value = this.value.toUpperCase();
+                });
+            }
+        });
+    </script>
+</body>
+</html>

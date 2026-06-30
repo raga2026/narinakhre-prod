@@ -1353,10 +1353,7 @@ def place_order():
 
 @app.route('/api/track/<waybill>', methods=['GET'])
 def api_track_shipment(waybill):
-    """Live tracking status for a shipment, used by the public tracking page.
-    Retail-only — wholesale is a quote-based service with no shipments to track."""
-    if g.site_type != 'retail':
-        return jsonify({"status": False, "msg": "Tracking not available"}), 403
+    """Live tracking status for a shipment, used by the public tracking page."""
     provider = get_shipping_provider(
         app.config['SHIPPING_PROVIDER'],
         api_token=app.config.get('DELHIVERY_API_KEY')
@@ -1371,10 +1368,7 @@ def api_track_shipment(waybill):
 
 @app.route('/track/<waybill>')
 def track_order_page(waybill):
-    """Public, shareable order-tracking page for retail customers only.
-    Wholesale is a quote-based service with no shipment tracking."""
-    if g.site_type != 'retail':
-        return redirect('/')
+    """Public, shareable order-tracking page for customers."""
     conn = get_db()
     order = conn.execute(
         'SELECT * FROM order_shipping WHERE delhivery_waybill=?', (waybill,)
