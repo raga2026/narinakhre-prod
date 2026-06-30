@@ -116,37 +116,41 @@ class DelhiveryProvider(BaseShippingProvider):
 
     def get_rates(self, o_pin, d_pin, weight, mode="Prepaid"):
         """
-        Get shipping charge (and COD fee if applicable) for a given route/weight.
+        Get shipping charge for a given route/weight.
         Returns dict with 'rate'/'shipping_charge' and 'cod_fee'.
 
-        Delhivery's invoice/charges API expects:
-          - md = shipping MODE: 'S' (Surface) or 'E' (Express)  [NOT payment mode]
-          - pt = PAYMENT TYPE: 'COD' or 'Pre-paid'
-          - cod = COD amount collected (0 if prepaid)
+        Delhivery's invoice/charges API official mandatory params (per their docs):
+          - md  = Billing Mode: 'E' (Express) or 'S' (Surface)
+          - cgm = Chargeable weight in GRAMS (integer)
+          - o_pin, d_pin = 6-digit pincodes
+          - ss  = Shipment Status: 'Delivered', 'RTO', or 'DTO' (required, even for an estimate —
+                  'Delivered' is used here since we're quoting a forward/delivered shipment)
+        Note: this endpoint does NOT take a payment-type param; COD surcharge is applied
+        separately by Delhivery's COD policy and isn't returned by this invoice endpoint,
+        so we estimate cod_fee with a flat business rule below.
         """
         if not self.api_token:
             return {"rate": 0, "shipping_charge": 0, "cod_fee": 0, "msg": "Delhivery API key not configured"}
         url = f"{self.base_url}/api/kinko/v1/invoice/charges/.json"
         is_cod = (mode == "COD")
-        payment_type = "COD" if is_cod else "Pre-paid"
         params = {
-            "ss": "R",
-            "md": "S",  # Surface shipping (use 'E' for Express if needed)
-            "pt": payment_type,
+            "md": "S",            # Surface shipping (use 'E' for Express if needed)
+            "cgm": str(int(float(weight))),  # chargeable weight in grams, integer
             "o_pin": str(o_pin),
             "d_pin": str(d_pin),
-            "wt": str(weight),
-            "cod": "1" if is_cod else "0"
+            "ss": "Delivered",    # required status param for a forward-shipment quote
         }
         try:
             response = requests.get(url, params=params, headers=self.headers, timeout=10)
             res_data = response.json()
             if isinstance(res_data, dict) and res_data.get('error'):
                 return {"rate": 0, "shipping_charge": 0, "cod_fee": 0, "msg": res_data['error']}
-            if res_data and isinstance(res_data, list):
+            if res_data and isinstance(res_data, list) and res_data:
                 charges = res_data[0]
-                total = charges.get('total_amount', 0)
-                cod_charge = charges.get('cod_charges', 0) if is_cod else 0
+                total = charges.get('total_amount', 0) or charges.get('gross_amount', 0)
+                # Delhivery's invoice API doesn't return a COD surcharge directly;
+                # apply a standard flat COD handling fee when payment mode is COD.
+                cod_charge = 25 if is_cod else 0
                 return {"rate": total, "shipping_charge": total, "cod_fee": cod_charge}
             return {"rate": 0, "shipping_charge": 0, "cod_fee": 0, "msg": "No rates found"}
         except Exception as e:
