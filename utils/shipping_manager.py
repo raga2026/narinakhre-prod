@@ -118,26 +118,35 @@ class DelhiveryProvider(BaseShippingProvider):
         """
         Get shipping charge (and COD fee if applicable) for a given route/weight.
         Returns dict with 'rate'/'shipping_charge' and 'cod_fee'.
+
+        Delhivery's invoice/charges API expects:
+          - md = shipping MODE: 'S' (Surface) or 'E' (Express)  [NOT payment mode]
+          - pt = PAYMENT TYPE: 'COD' or 'Pre-paid'
+          - cod = COD amount collected (0 if prepaid)
         """
         if not self.api_token:
             return {"rate": 0, "shipping_charge": 0, "cod_fee": 0, "msg": "Delhivery API key not configured"}
         url = f"{self.base_url}/api/kinko/v1/invoice/charges/.json"
-        cod_flag = "1" if mode == "COD" else "0"
+        is_cod = (mode == "COD")
+        payment_type = "COD" if is_cod else "Pre-paid"
         params = {
             "ss": "R",
-            "md": mode,
+            "md": "S",  # Surface shipping (use 'E' for Express if needed)
+            "pt": payment_type,
             "o_pin": str(o_pin),
             "d_pin": str(d_pin),
             "wt": str(weight),
-            "cod": cod_flag
+            "cod": "1" if is_cod else "0"
         }
         try:
             response = requests.get(url, params=params, headers=self.headers, timeout=10)
             res_data = response.json()
+            if isinstance(res_data, dict) and res_data.get('error'):
+                return {"rate": 0, "shipping_charge": 0, "cod_fee": 0, "msg": res_data['error']}
             if res_data and isinstance(res_data, list):
                 charges = res_data[0]
                 total = charges.get('total_amount', 0)
-                cod_charge = charges.get('cod_charges', 0) if mode == "COD" else 0
+                cod_charge = charges.get('cod_charges', 0) if is_cod else 0
                 return {"rate": total, "shipping_charge": total, "cod_fee": cod_charge}
             return {"rate": 0, "shipping_charge": 0, "cod_fee": 0, "msg": "No rates found"}
         except Exception as e:

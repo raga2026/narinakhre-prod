@@ -1159,11 +1159,11 @@ def delhivery_debug_pincode(pincode):
         except Exception:
             debug_info["raw_response_json"] = None
 
-        # Also test the shipping rate endpoint
+        # Also test the shipping rate endpoint (corrected: md=S/E is shipping mode, pt is payment type)
         try:
             rate_url = "https://track.delhivery.com/api/kinko/v1/invoice/charges/.json"
             rate_params = {
-                "ss": "R", "md": "Prepaid",
+                "ss": "R", "md": "S", "pt": "Pre-paid",
                 "o_pin": app.config.get('WAREHOUSE_PIN', ''),
                 "d_pin": pincode, "wt": "250", "cod": "0"
             }
