@@ -397,6 +397,19 @@ def initialize_database_if_needed():
             consignee_pincode TEXT NOT NULL,
             internal_order_id TEXT NOT NULL UNIQUE,
             delhivery_waybill TEXT
+        )''',
+        '''CREATE TABLE IF NOT EXISTS coupons (
+            id BIGSERIAL PRIMARY KEY,
+            code TEXT NOT NULL UNIQUE,
+            discount_percent FLOAT DEFAULT 0.0,
+            min_order_amount FLOAT DEFAULT 0.0,
+            category TEXT,
+            sub_category TEXT,
+            expiry_date DATE,
+            is_active INTEGER DEFAULT 1,
+            usage_limit INTEGER DEFAULT 0,
+            times_used INTEGER DEFAULT 0,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )'''
     ]
     client = get_supabase()
@@ -811,7 +824,13 @@ def checkout():
         display_cart.append(item_dict)
     
     subtotal = sum(item['price'] * item['units'] for item in display_cart)
-    return render_site('checkout.html', display_cart=display_cart, subtotal=subtotal, total_tax=0.0, discount=0.0, grand_total=subtotal)
+    applied_coupon = session.get('applied_coupon')
+    discount = applied_coupon['discount_amount'] if applied_coupon else 0.0
+    coupon_code = applied_coupon['code'] if applied_coupon else ''
+    grand_total = max(subtotal - discount, 0)
+
+    return render_site('checkout.html', display_cart=display_cart, subtotal=subtotal, total_tax=0.0,
+                        discount=discount, grand_total=grand_total, coupon_code=coupon_code)
 
 @app.route('/checkout/shipping', methods=['GET', 'POST'])
 @app.route('/retail/checkout/shipping', methods=['GET', 'POST'])
@@ -1298,7 +1317,21 @@ def place_order():
         (order_id, name, phone, f"{address_line1}, {address_line2}", city, state, pincode, waybill)
     )
     conn.commit()
+
+    # Finalize coupon usage if one was applied to this order
+    applied_coupon = session.get('applied_coupon')
+    if applied_coupon and applied_coupon.get('code'):
+        try:
+            conn.execute(
+                'UPDATE coupons SET times_used = times_used + 1 WHERE code=?',
+                (applied_coupon['code'],)
+            )
+            conn.commit()
+        except Exception as e:
+            app.logger.warning(f'Could not increment coupon usage: {e}')
+
     session.pop('cart', None)
+    session.pop('applied_coupon', None)
 
     # Use our own branded, shareable tracking page instead of the raw Delhivery URL
     tracking_url = url_for('track_order_page', waybill=waybill, _external=True) if waybill else None
@@ -1320,7 +1353,10 @@ def place_order():
 
 @app.route('/api/track/<waybill>', methods=['GET'])
 def api_track_shipment(waybill):
-    """Live tracking status for a shipment, used by the public tracking page."""
+    """Live tracking status for a shipment, used by the public tracking page.
+    Retail-only — wholesale is a quote-based service with no shipments to track."""
+    if g.site_type != 'retail':
+        return jsonify({"status": False, "msg": "Tracking not available"}), 403
     provider = get_shipping_provider(
         app.config['SHIPPING_PROVIDER'],
         api_token=app.config.get('DELHIVERY_API_KEY')
@@ -1335,12 +1371,114 @@ def api_track_shipment(waybill):
 
 @app.route('/track/<waybill>')
 def track_order_page(waybill):
-    """Public, shareable order-tracking page for customers."""
+    """Public, shareable order-tracking page for retail customers only.
+    Wholesale is a quote-based service with no shipment tracking."""
+    if g.site_type != 'retail':
+        return redirect('/')
     conn = get_db()
     order = conn.execute(
         'SELECT * FROM order_shipping WHERE delhivery_waybill=?', (waybill,)
     ).fetchone()
     return render_site('track_order.html', waybill=waybill, order=order)
+
+
+@app.route('/apply_coupon', methods=['POST'])
+def apply_coupon():
+    data = request.get_json(silent=True) or {}
+    code = (data.get('coupon') or '').strip().upper()
+    if not code:
+        return jsonify({"status": "error", "message": "Please enter a coupon code"}), 400
+
+    db = get_db()
+    coupon = db.execute(
+        "SELECT * FROM coupons WHERE code=? AND is_active=1", (code,)
+    ).fetchone()
+
+    if not coupon:
+        return jsonify({"status": "error", "message": "Invalid or inactive coupon code"}), 200
+
+    # Expiry check
+    if coupon['expiry_date']:
+        try:
+            from datetime import date as _date
+            expiry = coupon['expiry_date']
+            if isinstance(expiry, str):
+                expiry = datetime.strptime(expiry, '%Y-%m-%d').date()
+            if expiry < _date.today():
+                return jsonify({"status": "error", "message": "This coupon has expired"}), 200
+        except Exception:
+            pass
+
+    # Usage limit check
+    if coupon['usage_limit'] and coupon['usage_limit'] > 0:
+        if coupon['times_used'] >= coupon['usage_limit']:
+            return jsonify({"status": "error", "message": "This coupon has reached its usage limit"}), 200
+
+    # Calculate cart subtotal, optionally filtered by category/sub_category
+    cart = session.get('cart', {})
+    if not cart:
+        return jsonify({"status": "error", "message": "Your cart is empty"}), 200
+
+    eligible_subtotal = 0.0
+    full_subtotal = 0.0
+    for item in cart.values():
+        units = item.get('units', item.get('qty', 1))
+        price = item.get('price', 0)
+        line_total = price * units
+        full_subtotal += line_total
+
+        applies = True
+        if coupon['category'] or coupon['sub_category']:
+            prod = db.execute(
+                'SELECT category, sub_category FROM products WHERE sku=?', (item.get('sku'),)
+            ).fetchone()
+            if prod:
+                if coupon['category'] and prod['category'] != coupon['category']:
+                    applies = False
+                if coupon['sub_category'] and prod['sub_category'] != coupon['sub_category']:
+                    applies = False
+            else:
+                applies = False
+        if applies:
+            eligible_subtotal += line_total
+
+    # Minimum order amount check (checked against full cart subtotal)
+    if coupon['min_order_amount'] and full_subtotal < coupon['min_order_amount']:
+        return jsonify({
+            "status": "error",
+            "message": f"Minimum order amount of \u20b9{coupon['min_order_amount']:.0f} required for this coupon"
+        }), 200
+
+    if eligible_subtotal <= 0:
+        return jsonify({
+            "status": "error",
+            "message": "This coupon doesn't apply to any items in your cart"
+        }), 200
+
+    discount = round(eligible_subtotal * (coupon['discount_percent'] / 100.0), 2)
+
+    session['applied_coupon'] = {
+        "code": code,
+        "discount_percent": coupon['discount_percent'],
+        "discount_amount": discount,
+        "category": coupon['category'],
+        "sub_category": coupon['sub_category']
+    }
+    session.modified = True
+
+    return jsonify({
+        "status": "success",
+        "message": f"Coupon applied! You saved \u20b9{discount:.0f}",
+        "discount": discount,
+        "code": code
+    })
+
+
+@app.route('/remove_coupon', methods=['POST'])
+def remove_coupon():
+    session.pop('applied_coupon', None)
+    session.modified = True
+    return jsonify({"status": "success"})
 
 
 @app.route('/clear_quote', methods=['POST'])
@@ -1786,6 +1924,103 @@ def admin_upload_excel():
     except Exception as exc:
         flash(f'Catalog sync failed: {exc}')
         return redirect(url_for('admin_dashboard'))
+
+@app.route('/admin/coupons', methods=['GET'])
+@admin_required
+def admin_coupons():
+    db = get_db()
+    coupons = db.execute('SELECT * FROM coupons ORDER BY id DESC').fetchall()
+    categories = db.execute(
+        "SELECT DISTINCT category FROM products WHERE category IS NOT NULL AND category != '' ORDER BY category"
+    ).fetchall()
+    sub_categories = db.execute(
+        "SELECT DISTINCT sub_category FROM products WHERE sub_category IS NOT NULL AND sub_category != '' ORDER BY sub_category"
+    ).fetchall()
+    today_str = datetime.now().strftime('%Y-%m-%d')
+    return render_template('admin/admin_coupons.html',
+                            coupons=coupons, categories=categories, sub_categories=sub_categories,
+                            today_str=today_str)
+
+
+@app.route('/admin/coupons/create', methods=['POST'])
+@admin_required
+def admin_coupon_create():
+    db = get_db()
+    code = (request.form.get('code') or '').strip().upper()
+    discount_percent = request.form.get('discount_percent', type=float) or 0.0
+    min_order_amount = request.form.get('min_order_amount', type=float) or 0.0
+    category = (request.form.get('category') or '').strip()
+    sub_category = (request.form.get('sub_category') or '').strip()
+    expiry_date = (request.form.get('expiry_date') or '').strip() or None
+    usage_limit = request.form.get('usage_limit', type=int) or 0
+
+    if not code:
+        flash('Coupon code is required.')
+        return redirect(url_for('admin_coupons'))
+    if discount_percent <= 0 or discount_percent > 100:
+        flash('Discount percent must be between 1 and 100.')
+        return redirect(url_for('admin_coupons'))
+
+    try:
+        db.execute(
+            "INSERT INTO coupons (code, discount_percent, min_order_amount, category, sub_category, expiry_date, usage_limit, is_active) VALUES (?,?,?,?,?,?,?,1)",
+            (code, discount_percent, min_order_amount, category or None, sub_category or None, expiry_date, usage_limit)
+        )
+        db.commit()
+        flash('Coupon "' + code + '" created successfully.')
+    except Exception as e:
+        flash('Could not create coupon - code may already exist. (' + str(e) + ')')
+    return redirect(url_for('admin_coupons'))
+
+
+@app.route('/admin/coupons/<int:coupon_id>/toggle', methods=['POST'])
+@admin_required
+def admin_coupon_toggle(coupon_id):
+    db = get_db()
+    row = db.execute('SELECT is_active FROM coupons WHERE id=?', (coupon_id,)).fetchone()
+    if row is None:
+        flash('Coupon not found.')
+        return redirect(url_for('admin_coupons'))
+    new_status = 0 if row['is_active'] else 1
+    db.execute('UPDATE coupons SET is_active=? WHERE id=?', (new_status, coupon_id))
+    db.commit()
+    flash('Coupon status updated.')
+    return redirect(url_for('admin_coupons'))
+
+
+@app.route('/admin/coupons/<int:coupon_id>/delete', methods=['POST'])
+@admin_required
+def admin_coupon_delete(coupon_id):
+    db = get_db()
+    db.execute('DELETE FROM coupons WHERE id=?', (coupon_id,))
+    db.commit()
+    flash('Coupon deleted.')
+    return redirect(url_for('admin_coupons'))
+
+
+@app.route('/admin/coupons/<int:coupon_id>/edit', methods=['POST'])
+@admin_required
+def admin_coupon_edit(coupon_id):
+    db = get_db()
+    discount_percent = request.form.get('discount_percent', type=float) or 0.0
+    min_order_amount = request.form.get('min_order_amount', type=float) or 0.0
+    category = (request.form.get('category') or '').strip()
+    sub_category = (request.form.get('sub_category') or '').strip()
+    expiry_date = (request.form.get('expiry_date') or '').strip() or None
+    usage_limit = request.form.get('usage_limit', type=int) or 0
+
+    if discount_percent <= 0 or discount_percent > 100:
+        flash('Discount percent must be between 1 and 100.')
+        return redirect(url_for('admin_coupons'))
+
+    db.execute(
+        "UPDATE coupons SET discount_percent=?, min_order_amount=?, category=?, sub_category=?, expiry_date=?, usage_limit=? WHERE id=?",
+        (discount_percent, min_order_amount, category or None, sub_category or None, expiry_date, usage_limit, coupon_id)
+    )
+    db.commit()
+    flash('Coupon updated.')
+    return redirect(url_for('admin_coupons'))
+
 
 @app.route('/admin/login', methods=['GET', 'POST'])
 def admin_login():
