@@ -6,6 +6,7 @@
     <title>Coupon Manager - NariNakhre Admin</title>
     <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
     <style>
+        /* Tailwind 2.2.19 CDN has no "rose" palette built in — define our own */
         .badge-active { background:#dcfce7; color:#15803d; }
         .badge-inactive { background:#f1f5f9; color:#64748b; }
         .badge-expired { background:#fee2e2; color:#b91c1c; }
@@ -13,6 +14,19 @@
         tr:hover { background:#fff7f8; }
         .edit-row { display:none; }
         .edit-row.open { display:table-row; }
+
+        .bg-rose-600 { background-color:#e11d48 !important; }
+        .bg-rose-600:hover, .hover\:bg-rose-700:hover { background-color:#be123c !important; }
+        .bg-rose-50 { background-color:#fff1f2 !important; }
+        .text-rose-600 { color:#e11d48 !important; }
+        .text-rose-700 { color:#be123c !important; }
+        .border-rose-300 { border-color:#fda4af !important; }
+        .focus\:border-rose-500:focus { border-color:#f43f5e !important; }
+        .focus\:ring-rose-500:focus { box-shadow:0 0 0 1px #f43f5e !important; }
+        .text-amber-600 { color:#d97706 !important; }
+        .text-green-600 { color:#16a34a !important; }
+        .text-red-600 { color:#dc2626 !important; }
+        .text-blue-600 { color:#2563eb !important; }
     </style>
 </head>
 <body class="bg-gray-100 min-h-screen">
