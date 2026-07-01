@@ -156,6 +156,7 @@
     <input type="text" id="ck-coupon" placeholder="Coupon code" value="{{ coupon_code or '' }}">
     <button onclick="applyCoupon()">Apply</button>
   </div>
+  <div id="coupon-msg" style="display:none;font-size:0.78rem;font-weight:700;color:#16a34a;padding:4px 2px 0;"></div>
   <div id="ck-coupon-msg" style="font-size:0.75rem;margin:-6px 0 10px;display:none;"></div>
   {% if coupon_code %}
   <div style="display:flex;align-items:center;justify-content:space-between;background:#f0fdf4;border:1.5px solid #86efac;border-radius:12px;padding:8px 12px;margin-bottom:10px;">
@@ -168,7 +169,12 @@
   <div class="ck-summary">
     <div class="ck-summary-title">Order Summary</div>
     <div class="ck-sum-row"><span>Subtotal</span><span id="s-subtotal">₹{{ subtotal|round(0)|int }}</span></div>
-    <div class="ck-sum-row"><span>GST</span><span>₹{{ total_tax|round(2) }}</span></div>
+    <div class="ck-sum-row"><span>GST (incl.)</span><span>₹{{ total_tax|round(2) }}</span></div>
+    {% if discount and discount > 0 %}
+    <div class="ck-sum-row" id="s-discount-row" style="color:#4ade80;"><span>Discount</span><span id="s-discount">−₹{{ discount|round(0)|int }}</span></div>
+    {% else %}
+    <div class="ck-sum-row" id="s-discount-row" style="display:none;color:#4ade80;"><span>Discount</span><span id="s-discount">₹0</span></div>
+    {% endif %}
     <div class="ck-sum-row"><span>Shipping</span><span id="s-ship" style="color:#4ade80;font-weight:700;">FREE</span></div>
     <div class="ck-sum-row" id="s-cod-row" style="display:none;"><span>COD Fee</span><span id="s-cod" style="color:#fbbf24;font-weight:700;">₹0</span></div>
     {% if discount and discount > 0 %}
@@ -241,6 +247,9 @@
 <script>
 const RZP_KEY = {{ config.get('RAZORPAY_KEY_ID', '')|tojson }};
 let ckServiceable = false, ckShip = 0, ckCodFee = 0;
+let appliedCoupon = null;  // {pct, min_order, max_discount} set when coupon applied
+let currentDiscount = {{ discount|default(0)|round(2) }};  // current effective discount
+const couponMsgEl = document.getElementById('coupon-msg');
 const subtotalBase = {{ subtotal|round(2) }};
 const gstBase = {{ total_tax|round(2) }};
 const discountBase = {{ discount|default(0)|round(2) }};
@@ -296,6 +305,9 @@ function ckRecalc() {
 }
 
 /* ── Coupon ── */
+// Add coupon-msg element if not already present (safety check)
+// It's referenced by couponMsgEl above
+
 function applyCoupon() {
     const code = document.getElementById('ck-coupon').value.trim();
     const msgEl = document.getElementById('ck-coupon-msg');
@@ -332,30 +344,43 @@ document.getElementById('ck-clear-btn').addEventListener('click', function(){
 });
 
 /* ── Pincode check ── */
+let ckPinCheckTimer = null; // debounce timer
 function ckCheckPin() {
     const pin = document.getElementById('ck-pin').value.trim();
     const chk=document.getElementById('ck-pin-chk');
     const ok=document.getElementById('ck-pin-ok');
     const err=document.getElementById('ck-pin-err');
-    [chk,ok,err].forEach(e=>e.style.display='none');
-    document.getElementById('ck-city').value='';
-    ckServiceable=false; ckShip=0; ckCodFee=0;
-    if(!/^\d{6}$/.test(pin)){ckUpdateSummary();return;}
-    chk.style.display='block';
-    fetch(`/api/delhivery/check/${pin}`)
-    .then(r=>r.json()).then(d=>{
-        chk.style.display='none';
-        if(d.serviceable||d.status){
-            ok.style.display='block';
-            document.getElementById('ck-city').value=d.city||'';
-            document.getElementById('ck-state').value=d.state||'';
-            ckServiceable=true;
-            ckFetchShipping(pin);
-        } else {
-            err.style.display='block';
-            ckUpdateSummary();
-        }
-    }).catch(()=>{ chk.style.display='none'; err.style.display='block'; ckUpdateSummary(); });
+
+    // While typing (< 6 digits), just clear the result without resetting serviceability
+    if(pin.length < 6) {
+        [chk,ok,err].forEach(e=>e.style.display='none');
+        return;
+    }
+
+    // Valid 6-digit pin entered — debounce 400ms so we don't hit API on every keystroke
+    clearTimeout(ckPinCheckTimer);
+    ckPinCheckTimer = setTimeout(() => {
+        [chk,ok,err].forEach(e=>e.style.display='none');
+        document.getElementById('ck-city').value='';
+        // Only reset serviceability NOW that we're about to recheck
+        ckServiceable=false; ckShip=0; ckCodFee=0;
+        if(!/^\d{6}$/.test(pin)){ckUpdateSummary();return;}
+        chk.style.display='block';
+        fetch(`/api/delhivery/check/${pin}`)
+        .then(r=>r.json()).then(d=>{
+            chk.style.display='none';
+            if(d.serviceable||d.status){
+                ok.style.display='block';
+                document.getElementById('ck-city').value=d.city||'';
+                document.getElementById('ck-state').value=d.state||'';
+                ckServiceable=true;
+                ckFetchShipping(pin);
+            } else {
+                err.style.display='block';
+                ckUpdateSummary();
+            }
+        }).catch(()=>{ chk.style.display='none'; err.style.display='block'; ckUpdateSummary(); });
+    }, 400);
 }
 function ckFetchShipping(pin) {
     const mode = document.querySelector('input[name="payment_mode"]:checked')?.value||'Prepaid';
@@ -383,11 +408,25 @@ function ckUpdateSummary() {
     document.getElementById('s-ship').style.color = '#4ade80';
     const codRow=document.getElementById('s-cod-row');
     const codFeeEl=document.getElementById('s-cod');
-    codRow.style.display = (mode==='COD')?'flex':'none';
-    if(codFeeEl) codFeeEl.textContent='₹'+cod;
     // Shipping FREE — not added to customer total
     const cod = (mode==='COD'&&ckServiceable)?ckCodFee:0;
-    const total = sub + cod - discountBase;
+    codRow.style.display = (mode==='COD')?'flex':'none';
+    if(codFeeEl) codFeeEl.textContent='₹'+cod;
+    // Revalidate coupon on every recalc
+    const effectiveSub = sub;
+    let effectiveDiscount = 0;
+    if(appliedCoupon && effectiveSub >= appliedCoupon.min_order) {
+        effectiveDiscount = Math.min(
+            effectiveSub * (appliedCoupon.pct / 100),
+            appliedCoupon.max_discount > 0 ? appliedCoupon.max_discount : Infinity
+        );
+        if(couponMsgEl) { couponMsgEl.style.display='block'; couponMsgEl.textContent='✓ Coupon applied: −₹'+effectiveDiscount.toFixed(0); }
+    } else if(appliedCoupon && effectiveSub < appliedCoupon.min_order) {
+        effectiveDiscount = 0;
+        if(couponMsgEl) { couponMsgEl.style.display='block'; couponMsgEl.style.color='#dc2626'; couponMsgEl.textContent='⚠ Coupon removed: order below minimum ₹'+appliedCoupon.min_order; }
+    }
+    const total = effectiveSub + cod - effectiveDiscount;
+    currentDiscount = effectiveDiscount;
     document.getElementById('s-total').textContent='₹'+total.toFixed(0);
 }
 
@@ -416,10 +455,30 @@ document.getElementById('ck-form').addEventListener('submit', function(e) {
     const mode  = form.payment_mode.value;
     const city  = document.getElementById('ck-city').value;
 
-    if (!ckServiceable) {
-        alert('Please enter a serviceable pincode.');
+    // Re-verify serviceability fresh on submit (guards against stale ckServiceable state
+    // when the modal was reopened or the main checkout page pincode bar was used separately)
+    const freshPin = pin.trim();
+    if (!/^\d{6}$/.test(freshPin)) {
+        alert('Please enter a valid 6-digit pincode.');
         submitBtn.disabled = false; submitBtn.textContent = '✓ Complete Purchase';
         return;
+    }
+    // Quick re-check serviceability before proceeding
+    try {
+        const svcR = await fetch('/api/delhivery/check/' + freshPin);
+        const svcD = await svcR.json();
+        if (!svcD.serviceable && !svcD.status) {
+            alert('Pincode ' + freshPin + ' is not serviceable. Please use a different delivery address.');
+            submitBtn.disabled = false; submitBtn.textContent = '✓ Complete Purchase';
+            return;
+        }
+        // Update city/state from fresh check
+        if (svcD.city) document.getElementById('ck-city').value = svcD.city;
+        if (svcD.state) document.getElementById('ck-state').value = svcD.state || '';
+        ckServiceable = true;
+    } catch(e) {
+        // If API fails, proceed anyway (don't block checkout for a timeout)
+        console.warn('Serviceability re-check failed:', e);
     }
 
     let sub = 0;
@@ -431,7 +490,7 @@ document.getElementById('ck-form').addEventListener('submit', function(e) {
     // GST is already INCLUDED in retail_price — never add it on top.
     // Shipping is FREE for customers — absorbed in product pricing.
     // Payable = product total - coupon discount only.
-    const totalRupees = (sub - discountBase);
+    const totalRupees = Math.max(sub - currentDiscount, 0);
 
     // Step 1: Create the shipment / order record (form-encoded, matches backend)
     const fd = new FormData();
