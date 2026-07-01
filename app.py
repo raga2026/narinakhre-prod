@@ -44,7 +44,6 @@ SUPABASE_KEY = os.environ.get('SUPABASE_KEY', '')
 app.config['SHIPPING_PROVIDER'] = os.environ.get('SHIPPING_PROVIDER', 'mock')
 app.config['DELHIVERY_API_KEY'] = os.environ.get('DELHIVERY_API_KEY', '')
 app.config['WAREHOUSE_PIN'] = os.environ.get('WAREHOUSE_PIN', '482001')
-app.config['WAREHOUSE_PIN'] = os.environ.get('WAREHOUSE_PIN', '400001')
 app.config['RAZORPAY_KEY_ID'] = os.environ.get('RAZORPAY_KEY_ID', '')
 app.config['RAZORPAY_KEY_SECRET'] = os.environ.get('RAZORPAY_KEY_SECRET', '')
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///:memory:'
@@ -55,6 +54,133 @@ db = SQLAlchemy(app)
 # Supabase client for database operations
 _supabase_client: SupabaseClient = None
 
+def create_delhivery_shipment(order_row, cart_items):
+    """
+    Create a shipment with Delhivery AFTER payment is confirmed.
+    Returns (waybill, error_msg).
+    Must be called from verify_payment, not checkout_process.
+
+    Required fields per Delhivery's Order Creation API:
+    - pin, phone, add, city, state, country (mandatory)
+    - order (unique order ID)
+    - payment_mode: 'Prepaid' or 'COD'
+    - cod_amount: required when payment_mode is COD
+    - weight: in grams
+    - shipment_width, shipment_height, shipment_length: in cm
+    - quantity: number of items
+    - hsn_code: mandatory per Delhivery docs (7117 for jewellery)
+    - seller_gst_tin: your GST number
+    - name: consignee name
+    - client: your registered client name in Delhivery
+    """
+    if not DELHIVERY_API_TOKEN:
+        return None, "Delhivery API token not configured"
+
+    consignee_name = order_row.get('consignee_name', '')
+    phone = order_row.get('consignee_phone', '')
+    address = order_row.get('consignee_address', '')
+    city = order_row.get('consignee_city', '')
+    state = order_row.get('consignee_state', '') or ''
+    pincode = str(order_row.get('consignee_pincode', ''))
+    internal_order_id = order_row.get('internal_order_id', '')
+    payment_mode = order_row.get('payment_mode', 'Prepaid')
+    total_amount = float(order_row.get('total_amount', 0) or 0)
+
+    # Compute total weight from cart
+    total_qty = sum(int(item.get('units', item.get('qty', 1))) for item in cart_items)
+    weight_grams = max(total_qty * 250, 250)
+
+    delhivery_payment_mode = 'COD' if payment_mode == 'COD' else 'Prepaid'
+
+    shipment = {
+        'name': consignee_name,
+        'phone': phone,
+        'add': address,
+        'city': city,
+        'state': state,
+        'pin': pincode,
+        'country': 'IN',
+        'order': internal_order_id,
+        'payment_mode': delhivery_payment_mode,
+        'cod_amount': total_amount if delhivery_payment_mode == 'COD' else 0,
+        'weight': weight_grams,
+        'shipment_width': 15,
+        'shipment_height': 10,
+        'shipment_length': 20,
+        'quantity': total_qty,
+        'hsn_code': '7117',           # HSN for imitation jewellery
+        'seller_gst_tin': DELHIVERY_SELLER_GST,
+        'client': DELHIVERY_CLIENT_NAME,
+        'return_pin': app.config.get('WAREHOUSE_PIN', '482001'),
+        'return_city': WAREHOUSE_CITY,
+        'return_state': WAREHOUSE_STATE,
+        'return_add': WAREHOUSE_ADDRESS or address,
+        'return_phone': WAREHOUSE_PHONE or phone,
+        'return_name': DELHIVERY_CLIENT_NAME or consignee_name,
+        'return_country': 'IN',
+    }
+
+    payload = {
+        'shipments': [shipment],
+        'pickup_location': {'name': DELHIVERY_PICKUP_LOCATION},
+    }
+
+    try:
+        response = requests.post(
+            'https://track.delhivery.com/api/cmu/create.json',
+            data={'format': 'json', 'data': json.dumps(payload)},
+            headers={
+                'Authorization': f'Token {DELHIVERY_API_TOKEN}',
+                'Content-Type': 'application/x-www-form-urlencoded',
+            },
+            timeout=30,
+        )
+        resp_json = response.json()
+        app.logger.info(f"Delhivery create response: {resp_json}")
+
+        # Check for errors in response
+        if not resp_json.get('upload_wbn') and not resp_json.get('packages'):
+            error_msg = resp_json.get('rmk') or resp_json.get('error') or str(resp_json)
+            return None, f"Delhivery error: {error_msg}"
+
+        packages = resp_json.get('packages', [])
+        if packages and isinstance(packages, list):
+            waybill = packages[0].get('waybill')
+            if waybill:
+                # Schedule pickup request after creating shipment
+                _schedule_delhivery_pickup(waybill)
+                return waybill, None
+
+        return None, f"No waybill in response: {resp_json}"
+    except Exception as e:
+        app.logger.error(f"Delhivery shipment creation exception: {e}")
+        return None, str(e)
+
+
+def _schedule_delhivery_pickup(waybill):
+    """Schedule a pickup request for the given waybill. Best-effort, non-blocking."""
+    if not DELHIVERY_API_TOKEN or not DELHIVERY_PICKUP_LOCATION:
+        return
+    try:
+        from datetime import date, timedelta
+        pickup_date = (date.today() + timedelta(days=1)).strftime('%Y-%m-%d')
+        payload = {
+            'pickup_time': '10:00:00',
+            'pickup_date': pickup_date,
+            'pickup_location': DELHIVERY_PICKUP_LOCATION,
+            'expected_package_count': 1,
+        }
+        requests.post(
+            'https://track.delhivery.com/fm/request/new/',
+            json=payload,
+            headers={'Authorization': f'Token {DELHIVERY_API_TOKEN}'},
+            timeout=15,
+        )
+        app.logger.info(f"Pickup scheduled for waybill {waybill} on {pickup_date}")
+    except Exception as e:
+        app.logger.warning(f"Pickup scheduling failed (non-critical): {e}")
+
+
 def get_supabase():
     global _supabase_client
     if _supabase_client is None:
@@ -64,6 +190,11 @@ def get_supabase():
 DELHIVERY_API_TOKEN = os.environ.get('DELHIVERY_API_TOKEN', '')
 DELHIVERY_CLIENT_NAME = os.environ.get('DELHIVERY_CLIENT_NAME', '')
 DELHIVERY_PICKUP_LOCATION = os.environ.get('DELHIVERY_PICKUP_LOCATION', '')
+DELHIVERY_SELLER_GST = os.environ.get('DELHIVERY_SELLER_GST', '')
+WAREHOUSE_CITY = os.environ.get('WAREHOUSE_CITY', 'Jabalpur')
+WAREHOUSE_STATE = os.environ.get('WAREHOUSE_STATE', 'Madhya Pradesh')
+WAREHOUSE_ADDRESS = os.environ.get('WAREHOUSE_ADDRESS', '')
+WAREHOUSE_PHONE = os.environ.get('WAREHOUSE_PHONE', '')
 RAZORPAY_KEY_ID = os.environ.get('RAZORPAY_KEY_ID')
 RAZORPAY_KEY_SECRET = os.environ.get('RAZORPAY_KEY_SECRET')
 ADMIN_USERNAME = os.environ.get('ADMIN_USERNAME', '')
@@ -981,71 +1112,12 @@ def checkout_process():
     )
     conn.commit()
 
-    delhivery_payload = {
-        'shipments': [
-            {
-                'name': cleaned_name,
-                'phone': consignee_phone,
-                'add': cleaned_address,
-                'city': consignee_city,
-                'state': consignee_state,
-                'pin': consignee_pincode,
-                'country': 'IN',
-                'order': internal_order_id,
-                'payment_mode': 'Pre-paid',
-                'return_pin': app.config.get('WAREHOUSE_PIN', ''),
-                'client': DELHIVERY_CLIENT_NAME,
-            }
-        ],
-        'pickup_location': {
-            'name': DELHIVERY_PICKUP_LOCATION,
-        }
-    }
-
-    response = requests.post(
-        'https://track.delhivery.com/api/cmu/create.json',
-        data={
-            'format': 'json',
-            'data': json.dumps(delhivery_payload),
-        },
-        headers={
-            'Authorization': f'Token {DELHIVERY_API_TOKEN}',
-            'Content-Type': 'application/x-www-form-urlencoded',
-        },
-        timeout=30,
-    )
-
-    waybill = None
-    if response.status_code == 200:
-        try:
-            resp_json = response.json()
-            packages = resp_json.get('packages', [])
-            if isinstance(packages, list) and packages:
-                waybill = packages[0].get('waybill')
-        except Exception:
-            waybill = None
-
-    if waybill:
-        conn.execute(
-            'UPDATE order_shipping SET delhivery_waybill=? WHERE internal_order_id=?',
-            (waybill, internal_order_id)
-        )
-        conn.commit()
-
-    print('Sanitized shipping payload for Delhivery:', {
-        'internal_order_id': internal_order_id,
-        'consignee_name': cleaned_name,
-        'consignee_phone': consignee_phone,
-        'consignee_address': cleaned_address,
-        'consignee_city': consignee_city,
-        'consignee_state': consignee_state,
-        'consignee_pincode': consignee_pincode,
-        'waybill': waybill,
-    })
-
+    # Delhivery shipment is created AFTER payment confirmation (in verify_payment)
+    # NOT here - creating a shipment before payment risks uncollectable waybills
+    # if the customer abandons at the payment step.
     session['checkout_handover'] = {
         'internal_order_id': internal_order_id,
-        'waybill': waybill,
+        'waybill': None,  # waybill assigned after payment confirmed
     }
     session.modified = True
 
@@ -1242,16 +1314,97 @@ def verify_payment():
         )
         conn.commit()
 
+        # ── CREATE DELHIVERY SHIPMENT NOW (after payment confirmed) ──────────
+        # Fetch the full order row to pass to create_delhivery_shipment
+        order_row_dict = {}
+        waybill = None
+        try:
+            order_row = conn.execute(
+                'SELECT * FROM order_shipping WHERE internal_order_id=?',
+                (internal_order_id,)
+            ).fetchone()
+            if order_row:
+                order_row_dict = dict(order_row)
+            # Get cart items for weight calculation
+            cart = session.get('cart', {})
+            cart_items = list(cart.values()) if cart else []
+            waybill, del_error = create_delhivery_shipment(order_row_dict, cart_items)
+            if waybill:
+                conn.execute(
+                    'UPDATE order_shipping SET delhivery_waybill=?, consignee_state=? WHERE internal_order_id=?',
+                    (waybill, order_row_dict.get('consignee_state', ''), internal_order_id)
+                )
+                conn.commit()
+                app.logger.info(f"Delhivery waybill {waybill} created for order {internal_order_id}")
+            else:
+                app.logger.error(f"Delhivery shipment failed for order {internal_order_id}: {del_error}")
+        except Exception as del_exc:
+            app.logger.error(f"Delhivery creation exception: {del_exc}")
+
+        # ── SEND ORDER CONFIRMATION EMAILS ───────────────────────────────────
+        try:
+            customer_email = order_row_dict.get('consignee_email', '')
+            customer_name = order_row_dict.get('consignee_name', 'Customer')
+            total = order_row_dict.get('total_amount', 0)
+            tracking_url = ''
+            if waybill:
+                tracking_url = f"{request.url_root.rstrip('/')}/track/{waybill}"
+
+            # Email to customer
+            if customer_email:
+                customer_body = (
+                    f"Hi {customer_name},\n\n"
+                    f"Your Nari Nakhre order has been placed successfully!\n\n"
+                    f"Order ID: {internal_order_id}\n"
+                    f"Amount Paid: ₹{total:.2f}\n"
+                    + (f"Track your order: {tracking_url}\n" if tracking_url else "") +
+                    f"\nThank you for shopping with us!\n- Team Nari Nakhre"
+                )
+                send_contact_email(
+                    customer_email,
+                    f"Order Confirmed — {internal_order_id} | Nari Nakhre",
+                    customer_body
+                )
+
+            # Email to admin
+            admin_email = os.environ.get('ADMIN_EMAIL', 'mohinicosmetics.india@gmail.com')
+            admin_body = (
+                f"New order received!\n\n"
+                f"Order ID: {internal_order_id}\n"
+                f"Customer: {customer_name}\n"
+                f"Phone: {order_row_dict.get('consignee_phone', '')}\n"
+                f"Email: {customer_email}\n"
+                f"Address: {order_row_dict.get('consignee_address', '')}, "
+                f"{order_row_dict.get('consignee_city', '')}, {order_row_dict.get('consignee_pincode', '')}\n"
+                f"Amount: ₹{total:.2f}\n"
+                f"Payment: {razorpay_payment_id}\n"
+                + (f"Waybill: {waybill}\n" if waybill else "Delhivery waybill pending\n") +
+                (f"Track: {tracking_url}\n" if tracking_url else "")
+            )
+            send_contact_email(
+                admin_email,
+                f"🛍️ New Order — {internal_order_id}",
+                admin_body
+            )
+        except Exception as email_exc:
+            app.logger.warning(f"Order confirmation email failed (non-critical): {email_exc}")
+
+        # Store waybill in session for thank-you page
+        session['checkout_handover'] = {
+            'internal_order_id': internal_order_id,
+            'waybill': waybill,
+        }
+        session.pop('cart', None)
+        session.pop('applied_coupon', None)
         session.pop('razorpay_order_id', None)
         session.pop('payment_pending', None)
         session.pop('internal_order_id', None)
         session.pop('waybill', None)
-        session.pop('checkout_handover', None)
         session.modified = True
 
         # If called via AJAX (fetch), return JSON; if form POST, redirect
         if request.is_json or request.headers.get('X-Requested-With') == 'XMLHttpRequest' or request.content_type == 'application/json':
-            return jsonify({'status': 'success', 'message': 'Payment verified and order finalized'}), 200
+            return jsonify({'status': 'success', 'message': 'Payment verified and order finalized', 'waybill': waybill}), 200
         return redirect(url_for('thank_you'))
     except Exception as e:
         app.logger.error(f'Payment verification error: {e}')

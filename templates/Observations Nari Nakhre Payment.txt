@@ -10,4 +10,15 @@ Observations:
 9. the referral system while logging in, if they refer somene , they would get 200 reward points, each user will have a referral code, this referral code  whn applied to another user will be converted into reward points only when the user which he or she refered completes an order above 500 rupess.
 10. there should be an email triggered to the admin, mohinicosmetics.india@gmail.com  and also to the user when an order i created from info@narinakhre.com
 
+
+
+
+
+
+
+
+
+11.
+i have completely changed all the files given by you and also ran the Alter command in superbase sql editor, now there are a few issues, the shipping charges is also inclusive in the  price and it should only be mentioned in the breakup for admin and not to the customer, please mention it as FREE and mention the charges in the admin panel to calculate the total revenue, so while using the amount payable for calculating the GST is fine, there should be two Columns in admin to c report thi CGST and SGST which is half of the GST percentage each and also the state of delhivery should be entioned in the report. There is a minor chage in the way price is displayed for all products acros index, product detail and product cateegory pages, the MRP should be mentioned fir which should be Strike through and the Actual Retail price should be beside it along with the percentage discount on its right like in AMazon or other websites
 1
+12. i did not get any message from delhivery for order plaement or shipment collection, we should handle that as well, the pin 600083 is not serciable, the whol of indi should be deliverable, we should look into it as well

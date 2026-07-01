@@ -348,6 +348,7 @@ function ckCheckPin() {
         if(d.serviceable||d.status){
             ok.style.display='block';
             document.getElementById('ck-city').value=d.city||'';
+            document.getElementById('ck-state').value=d.state||'';
             ckServiceable=true;
             ckFetchShipping(pin);
         } else {
@@ -438,7 +439,7 @@ document.getElementById('ck-form').addEventListener('submit', function(e) {
     fd.append('consignee_phone', phone);
     fd.append('consignee_address', addr);
     fd.append('consignee_city', city);
-    fd.append('consignee_state', '');
+    fd.append('consignee_state', document.getElementById('ck-state').value || '');
     fd.append('consignee_pincode', pin);
     fd.append('payment_mode', mode);
     fd.append('email', email);
