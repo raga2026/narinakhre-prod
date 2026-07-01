@@ -455,30 +455,19 @@ document.getElementById('ck-form').addEventListener('submit', async function(e) 
     const mode  = form.payment_mode.value;
     const city  = document.getElementById('ck-city').value;
 
-    // Re-verify serviceability fresh on submit (guards against stale ckServiceable state
-    // when the modal was reopened or the main checkout page pincode bar was used separately)
+    // Validate pincode format
     const freshPin = pin.trim();
     if (!/^\d{6}$/.test(freshPin)) {
         alert('Please enter a valid 6-digit pincode.');
         submitBtn.disabled = false; submitBtn.textContent = '✓ Complete Purchase';
         return;
     }
-    // Quick re-check serviceability before proceeding
-    try {
-        const svcR = await fetch('/api/delhivery/check/' + freshPin);
-        const svcD = await svcR.json();
-        if (!svcD.serviceable && !svcD.status) {
-            alert('Pincode ' + freshPin + ' is not serviceable. Please use a different delivery address.');
-            submitBtn.disabled = false; submitBtn.textContent = '✓ Complete Purchase';
-            return;
-        }
-        // Update city/state from fresh check
-        if (svcD.city) document.getElementById('ck-city').value = svcD.city;
-        if (svcD.state) document.getElementById('ck-state').value = svcD.state || '';
-        ckServiceable = true;
-    } catch(e) {
-        // If API fails, proceed anyway (don't block checkout for a timeout)
-        console.warn('Serviceability re-check failed:', e);
+    // Trust the serviceability check done when user typed the pin (ckCheckPin)
+    // No re-check here — that caused race conditions showing conflicting messages
+    if (!ckServiceable) {
+        alert('Please wait for the pincode check to complete, or try a different pincode.');
+        submitBtn.disabled = false; submitBtn.textContent = '✓ Complete Purchase';
+        return;
     }
 
     let sub = 0;
