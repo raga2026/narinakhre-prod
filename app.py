@@ -147,8 +147,7 @@ def create_delhivery_shipment(order_row, cart_items):
         if packages and isinstance(packages, list):
             waybill = packages[0].get('waybill')
             if waybill:
-                # Schedule pickup request after creating shipment
-                _schedule_delhivery_pickup(waybill)
+                # Pickup scheduled by admin via Order Processing module (not auto)
                 return waybill, None
 
         return None, f"No waybill in response: {resp_json}"
@@ -1250,6 +1249,109 @@ def create_razorpay_order():
         }), 500
 
 
+@app.route('/api/confirm-cod', methods=['POST'])
+def confirm_cod_order():
+    """
+    Called immediately after a COD customer confirms their order details.
+    Creates the Delhivery shipment, updates order to cod_confirmed,
+    sends confirmation emails to customer and admin.
+    """
+    g.site_type = 'retail'
+    checkout_handover = session.get('checkout_handover', {})
+    internal_order_id = checkout_handover.get('internal_order_id', '').strip()
+
+    if not internal_order_id:
+        return jsonify({'status': 'error', 'message': 'No active order found'}), 400
+
+    conn = get_db()
+    order_row = conn.execute(
+        'SELECT * FROM order_shipping WHERE internal_order_id=? AND status=?',
+        (internal_order_id, 'pending')
+    ).fetchone()
+
+    if not order_row:
+        return jsonify({'status': 'error', 'message': 'Order not found or already processed'}), 400
+
+    order_row_dict = dict(order_row)
+
+    # Create Delhivery shipment immediately for COD
+    cart = session.get('cart', {})
+    cart_items = list(cart.values()) if cart else []
+    waybill, del_error = create_delhivery_shipment(order_row_dict, cart_items)
+
+    if waybill:
+        conn.execute(
+            'UPDATE order_shipping SET status=?, delhivery_waybill=? WHERE internal_order_id=?',
+            ('cod_confirmed', waybill, internal_order_id)
+        )
+    else:
+        # Still confirm the order even if Delhivery fails - admin can retry from console
+        app.logger.error(f"Delhivery shipment failed for COD order {internal_order_id}: {del_error}")
+        conn.execute(
+            'UPDATE order_shipping SET status=? WHERE internal_order_id=?',
+            ('cod_confirmed', internal_order_id)
+        )
+    conn.commit()
+
+    # Send confirmation emails
+    try:
+        customer_email = order_row_dict.get('consignee_email', '')
+        customer_name = order_row_dict.get('consignee_name', 'Customer')
+        total = order_row_dict.get('total_amount', 0)
+        tracking_url = f"{request.url_root.rstrip('/')}/track/{waybill}" if waybill else ''
+
+        if customer_email:
+            customer_body = (
+                f"Hi {customer_name},\n\n"
+                f"Your Nari Nakhre COD order has been placed successfully!\n\n"
+                f"Order ID: {internal_order_id}\n"
+                f"Amount to pay on delivery: ₹{total:.2f}\n"
+                + (f"Track your order: {tracking_url}\n" if tracking_url else "") +
+                f"\nPlease keep the exact amount ready at the time of delivery.\n"
+                f"- Team Nari Nakhre"
+            )
+            send_contact_email(
+                customer_email,
+                f"Order Confirmed (COD) — {internal_order_id} | Nari Nakhre",
+                customer_body
+            )
+
+        admin_email = os.environ.get('ADMIN_EMAIL', 'mohinicosmetics.india@gmail.com')
+        admin_body = (
+            f"New COD order received!\n\n"
+            f"Order ID: {internal_order_id}\n"
+            f"Customer: {customer_name}\n"
+            f"Phone: {order_row_dict.get('consignee_phone', '')}\n"
+            f"Address: {order_row_dict.get('consignee_address', '')}, "
+            f"{order_row_dict.get('consignee_city', '')}, {order_row_dict.get('consignee_pincode', '')}\n"
+            f"COD Amount: ₹{total:.2f}\n"
+            + (f"Waybill: {waybill}\n" if waybill else "Delhivery waybill pending — check admin console\n")
+            + (f"Track: {tracking_url}\n" if tracking_url else "")
+        )
+        send_contact_email(
+            admin_email,
+            f"🛍️ New COD Order — {internal_order_id}",
+            admin_body
+        )
+    except Exception as e:
+        app.logger.warning(f"COD order email failed (non-critical): {e}")
+
+    # Update session for thank-you page
+    session['checkout_handover'] = {
+        'internal_order_id': internal_order_id,
+        'waybill': waybill,
+    }
+    session.pop('cart', None)
+    session.pop('applied_coupon', None)
+    session.modified = True
+
+    return jsonify({
+        'status': 'success',
+        'waybill': waybill,
+        'internal_order_id': internal_order_id
+    }), 200
+
+
 @app.route('/api/verify-payment', methods=['POST'])
 def verify_payment():
     g.site_type = 'retail'
@@ -2201,6 +2303,114 @@ def admin_upload_excel():
     except Exception as exc:
         flash(f'Catalog sync failed: {exc}')
         return redirect(url_for('admin_dashboard'))
+
+@app.route('/admin/orders')
+@admin_required
+def admin_orders():
+    conn = get_db()
+    current_status = request.args.get('status', 'all')
+    if current_status == 'all':
+        orders = conn.execute("SELECT * FROM order_shipping ORDER BY id DESC LIMIT 200").fetchall()
+    else:
+        orders = conn.execute("SELECT * FROM order_shipping WHERE status=? ORDER BY id DESC", (current_status,)).fetchall()
+    status_counts = conn.execute("SELECT status, COUNT(*) as count FROM order_shipping GROUP BY status").fetchall()
+    count_map = {r['status']: r['count'] for r in status_counts}
+    stats = [
+        {'label':'All','count':sum(count_map.values()),'color':'#374151'},
+        {'label':'Paid','count':count_map.get('paid',0),'color':'#059669'},
+        {'label':'COD','count':count_map.get('cod_confirmed',0),'color':'#2563eb'},
+        {'label':'Accepted','count':count_map.get('accepted',0),'color':'#7c3aed'},
+        {'label':'Dispatched','count':count_map.get('dispatched',0),'color':'#0369a1'},
+        {'label':'Delivered','count':count_map.get('delivered',0),'color':'#15803d'},
+        {'label':'Cancelled','count':count_map.get('cancelled',0),'color':'#b91c1c'},
+    ]
+    return render_template('admin/admin_orders.html', orders=orders, stats=stats, current_status=current_status)
+
+
+@app.route('/admin/orders/<int:order_id>/accept', methods=['POST'])
+@admin_required
+def admin_order_accept(order_id):
+    conn = get_db()
+    order = conn.execute('SELECT * FROM order_shipping WHERE id=?', (order_id,)).fetchone()
+    if not order:
+        flash('Order not found.', 'error')
+        return redirect(url_for('admin_orders'))
+    waybill = order['delhivery_waybill']
+    if not waybill:
+        order_dict = dict(order)
+        waybill, err = create_delhivery_shipment(order_dict, [])
+        if waybill:
+            conn.execute('UPDATE order_shipping SET delhivery_waybill=? WHERE id=?', (waybill, order_id))
+        else:
+            flash(f'Could not create Delhivery shipment: {err}', 'error')
+            return redirect(url_for('admin_orders'))
+    # Schedule pickup with Delhivery
+    pickup_scheduled = False
+    try:
+        from datetime import date, timedelta
+        pickup_date = (date.today() + timedelta(days=1)).strftime('%Y-%m-%d')
+        payload = {'pickup_time':'10:00:00','pickup_date':pickup_date,
+                   'pickup_location':DELHIVERY_PICKUP_LOCATION,'expected_package_count':1}
+        resp = requests.post('https://track.delhivery.com/fm/request/new/',
+            json=payload, headers={'Authorization':f'Token {DELHIVERY_API_TOKEN}'}, timeout=15)
+        pickup_scheduled = resp.status_code == 200
+        app.logger.info(f"Pickup request for {waybill}: {resp.status_code} {resp.text[:200]}")
+    except Exception as e:
+        app.logger.warning(f"Pickup scheduling failed: {e}")
+    conn.execute('UPDATE order_shipping SET status=? WHERE id=?', ('accepted', order_id))
+    conn.commit()
+    msg = f"Order accepted. Waybill: {waybill}."
+    msg += " Pickup scheduled for tomorrow." if pickup_scheduled else " Note: Schedule pickup manually in Delhivery panel."
+    flash(msg, 'success')
+    return redirect(url_for('admin_orders'))
+
+
+@app.route('/admin/orders/<int:order_id>/cancel', methods=['POST'])
+@admin_required
+def admin_order_cancel(order_id):
+    conn = get_db()
+    order = conn.execute('SELECT * FROM order_shipping WHERE id=?', (order_id,)).fetchone()
+    if not order:
+        flash('Order not found.', 'error')
+        return redirect(url_for('admin_orders'))
+    waybill = order['delhivery_waybill']
+    if waybill and DELHIVERY_API_TOKEN:
+        try:
+            requests.post('https://track.delhivery.com/api/p/edit',
+                json={'waybill':waybill,'cancellation':True},
+                headers={'Authorization':f'Token {DELHIVERY_API_TOKEN}'}, timeout=15)
+        except Exception as e:
+            app.logger.warning(f"Delhivery cancellation failed: {e}")
+    conn.execute('UPDATE order_shipping SET status=? WHERE id=?', ('cancelled', order_id))
+    conn.commit()
+    flash(f"Order {order['internal_order_id']} cancelled.", 'success')
+    return redirect(url_for('admin_orders'))
+
+
+@app.route('/admin/orders/<int:order_id>/label')
+@admin_required
+def admin_shipping_label(order_id):
+    conn = get_db()
+    order = conn.execute('SELECT * FROM order_shipping WHERE id=?', (order_id,)).fetchone()
+    if not order or not order['delhivery_waybill']:
+        flash('No waybill found for this order.', 'error')
+        return redirect(url_for('admin_orders'))
+    return render_template('admin/shipping_label.html', order=order)
+
+
+@app.route('/admin/orders/<int:order_id>/invoice')
+@admin_required
+def admin_order_invoice(order_id):
+    conn = get_db()
+    order = conn.execute('SELECT * FROM order_shipping WHERE id=?', (order_id,)).fetchone()
+    if not order:
+        flash('Order not found.', 'error')
+        return redirect(url_for('admin_orders'))
+    return render_template('admin/invoice.html', order=order,
+                           seller_gst=DELHIVERY_SELLER_GST,
+                           seller_name='Nari Nakhre',
+                           seller_address=WAREHOUSE_ADDRESS)
+
 
 @app.route('/admin/coupons', methods=['GET'])
 @admin_required

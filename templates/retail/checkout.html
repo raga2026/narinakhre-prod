@@ -452,8 +452,20 @@ document.getElementById('ck-form').addEventListener('submit', function(e) {
         }
 
         if (mode === 'COD') {
-            window.location.href = '/thank_you';
-            return;
+            // For COD: confirm with backend immediately (creates Delhivery shipment, sends emails)
+            return fetch('/api/confirm-cod', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({})
+            })
+            .then(r => r.json())
+            .then(d => {
+                if (d.status === 'success') {
+                    window.location.href = '/thank_you';
+                } else {
+                    throw new Error(d.message || 'Could not confirm COD order');
+                }
+            });
         }
 
         // Step 2: Create Razorpay order
