@@ -44,10 +44,15 @@
 <body>
     <div class="ty-wrap">
         <img src="/static/assets/logo.png" alt="Nari Nakhre" class="ty-logo">
-        <div class="ty-icon">🎉</div>
+        <!-- Green animated checkmark -->
+        <div style="width:72px;height:72px;border-radius:50%;background:linear-gradient(135deg,#16a34a,#4ade80);display:flex;align-items:center;justify-content:center;margin:0 auto 16px;box-shadow:0 6px 20px rgba(22,163,74,0.35);">
+            <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+                <polyline points="20 6 9 17 4 12"></polyline>
+            </svg>
+        </div>
 
         {% if order_id %}
-        <div class="ty-title">Order Confirmed!</div>
+        <div class="ty-title" style="color:#16a34a;">Order Placed Successfully!</div>
         <div class="ty-sub">Thank you for shopping with Nari Nakhre.<br>We'll have your order on its way soon.</div>
 
         <div class="ty-card">

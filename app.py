@@ -64,6 +64,12 @@ def get_supabase():
 DELHIVERY_API_TOKEN = os.environ.get('DELHIVERY_API_TOKEN', '')
 DELHIVERY_CLIENT_NAME = os.environ.get('DELHIVERY_CLIENT_NAME', '')
 DELHIVERY_PICKUP_LOCATION = os.environ.get('DELHIVERY_PICKUP_LOCATION', '')
+DELHIVERY_SELLER_GST = os.environ.get('DELHIVERY_SELLER_GST', '')
+WAREHOUSE_CITY = os.environ.get('WAREHOUSE_CITY', 'Jabalpur')
+WAREHOUSE_STATE = os.environ.get('WAREHOUSE_STATE', 'Madhya Pradesh')
+WAREHOUSE_ADDRESS = os.environ.get('WAREHOUSE_ADDRESS', '')
+WAREHOUSE_PHONE = os.environ.get('WAREHOUSE_PHONE', '')
+ADMIN_EMAIL = os.environ.get('ADMIN_EMAIL', 'mohinicosmetics.india@gmail.com')
 RAZORPAY_KEY_ID = os.environ.get('RAZORPAY_KEY_ID')
 RAZORPAY_KEY_SECRET = os.environ.get('RAZORPAY_KEY_SECRET')
 ADMIN_USERNAME = os.environ.get('ADMIN_USERNAME', '')
@@ -428,6 +434,91 @@ def ensure_checkout_tables_exist():
 
 initialize_database_if_needed()
 ensure_checkout_tables_exist()
+
+
+def calculate_inclusive_gst(display_cart, discount=0.0, full_subtotal=0.0):
+    """Extract GST already included in retail prices (GST-inclusive pricing)."""
+    db = get_db()
+    total_gst = 0.0
+    for item in display_cart:
+        line_total = item.get('price', 0) * item.get('units', item.get('qty', 1))
+        if line_total <= 0:
+            continue
+        gst_rate = 3.0
+        sku = item.get('sku')
+        if sku:
+            try:
+                prod = db.execute('SELECT gst_percent FROM products WHERE sku=?', (sku,)).fetchone()
+                if prod and prod['gst_percent']:
+                    gst_rate = float(prod['gst_percent'])
+            except Exception:
+                pass
+        line_gst = line_total - (line_total / (1 + gst_rate / 100.0))
+        total_gst += line_gst
+    if discount and full_subtotal and full_subtotal > 0:
+        discount_ratio = min(discount / full_subtotal, 1.0)
+        total_gst = total_gst * (1 - discount_ratio)
+    total_gst = round(total_gst, 2)
+    half = round(total_gst / 2, 2)
+    return {'total_gst': total_gst, 'cgst': half, 'sgst': round(total_gst - half, 2)}
+
+
+def create_delhivery_shipment(order_row, cart_items):
+    """Create a Delhivery shipment after payment confirmation. Returns (waybill, error_msg)."""
+    if not DELHIVERY_API_TOKEN:
+        return None, "Delhivery API token not configured"
+    order_row_dict = dict(order_row) if not isinstance(order_row, dict) else order_row
+    consignee_name = order_row_dict.get('consignee_name', '')
+    phone = order_row_dict.get('consignee_phone', '')
+    address = order_row_dict.get('consignee_address', '')
+    city = order_row_dict.get('consignee_city', '')
+    state = order_row_dict.get('consignee_state', '') or ''
+    pincode = str(order_row_dict.get('consignee_pincode', ''))
+    internal_order_id = order_row_dict.get('internal_order_id', '')
+    payment_mode = order_row_dict.get('payment_mode', 'Prepaid')
+    total_amount = float(order_row_dict.get('total_amount', 0) or 0)
+    total_qty = max(sum(int(item.get('units', item.get('qty', 1))) for item in cart_items), 1) if cart_items else 1
+    weight_grams = max(total_qty * 250, 250)
+    delhivery_payment_mode = 'COD' if payment_mode == 'COD' else 'Prepaid'
+    shipment = {
+        'name': consignee_name, 'phone': phone, 'add': address,
+        'city': city, 'state': state, 'pin': pincode, 'country': 'IN',
+        'order': internal_order_id,
+        'payment_mode': delhivery_payment_mode,
+        'cod_amount': total_amount if delhivery_payment_mode == 'COD' else 0,
+        'weight': weight_grams,
+        'shipment_width': 15, 'shipment_height': 10, 'shipment_length': 20,
+        'quantity': total_qty, 'hsn_code': '7117',
+        'seller_gst_tin': DELHIVERY_SELLER_GST,
+        'client': DELHIVERY_CLIENT_NAME,
+        'return_pin': app.config.get('WAREHOUSE_PIN', '482001'),
+        'return_city': WAREHOUSE_CITY, 'return_state': WAREHOUSE_STATE,
+        'return_add': WAREHOUSE_ADDRESS or address,
+        'return_phone': WAREHOUSE_PHONE or phone,
+        'return_name': DELHIVERY_CLIENT_NAME or consignee_name,
+        'return_country': 'IN',
+    }
+    payload = {'shipments': [shipment], 'pickup_location': {'name': DELHIVERY_PICKUP_LOCATION}}
+    try:
+        response = requests.post(
+            'https://track.delhivery.com/api/cmu/create.json',
+            data={'format': 'json', 'data': json.dumps(payload)},
+            headers={'Authorization': f'Token {DELHIVERY_API_TOKEN}',
+                     'Content-Type': 'application/x-www-form-urlencoded'},
+            timeout=30,
+        )
+        resp_json = response.json()
+        app.logger.info(f"Delhivery create response: {resp_json}")
+        packages = resp_json.get('packages', [])
+        if packages and isinstance(packages, list):
+            waybill = packages[0].get('waybill')
+            if waybill:
+                return waybill, None
+        error_msg = resp_json.get('rmk') or resp_json.get('error') or str(resp_json)
+        return None, f"Delhivery error: {error_msg}"
+    except Exception as e:
+        app.logger.error(f"Delhivery shipment creation exception: {e}")
+        return None, str(e)
 
 
 def send_contact_email(to_email, subject, body, html_body=None):
@@ -1075,6 +1166,60 @@ def create_razorpay_order():
             'status': 'error',
             'message': 'Unable to create Razorpay order'
         }), 500
+
+
+@app.route('/api/confirm-cod', methods=['POST'])
+def confirm_cod_order():
+    """Confirm a COD order immediately after address submission."""
+    g.site_type = 'retail'
+    checkout_handover = session.get('checkout_handover', {})
+    internal_order_id = checkout_handover.get('internal_order_id', '').strip()
+    if not internal_order_id:
+        return jsonify({'status': 'error', 'message': 'No active order found'}), 400
+    conn = get_db()
+    order_row = conn.execute(
+        'SELECT * FROM order_shipping WHERE internal_order_id=? AND status=?',
+        (internal_order_id, 'pending')
+    ).fetchone()
+    if not order_row:
+        return jsonify({'status': 'error', 'message': 'Order not found or already processed'}), 400
+    order_row_dict = dict(order_row)
+    cart = session.get('cart', {})
+    cart_items = list(cart.values()) if cart else []
+    waybill, del_error = create_delhivery_shipment(order_row_dict, cart_items)
+    if waybill:
+        conn.execute('UPDATE order_shipping SET status=?, delhivery_waybill=? WHERE internal_order_id=?',
+                     ('cod_confirmed', waybill, internal_order_id))
+    else:
+        app.logger.error(f"Delhivery failed for COD {internal_order_id}: {del_error}")
+        conn.execute('UPDATE order_shipping SET status=? WHERE internal_order_id=?',
+                     ('cod_confirmed', internal_order_id))
+    conn.commit()
+    try:
+        customer_email = order_row_dict.get('consignee_email', '')
+        customer_name = order_row_dict.get('consignee_name', 'Customer')
+        total = order_row_dict.get('total_amount', 0)
+        tracking_url = f"{request.url_root.rstrip('/')}/track/{waybill}" if waybill else ''
+        invoice_url = f"{request.url_root.rstrip('/')}/invoice/{internal_order_id}"
+        if customer_email:
+            send_contact_email(customer_email,
+                f"Order Confirmed (COD) — {internal_order_id} | Nari Nakhre",
+                f"Hi {customer_name},\n\nYour COD order is confirmed!\n\nOrder ID: {internal_order_id}\nAmount to pay on delivery: ₹{total:.2f}\n"
+                + (f"Track: {tracking_url}\n" if tracking_url else "")
+                + f"Invoice: {invoice_url}\n\nThank you!\n- Nari Nakhre")
+        send_contact_email(ADMIN_EMAIL,
+            f"🛍️ New COD Order — {internal_order_id}",
+            f"COD Order\nCustomer: {customer_name}\nPhone: {order_row_dict.get('consignee_phone','')}\n"
+            f"Address: {order_row_dict.get('consignee_address','')}, {order_row_dict.get('consignee_city','')}, {order_row_dict.get('consignee_pincode','')}\n"
+            f"Amount: ₹{total:.2f}\n"
+            + (f"Waybill: {waybill}\n" if waybill else "Waybill pending\n"))
+    except Exception as e:
+        app.logger.warning(f"COD email failed: {e}")
+    session['checkout_handover'] = {'internal_order_id': internal_order_id, 'waybill': waybill}
+    session.pop('cart', None)
+    session.pop('applied_coupon', None)
+    session.modified = True
+    return jsonify({'status': 'success', 'waybill': waybill, 'internal_order_id': internal_order_id}), 200
 
 
 @app.route('/api/verify-payment', methods=['POST'])
