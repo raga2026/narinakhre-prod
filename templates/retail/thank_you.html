@@ -6,97 +6,79 @@
     <meta name="robots" content="noindex">
     <title>Order Confirmed | Nari Nakhre</title>
     <link rel="icon" type="image/x-icon" href="/favicon.ico">
-    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
     <style>
         * { box-sizing: border-box; }
-        body { background: linear-gradient(160deg, #fff1f2 0%, #fdf2f8 100%); min-height: 100vh; font-family: Georgia, serif; }
-        .ty-card { background: white; border: 1px solid #fce7f3; border-radius: 20px; padding: 20px; margin-bottom: 14px; }
-        .ty-row { display: flex; justify-content: space-between; align-items: center; font-size: 0.85rem; padding: 8px 0; border-bottom: 1px solid #fdf2f8; }
+        body {
+            margin: 0; font-family: 'Georgia', serif;
+            background: linear-gradient(180deg, #fff1f2 0%, #fdf2f8 100%);
+            min-height: 100vh;
+        }
+        .ty-wrap { max-width: 480px; margin: 0 auto; padding: 36px 16px 50px; text-align: center; }
+        .ty-logo { height: 44px; margin-bottom: 18px; }
+        .ty-icon { font-size: 3rem; margin-bottom: 8px; }
+        .ty-title { font-size: 1.4rem; font-weight: 900; color: #881337; margin-bottom: 6px; }
+        .ty-sub { font-size: 0.88rem; color: #6b7280; margin-bottom: 22px; line-height: 1.5; }
+        .ty-card {
+            background: white; border: 1px solid #fce7f3; border-radius: 20px;
+            padding: 18px; margin-bottom: 16px; text-align: left;
+        }
+        .ty-row { display: flex; justify-content: space-between; font-size: 0.85rem; padding: 8px 0; border-bottom: 1px solid #fdf2f8; }
         .ty-row:last-child { border-bottom: none; }
         .ty-label { color: #9f9f9f; }
         .ty-value { font-weight: 700; color: #881337; }
-        .ty-track { display: block; width: 100%; padding: 14px; border-radius: 30px; border: none; background: linear-gradient(135deg, #be185d, #f472b6); color: white; font-weight: 900; font-size: 0.95rem; text-decoration: none; text-align: center; box-shadow: 0 4px 14px rgba(190,24,93,0.3); margin-top: 4px; }
-        .checkmark { width: 72px; height: 72px; border-radius: 50%; background: linear-gradient(135deg, #16a34a, #4ade80); display: flex; align-items: center; justify-content: center; margin: 0 auto 16px; box-shadow: 0 6px 20px rgba(22,163,74,0.35); }
-        .checkmark svg { width: 40px; height: 40px; }
+        .ty-track-btn {
+            display: block; width: 100%; padding: 14px; border-radius: 30px; border: none;
+            background: linear-gradient(135deg, #be185d, #f472b6); color: white;
+            font-weight: 900; font-size: 0.95rem; text-decoration: none; margin-top: 4px;
+            box-shadow: 0 4px 14px rgba(190,24,93,0.3);
+        }
+        .ty-hint { font-size: 0.7rem; color: #9f9f9f; margin-top: 10px; }
+        .ty-home-link {
+            display: inline-block; margin-top: 22px; color: #be185d;
+            font-weight: 700; font-size: 0.85rem; text-decoration: none;
+        }
+        .ty-contact { font-size: 0.78rem; color: #6b7280; margin-top: 18px; }
+        .ty-contact a { color: #be185d; font-weight: 700; text-decoration: none; }
     </style>
 </head>
 <body>
-    <div style="max-width:480px;margin:0 auto;padding:32px 16px 60px;">
-        <!-- Logo -->
-        <div style="text-align:center;margin-bottom:24px;">
-            <img src="/static/assets/logo.png" alt="Nari Nakhre" style="height:44px;">
-        </div>
+    <div class="ty-wrap">
+        <img src="/static/assets/logo.png" alt="Nari Nakhre" class="ty-logo">
+        <div class="ty-icon">🎉</div>
 
-        <!-- Green tick -->
-        <div style="text-align:center;margin-bottom:16px;">
-            <div class="checkmark">
-                <svg viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
-                    <polyline points="20 6 9 17 4 12"></polyline>
-                </svg>
-            </div>
-            <h1 style="font-size:1.4rem;font-weight:900;color:#16a34a;margin-bottom:4px;">Order Placed Successfully!</h1>
-            <p style="font-size:0.85rem;color:#6b7280;">Thank you for shopping with Nari Nakhre. We'll get it to you soon.</p>
-        </div>
-
-        <!-- Order details card -->
         {% if order_id %}
+        <div class="ty-title">Order Confirmed!</div>
+        <div class="ty-sub">Thank you for shopping with Nari Nakhre.<br>We'll have your order on its way soon.</div>
+
         <div class="ty-card">
-            <div class="ty-row">
-                <span class="ty-label">Order ID</span>
-                <span class="ty-value" style="font-size:0.8rem;">{{ order_id }}</span>
-            </div>
+            <div class="ty-row"><span class="ty-label">Order ID</span><span class="ty-value">{{ order_id }}</span></div>
             {% if waybill %}
-            <div class="ty-row">
-                <span class="ty-label">Tracking ID (AWB)</span>
-                <span class="ty-value">{{ waybill }}</span>
-            </div>
-            {% endif %}
-            {% if amount_paid %}
-            <div class="ty-row">
-                <span class="ty-label">Amount Paid</span>
-                <span class="ty-value">₹{{ amount_paid|round(2) }}</span>
-            </div>
-            {% endif %}
-            {% if payment_mode %}
-            <div class="ty-row">
-                <span class="ty-label">Payment Mode</span>
-                <span class="ty-value">{{ 'Cash on Delivery' if payment_mode == 'COD' else 'Prepaid (Online)' }}</span>
-            </div>
-            {% endif %}
-            {% if order_date %}
-            <div class="ty-row">
-                <span class="ty-label">Order Date</span>
-                <span class="ty-value">{{ order_date }}</span>
-            </div>
+            <div class="ty-row"><span class="ty-label">Tracking ID (AWB)</span><span class="ty-value">{{ waybill }}</span></div>
             {% endif %}
         </div>
-        {% endif %}
 
-        <!-- Track order -->
         {% if tracking_url and waybill %}
-        <a href="{{ tracking_url }}" class="ty-track">📦 Track Your Order</a>
-        <p style="text-align:center;font-size:0.7rem;color:#9f9f9f;margin-top:8px;">
-            You can also share this tracking link with the recipient.
-        </p>
-        {% else %}
-        <div class="ty-card" style="text-align:center;color:#6b7280;font-size:0.85rem;">
-            <p>Your shipment is being processed. A tracking link will be available shortly.</p>
-        </div>
+        <a href="{{ tracking_url }}" class="ty-track-btn">📦 Track Your Order</a>
+        {% if order_id %}
+        <a href="/invoice/{{ order_id }}" target="_blank"
+           style="display:block;text-align:center;margin-top:10px;color:#be185d;font-weight:700;font-size:0.85rem;text-decoration:none;">
+            🧾 Download GST Invoice
+        </a>
+        {% endif %}
+        <div class="ty-hint">Save this link — you can share it via WhatsApp or email.</div>
         {% endif %}
 
-        <!-- Email confirmation note -->
-        <div style="text-align:center;font-size:0.78rem;color:#9f9f9f;margin-top:14px;">
-            A confirmation email has been sent to you.<br>
-            For help: <a href="mailto:info@narinakhre.com" style="color:#be185d;font-weight:700;">info@narinakhre.com</a>
-        </div>
+        <div class="ty-contact">Need help? Contact <a href="mailto:info@narinakhre.com">info@narinakhre.com</a></div>
+        {% else %}
+        <div class="ty-title">Thank you!</div>
+        <div class="ty-sub">Your request has been received.<br>For assistance, contact <a href="mailto:info@narinakhre.com" style="color:#be185d;">info@narinakhre.com</a>.</div>
+        {% endif %}
 
-        <a href="/retail" style="display:block;text-align:center;margin-top:22px;color:#be185d;font-weight:700;font-size:0.85rem;text-decoration:none;">
-            ← Continue Shopping
-        </a>
+        <a href="/retail" class="ty-home-link">← Continue Shopping</a>
     </div>
     <script>
-        // Clear cart display after successful order
-        if (typeof syncCartCount === 'function') syncCartCount(0);
+        localStorage.removeItem('quoteCart');
+        localStorage.removeItem('retail_cart');
     </script>
 </body>
 </html>

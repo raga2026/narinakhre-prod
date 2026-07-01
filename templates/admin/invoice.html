@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Invoice #{{ order.internal_order_id }} — Nari Nakhre</title>
+    <style>
+        @page { size: A4; margin: 15mm; }
+        @media print {
+            .no-print { display: none !important; }
+            body { margin: 0; }
+        }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: Arial, sans-serif; font-size: 12px; color: #1a1a1a; background: white; }
+
+        /* Print toolbar */
+        .no-print {
+            background: #be185d; color: white; padding: 10px 20px;
+            display: flex; gap: 12px; align-items: center;
+        }
+        .no-print button {
+            background: white; color: #be185d; border: none; padding: 8px 18px;
+            border-radius: 8px; font-weight: 700; cursor: pointer; font-size: 13px;
+        }
+        .no-print a { color: white; font-size: 13px; text-decoration: none; font-weight: 600; }
+
+        /* Invoice layout */
+        .invoice-wrap { max-width: 780px; margin: 20px auto; padding: 30px; border: 1px solid #e5e7eb; }
+
+        /* Header */
+        .inv-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 28px; border-bottom: 2px solid #be185d; padding-bottom: 18px; }
+        .inv-logo { font-size: 22px; font-weight: 900; color: #881337; letter-spacing: -0.5px; }
+        .inv-logo-sub { font-size: 11px; color: #9f9f9f; margin-top: 2px; }
+        .inv-title { text-align: right; }
+        .inv-title h1 { font-size: 22px; font-weight: 900; color: #be185d; letter-spacing: 1px; }
+        .inv-title .inv-num { font-size: 12px; color: #6b7280; margin-top: 4px; }
+        .inv-title .inv-date { font-size: 11px; color: #9f9f9f; }
+
+        /* Seller + Buyer */
+        .inv-parties { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; margin-bottom: 24px; }
+        .inv-party-label { font-size: 10px; font-weight: 700; color: #be185d; text-transform: uppercase; letter-spacing: 0.8px; margin-bottom: 6px; }
+        .inv-party-name { font-size: 13px; font-weight: 700; color: #1a1a1a; }
+        .inv-party-detail { font-size: 11px; color: #6b7280; line-height: 1.6; margin-top: 3px; }
+
+        /* Items table */
+        .inv-table { width: 100%; border-collapse: collapse; margin-bottom: 20px; }
+        .inv-table th { background: #fdf2f8; color: #881337; font-size: 10px; font-weight: 700; text-transform: uppercase; padding: 8px 10px; text-align: left; border-bottom: 2px solid #fce7f3; }
+        .inv-table td { padding: 9px 10px; border-bottom: 1px solid #f3f4f6; font-size: 11px; color: #374151; }
+        .inv-table td.num { text-align: right; }
+        .inv-table th.num { text-align: right; }
+        .inv-table tr:last-child td { border-bottom: none; }
+
+        /* Totals */
+        .inv-totals { display: flex; justify-content: flex-end; margin-bottom: 24px; }
+        .inv-totals-table { width: 280px; }
+        .inv-totals-row { display: flex; justify-content: space-between; padding: 5px 0; font-size: 12px; border-bottom: 1px solid #f3f4f6; }
+        .inv-totals-row:last-child { border-bottom: none; }
+        .inv-totals-label { color: #6b7280; }
+        .inv-totals-value { font-weight: 600; color: #1a1a1a; }
+        .inv-grand-total { background: #fdf2f8; padding: 10px 14px; border-radius: 10px; margin-top: 8px; display: flex; justify-content: space-between; align-items: center; }
+        .inv-grand-label { font-size: 13px; font-weight: 700; color: #881337; }
+        .inv-grand-value { font-size: 18px; font-weight: 900; color: #be185d; }
+
+        /* GST summary box */
+        .inv-gst-box { background: #f8fafc; border: 1px solid #e5e7eb; border-radius: 10px; padding: 14px; margin-bottom: 20px; }
+        .inv-gst-title { font-size: 11px; font-weight: 700; color: #374151; margin-bottom: 10px; text-transform: uppercase; letter-spacing: 0.5px; }
+        .inv-gst-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+        .inv-gst-cell { text-align: center; }
+        .inv-gst-cell-label { font-size: 9px; color: #9f9f9f; text-transform: uppercase; letter-spacing: 0.5px; }
+        .inv-gst-cell-value { font-size: 14px; font-weight: 800; color: #1a1a1a; margin-top: 3px; }
+
+        /* Payment details */
+        .inv-payment { display: flex; gap: 20px; flex-wrap: wrap; font-size: 11px; color: #6b7280; margin-bottom: 20px; }
+        .inv-payment strong { color: #1a1a1a; }
+
+        /* Footer */
+        .inv-footer { border-top: 1px solid #e5e7eb; padding-top: 14px; text-align: center; font-size: 10px; color: #9f9f9f; line-height: 1.7; }
+        .inv-footer strong { color: #be185d; }
+
+        /* GSTIN badge */
+        .inv-gstin { display: inline-block; background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 6px; padding: 3px 10px; font-size: 11px; font-weight: 700; color: #1d4ed8; margin-top: 4px; }
+    </style>
+</head>
+<body>
+    <!-- Print toolbar (hidden in print) -->
+    <div class="no-print">
+        <button onclick="window.print()">🖨️ Print / Save as PDF</button>
+        <a href="/admin/orders">← Back to Orders</a>
+        <span style="margin-left:auto;font-size:12px;">Use browser Print → Save as PDF to download</span>
+    </div>
+
+    <div class="invoice-wrap">
+        <!-- Header -->
+        <div class="inv-header">
+            <div>
+                <div class="inv-logo">Nari Nakhre™</div>
+                <div class="inv-logo-sub">A brand by Mohini Cosmetics</div>
+                {% if seller_gst %}
+                <div class="inv-gstin">GSTIN: {{ seller_gst }}</div>
+                {% endif %}
+            </div>
+            <div class="inv-title">
+                <h1>TAX INVOICE</h1>
+                <div class="inv-num">Invoice No: {{ order.internal_order_id }}</div>
+                <div class="inv-date">Date: {{ order.created_at|string|truncate(10,true,'') if order.created_at else 'N/A' }}</div>
+                {% if order.razorpay_payment_id %}
+                <div class="inv-date" style="margin-top:2px;">Payment ID: {{ order.razorpay_payment_id }}</div>
+                {% endif %}
+            </div>
+        </div>
+
+        <!-- Seller + Buyer -->
+        <div class="inv-parties">
+            <div>
+                <div class="inv-party-label">Sold By</div>
+                <div class="inv-party-name">Nari Nakhre (Mohini Cosmetics)</div>
+                <div class="inv-party-detail">
+                    {{ seller_address or 'Jabalpur, Madhya Pradesh — 482001' }}<br>
+                    Email: info@narinakhre.com<br>
+                    {% if seller_gst %}GSTIN: {{ seller_gst }}{% endif %}
+                </div>
+            </div>
+            <div>
+                <div class="inv-party-label">Billed &amp; Shipped To</div>
+                <div class="inv-party-name">{{ order.consignee_name }}</div>
+                <div class="inv-party-detail">
+                    {{ order.consignee_address }}<br>
+                    {{ order.consignee_city }}, {{ order.consignee_state }} — {{ order.consignee_pincode }}<br>
+                    📞 {{ order.consignee_phone }}<br>
+                    {% if order.consignee_email %}✉ {{ order.consignee_email }}{% endif %}
+                </div>
+            </div>
+        </div>
+
+        <!-- Items table -->
+        <table class="inv-table">
+            <thead>
+                <tr>
+                    <th style="width:40px;">#</th>
+                    <th>Description</th>
+                    <th class="num">HSN</th>
+                    <th class="num">GST %</th>
+                    <th class="num">Taxable Value</th>
+                    <th class="num">GST Amount</th>
+                    <th class="num">Total</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% set subtotal = order.subtotal_amount or 0 %}
+                {% set disc = order.discount_amount or 0 %}
+                {% set gst = order.gst_amount or 0 %}
+                {% set net_subtotal = subtotal - disc %}
+                {% set taxable_value = net_subtotal - gst %}
+                <tr>
+                    <td>1</td>
+                    <td>
+                        <strong>Imitation Jewellery &amp; Accessories</strong><br>
+                        <span style="color:#9f9f9f;font-size:10px;">
+                            Order: {{ order.internal_order_id }}
+                            {% if order.coupon_code %} · Coupon: {{ order.coupon_code }} applied{% endif %}
+                        </span>
+                    </td>
+                    <td class="num">7117</td>
+                    <td class="num">3%</td>
+                    <td class="num">₹{{ "%.2f"|format(taxable_value) }}</td>
+                    <td class="num">₹{{ "%.2f"|format(gst) }}</td>
+                    <td class="num">₹{{ "%.2f"|format(net_subtotal) }}</td>
+                </tr>
+            </tbody>
+        </table>
+
+        <!-- GST summary -->
+        <div class="inv-gst-box">
+            <div class="inv-gst-title">GST Breakdown (Intra-state supply — CGST + SGST)</div>
+            <div class="inv-gst-grid">
+                <div class="inv-gst-cell">
+                    <div class="inv-gst-cell-label">Taxable Value</div>
+                    <div class="inv-gst-cell-value">₹{{ "%.2f"|format(taxable_value) }}</div>
+                </div>
+                <div class="inv-gst-cell">
+                    <div class="inv-gst-cell-label">CGST @ 1.5%</div>
+                    <div class="inv-gst-cell-value">₹{{ "%.2f"|format(order.cgst_amount or gst/2) }}</div>
+                </div>
+                <div class="inv-gst-cell">
+                    <div class="inv-gst-cell-label">SGST @ 1.5%</div>
+                    <div class="inv-gst-cell-value">₹{{ "%.2f"|format(order.sgst_amount or gst/2) }}</div>
+                </div>
+                <div class="inv-gst-cell">
+                    <div class="inv-gst-cell-label">Total GST</div>
+                    <div class="inv-gst-cell-value" style="color:#be185d;">₹{{ "%.2f"|format(gst) }}</div>
+                </div>
+            </div>
+            {% if order.consignee_state and order.consignee_state != 'Madhya Pradesh' %}
+            <div style="margin-top:10px;font-size:10px;color:#9f9f9f;">
+                ⚠️ Inter-state supply ({{ order.consignee_state }}): CGST+SGST shown above should be reported as IGST @ 3% for GSTR-1 filing.
+            </div>
+            {% endif %}
+        </div>
+
+        <!-- Totals -->
+        <div class="inv-totals">
+            <div class="inv-totals-table">
+                <div class="inv-totals-row">
+                    <span class="inv-totals-label">Subtotal (incl. GST)</span>
+                    <span class="inv-totals-value">₹{{ "%.2f"|format(subtotal) }}</span>
+                </div>
+                {% if disc > 0 %}
+                <div class="inv-totals-row" style="color:#16a34a;">
+                    <span class="inv-totals-label">Discount{% if order.coupon_code %} ({{ order.coupon_code }}){% endif %}</span>
+                    <span class="inv-totals-value" style="color:#16a34a;">−₹{{ "%.2f"|format(disc) }}</span>
+                </div>
+                {% endif %}
+                <div class="inv-totals-row">
+                    <span class="inv-totals-label">Shipping</span>
+                    <span class="inv-totals-value" style="color:#16a34a;">FREE</span>
+                </div>
+                <div class="inv-grand-total">
+                    <span class="inv-grand-label">Amount Paid</span>
+                    <span class="inv-grand-value">₹{{ "%.2f"|format(order.total_amount or 0) }}</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Payment -->
+        <div class="inv-payment">
+            <div><span class="inv-totals-label">Payment Mode: </span><strong>{{ 'Cash on Delivery' if order.payment_mode == 'COD' else 'Prepaid (Online)' }}</strong></div>
+            {% if order.delhivery_waybill %}<div><span class="inv-totals-label">Waybill (AWB): </span><strong>{{ order.delhivery_waybill }}</strong></div>{% endif %}
+            <div><span class="inv-totals-label">Order Status: </span><strong>{{ order.status|title }}</strong></div>
+        </div>
+
+        <!-- Footer -->
+        <div class="inv-footer">
+            <strong>Nari Nakhre</strong> — A brand by Mohini Cosmetics · info@narinakhre.com · narinakhre.com<br>
+            This is a computer-generated invoice. Prices are GST-inclusive (HSN 7117 — Imitation Jewellery, GST @ 3%).<br>
+            For queries, contact info@narinakhre.com or call us.
+            {% if order.consignee_state != 'Madhya Pradesh' %}
+            <br><span style="color:#9f9f9f;">This is an inter-state supply. IGST @ 3% is applicable per GST rules.</span>
+            {% endif %}
+        </div>
+    </div>
+</body>
+</html>

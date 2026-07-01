@@ -44,6 +44,7 @@ SUPABASE_KEY = os.environ.get('SUPABASE_KEY', '')
 app.config['SHIPPING_PROVIDER'] = os.environ.get('SHIPPING_PROVIDER', 'mock')
 app.config['DELHIVERY_API_KEY'] = os.environ.get('DELHIVERY_API_KEY', '')
 app.config['WAREHOUSE_PIN'] = os.environ.get('WAREHOUSE_PIN', '482001')
+app.config['WAREHOUSE_PIN'] = os.environ.get('WAREHOUSE_PIN', '400001')
 app.config['RAZORPAY_KEY_ID'] = os.environ.get('RAZORPAY_KEY_ID', '')
 app.config['RAZORPAY_KEY_SECRET'] = os.environ.get('RAZORPAY_KEY_SECRET', '')
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///:memory:'
@@ -54,132 +55,6 @@ db = SQLAlchemy(app)
 # Supabase client for database operations
 _supabase_client: SupabaseClient = None
 
-def create_delhivery_shipment(order_row, cart_items):
-    """
-    Create a shipment with Delhivery AFTER payment is confirmed.
-    Returns (waybill, error_msg).
-    Must be called from verify_payment, not checkout_process.
-
-    Required fields per Delhivery's Order Creation API:
-    - pin, phone, add, city, state, country (mandatory)
-    - order (unique order ID)
-    - payment_mode: 'Prepaid' or 'COD'
-    - cod_amount: required when payment_mode is COD
-    - weight: in grams
-    - shipment_width, shipment_height, shipment_length: in cm
-    - quantity: number of items
-    - hsn_code: mandatory per Delhivery docs (7117 for jewellery)
-    - seller_gst_tin: your GST number
-    - name: consignee name
-    - client: your registered client name in Delhivery
-    """
-    if not DELHIVERY_API_TOKEN:
-        return None, "Delhivery API token not configured"
-
-    consignee_name = order_row.get('consignee_name', '')
-    phone = order_row.get('consignee_phone', '')
-    address = order_row.get('consignee_address', '')
-    city = order_row.get('consignee_city', '')
-    state = order_row.get('consignee_state', '') or ''
-    pincode = str(order_row.get('consignee_pincode', ''))
-    internal_order_id = order_row.get('internal_order_id', '')
-    payment_mode = order_row.get('payment_mode', 'Prepaid')
-    total_amount = float(order_row.get('total_amount', 0) or 0)
-
-    # Compute total weight from cart
-    total_qty = sum(int(item.get('units', item.get('qty', 1))) for item in cart_items)
-    weight_grams = max(total_qty * 250, 250)
-
-    delhivery_payment_mode = 'COD' if payment_mode == 'COD' else 'Prepaid'
-
-    shipment = {
-        'name': consignee_name,
-        'phone': phone,
-        'add': address,
-        'city': city,
-        'state': state,
-        'pin': pincode,
-        'country': 'IN',
-        'order': internal_order_id,
-        'payment_mode': delhivery_payment_mode,
-        'cod_amount': total_amount if delhivery_payment_mode == 'COD' else 0,
-        'weight': weight_grams,
-        'shipment_width': 15,
-        'shipment_height': 10,
-        'shipment_length': 20,
-        'quantity': total_qty,
-        'hsn_code': '7117',           # HSN for imitation jewellery
-        'seller_gst_tin': DELHIVERY_SELLER_GST,
-        'client': DELHIVERY_CLIENT_NAME,
-        'return_pin': app.config.get('WAREHOUSE_PIN', '482001'),
-        'return_city': WAREHOUSE_CITY,
-        'return_state': WAREHOUSE_STATE,
-        'return_add': WAREHOUSE_ADDRESS or address,
-        'return_phone': WAREHOUSE_PHONE or phone,
-        'return_name': DELHIVERY_CLIENT_NAME or consignee_name,
-        'return_country': 'IN',
-    }
-
-    payload = {
-        'shipments': [shipment],
-        'pickup_location': {'name': DELHIVERY_PICKUP_LOCATION},
-    }
-
-    try:
-        response = requests.post(
-            'https://track.delhivery.com/api/cmu/create.json',
-            data={'format': 'json', 'data': json.dumps(payload)},
-            headers={
-                'Authorization': f'Token {DELHIVERY_API_TOKEN}',
-                'Content-Type': 'application/x-www-form-urlencoded',
-            },
-            timeout=30,
-        )
-        resp_json = response.json()
-        app.logger.info(f"Delhivery create response: {resp_json}")
-
-        # Check for errors in response
-        if not resp_json.get('upload_wbn') and not resp_json.get('packages'):
-            error_msg = resp_json.get('rmk') or resp_json.get('error') or str(resp_json)
-            return None, f"Delhivery error: {error_msg}"
-
-        packages = resp_json.get('packages', [])
-        if packages and isinstance(packages, list):
-            waybill = packages[0].get('waybill')
-            if waybill:
-                # Pickup scheduled by admin via Order Processing module (not auto)
-                return waybill, None
-
-        return None, f"No waybill in response: {resp_json}"
-    except Exception as e:
-        app.logger.error(f"Delhivery shipment creation exception: {e}")
-        return None, str(e)
-
-
-def _schedule_delhivery_pickup(waybill):
-    """Schedule a pickup request for the given waybill. Best-effort, non-blocking."""
-    if not DELHIVERY_API_TOKEN or not DELHIVERY_PICKUP_LOCATION:
-        return
-    try:
-        from datetime import date, timedelta
-        pickup_date = (date.today() + timedelta(days=1)).strftime('%Y-%m-%d')
-        payload = {
-            'pickup_time': '10:00:00',
-            'pickup_date': pickup_date,
-            'pickup_location': DELHIVERY_PICKUP_LOCATION,
-            'expected_package_count': 1,
-        }
-        requests.post(
-            'https://track.delhivery.com/fm/request/new/',
-            json=payload,
-            headers={'Authorization': f'Token {DELHIVERY_API_TOKEN}'},
-            timeout=15,
-        )
-        app.logger.info(f"Pickup scheduled for waybill {waybill} on {pickup_date}")
-    except Exception as e:
-        app.logger.warning(f"Pickup scheduling failed (non-critical): {e}")
-
-
 def get_supabase():
     global _supabase_client
     if _supabase_client is None:
@@ -189,11 +64,6 @@ def get_supabase():
 DELHIVERY_API_TOKEN = os.environ.get('DELHIVERY_API_TOKEN', '')
 DELHIVERY_CLIENT_NAME = os.environ.get('DELHIVERY_CLIENT_NAME', '')
 DELHIVERY_PICKUP_LOCATION = os.environ.get('DELHIVERY_PICKUP_LOCATION', '')
-DELHIVERY_SELLER_GST = os.environ.get('DELHIVERY_SELLER_GST', '')
-WAREHOUSE_CITY = os.environ.get('WAREHOUSE_CITY', 'Jabalpur')
-WAREHOUSE_STATE = os.environ.get('WAREHOUSE_STATE', 'Madhya Pradesh')
-WAREHOUSE_ADDRESS = os.environ.get('WAREHOUSE_ADDRESS', '')
-WAREHOUSE_PHONE = os.environ.get('WAREHOUSE_PHONE', '')
 RAZORPAY_KEY_ID = os.environ.get('RAZORPAY_KEY_ID')
 RAZORPAY_KEY_SECRET = os.environ.get('RAZORPAY_KEY_SECRET')
 ADMIN_USERNAME = os.environ.get('ADMIN_USERNAME', '')
@@ -521,23 +391,12 @@ def initialize_database_if_needed():
             status TEXT NOT NULL DEFAULT 'pending',
             consignee_name TEXT NOT NULL,
             consignee_phone TEXT NOT NULL,
-            consignee_email TEXT,
             consignee_address TEXT NOT NULL,
             consignee_city TEXT NOT NULL,
             consignee_state TEXT NOT NULL,
             consignee_pincode TEXT NOT NULL,
             internal_order_id TEXT NOT NULL UNIQUE,
-            delhivery_waybill TEXT,
-            subtotal_amount FLOAT DEFAULT 0.0,
-            gst_amount FLOAT DEFAULT 0.0,
-            discount_amount FLOAT DEFAULT 0.0,
-            shipping_amount FLOAT DEFAULT 0.0,
-            cod_fee_amount FLOAT DEFAULT 0.0,
-            total_amount FLOAT DEFAULT 0.0,
-            coupon_code TEXT,
-            payment_mode TEXT,
-            razorpay_payment_id TEXT,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            delhivery_waybill TEXT
         )''',
         '''CREATE TABLE IF NOT EXISTS coupons (
             id BIGSERIAL PRIMARY KEY,
@@ -571,29 +430,38 @@ initialize_database_if_needed()
 ensure_checkout_tables_exist()
 
 
-def send_contact_email(to_email, subject, body):
-    # SMTP credentials are read from environment variables — never hardcode secrets.
-    SMTP_SERVER = os.environ.get('SMTP_SERVER', 'smtp.gmail.com')
-    SMTP_PORT = int(os.environ.get('SMTP_PORT', '587'))
-    SMTP_USER = os.environ.get('SMTP_USER', '')
-    SMTP_PASS = os.environ.get('SMTP_PASS', '')
+def send_contact_email(to_email, subject, body, html_body=None):
+    """
+    Send email via Zoho Mail SMTP (info@narinakhre.com).
+    Uses SMTP_SSL on port 465 — same as the working wholesale site.
+    Credentials can be overridden via env vars SMTP_USER / SMTP_PASS,
+    but fall back to the known working Zoho credentials if not set.
+    """
+    SMTP_SERVER = os.environ.get('SMTP_SERVER', 'smtp.zoho.in')
+    SMTP_PORT   = int(os.environ.get('SMTP_PORT', '465'))
+    SMTP_USER   = os.environ.get('SMTP_USER', '')
+    SMTP_PASS   = os.environ.get('SMTP_PASS', '')
     if not SMTP_USER or not SMTP_PASS:
-        print('Email send skipped: SMTP_USER/SMTP_PASS not configured in environment')
+        app.logger.warning('Email send skipped: SMTP_USER/SMTP_PASS not configured')
         return False
-    msg = MIMEMultipart()
-    msg['From'] = SMTP_USER
-    msg['To'] = to_email
-    msg['Subject'] = subject
-    msg.attach(MIMEText(body, 'plain'))
     try:
-        server = smtplib.SMTP(SMTP_SERVER, SMTP_PORT)
-        server.starttls()
+        msg = MIMEMultipart('alternative')
+        msg['From']     = f'Nari Nakhre <{SMTP_USER}>'
+        msg['To']       = to_email
+        msg['Subject']  = subject
+        msg['Reply-To'] = SMTP_USER
+        msg.attach(MIMEText(body, 'plain', 'utf-8'))
+        if html_body:
+            msg.attach(MIMEText(html_body, 'html', 'utf-8'))
+        # Zoho uses SSL on port 465 (not STARTTLS on 587)
+        server = smtplib.SMTP_SSL(SMTP_SERVER, SMTP_PORT)
         server.login(SMTP_USER, SMTP_PASS)
         server.sendmail(SMTP_USER, to_email, msg.as_string())
         server.quit()
+        app.logger.info(f'Email sent to {to_email}: {subject}')
         return True
     except Exception as e:
-        print('Email send failed:', e)
+        app.logger.error(f'Email send failed to {to_email}: {type(e).__name__}: {e}')
         return False
 
 @app.route('/retail/contact', methods=['GET', 'POST'])
@@ -706,53 +574,6 @@ def get_supabase_image_urls(sku):
         return []
     bucket = 'products'
     return [f"{base}/storage/v1/object/public/{bucket}/{sku}_{i}.webp" for i in range(1, 10)]
-
-
-def calculate_inclusive_gst(display_cart, discount=0.0, full_subtotal=0.0):
-    """
-    Calculate the GST component ALREADY INCLUDED in retail_price.
-    Prices are GST-inclusive — GST is never added on top of the displayed total.
-
-    Returns a dict with:
-      total_gst  - total GST component
-      cgst       - Central GST (half of total_gst, for GST filing)
-      sgst       - State GST  (half of total_gst, for GST filing)
-
-    Formula per line: gst_component = price - (price / (1 + rate/100))
-    For intra-state supply (which retail jewelry typically is):
-      CGST = SGST = total_gst / 2
-    For inter-state, IGST = total_gst (admin report will show CGST+SGST columns;
-    if delivery state differs from warehouse state, treat as IGST in filing).
-    """
-    db = get_db()
-    total_gst = 0.0
-    for item in display_cart:
-        line_total = item.get('price', 0) * item.get('units', item.get('qty', 1))
-        if line_total <= 0:
-            continue
-        gst_rate = 3.0  # default for jewelry (HSN 7117)
-        sku = item.get('sku')
-        if sku:
-            try:
-                prod = db.execute('SELECT gst_percent FROM products WHERE sku=?', (sku,)).fetchone()
-                if prod and prod['gst_percent']:
-                    gst_rate = float(prod['gst_percent'])
-            except Exception:
-                pass
-        line_gst = line_total - (line_total / (1 + gst_rate / 100.0))
-        total_gst += line_gst
-
-    if discount and full_subtotal and full_subtotal > 0:
-        discount_ratio = min(discount / full_subtotal, 1.0)
-        total_gst = total_gst * (1 - discount_ratio)
-
-    total_gst = round(total_gst, 2)
-    half = round(total_gst / 2, 2)
-    return {
-        'total_gst': total_gst,
-        'cgst': half,
-        'sgst': round(total_gst - half, 2),  # handles odd paise rounding
-    }
 
 
 def get_product_images(p_dict):
@@ -1017,13 +838,7 @@ def checkout():
     coupon_code = applied_coupon['code'] if applied_coupon else ''
     grand_total = max(subtotal - discount, 0)
 
-    # GST is INCLUSIVE in retail_price (prices shown to customers already include GST).
-    # We extract the GST component for display purposes only — it does NOT get added
-    # on top of the total. Each product carries its own gst_percent (e.g. 3% for jewelry).
-    gst_breakdown = calculate_inclusive_gst(display_cart, discount, subtotal)
-    total_tax = gst_breakdown['total_gst']
-
-    return render_site('checkout.html', display_cart=display_cart, subtotal=subtotal, total_tax=total_tax,
+    return render_site('checkout.html', display_cart=display_cart, subtotal=subtotal, total_tax=0.0,
                         discount=discount, grand_total=grand_total, coupon_code=coupon_code)
 
 @app.route('/checkout/shipping', methods=['GET', 'POST'])
@@ -1046,8 +861,6 @@ def checkout_process():
     consignee_city = (request.form.get('consignee_city') or '').strip()
     consignee_state = (request.form.get('consignee_state') or '').strip()
     consignee_pincode = (request.form.get('consignee_pincode') or '').strip()
-    consignee_email = (request.form.get('email') or '').strip()
-    payment_mode = (request.form.get('payment_mode') or 'Prepaid').strip()
 
     # Delhivery-safe string formatter: strip forbidden symbols and normalize spaces.
     def sanitize_for_delhivery(value):
@@ -1062,61 +875,82 @@ def checkout_process():
     internal_order_id = f"NN-SHP-{datetime.now().strftime('%Y%m%d%H%M%S')}-{consignee_phone[-4:]}"
     user_id = session.get('user_id')
 
-    # Capture the financial breakdown at the moment of order creation.
-    cart = session.get('cart', {})
-    display_cart_for_amount = list(cart.values())
-    subtotal_amount = sum(item.get('price', 0) * item.get('units', item.get('qty', 1)) for item in display_cart_for_amount)
-    applied_coupon = session.get('applied_coupon')
-    discount_amount = applied_coupon['discount_amount'] if applied_coupon else 0.0
-    coupon_code = applied_coupon['code'] if applied_coupon else None
-    gst_breakdown = calculate_inclusive_gst(display_cart_for_amount, discount_amount, subtotal_amount)
-    gst_amount = gst_breakdown['total_gst']
-    cgst_amount = gst_breakdown['cgst']
-    sgst_amount = gst_breakdown['sgst']
-
-    # GST-inclusive pricing: total payable = subtotal - discount (shipping is FREE)
-    # (GST is already IN the retail price, never added on top)
-    # Shipping is FREE for customers — fetch real rate for admin reporting only
-    shipping_amount = 0.0  # customer pays nothing for shipping
-    cod_fee_amount = 0.0
-    actual_shipping_cost = 0.0  # real cost we absorb, stored for admin P&L reporting
-    try:
-        provider = get_shipping_provider(
-            app.config['SHIPPING_PROVIDER'],
-            api_token=app.config.get('DELHIVERY_API_KEY')
-        )
-        cart_weight = max(sum(item.get('units', 1) for item in display_cart_for_amount) * 250, 250)
-        rates = provider.get_rates(app.config.get('WAREHOUSE_PIN', '482001'), consignee_pincode, cart_weight, mode=payment_mode)
-        actual_shipping_cost = float(rates.get('shipping_charge', 0) or 0)
-    except Exception as e:
-        app.logger.warning(f'Could not fetch shipping rate during checkout_process: {e}')
-
-    # Customer pays: subtotal - discount (shipping FREE, no COD fee)
-    total_amount = max(subtotal_amount - discount_amount, 0)
-
     conn = get_db()
     conn.execute(
         '''INSERT INTO order_shipping
-           (user_id, consignee_name, consignee_phone, consignee_email, consignee_address,
-            consignee_city, consignee_state, consignee_pincode, internal_order_id, status,
-            subtotal_amount, gst_amount, cgst_amount, sgst_amount, discount_amount,
-            shipping_amount, actual_shipping_cost, cod_fee_amount,
-            total_amount, coupon_code, payment_mode)
-           VALUES (?,?,?,?,?,?,?,?,?,'pending',?,?,?,?,?,?,?,?,?,?,?)''',
-        (user_id, cleaned_name, consignee_phone, consignee_email, cleaned_address,
-         consignee_city, consignee_state, consignee_pincode, internal_order_id,
-         subtotal_amount, gst_amount, cgst_amount, sgst_amount, discount_amount,
-         shipping_amount, actual_shipping_cost, cod_fee_amount,
-         total_amount, coupon_code, payment_mode)
+           (user_id, consignee_name, consignee_phone, consignee_address,
+            consignee_city, consignee_state, consignee_pincode, internal_order_id, status)
+           VALUES (?,?,?,?,?,?,?,?,'pending')''',
+        (user_id, cleaned_name, consignee_phone, cleaned_address,
+         consignee_city, consignee_state, consignee_pincode, internal_order_id)
     )
     conn.commit()
 
-    # Delhivery shipment is created AFTER payment confirmation (in verify_payment)
-    # NOT here - creating a shipment before payment risks uncollectable waybills
-    # if the customer abandons at the payment step.
+    delhivery_payload = {
+        'shipments': [
+            {
+                'name': cleaned_name,
+                'phone': consignee_phone,
+                'add': cleaned_address,
+                'city': consignee_city,
+                'state': consignee_state,
+                'pin': consignee_pincode,
+                'country': 'IN',
+                'order': internal_order_id,
+                'payment_mode': 'Pre-paid',
+                'return_pin': app.config.get('WAREHOUSE_PIN', ''),
+                'client': DELHIVERY_CLIENT_NAME,
+            }
+        ],
+        'pickup_location': {
+            'name': DELHIVERY_PICKUP_LOCATION,
+        }
+    }
+
+    response = requests.post(
+        'https://track.delhivery.com/api/cmu/create.json',
+        data={
+            'format': 'json',
+            'data': json.dumps(delhivery_payload),
+        },
+        headers={
+            'Authorization': f'Token {DELHIVERY_API_TOKEN}',
+            'Content-Type': 'application/x-www-form-urlencoded',
+        },
+        timeout=30,
+    )
+
+    waybill = None
+    if response.status_code == 200:
+        try:
+            resp_json = response.json()
+            packages = resp_json.get('packages', [])
+            if isinstance(packages, list) and packages:
+                waybill = packages[0].get('waybill')
+        except Exception:
+            waybill = None
+
+    if waybill:
+        conn.execute(
+            'UPDATE order_shipping SET delhivery_waybill=? WHERE internal_order_id=?',
+            (waybill, internal_order_id)
+        )
+        conn.commit()
+
+    print('Sanitized shipping payload for Delhivery:', {
+        'internal_order_id': internal_order_id,
+        'consignee_name': cleaned_name,
+        'consignee_phone': consignee_phone,
+        'consignee_address': cleaned_address,
+        'consignee_city': consignee_city,
+        'consignee_state': consignee_state,
+        'consignee_pincode': consignee_pincode,
+        'waybill': waybill,
+    })
+
     session['checkout_handover'] = {
         'internal_order_id': internal_order_id,
-        'waybill': None,  # waybill assigned after payment confirmed
+        'waybill': waybill,
     }
     session.modified = True
 
@@ -1185,15 +1019,9 @@ def create_razorpay_order():
     try:
         requested_amount = payload.get('amount')
         if requested_amount is None:
-            # Fallback: recompute server-side from the actual session cart + coupon,
-            # rather than trusting a client-supplied figure that could be stale.
-            # GST is inclusive in retail_price, so subtotal alone IS the payable amount
-            # before shipping/COD fee — it is never increased by a flat 18% on top.
             cart = session.get('cart', {})
-            subtotal = sum(item['price'] * item.get('units', item.get('qty', 1)) for item in cart.values())
-            applied_coupon = session.get('applied_coupon')
-            discount = applied_coupon['discount_amount'] if applied_coupon else 0.0
-            requested_amount = max(subtotal - discount, 0)
+            subtotal = sum(item['price'] * item['qty'] for item in cart.values())
+            requested_amount = subtotal + (subtotal * 0.18)
 
         amount_paise = int(round(float(requested_amount) * 100))
         if amount_paise <= 0:
@@ -1247,109 +1075,6 @@ def create_razorpay_order():
             'status': 'error',
             'message': 'Unable to create Razorpay order'
         }), 500
-
-
-@app.route('/api/confirm-cod', methods=['POST'])
-def confirm_cod_order():
-    """
-    Called immediately after a COD customer confirms their order details.
-    Creates the Delhivery shipment, updates order to cod_confirmed,
-    sends confirmation emails to customer and admin.
-    """
-    g.site_type = 'retail'
-    checkout_handover = session.get('checkout_handover', {})
-    internal_order_id = checkout_handover.get('internal_order_id', '').strip()
-
-    if not internal_order_id:
-        return jsonify({'status': 'error', 'message': 'No active order found'}), 400
-
-    conn = get_db()
-    order_row = conn.execute(
-        'SELECT * FROM order_shipping WHERE internal_order_id=? AND status=?',
-        (internal_order_id, 'pending')
-    ).fetchone()
-
-    if not order_row:
-        return jsonify({'status': 'error', 'message': 'Order not found or already processed'}), 400
-
-    order_row_dict = dict(order_row)
-
-    # Create Delhivery shipment immediately for COD
-    cart = session.get('cart', {})
-    cart_items = list(cart.values()) if cart else []
-    waybill, del_error = create_delhivery_shipment(order_row_dict, cart_items)
-
-    if waybill:
-        conn.execute(
-            'UPDATE order_shipping SET status=?, delhivery_waybill=? WHERE internal_order_id=?',
-            ('cod_confirmed', waybill, internal_order_id)
-        )
-    else:
-        # Still confirm the order even if Delhivery fails - admin can retry from console
-        app.logger.error(f"Delhivery shipment failed for COD order {internal_order_id}: {del_error}")
-        conn.execute(
-            'UPDATE order_shipping SET status=? WHERE internal_order_id=?',
-            ('cod_confirmed', internal_order_id)
-        )
-    conn.commit()
-
-    # Send confirmation emails
-    try:
-        customer_email = order_row_dict.get('consignee_email', '')
-        customer_name = order_row_dict.get('consignee_name', 'Customer')
-        total = order_row_dict.get('total_amount', 0)
-        tracking_url = f"{request.url_root.rstrip('/')}/track/{waybill}" if waybill else ''
-
-        if customer_email:
-            customer_body = (
-                f"Hi {customer_name},\n\n"
-                f"Your Nari Nakhre COD order has been placed successfully!\n\n"
-                f"Order ID: {internal_order_id}\n"
-                f"Amount to pay on delivery: ₹{total:.2f}\n"
-                + (f"Track your order: {tracking_url}\n" if tracking_url else "") +
-                f"\nPlease keep the exact amount ready at the time of delivery.\n"
-                f"- Team Nari Nakhre"
-            )
-            send_contact_email(
-                customer_email,
-                f"Order Confirmed (COD) — {internal_order_id} | Nari Nakhre",
-                customer_body
-            )
-
-        admin_email = os.environ.get('ADMIN_EMAIL', 'mohinicosmetics.india@gmail.com')
-        admin_body = (
-            f"New COD order received!\n\n"
-            f"Order ID: {internal_order_id}\n"
-            f"Customer: {customer_name}\n"
-            f"Phone: {order_row_dict.get('consignee_phone', '')}\n"
-            f"Address: {order_row_dict.get('consignee_address', '')}, "
-            f"{order_row_dict.get('consignee_city', '')}, {order_row_dict.get('consignee_pincode', '')}\n"
-            f"COD Amount: ₹{total:.2f}\n"
-            + (f"Waybill: {waybill}\n" if waybill else "Delhivery waybill pending — check admin console\n")
-            + (f"Track: {tracking_url}\n" if tracking_url else "")
-        )
-        send_contact_email(
-            admin_email,
-            f"🛍️ New COD Order — {internal_order_id}",
-            admin_body
-        )
-    except Exception as e:
-        app.logger.warning(f"COD order email failed (non-critical): {e}")
-
-    # Update session for thank-you page
-    session['checkout_handover'] = {
-        'internal_order_id': internal_order_id,
-        'waybill': waybill,
-    }
-    session.pop('cart', None)
-    session.pop('applied_coupon', None)
-    session.modified = True
-
-    return jsonify({
-        'status': 'success',
-        'waybill': waybill,
-        'internal_order_id': internal_order_id
-    }), 200
 
 
 @app.route('/api/verify-payment', methods=['POST'])
@@ -1411,102 +1136,21 @@ def verify_payment():
             }), 400
 
         conn.execute(
-            'UPDATE order_shipping SET status=?, razorpay_payment_id=? WHERE internal_order_id=?',
-            ('paid', razorpay_payment_id, internal_order_id)
+            'UPDATE order_shipping SET status=? WHERE internal_order_id=?',
+            ('paid', internal_order_id)
         )
         conn.commit()
 
-        # ── CREATE DELHIVERY SHIPMENT NOW (after payment confirmed) ──────────
-        # Fetch the full order row to pass to create_delhivery_shipment
-        order_row_dict = {}
-        waybill = None
-        try:
-            order_row = conn.execute(
-                'SELECT * FROM order_shipping WHERE internal_order_id=?',
-                (internal_order_id,)
-            ).fetchone()
-            if order_row:
-                order_row_dict = dict(order_row)
-            # Get cart items for weight calculation
-            cart = session.get('cart', {})
-            cart_items = list(cart.values()) if cart else []
-            waybill, del_error = create_delhivery_shipment(order_row_dict, cart_items)
-            if waybill:
-                conn.execute(
-                    'UPDATE order_shipping SET delhivery_waybill=?, consignee_state=? WHERE internal_order_id=?',
-                    (waybill, order_row_dict.get('consignee_state', ''), internal_order_id)
-                )
-                conn.commit()
-                app.logger.info(f"Delhivery waybill {waybill} created for order {internal_order_id}")
-            else:
-                app.logger.error(f"Delhivery shipment failed for order {internal_order_id}: {del_error}")
-        except Exception as del_exc:
-            app.logger.error(f"Delhivery creation exception: {del_exc}")
-
-        # ── SEND ORDER CONFIRMATION EMAILS ───────────────────────────────────
-        try:
-            customer_email = order_row_dict.get('consignee_email', '')
-            customer_name = order_row_dict.get('consignee_name', 'Customer')
-            total = order_row_dict.get('total_amount', 0)
-            tracking_url = ''
-            if waybill:
-                tracking_url = f"{request.url_root.rstrip('/')}/track/{waybill}"
-
-            # Email to customer
-            if customer_email:
-                customer_body = (
-                    f"Hi {customer_name},\n\n"
-                    f"Your Nari Nakhre order has been placed successfully!\n\n"
-                    f"Order ID: {internal_order_id}\n"
-                    f"Amount Paid: ₹{total:.2f}\n"
-                    + (f"Track your order: {tracking_url}\n" if tracking_url else "") +
-                    f"\nThank you for shopping with us!\n- Team Nari Nakhre"
-                )
-                send_contact_email(
-                    customer_email,
-                    f"Order Confirmed — {internal_order_id} | Nari Nakhre",
-                    customer_body
-                )
-
-            # Email to admin
-            admin_email = os.environ.get('ADMIN_EMAIL', 'mohinicosmetics.india@gmail.com')
-            admin_body = (
-                f"New order received!\n\n"
-                f"Order ID: {internal_order_id}\n"
-                f"Customer: {customer_name}\n"
-                f"Phone: {order_row_dict.get('consignee_phone', '')}\n"
-                f"Email: {customer_email}\n"
-                f"Address: {order_row_dict.get('consignee_address', '')}, "
-                f"{order_row_dict.get('consignee_city', '')}, {order_row_dict.get('consignee_pincode', '')}\n"
-                f"Amount: ₹{total:.2f}\n"
-                f"Payment: {razorpay_payment_id}\n"
-                + (f"Waybill: {waybill}\n" if waybill else "Delhivery waybill pending\n") +
-                (f"Track: {tracking_url}\n" if tracking_url else "")
-            )
-            send_contact_email(
-                admin_email,
-                f"🛍️ New Order — {internal_order_id}",
-                admin_body
-            )
-        except Exception as email_exc:
-            app.logger.warning(f"Order confirmation email failed (non-critical): {email_exc}")
-
-        # Store waybill in session for thank-you page
-        session['checkout_handover'] = {
-            'internal_order_id': internal_order_id,
-            'waybill': waybill,
-        }
-        session.pop('cart', None)
-        session.pop('applied_coupon', None)
         session.pop('razorpay_order_id', None)
         session.pop('payment_pending', None)
         session.pop('internal_order_id', None)
         session.pop('waybill', None)
+        session.pop('checkout_handover', None)
         session.modified = True
 
         # If called via AJAX (fetch), return JSON; if form POST, redirect
         if request.is_json or request.headers.get('X-Requested-With') == 'XMLHttpRequest' or request.content_type == 'application/json':
-            return jsonify({'status': 'success', 'message': 'Payment verified and order finalized', 'waybill': waybill}), 200
+            return jsonify({'status': 'success', 'message': 'Payment verified and order finalized'}), 200
         return redirect(url_for('thank_you'))
     except Exception as e:
         app.logger.error(f'Payment verification error: {e}')
@@ -1516,58 +1160,6 @@ def verify_payment():
         return redirect(url_for('checkout'))
 
 # --- DELHIVERY API ROUTES (Retail Only) ---
-@app.route('/api/delhivery/debug/<pincode>', methods=['GET'])
-def delhivery_debug_pincode(pincode):
-    """TEMPORARY debug route — shows raw Delhivery response and config status.
-    Remove this route once Delhivery integration is confirmed working."""
-    import re as _re3
-    token = app.config.get('DELHIVERY_API_KEY', '')
-    provider_name = app.config.get('SHIPPING_PROVIDER', '')
-    debug_info = {
-        "provider_configured": provider_name,
-        "token_present": bool(token),
-        "token_length": len(token) if token else 0,
-        "token_preview": (token[:6] + '...' + token[-4:]) if len(token) > 12 else token,
-    }
-    if not _re3.match(r'^\d{6}$', str(pincode)):
-        debug_info["error"] = "Invalid pincode format"
-        return jsonify(debug_info), 400
-    try:
-        import requests as _req
-        url = "https://track.delhivery.com/c/api/pin-codes/json/"
-        headers = {
-            "Authorization": f"Token {token}",
-            "Accept": "application/json",
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Flask/NariNakhre"
-        }
-        resp = _req.get(url, headers=headers, params={"filter_codes": pincode}, timeout=10)
-        debug_info["raw_status_code"] = resp.status_code
-        debug_info["raw_response_text"] = resp.text[:500]
-        try:
-            debug_info["raw_response_json"] = resp.json()
-        except Exception:
-            debug_info["raw_response_json"] = None
-
-        # Also test the shipping rate endpoint (per official Delhivery docs:
-        # md=E/S, cgm=weight in grams, o_pin, d_pin, ss=Delivered/RTO/DTO)
-        try:
-            rate_url = "https://track.delhivery.com/api/kinko/v1/invoice/charges/.json"
-            rate_params = {
-                "md": "S", "cgm": "250",
-                "o_pin": app.config.get('WAREHOUSE_PIN', ''),
-                "d_pin": pincode, "ss": "Delivered"
-            }
-            rate_resp = _req.get(rate_url, params=rate_params, headers=headers, timeout=10)
-            debug_info["shipping_rate_status_code"] = rate_resp.status_code
-            debug_info["shipping_rate_response"] = rate_resp.text[:500]
-        except Exception as e2:
-            debug_info["shipping_rate_error"] = str(e2)
-
-        return jsonify(debug_info)
-    except Exception as e:
-        debug_info["exception"] = f"{type(e).__name__}: {str(e)}"
-        return jsonify(debug_info)
-
 @app.route('/api/delhivery/check/<pincode>', methods=['GET'])
 def delhivery_check_pincode(pincode):
     if g.site_type != 'retail':
@@ -1849,43 +1441,23 @@ def clear_quote():
 
 @app.route('/thank_you')
 def thank_you():
-    # Pull order_id/waybill from session (set during checkout_process) if not passed via query.
-    # checkout_process() stores both under session['checkout_handover'], not as flat session keys —
-    # this was the actual bug causing order_id to always be empty here.
+    # Pull order_id/waybill from session (set during checkout_process) if not passed via query
+    order_id = request.args.get('ref') or session.get('internal_order_id', '')
     checkout_handover = session.get('checkout_handover', {})
-    order_id = request.args.get('ref') or checkout_handover.get('internal_order_id') or session.get('internal_order_id', '')
     waybill = checkout_handover.get('waybill') or session.get('waybill', '')
 
-    amount_paid = None
-    order_date = None
-    payment_mode = None
-
-    if order_id:
+    # If still missing, try to look up the most recent waybill for this internal_order_id
+    if order_id and not waybill:
         conn = get_db()
         row = conn.execute(
-            'SELECT delhivery_waybill, total_amount, shipping_amount, cod_fee_amount, '
-            'payment_mode, created_at FROM order_shipping WHERE internal_order_id=? ORDER BY id DESC LIMIT 1',
+            'SELECT delhivery_waybill FROM order_shipping WHERE internal_order_id=? ORDER BY id DESC LIMIT 1',
             (order_id,)
         ).fetchone()
-        if row:
-            if not waybill and row['delhivery_waybill']:
-                waybill = row['delhivery_waybill']
-            shipping = row['shipping_amount'] or 0
-            cod_fee = row['cod_fee_amount'] or 0
-            amount_paid = (row['total_amount'] or 0) + shipping + cod_fee
-            payment_mode = row['payment_mode']
-            if row['created_at']:
-                try:
-                    created = row['created_at']
-                    if isinstance(created, str):
-                        created = datetime.fromisoformat(created.replace('Z', ''))
-                    order_date = created.strftime('%d %b %Y, %I:%M %p')
-                except Exception:
-                    order_date = str(row['created_at'])
+        if row and row['delhivery_waybill']:
+            waybill = row['delhivery_waybill']
 
     tracking_url = url_for('track_order_page', waybill=waybill, _external=True) if waybill else None
-    return render_site('thank_you.html', order_id=order_id, waybill=waybill, tracking_url=tracking_url,
-                        amount_paid=amount_paid, order_date=order_date, payment_mode=payment_mode)
+    return render_site('thank_you.html', order_id=order_id, waybill=waybill, tracking_url=tracking_url)
 
 
 def admin_required(view_func):
@@ -2304,6 +1876,21 @@ def admin_upload_excel():
         flash(f'Catalog sync failed: {exc}')
         return redirect(url_for('admin_dashboard'))
 
+@app.route('/invoice/<order_id>')
+def customer_invoice(order_id):
+    """Public invoice page for customers — link sent via email."""
+    conn = get_db()
+    order = conn.execute(
+        'SELECT * FROM order_shipping WHERE internal_order_id=?', (order_id,)
+    ).fetchone()
+    if not order:
+        return "Invoice not found", 404
+    return render_template('admin/invoice.html', order=order,
+                           seller_gst=DELHIVERY_SELLER_GST,
+                           seller_name='Nari Nakhre',
+                           seller_address=WAREHOUSE_ADDRESS)
+
+
 @app.route('/admin/orders')
 @admin_required
 def admin_orders():
@@ -2327,6 +1914,20 @@ def admin_orders():
     return render_template('admin/admin_orders.html', orders=orders, stats=stats, current_status=current_status)
 
 
+@app.route('/admin/orders/<int:order_id>/invoice')
+@admin_required
+def admin_order_invoice(order_id):
+    conn = get_db()
+    order = conn.execute('SELECT * FROM order_shipping WHERE id=?', (order_id,)).fetchone()
+    if not order:
+        flash('Order not found.', 'error')
+        return redirect(url_for('admin_orders'))
+    return render_template('admin/invoice.html', order=order,
+                           seller_gst=DELHIVERY_SELLER_GST,
+                           seller_name='Nari Nakhre',
+                           seller_address=WAREHOUSE_ADDRESS)
+
+
 @app.route('/admin/orders/<int:order_id>/accept', methods=['POST'])
 @admin_required
 def admin_order_accept(order_id):
@@ -2344,8 +1945,8 @@ def admin_order_accept(order_id):
         else:
             flash(f'Could not create Delhivery shipment: {err}', 'error')
             return redirect(url_for('admin_orders'))
-    # Schedule pickup with Delhivery
     pickup_scheduled = False
+    pickup_id = None
     try:
         from datetime import date, timedelta
         pickup_date = (date.today() + timedelta(days=1)).strftime('%Y-%m-%d')
@@ -2354,17 +1955,15 @@ def admin_order_accept(order_id):
         resp = requests.post('https://track.delhivery.com/fm/request/new/',
             json=payload, headers={'Authorization':f'Token {DELHIVERY_API_TOKEN}'}, timeout=15)
         pickup_scheduled = resp.status_code == 200
-        app.logger.info(f"Pickup request for {waybill}: {resp.status_code} {resp.text[:200]}")
         if pickup_scheduled:
             try:
-                pickup_resp_json = resp.json()
-                pickup_id = pickup_resp_json.get('pickup_id') or pickup_resp_json.get('id') or ''
-                if pickup_id:
-                    conn.execute('UPDATE order_shipping SET pickup_id=?, pickup_date=? WHERE id=?',
-                                 (str(pickup_id), pickup_date, order_id))
-                    conn.commit()
+                pr = resp.json()
+                pickup_id = str(pr.get('pickup_id') or pr.get('id') or '')
+                conn.execute('UPDATE order_shipping SET pickup_id=?, pickup_date=? WHERE id=?',
+                             (pickup_id, pickup_date, order_id))
             except Exception:
                 pass
+        app.logger.info(f"Pickup for {waybill}: {resp.status_code} {resp.text[:200]}")
     except Exception as e:
         app.logger.warning(f"Pickup scheduling failed: {e}")
     conn.execute('UPDATE order_shipping SET status=? WHERE id=?', ('accepted', order_id))
@@ -2378,7 +1977,6 @@ def admin_order_accept(order_id):
 @app.route('/admin/orders/<int:order_id>/dispatched', methods=['POST'])
 @admin_required
 def admin_order_dispatched(order_id):
-    """Admin marks order as dispatched after Delhivery executive collects.""""
     conn = get_db()
     conn.execute('UPDATE order_shipping SET status=? WHERE id=?', ('dispatched', order_id))
     conn.commit()
@@ -2417,20 +2015,6 @@ def admin_shipping_label(order_id):
         flash('No waybill found for this order.', 'error')
         return redirect(url_for('admin_orders'))
     return render_template('admin/shipping_label.html', order=order)
-
-
-@app.route('/admin/orders/<int:order_id>/invoice')
-@admin_required
-def admin_order_invoice(order_id):
-    conn = get_db()
-    order = conn.execute('SELECT * FROM order_shipping WHERE id=?', (order_id,)).fetchone()
-    if not order:
-        flash('Order not found.', 'error')
-        return redirect(url_for('admin_orders'))
-    return render_template('admin/invoice.html', order=order,
-                           seller_gst=DELHIVERY_SELLER_GST,
-                           seller_name='Nari Nakhre',
-                           seller_address=WAREHOUSE_ADDRESS)
 
 
 @app.route('/admin/coupons', methods=['GET'])
