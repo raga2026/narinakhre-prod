@@ -2355,6 +2355,16 @@ def admin_order_accept(order_id):
             json=payload, headers={'Authorization':f'Token {DELHIVERY_API_TOKEN}'}, timeout=15)
         pickup_scheduled = resp.status_code == 200
         app.logger.info(f"Pickup request for {waybill}: {resp.status_code} {resp.text[:200]}")
+        if pickup_scheduled:
+            try:
+                pickup_resp_json = resp.json()
+                pickup_id = pickup_resp_json.get('pickup_id') or pickup_resp_json.get('id') or ''
+                if pickup_id:
+                    conn.execute('UPDATE order_shipping SET pickup_id=?, pickup_date=? WHERE id=?',
+                                 (str(pickup_id), pickup_date, order_id))
+                    conn.commit()
+            except Exception:
+                pass
     except Exception as e:
         app.logger.warning(f"Pickup scheduling failed: {e}")
     conn.execute('UPDATE order_shipping SET status=? WHERE id=?', ('accepted', order_id))
@@ -2362,6 +2372,17 @@ def admin_order_accept(order_id):
     msg = f"Order accepted. Waybill: {waybill}."
     msg += " Pickup scheduled for tomorrow." if pickup_scheduled else " Note: Schedule pickup manually in Delhivery panel."
     flash(msg, 'success')
+    return redirect(url_for('admin_orders'))
+
+
+@app.route('/admin/orders/<int:order_id>/dispatched', methods=['POST'])
+@admin_required
+def admin_order_dispatched(order_id):
+    """Admin marks order as dispatched after Delhivery executive collects.""""
+    conn = get_db()
+    conn.execute('UPDATE order_shipping SET status=? WHERE id=?', ('dispatched', order_id))
+    conn.commit()
+    flash('Order marked as dispatched.', 'success')
     return redirect(url_for('admin_orders'))
 
 

@@ -146,6 +146,12 @@
                         {% elif o.status == 'accepted' %}
                         <a href="{{ url_for('admin_shipping_label', order_id=o.id) }}" target="_blank"
                            class="action-btn text-white" style="background:#0369a1;">🖨️ Label</a>
+                        <form method="POST" action="{{ url_for('admin_order_dispatched', order_id=o.id) }}" style="display:inline;">
+                            <button class="action-btn text-white" style="background:#0369a1;"
+                                    title="Mark as dispatched after Delhivery executive collects">
+                                🚚 Dispatched
+                            </button>
+                        </form>
                         {% endif %}
                         {% if o.delhivery_waybill %}
                         <a href="/track/{{ o.delhivery_waybill }}" target="_blank"
@@ -185,6 +191,13 @@
                         <div class="font-mono font-bold">{{ o.delhivery_waybill }}</div>
                         <a href="/track/{{ o.delhivery_waybill }}" target="_blank" class="text-blue-600 text-xs hover:underline">Track this shipment →</a>
                         {% else %}<div class="text-gray-400">No waybill yet</div>{% endif %}
+                        {% if o.pickup_id %}
+                        <div class="mt-2 text-xs text-gray-500">Pickup ID: <span class="font-mono font-bold text-gray-700">{{ o.pickup_id }}</span></div>
+                        {% endif %}
+                        {% if o.pickup_date %}
+                        <div class="text-xs text-gray-500">Pickup Date: <span class="font-semibold">{{ o.pickup_date }}</span></div>
+                        <div class="text-xs text-amber-600 font-semibold mt-1">⚠️ Delhivery executive will arrive with an OTP on their device. No action needed on your end — just hand over the package after verifying the OTP they show you.</div>
+                        {% endif %}
                         </div>
                     </div>
                 </td>
