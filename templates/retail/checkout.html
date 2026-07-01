@@ -440,7 +440,7 @@ function closeModal(e) {
 }
 
 /* ── Checkout form → real backend flow ── */
-document.getElementById('ck-form').addEventListener('submit', function(e) {
+document.getElementById('ck-form').addEventListener('submit', async function(e) {
     e.preventDefault();
     const form = e.target;
     const submitBtn = form.querySelector('.ck-submit');
