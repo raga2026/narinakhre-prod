@@ -2,257 +2,407 @@
 {% block title %}Checkout | Nari Nakhre{% endblock %}
 {% block content %}
 <style>
-/* ── Checkout — mobile-first, fits one screen ── */
-.ck-wrap { max-width: 480px; margin: 0 auto; padding: 12px 12px 80px; }
+/* ─────────────────────────────────────────────────────
+   NARI NAKHRE CHECKOUT — Apple-inspired design
+   Mobile-first, graceful desktop upgrade at 768px+
+───────────────────────────────────────────────────── */
+*, *::before, *::after { box-sizing: border-box; }
 
-/* Step dots */
-.ck-steps { display:flex; justify-content:center; gap:8px; margin-bottom:16px; }
-.ck-step  { height:6px; width:48px; border-radius:3px; background:#e2e8f0; }
-.ck-step.on { background:#be185d; }
+.ck-page {
+  min-height: 100vh;
+  background: #f5f5f7;
+  padding: 0 0 60px;
+  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', sans-serif;
+}
 
-/* Cart card */
-.ck-card { background:white; border:1px solid #fce7f3; border-radius:20px; padding:14px; margin-bottom:12px; }
-.ck-card-title { font-size:1.05rem; font-weight:800; color:#881337; margin-bottom:10px; }
+/* ── Top bar ── */
+.ck-topbar {
+  background: rgba(255,255,255,0.85);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border-bottom: 1px solid rgba(0,0,0,0.06);
+  padding: 14px 24px;
+  text-align: center;
+  position: sticky; top: 0; z-index: 40;
+}
+.ck-topbar-brand {
+  font-size: 1rem; font-weight: 700; color: #1d1d1f; letter-spacing: -0.3px;
+}
+.ck-topbar-secure {
+  font-size: 0.7rem; color: #6e6e73; margin-top: 2px;
+}
 
-/* Cart item — Blinkit-style: image left, info+price+counter right */
+/* ── Main container ── */
+.ck-container {
+  max-width: 860px;
+  margin: 0 auto;
+  padding: 28px 16px 0;
+}
+
+/* ── On desktop: two columns ── */
+@media (min-width: 768px) {
+  .ck-container {
+    display: grid;
+    grid-template-columns: 1fr 420px;
+    gap: 24px;
+    align-items: start;
+    padding: 40px 24px 0;
+  }
+  .ck-left  { grid-column: 1; }
+  .ck-right { grid-column: 2; position: sticky; top: 80px; }
+}
+
+/* ── Section card ── */
+.ck-section {
+  background: white;
+  border-radius: 18px;
+  padding: 22px;
+  margin-bottom: 16px;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.07);
+}
+.ck-section-title {
+  font-size: 1.05rem; font-weight: 700; color: #1d1d1f;
+  margin-bottom: 18px; letter-spacing: -0.3px;
+}
+
+/* ── Cart items ── */
 .ck-item {
-  display:flex; gap:10px; align-items:center;
-  background:#fdf2f8; border-radius:14px; padding:10px;
-  margin-bottom:8px; border:1px solid #fce7f3;
+  display: flex; gap: 14px; align-items: center;
+  padding: 12px 0;
+  border-bottom: 1px solid #f2f2f2;
 }
+.ck-item:last-child { border-bottom: none; }
 .ck-item-img {
-  width:60px; height:60px; object-fit:contain; border-radius:10px;
-  background:white; border:1px solid #fce7f3; flex-shrink:0;
+  width: 64px; height: 64px; object-fit: contain;
+  border-radius: 12px; background: #f9f9f9;
+  border: 1px solid #eee; flex-shrink: 0;
 }
-.ck-item-right { flex:1; min-width:0; display:flex; flex-direction:column; gap:4px; }
-.ck-item-name { font-size:0.82rem; font-weight:700; color:#881337; line-height:1.3;
-                white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-.ck-item-size { font-size:0.7rem; color:#9f9f9f; margin-top:-2px; }
-.ck-item-price-row { display:flex; align-items:center; justify-content:space-between; margin-top:2px; }
-.ck-line-total { font-size:0.95rem; font-weight:900; color:#be185d; }
-/* Counter */
-.ck-counter { display:flex; align-items:center; gap:6px; }
+.ck-item-right { flex: 1; min-width: 0; }
+.ck-item-name {
+  font-size: 0.88rem; font-weight: 600; color: #1d1d1f;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  margin-bottom: 2px;
+}
+.ck-item-size { font-size: 0.72rem; color: #6e6e73; margin-bottom: 8px; }
+.ck-item-bottom {
+  display: flex; align-items: center; justify-content: space-between;
+}
+.ck-line-total { font-size: 0.92rem; font-weight: 700; color: #1d1d1f; }
+.ck-counter { display: flex; align-items: center; gap: 0; }
 .ck-c-btn {
-  width:26px; height:26px; border-radius:50%;
-  border:1.5px solid #fda4af; background:#fff1f2;
-  color:#be185d; font-size:0.95rem; font-weight:800;
-  cursor:pointer; display:flex; align-items:center; justify-content:center;
-  line-height:1; flex-shrink:0;
+  width: 28px; height: 28px; border-radius: 50%;
+  border: 1.5px solid #d2d2d7; background: white;
+  color: #1d1d1f; font-size: 1rem; font-weight: 300;
+  cursor: pointer; display: flex; align-items: center;
+  justify-content: center; transition: background 0.15s;
 }
-.ck-c-btn:active { background:#fecdd3; }
-.ck-qty { font-size:0.85rem; font-weight:800; color:#9f1239; width:18px; text-align:center; }
-
-/* Clear cart */
-.ck-clear { font-size:0.75rem; color:#be185d; background:none; border:none; cursor:pointer; font-weight:600; }
-
-/* Summary card */
-.ck-summary {
-  background:#1e293b; color:white;
-  border-radius:18px; padding:16px; margin-bottom:12px;
+.ck-c-btn:hover { background: #f5f5f7; }
+.ck-qty {
+  font-size: 0.88rem; font-weight: 600; color: #1d1d1f;
+  width: 28px; text-align: center;
 }
-.ck-summary-title { font-size:0.95rem; font-weight:800; border-bottom:1px solid #334155; padding-bottom:8px; margin-bottom:12px; }
-.ck-sum-row { display:flex; justify-content:space-between; font-size:0.82rem; color:#94a3b8; margin-bottom:6px; }
-.ck-sum-total { display:flex; justify-content:space-between; font-size:1rem; font-weight:900; color:#f9a8d4; padding-top:8px; border-top:1px solid #334155; margin-top:8px; }
-
-/* Coupon */
-.ck-coupon { display:flex; gap:8px; margin-bottom:12px; }
-.ck-coupon input { flex:1; padding:8px 12px; border:2px solid #fce7f3; border-radius:12px; font-size:0.82rem; outline:none; }
-.ck-coupon input:focus { border-color:#be185d; }
-.ck-coupon button { padding:8px 14px; border-radius:12px; border:none; background:#be185d; color:white; font-weight:700; font-size:0.8rem; cursor:pointer; }
-
-/* Proceed button */
-.ck-proceed {
-  width:100%; padding:14px; border-radius:30px; border:none;
-  background:linear-gradient(135deg,#be185d,#f472b6);
-  color:white; font-weight:900; font-size:1rem;
-  box-shadow:0 4px 18px rgba(190,24,93,0.3);
-  cursor:pointer; margin-bottom:8px;
+.ck-clear-btn {
+  font-size: 0.75rem; color: #be185d; background: none;
+  border: none; cursor: pointer; font-weight: 500;
+  padding: 0; letter-spacing: 0;
 }
-.ck-proceed:disabled { opacity:0.5; cursor:not-allowed; }
-.ck-secure { text-align:center; font-size:0.68rem; color:#94a3b8; }
 
-/* Address modal */
-.ck-modal-bg {
-  display:none; position:fixed; inset:0;
-  background:rgba(0,0,0,0.5); z-index:50;
-  align-items:flex-end; justify-content:center;
+/* ── Coupon row ── */
+.ck-coupon-row {
+  display: flex; gap: 8px; margin-top: 16px; padding-top: 16px;
+  border-top: 1px solid #f2f2f2;
 }
-.ck-modal-bg.open { display:flex; }
-.ck-modal {
-  background:white; border-radius:24px 24px 0 0;
-  padding:20px; width:100%; max-width:480px;
-  max-height:85vh; overflow-y:auto;
+.ck-coupon-input {
+  flex: 1; padding: 9px 14px;
+  border: 1.5px solid #d2d2d7; border-radius: 10px;
+  font-size: 0.85rem; outline: none;
+  transition: border-color 0.15s; background: #f9f9f9;
+  text-transform: uppercase; letter-spacing: 0.05em;
 }
-.ck-modal-title { font-size:1.1rem; font-weight:800; color:#881337; margin-bottom:14px; }
-.ck-form-group { margin-bottom:12px; }
-.ck-form-label { display:block; font-size:0.72rem; font-weight:700; color:#64748b; margin-bottom:4px; }
+.ck-coupon-input:focus { border-color: #be185d; background: white; }
+.ck-coupon-btn {
+  padding: 9px 16px; border-radius: 10px; border: none;
+  background: #1d1d1f; color: white; font-size: 0.82rem;
+  font-weight: 600; cursor: pointer; white-space: nowrap;
+  transition: opacity 0.15s;
+}
+.ck-coupon-btn:hover { opacity: 0.8; }
+.ck-coupon-msg { font-size: 0.75rem; margin-top: 6px; font-weight: 600; }
+
+/* ── Order summary ── */
+.ck-sum-row {
+  display: flex; justify-content: space-between; align-items: center;
+  font-size: 0.88rem; color: #1d1d1f; padding: 8px 0;
+  border-bottom: 1px solid #f2f2f2;
+}
+.ck-sum-row:last-of-type { border-bottom: none; }
+.ck-sum-label { color: #6e6e73; }
+.ck-sum-value { font-weight: 500; }
+.ck-sum-value.free { color: #16a34a; font-weight: 600; }
+.ck-sum-value.discount { color: #16a34a; }
+.ck-sum-total-row {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 16px 0 0; margin-top: 4px;
+}
+.ck-sum-total-label { font-size: 1rem; font-weight: 700; color: #1d1d1f; }
+.ck-sum-total-value { font-size: 1.2rem; font-weight: 800; color: #1d1d1f; }
+
+/* ── Form ── */
+.ck-form-group { margin-bottom: 14px; }
+.ck-form-label {
+  display: block; font-size: 0.72rem; font-weight: 600;
+  color: #6e6e73; margin-bottom: 5px; text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
 .ck-form-input {
-  width:100%; padding:10px 14px; border:2px solid #f1f5f9;
-  border-radius:14px; font-size:0.88rem; outline:none; box-sizing:border-box;
-  transition:border-color 0.2s;
+  width: 100%; padding: 11px 14px;
+  border: 1.5px solid #d2d2d7; border-radius: 12px;
+  font-size: 0.9rem; outline: none; background: white;
+  transition: border-color 0.2s; color: #1d1d1f;
 }
-.ck-form-input:focus { border-color:#be185d; }
-.ck-form-row { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
-.ck-radio-group { display:flex; gap:16px; }
-.ck-radio-group label { display:flex; align-items:center; gap:6px; font-size:0.82rem; font-weight:600; cursor:pointer; }
-.ck-submit {
-  width:100%; padding:14px; border-radius:30px; border:none;
-  background:linear-gradient(135deg,#be185d,#f472b6);
-  color:white; font-weight:900; font-size:1rem; cursor:pointer;
-  margin-top:8px; box-shadow:0 4px 14px rgba(190,24,93,0.3);
+.ck-form-input:focus { border-color: #be185d; }
+.ck-form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.ck-pin-status { font-size: 0.72rem; font-weight: 600; margin-top: 5px; min-height: 16px; }
+.ck-pin-status.ok   { color: #16a34a; }
+.ck-pin-status.err  { color: #dc2626; }
+.ck-pin-status.chk  { color: #6e6e73; }
+
+/* ── Payment toggle ── */
+.ck-payment-options { display: flex; gap: 10px; }
+.ck-payment-option {
+  flex: 1; padding: 12px; border: 1.5px solid #d2d2d7;
+  border-radius: 12px; cursor: pointer; text-align: center;
+  transition: border-color 0.15s, background 0.15s;
 }
-.ck-pin-ok  { font-size:0.72rem; color:#16a34a; font-weight:700; margin-top:3px; display:none; }
-.ck-pin-err { font-size:0.72rem; color:#dc2626; font-weight:700; margin-top:3px; display:none; }
-.ck-pin-chk { font-size:0.72rem; color:#be185d; font-weight:700; margin-top:3px; display:none; }
+.ck-payment-option.selected {
+  border-color: #be185d; background: #fff7f8;
+}
+.ck-payment-option input { display: none; }
+.ck-payment-option-icon { font-size: 1.2rem; display: block; margin-bottom: 4px; }
+.ck-payment-option-label { font-size: 0.78rem; font-weight: 600; color: #1d1d1f; }
+
+/* ── Submit ── */
+.ck-submit-btn {
+  width: 100%; padding: 16px;
+  border-radius: 14px; border: none;
+  background: #1d1d1f; color: white;
+  font-size: 0.95rem; font-weight: 700;
+  cursor: pointer; margin-top: 18px;
+  letter-spacing: -0.2px;
+  transition: background 0.15s, opacity 0.15s;
+}
+.ck-submit-btn:hover { background: #333; }
+.ck-submit-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.ck-submit-note {
+  text-align: center; font-size: 0.68rem; color: #6e6e73;
+  margin-top: 10px; line-height: 1.5;
+}
 </style>
 
-<div class="ck-wrap">
-  <!-- Step indicator -->
-  <div class="ck-steps">
-    <div class="ck-step on"></div>
-    <div class="ck-step on"></div>
-    <div class="ck-step"></div>
+<div class="ck-page">
+  <!-- Top bar -->
+  <div class="ck-topbar">
+    <div class="ck-topbar-brand">Nari Nakhre — Checkout</div>
+    <div class="ck-topbar-secure">🔒 Secured by Razorpay · 256-bit SSL</div>
   </div>
 
-  <!-- Cart items -->
-  <div class="ck-card">
-    <div style="display:flex;justify-content:space-between;align-items:center;">
-      <div class="ck-card-title">Your Cart</div>
-      <button class="ck-clear" id="ck-clear-btn">Clear Cart</button>
-    </div>
+  <div class="ck-container">
 
-    <div id="ck-items">
-    {% for item in display_cart %}
-    {%- set clean_size = item.size if item.size and item.size not in ['Standard','standard','STANDARD','None',''] else '' -%}
-    {%- set img_src = item.image_url if item.image_url and item.image_url.startswith('http') else '' -%}
-    <div class="ck-item" data-sku="{{ item.sku }}" data-size="{{ item.size }}" data-price="{{ item.price }}">
-      <!-- Image on the left -->
-      <img class="ck-item-img"
-           src="{{ img_src or url_for('static', filename='assets/logo.png') }}"
-           alt="{{ item.name }}"
-           onerror="this.onerror=null;this.src='{{ url_for('static', filename='assets/logo.png') }}'">
-      <!-- Title, size, price + counter stacked on the right -->
-      <div class="ck-item-right">
-        <div class="ck-item-name">{{ item.name }}</div>
-        {% if clean_size %}<div class="ck-item-size">Size: {{ clean_size }}</div>{% endif %}
-        <div class="ck-item-price-row">
-          <div class="ck-line-total">₹{{ (item.price * item.units)|round(0)|int }}</div>
-          <div class="ck-counter">
-            <button class="ck-c-btn" onclick="ckDec(this)">−</button>
-            <span class="ck-qty">{{ item.units }}</span>
-            <button class="ck-c-btn" onclick="ckInc(this)">+</button>
+    <!-- ── LEFT: Cart + Coupon ── -->
+    <div class="ck-left">
+
+      <!-- Cart items -->
+      <div class="ck-section">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
+          <div class="ck-section-title" style="margin-bottom:0;">
+            Your Bag
+            <span style="font-size:0.78rem;font-weight:500;color:#6e6e73;margin-left:6px;">
+              ({{ display_cart|length }} item{{ 's' if display_cart|length != 1 else '' }})
+            </span>
+          </div>
+          <button class="ck-clear-btn" id="ck-clear-btn">Clear all</button>
+        </div>
+
+        <div id="ck-items">
+        {% for item in display_cart %}
+        {%- set clean_size = item.size if item.size and item.size not in ['Standard','standard','STANDARD','None',''] else '' -%}
+        {%- set img_src = item.image_url if item.image_url and item.image_url.startswith('http') else '' -%}
+        <div class="ck-item" data-sku="{{ item.sku }}" data-size="{{ item.size }}" data-price="{{ item.price }}">
+          <img class="ck-item-img"
+               src="{{ img_src or url_for('static', filename='assets/logo.png') }}"
+               alt="{{ item.name }}"
+               onerror="this.onerror=null;this.src='{{ url_for('static', filename='assets/logo.png') }}'">
+          <div class="ck-item-right">
+            <div class="ck-item-name">{{ item.name }}</div>
+            {% if clean_size %}<div class="ck-item-size">Size: {{ clean_size }}</div>{% endif %}
+            <div class="ck-item-bottom">
+              <div class="ck-line-total">₹{{ (item.price * item.units)|round(0)|int }}</div>
+              <div class="ck-counter">
+                <button class="ck-c-btn" onclick="ckDec(this)">−</button>
+                <span class="ck-qty">{{ item.units }}</span>
+                <button class="ck-c-btn" onclick="ckInc(this)">+</button>
+              </div>
+            </div>
           </div>
         </div>
+        {% else %}
+        <div style="text-align:center;color:#6e6e73;padding:32px 0;font-size:0.88rem;">
+          Your bag is empty.
+        </div>
+        {% endfor %}
+        </div>
+
+        <!-- Coupon -->
+        <div class="ck-coupon-row">
+          <input type="text" id="ck-coupon" class="ck-coupon-input"
+                 placeholder="Coupon code"
+                 value="{{ coupon_code or '' }}">
+          <button onclick="applyCoupon()" class="ck-coupon-btn">Apply</button>
+        </div>
+        <div id="ck-coupon-msg" class="ck-coupon-msg" style="display:none;"></div>
+        {% if coupon_code %}
+        <div style="display:flex;align-items:center;justify-content:space-between;background:#f0fdf4;border:1.5px solid #86efac;border-radius:10px;padding:8px 12px;margin-top:8px;">
+          <span style="font-size:0.8rem;font-weight:600;color:#15803d;">✓ {{ coupon_code }} applied</span>
+          <button onclick="removeCoupon()" style="background:none;border:none;color:#dc2626;font-size:0.75rem;font-weight:600;cursor:pointer;">Remove</button>
+        </div>
+        {% endif %}
+      </div>
+
+      <!-- Shipping address form — shown inline on desktop, stays visible -->
+      <div class="ck-section">
+        <div class="ck-section-title">Shipping Address</div>
+        <form id="ck-form">
+          <div class="ck-form-row">
+            <div class="ck-form-group">
+              <label class="ck-form-label">Full Name *</label>
+              <input type="text" name="name" required class="ck-form-input" placeholder="Ananya Sharma" autocomplete="name">
+            </div>
+            <div class="ck-form-group">
+              <label class="ck-form-label">Phone *</label>
+              <input type="tel" name="phone" required class="ck-form-input" placeholder="10-digit mobile" autocomplete="tel">
+            </div>
+          </div>
+          <div class="ck-form-group">
+            <label class="ck-form-label">Email *</label>
+            <input type="email" name="email" required class="ck-form-input" placeholder="name@example.com" autocomplete="email">
+          </div>
+          <div class="ck-form-group">
+            <label class="ck-form-label">Address *</label>
+            <textarea name="address" rows="2" required class="ck-form-input"
+                      placeholder="House No, Street, Area" autocomplete="street-address"
+                      style="resize:vertical;"></textarea>
+          </div>
+          <div class="ck-form-row">
+            <div class="ck-form-group">
+              <label class="ck-form-label">Pincode *</label>
+              <input type="text" id="ck-pin" name="pincode" required maxlength="6"
+                     class="ck-form-input" placeholder="6-digit PIN"
+                     autocomplete="postal-code" oninput="ckCheckPin()">
+              <div id="ck-pin-status" class="ck-pin-status"></div>
+              <input type="hidden" id="ck-state" name="state" value="">
+            </div>
+            <div class="ck-form-group">
+              <label class="ck-form-label">City / State</label>
+              <input type="text" id="ck-city" readonly class="ck-form-input"
+                     style="background:#f9f9f9;color:#6e6e73;" placeholder="Auto-detected">
+            </div>
+          </div>
+
+          <!-- Payment method -->
+          <div class="ck-form-group" style="margin-top:4px;">
+            <label class="ck-form-label">Payment Method</label>
+            <div class="ck-payment-options">
+              <label class="ck-payment-option selected" id="opt-prepaid" onclick="selectPayment('Prepaid')">
+                <input type="radio" name="payment_mode" value="Prepaid" checked>
+                <span class="ck-payment-option-icon">💳</span>
+                <span class="ck-payment-option-label">Prepaid</span>
+              </label>
+              <label class="ck-payment-option" id="opt-cod" onclick="selectPayment('COD')">
+                <input type="radio" name="payment_mode" value="COD">
+                <span class="ck-payment-option-icon">💵</span>
+                <span class="ck-payment-option-label">Cash on Delivery</span>
+              </label>
+            </div>
+          </div>
+
+          <button type="submit" class="ck-submit-btn" id="ck-submit-btn">
+            Place Order
+          </button>
+          <div class="ck-submit-note">
+            By placing your order you agree to our terms.<br>
+            🔒 Payments processed securely by Razorpay.
+          </div>
+        </form>
       </div>
     </div>
-    {% else %}
-    <div style="text-align:center;color:#9f9f9f;padding:20px 0;font-size:0.85rem;">Your cart is empty.</div>
-    {% endfor %}
+
+    <!-- ── RIGHT: Order Summary ── -->
+    <div class="ck-right">
+      <div class="ck-section">
+        <div class="ck-section-title">Order Summary</div>
+
+        <div class="ck-sum-row">
+          <span class="ck-sum-label">Subtotal</span>
+          <span class="ck-sum-value" id="s-subtotal">₹{{ subtotal|round(0)|int }}</span>
+        </div>
+        <div class="ck-sum-row">
+          <span class="ck-sum-label">GST (included)</span>
+          <span class="ck-sum-value" style="color:#6e6e73;">₹{{ total_tax|round(2) }}</span>
+        </div>
+        {% if discount and discount > 0 %}
+        <div class="ck-sum-row" id="s-discount-row">
+          <span class="ck-sum-label">Discount{% if coupon_code %} ({{ coupon_code }}){% endif %}</span>
+          <span class="ck-sum-value discount" id="s-discount">−₹{{ discount|round(0)|int }}</span>
+        </div>
+        {% else %}
+        <div class="ck-sum-row" id="s-discount-row" style="display:none;">
+          <span class="ck-sum-label">Discount</span>
+          <span class="ck-sum-value discount" id="s-discount">−₹0</span>
+        </div>
+        {% endif %}
+        <div class="ck-sum-row">
+          <span class="ck-sum-label">Shipping</span>
+          <span class="ck-sum-value free" id="s-ship">FREE</span>
+        </div>
+        <div class="ck-sum-row" id="s-cod-row" style="display:none;">
+          <span class="ck-sum-label">COD Fee</span>
+          <span class="ck-sum-value" id="s-cod">₹0</span>
+        </div>
+
+        <div style="border-top:1px solid #f2f2f2;margin-top:4px;"></div>
+        <div class="ck-sum-total-row">
+          <span class="ck-sum-total-label">Total</span>
+          <span class="ck-sum-total-value" id="s-total">₹{{ grand_total|round(0)|int }}</span>
+        </div>
+
+        <div style="margin-top:18px;padding:14px;background:#f9f9f9;border-radius:12px;font-size:0.75rem;color:#6e6e73;line-height:1.6;">
+          🚚 <strong>Free shipping</strong> on all orders<br>
+          🔄 Easy returns within 7 days<br>
+          🔒 Secure payment via Razorpay
+        </div>
+      </div>
     </div>
-  </div>
 
-  <!-- Coupon -->
-  <div class="ck-coupon">
-    <input type="text" id="ck-coupon" placeholder="Coupon code" value="{{ coupon_code or '' }}">
-    <button onclick="applyCoupon()">Apply</button>
-  </div>
-  <div id="coupon-msg" style="display:none;font-size:0.78rem;font-weight:700;color:#16a34a;padding:4px 2px 0;"></div>
-  <div id="ck-coupon-msg" style="font-size:0.75rem;margin:-6px 0 10px;display:none;"></div>
-  {% if coupon_code %}
-  <div style="display:flex;align-items:center;justify-content:space-between;background:#f0fdf4;border:1.5px solid #86efac;border-radius:12px;padding:8px 12px;margin-bottom:10px;">
-    <span style="font-size:0.8rem;font-weight:700;color:#15803d;">✓ {{ coupon_code }} applied</span>
-    <button onclick="removeCoupon()" style="background:none;border:none;color:#dc2626;font-size:0.75rem;font-weight:700;cursor:pointer;">Remove</button>
-  </div>
-  {% endif %}
-
-  <!-- Order summary -->
-  <div class="ck-summary">
-    <div class="ck-summary-title">Order Summary</div>
-    <div class="ck-sum-row"><span>Subtotal</span><span id="s-subtotal">₹{{ subtotal|round(0)|int }}</span></div>
-    <div class="ck-sum-row"><span>GST (incl.)</span><span>₹{{ total_tax|round(2) }}</span></div>
-    {% if discount and discount > 0 %}
-    <div class="ck-sum-row" id="s-discount-row" style="color:#4ade80;"><span>Discount</span><span id="s-discount">−₹{{ discount|round(0)|int }}</span></div>
-    {% else %}
-    <div class="ck-sum-row" id="s-discount-row" style="display:none;color:#4ade80;"><span>Discount</span><span id="s-discount">₹0</span></div>
-    {% endif %}
-    <div class="ck-sum-row"><span>Shipping</span><span id="s-ship" style="color:#4ade80;font-weight:700;">FREE</span></div>
-    <div class="ck-sum-row" id="s-cod-row" style="display:none;"><span>COD Fee</span><span id="s-cod" style="color:#fbbf24;font-weight:700;">₹0</span></div>
-    {% if discount and discount > 0 %}
-    <div class="ck-sum-row" style="color:#4ade80;"><span>Discount</span><span>−₹{{ discount|round(0)|int }}</span></div>
-    {% endif %}
-    <div class="ck-sum-total"><span>Total</span><span id="s-total">₹{{ grand_total|round(0)|int }}</span></div>
-  </div>
-
-  <!-- Proceed button -->
-  <button class="ck-proceed" id="ck-proceed" onclick="openAddressModal()">
-    🔒 Proceed to Payment
-  </button>
-  <div class="ck-secure">Secured by Razorpay · 256-bit SSL</div>
-</div>
-
-<!-- Address modal (bottom sheet) -->
-<div class="ck-modal-bg" id="ck-modal-bg" onclick="closeModal(event)">
-  <div class="ck-modal">
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">
-      <div class="ck-modal-title">Shipping Details</div>
-      <button onclick="document.getElementById('ck-modal-bg').classList.remove('open')"
-              style="background:none;border:none;font-size:1.4rem;color:#be185d;cursor:pointer;">×</button>
-    </div>
-    <form id="ck-form">
-      <div class="ck-form-row">
-        <div class="ck-form-group">
-          <label class="ck-form-label">Full Name *</label>
-          <input type="text" name="name" required class="ck-form-input" placeholder="Ananya Sharma">
-        </div>
-        <div class="ck-form-group">
-          <label class="ck-form-label">Phone *</label>
-          <input type="tel" name="phone" required class="ck-form-input" placeholder="10-digit mobile">
-        </div>
-      </div>
-      <div class="ck-form-group">
-        <label class="ck-form-label">Email *</label>
-        <input type="email" name="email" required class="ck-form-input" placeholder="name@example.com">
-      </div>
-      <div class="ck-form-group">
-        <label class="ck-form-label">Address *</label>
-        <textarea name="address" rows="2" required class="ck-form-input" placeholder="House No, Street, Area"></textarea>
-      </div>
-      <div class="ck-form-row">
-        <div class="ck-form-group">
-          <label class="ck-form-label">Pincode *</label>
-          <input type="text" id="ck-pin" name="pincode" required maxlength="6" class="ck-form-input"
-                 placeholder="6-digit PIN" oninput="ckCheckPin()">
-          <div id="ck-pin-chk" class="ck-pin-chk">Checking…</div>
-          <div id="ck-pin-ok"  class="ck-pin-ok">✓ Serviceable</div>
-          <div id="ck-pin-err" class="ck-pin-err">✗ Not serviceable</div>
-        </div>
-        <div class="ck-form-group">
-          <label class="ck-form-label">City / State</label>
-          <input type="text" id="ck-city" readonly class="ck-form-input" style="background:#f8fafc;" placeholder="Auto-detected">
-        </div>
-      </div>
-      <div class="ck-form-group">
-        <label class="ck-form-label">Payment</label>
-        <div class="ck-radio-group">
-          <label><input type="radio" name="payment_mode" value="Prepaid" checked onchange="ckPayMode()"> Prepaid</label>
-          <label><input type="radio" name="payment_mode" value="COD" onchange="ckPayMode()"> Cash on Delivery</label>
-        </div>
-      </div>
-      <button type="submit" class="ck-submit">✓ Complete Purchase</button>
-    </form>
-  </div>
-</div>
+  </div><!-- end .ck-container -->
+</div><!-- end .ck-page -->
 
 <script src="https://checkout.razorpay.com/v1/checkout.js"></script>
 <script>
 const RZP_KEY = {{ config.get('RAZORPAY_KEY_ID', '')|tojson }};
 let ckServiceable = false, ckShip = 0, ckCodFee = 0;
-let appliedCoupon = null;  // {pct, min_order, max_discount} set when coupon applied
-let currentDiscount = {{ discount|default(0)|round(2) }};  // current effective discount
-const couponMsgEl = document.getElementById('coupon-msg');
+let appliedCoupon = null;
+let currentDiscount = {{ discount|default(0)|round(2) }};
 const subtotalBase = {{ subtotal|round(2) }};
 const gstBase = {{ total_tax|round(2) }};
 const discountBase = {{ discount|default(0)|round(2) }};
+
+/* ── Payment method toggle ── */
+function selectPayment(mode) {
+    document.querySelectorAll('.ck-payment-option').forEach(el => el.classList.remove('selected'));
+    document.getElementById('opt-' + mode.toLowerCase()).classList.add('selected');
+    document.querySelector(`input[value="${mode}"]`).checked = true;
+    ckPayMode();
+}
 
 /* ── Cart controls ── */
 function ckDec(btn) {
@@ -261,8 +411,8 @@ function ckDec(btn) {
     const qEl = row.querySelector('.ck-qty');
     let qty = +qEl.textContent - 1;
     if (qty <= 0) {
-        fetch('/update-cart',{method:'POST',headers:{'Content-Type':'application/json'},
-            body:JSON.stringify({product_id:sku,qty:0,price,size})})
+        fetch('/update-cart', {method:'POST', headers:{'Content-Type':'application/json'},
+            body: JSON.stringify({product_id:sku, qty:0, price, size})})
         .then(r=>r.json()).then(d=>{
             row.remove();
             if(typeof syncCartCount==='function') syncCartCount(d.new_total||0);
@@ -271,8 +421,8 @@ function ckDec(btn) {
         });
         return;
     }
-    fetch('/update-cart',{method:'POST',headers:{'Content-Type':'application/json'},
-        body:JSON.stringify({product_id:sku,qty,price,size})})
+    fetch('/update-cart', {method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({product_id:sku, qty, price, size})})
     .then(r=>r.json()).then(d=>{
         qEl.textContent = qty;
         row.querySelector('.ck-line-total').textContent = '₹'+(qty*price).toFixed(0);
@@ -285,8 +435,8 @@ function ckInc(btn) {
     const sku = row.dataset.sku, size = row.dataset.size, price = +row.dataset.price;
     const qEl = row.querySelector('.ck-qty');
     const qty = +qEl.textContent + 1;
-    fetch('/update-cart',{method:'POST',headers:{'Content-Type':'application/json'},
-        body:JSON.stringify({product_id:sku,qty,price,size})})
+    fetch('/update-cart', {method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({product_id:sku, qty, price, size})})
     .then(r=>r.json()).then(d=>{
         qEl.textContent = qty;
         row.querySelector('.ck-line-total').textContent = '₹'+(qty*price).toFixed(0);
@@ -300,87 +450,88 @@ function ckRecalc() {
         sub += +r.dataset.price * +r.querySelector('.ck-qty').textContent;
     });
     document.getElementById('s-subtotal').textContent = '₹'+sub.toFixed(0);
-    const total = sub - discountBase;
-    document.getElementById('s-total').textContent = '₹'+total.toFixed(0);
+    let disc = appliedCoupon ? Math.min(sub*(appliedCoupon.pct/100), appliedCoupon.max_discount>0?appliedCoupon.max_discount:Infinity) : discountBase;
+    if (appliedCoupon && sub < appliedCoupon.min_order) { disc = 0; }
+    currentDiscount = disc;
+    document.getElementById('s-total').textContent = '₹'+Math.max(sub-disc,0).toFixed(0);
 }
 
 /* ── Coupon ── */
-// Add coupon-msg element if not already present (safety check)
-// It's referenced by couponMsgEl above
-
 function applyCoupon() {
-    const code = document.getElementById('ck-coupon').value.trim();
+    const code = document.getElementById('ck-coupon').value.trim().toUpperCase();
     const msgEl = document.getElementById('ck-coupon-msg');
     if (!code) return;
-    fetch('/apply_coupon', { method:'POST', headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({coupon: code}) })
-    .then(r => r.json())
-    .then(d => {
+    fetch('/apply_coupon', {method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({coupon: code})})
+    .then(r=>r.json()).then(d=>{
         msgEl.style.display = 'block';
         if (d.status === 'success') {
             msgEl.style.color = '#15803d';
             msgEl.textContent = d.message;
-            setTimeout(() => location.reload(), 600);
+            setTimeout(()=>location.reload(), 600);
         } else {
             msgEl.style.color = '#dc2626';
-            msgEl.textContent = d.message || 'Could not apply coupon';
+            msgEl.textContent = d.message || 'Invalid coupon code';
         }
-    })
-    .catch(() => {
-        msgEl.style.display = 'block';
-        msgEl.style.color = '#dc2626';
-        msgEl.textContent = 'Could not apply coupon. Please try again.';
+    }).catch(()=>{
+        msgEl.style.display='block'; msgEl.style.color='#dc2626';
+        msgEl.textContent='Could not apply coupon. Please try again.';
     });
 }
 function removeCoupon() {
-    fetch('/remove_coupon', { method:'POST' })
-    .then(() => location.reload());
+    fetch('/remove_coupon', {method:'POST'}).then(()=>location.reload());
 }
 
 /* ── Clear cart ── */
 document.getElementById('ck-clear-btn').addEventListener('click', function(){
+    if(!confirm('Clear your entire bag?')) return;
     fetch('/clear_quote',{method:'POST',headers:{'X-Requested-With':'XMLHttpRequest'}})
     .then(r=>{ if(r.ok) location.reload(); });
 });
 
 /* ── Pincode check ── */
-let ckPinCheckTimer = null; // debounce timer
+let ckPinTimer = null;
+function ckSetPinStatus(type, msg) {
+    const el = document.getElementById('ck-pin-status');
+    el.className = 'ck-pin-status ' + (type||'');
+    el.textContent = msg || '';
+}
 function ckCheckPin() {
     const pin = document.getElementById('ck-pin').value.trim();
-    const chk=document.getElementById('ck-pin-chk');
-    const ok=document.getElementById('ck-pin-ok');
-    const err=document.getElementById('ck-pin-err');
-
-    // While typing (< 6 digits), just clear the result without resetting serviceability
-    if(pin.length < 6) {
-        [chk,ok,err].forEach(e=>e.style.display='none');
+    if (pin.length < 6) {
+        ckSetPinStatus('', '');
+        // Don't reset ckServiceable while still typing
         return;
     }
-
-    // Valid 6-digit pin entered — debounce 400ms so we don't hit API on every keystroke
-    clearTimeout(ckPinCheckTimer);
-    ckPinCheckTimer = setTimeout(() => {
-        [chk,ok,err].forEach(e=>e.style.display='none');
-        document.getElementById('ck-city').value='';
-        // Only reset serviceability NOW that we're about to recheck
-        ckServiceable=false; ckShip=0; ckCodFee=0;
-        if(!/^\d{6}$/.test(pin)){ckUpdateSummary();return;}
-        chk.style.display='block';
-        fetch(`/api/delhivery/check/${pin}`)
-        .then(r=>r.json()).then(d=>{
-            chk.style.display='none';
-            if(d.serviceable||d.status){
-                ok.style.display='block';
-                document.getElementById('ck-city').value=d.city||'';
-                document.getElementById('ck-state').value=d.state||'';
-                ckServiceable=true;
+    clearTimeout(ckPinTimer);
+    ckPinTimer = setTimeout(()=>{
+        if (!/^\d{6}$/.test(pin)) { ckSetPinStatus('err','Invalid pincode'); return; }
+        // Reset serviceability only right before we fire the API call
+        ckServiceable = false;
+        ckSetPinStatus('chk','Checking availability…');
+        document.getElementById('ck-city').value = '';
+        document.getElementById('ck-state').value = '';
+        fetch('/api/delhivery/check/'+pin)
+        .then(r=>r.json())
+        .then(d=>{
+            if (d.serviceable || d.status) {
+                ckServiceable = true;
+                ckSetPinStatus('ok', '✓ Delivery available in ' + (d.city||pin));
+                document.getElementById('ck-city').value = d.city || '';
+                document.getElementById('ck-state').value = d.state || '';
                 ckFetchShipping(pin);
             } else {
-                err.style.display='block';
-                ckUpdateSummary();
+                ckServiceable = false;
+                // Show a softer message — "not serviceable" could be an API hiccup
+                ckSetPinStatus('err','Delivery not available at this pincode');
             }
-        }).catch(()=>{ chk.style.display='none'; err.style.display='block'; ckUpdateSummary(); });
-    }, 400);
+        })
+        .catch(()=>{
+            // API failed — don't show "not serviceable", show a neutral retry message
+            ckServiceable = false;
+            ckSetPinStatus('chk','Could not verify — please check your pincode');
+        });
+    }, 500);
 }
 function ckFetchShipping(pin) {
     const mode = document.querySelector('input[name="payment_mode"]:checked')?.value||'Prepaid';
@@ -388,100 +539,46 @@ function ckFetchShipping(pin) {
         body:JSON.stringify({pincode:pin,mode})})
     .then(r=>r.json()).then(d=>{
         ckShip=d.shipping_charge||0; ckCodFee=d.cod_fee||0;
-        ckUpdateSummary();
-    }).catch(()=>{ ckShip=0; ckCodFee=0; ckUpdateSummary(); });
+    }).catch(()=>{ ckShip=0; ckCodFee=0; });
 }
 function ckPayMode() {
     const pin = document.getElementById('ck-pin').value.trim();
-    if(ckServiceable && /^\d{6}$/.test(pin)) ckFetchShipping(pin);
-    else ckUpdateSummary();
-}
-function ckUpdateSummary() {
-    const mode = document.querySelector('input[name="payment_mode"]:checked')?.value||'Prepaid';
-    let sub = 0;
-    document.querySelectorAll('.ck-item').forEach(r=>{
-        sub += +r.dataset.price * +r.querySelector('.ck-qty').textContent;
-    });
-    document.getElementById('s-subtotal').textContent='₹'+sub.toFixed(0);
-    // Shipping is FREE for customers — the cost is absorbed in product pricing
-    document.getElementById('s-ship').textContent = 'FREE';
-    document.getElementById('s-ship').style.color = '#4ade80';
-    const codRow=document.getElementById('s-cod-row');
-    const codFeeEl=document.getElementById('s-cod');
-    // Shipping FREE — not added to customer total
-    const cod = (mode==='COD'&&ckServiceable)?ckCodFee:0;
-    codRow.style.display = (mode==='COD')?'flex':'none';
-    if(codFeeEl) codFeeEl.textContent='₹'+cod;
-    // Revalidate coupon on every recalc
-    const effectiveSub = sub;
-    let effectiveDiscount = 0;
-    if(appliedCoupon && effectiveSub >= appliedCoupon.min_order) {
-        effectiveDiscount = Math.min(
-            effectiveSub * (appliedCoupon.pct / 100),
-            appliedCoupon.max_discount > 0 ? appliedCoupon.max_discount : Infinity
-        );
-        if(couponMsgEl) { couponMsgEl.style.display='block'; couponMsgEl.textContent='✓ Coupon applied: −₹'+effectiveDiscount.toFixed(0); }
-    } else if(appliedCoupon && effectiveSub < appliedCoupon.min_order) {
-        effectiveDiscount = 0;
-        if(couponMsgEl) { couponMsgEl.style.display='block'; couponMsgEl.style.color='#dc2626'; couponMsgEl.textContent='⚠ Coupon removed: order below minimum ₹'+appliedCoupon.min_order; }
-    }
-    const total = effectiveSub + cod - effectiveDiscount;
-    currentDiscount = effectiveDiscount;
-    document.getElementById('s-total').textContent='₹'+total.toFixed(0);
+    if (ckServiceable && /^\d{6}$/.test(pin)) ckFetchShipping(pin);
 }
 
-/* ── Address modal ── */
-function openAddressModal() {
-    document.getElementById('ck-modal-bg').classList.add('open');
-}
-function closeModal(e) {
-    if(e.target===document.getElementById('ck-modal-bg'))
-        document.getElementById('ck-modal-bg').classList.remove('open');
-}
-
-/* ── Checkout form → real backend flow ── */
-document.getElementById('ck-form').addEventListener('submit', async function(e) {
+/* ── Form submit ── */
+document.getElementById('ck-form').addEventListener('submit', async function(e){
     e.preventDefault();
     const form = e.target;
-    const submitBtn = form.querySelector('.ck-submit');
-    submitBtn.disabled = true;
-    submitBtn.textContent = 'Processing…';
-
-    const name  = form.name.value;
-    const phone = form.phone.value;
-    const email = form.email.value;
-    const addr  = form.address.value;
-    const pin   = form.pincode.value;
+    const submitBtn = document.getElementById('ck-submit-btn');
+    const name  = form.name.value.trim();
+    const phone = form.phone.value.trim();
+    const email = form.email.value.trim();
+    const addr  = form.address.value.trim();
+    const pin   = form.pincode.value.trim();
     const mode  = form.payment_mode.value;
     const city  = document.getElementById('ck-city').value;
 
-    // Validate pincode format
-    const freshPin = pin.trim();
-    if (!/^\d{6}$/.test(freshPin)) {
-        alert('Please enter a valid 6-digit pincode.');
-        submitBtn.disabled = false; submitBtn.textContent = '✓ Complete Purchase';
+    if (!/^\d{6}$/.test(pin)) {
+        ckSetPinStatus('err','Please enter a valid 6-digit pincode');
+        document.getElementById('ck-pin').focus();
         return;
     }
-    // Trust the serviceability check done when user typed the pin (ckCheckPin)
-    // No re-check here — that caused race conditions showing conflicting messages
     if (!ckServiceable) {
-        alert('Please wait for the pincode check to complete, or try a different pincode.');
-        submitBtn.disabled = false; submitBtn.textContent = '✓ Complete Purchase';
+        ckSetPinStatus('err','Please wait — verifying delivery to this pincode…');
+        document.getElementById('ck-pin').focus();
         return;
     }
+
+    submitBtn.disabled = true;
+    submitBtn.textContent = 'Processing…';
 
     let sub = 0;
     document.querySelectorAll('.ck-item').forEach(r=>{
         sub += +r.dataset.price * +r.querySelector('.ck-qty').textContent;
     });
-    const shipping = ckShip;
-    const cod = (mode==='COD') ? ckCodFee : 0;
-    // GST is already INCLUDED in retail_price — never add it on top.
-    // Shipping is FREE for customers — absorbed in product pricing.
-    // Payable = product total - coupon discount only.
     const totalRupees = Math.max(sub - currentDiscount, 0);
 
-    // Step 1: Create the shipment / order record (form-encoded, matches backend)
     const fd = new FormData();
     fd.append('consignee_name', name);
     fd.append('consignee_phone', phone);
@@ -492,77 +589,46 @@ document.getElementById('ck-form').addEventListener('submit', async function(e) 
     fd.append('payment_mode', mode);
     fd.append('email', email);
 
-    fetch('/retail/checkout/process', { method:'POST', body: fd })
-    .then(r => r.json().catch(()=>({})).then(d => ({ok:r.ok, data:d})))
-    .then(({ok, data}) => {
-        if (!ok || (data.status && data.status === 'error')) {
-            throw new Error(data.message || 'Could not create order');
-        }
+    try {
+        const r1 = await fetch('/retail/checkout/process', {method:'POST', body:fd});
+        const d1 = await r1.json().catch(()=>({}));
+        if (!r1.ok || d1.status === 'error') throw new Error(d1.message || 'Could not create order');
 
         if (mode === 'COD') {
-            // For COD: confirm with backend immediately (creates Delhivery shipment, sends emails)
-            return fetch('/api/confirm-cod', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({})
-            })
-            .then(r => r.json())
-            .then(d => {
-                if (d.status === 'success') {
-                    window.location.href = '/thank_you';
-                } else {
-                    throw new Error(d.message || 'Could not confirm COD order');
-                }
-            });
+            const r2 = await fetch('/api/confirm-cod',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({})});
+            const d2 = await r2.json();
+            if (d2.status === 'success') { window.location.href = '/thank_you'; return; }
+            throw new Error(d2.message || 'Could not confirm COD order');
         }
 
-        // Step 2: Create Razorpay order
-        return fetch('/api/create-order', {
-            method:'POST', headers:{'Content-Type':'application/json'},
-            body: JSON.stringify({ amount: totalRupees })
-        })
-        .then(r => r.json())
-        .then(orderData => {
-            if (orderData.status !== 'success' || !orderData.order_id) {
-                throw new Error(orderData.message || 'Could not initiate payment');
-            }
-            const rzp = new Razorpay({
-                key: orderData.key_id || RZP_KEY,
-                amount: orderData.amount,
-                currency: orderData.currency || 'INR',
-                name: 'Nari Nakhre',
-                description: 'Jewellery Order',
-                order_id: orderData.order_id,
-                prefill: { name, email, contact: phone },
-                theme: { color: '#be185d' },
-                handler: function (resp) {
-                    fetch('/api/verify-payment', {
-                        method:'POST', headers:{'Content-Type':'application/json'},
-                        body: JSON.stringify({
-                            razorpay_order_id: resp.razorpay_order_id,
-                            razorpay_payment_id: resp.razorpay_payment_id,
-                            razorpay_signature: resp.razorpay_signature
-                        })
-                    }).then(r => r.json()).then(d => {
-                        if (d.status === 'success') window.location.href = '/thank_you';
-                        else alert(d.message || 'Payment verification failed');
-                    });
-                },
-                modal: {
-                    ondismiss: function() {
-                        submitBtn.disabled = false;
-                        submitBtn.textContent = '✓ Complete Purchase';
-                    }
-                }
-            });
-            rzp.open();
+        const r3 = await fetch('/api/create-order',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({amount:totalRupees})});
+        const orderData = await r3.json();
+        if (orderData.status !== 'success' || !orderData.order_id) throw new Error(orderData.message || 'Payment initiation failed');
+
+        const rzp = new Razorpay({
+            key: orderData.key_id || RZP_KEY,
+            amount: orderData.amount,
+            currency: orderData.currency || 'INR',
+            name: 'Nari Nakhre',
+            description: 'Jewellery Order',
+            image: '/static/assets/logo.png',
+            order_id: orderData.order_id,
+            prefill: {name, email, contact:phone},
+            theme: {color:'#be185d'},
+            handler: async function(resp){
+                const r4 = await fetch('/api/verify-payment',{method:'POST',headers:{'Content-Type':'application/json'},
+                    body:JSON.stringify({razorpay_order_id:resp.razorpay_order_id,razorpay_payment_id:resp.razorpay_payment_id,razorpay_signature:resp.razorpay_signature})});
+                const d4 = await r4.json();
+                if (d4.status==='success') window.location.href='/thank_you';
+                else alert(d4.message||'Payment verification failed');
+            },
+            modal:{ondismiss:()=>{ submitBtn.disabled=false; submitBtn.textContent='Place Order'; }}
         });
-    })
-    .catch(err => {
-        alert(err.message || 'Something went wrong. Please try again.');
-        submitBtn.disabled = false;
-        submitBtn.textContent = '✓ Complete Purchase';
-    });
+        rzp.open();
+    } catch(err) {
+        alert(err.message||'Something went wrong. Please try again.');
+        submitBtn.disabled=false; submitBtn.textContent='Place Order';
+    }
 });
 </script>
 {% endblock %}
