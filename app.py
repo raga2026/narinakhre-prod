@@ -590,10 +590,10 @@ def detect_site_type():
     elif path.startswith('/wholesale'):
         g.site_type = 'wholesale'
     else:
-        g.site_type = 'wholesale'
+        g.site_type = 'retail'  # default to retail for shared paths like /admin, /track
 
 def render_site(template_name, **kwargs):
-    site_type = getattr(g, 'site_type', 'wholesale')
+    site_type = getattr(g, 'site_type', 'retail')
     db = get_db()
     # For retail, fetch categories from the products table's 'category' column
     if site_type == 'retail':
@@ -698,6 +698,14 @@ def index():
         g.site_type = 'retail'
     elif request.path.startswith('/wholesale'):
         g.site_type = 'wholesale'
+    elif request.path == '/':
+        # Root domain — detect from hostname
+        # narinakhre.com → retail, wholesale.narinakhre.com → wholesale
+        host = request.host.lower()
+        if 'wholesale' in host:
+            g.site_type = 'wholesale'
+        else:
+            g.site_type = 'retail'
 
     db = get_db()
     hero_images = get_random_hero_images(db, count=4)
@@ -820,7 +828,7 @@ def sitemap():
 @app.route('/update-cart', methods=['POST'])
 def update_cart():
     if g.site_type != 'retail':
-        return jsonify({'status': 'error', 'message': 'Cart disabled for wholesale'}), 403
+        return jsonify({'status': 'error', 'message': 'Cart not available on wholesale'}), 403
     data = request.get_json()
     sku = data.get('product_id')
     qty = int(data.get('qty', 1))
@@ -1058,7 +1066,7 @@ def payment_cancel():
 @app.route('/api/create-order', methods=['POST'])
 def create_razorpay_order():
     if g.site_type != 'retail':
-        return jsonify({'status': 'error', 'message': 'Retail-only endpoint'}), 403
+        return jsonify({'status': 'error', 'message': 'Payment not available on wholesale'}), 403
     g.site_type = 'retail'
     payload = request.get_json(silent=True) or request.form or {}
 
@@ -1427,8 +1435,6 @@ def place_order():
 @app.route('/api/track/<waybill>', methods=['GET'])
 def api_track_shipment(waybill):
     """Live tracking status for a shipment, used by the public tracking page."""
-    if g.site_type != 'retail':
-        return jsonify({"status": False, "msg": "Unauthorized"}), 403
     provider = get_shipping_provider(
         app.config['SHIPPING_PROVIDER'],
         api_token=app.config.get('DELHIVERY_API_KEY')
@@ -1444,8 +1450,6 @@ def api_track_shipment(waybill):
 @app.route('/track/<waybill>')
 def track_order_page(waybill):
     """Public, shareable order-tracking page for customers."""
-    if g.site_type != 'retail':
-        return redirect(url_for('index'))
     conn = get_db()
     order = conn.execute(
         'SELECT * FROM order_shipping WHERE delhivery_waybill=?', (waybill,)
@@ -1562,11 +1566,6 @@ def remove_coupon():
 
 @app.route('/clear_quote', methods=['POST'])
 def clear_quote():
-    if g.site_type != 'retail':
-        session.pop('cart', None)
-        if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
-            return ('', 204)
-        return redirect('/wholesale')
     session.pop('cart', None)
     if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
         return ('', 204)

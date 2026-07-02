@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 
 {% block title %}Nari Nakhre | Premium Ethnic Jewelry Wholesaler{% endblock %}
-{% block meta_description %}<meta name="description" content="Wholesale Indian jewelry, bridal sets, and traditional bangles for weddings and festivals."><meta name="robots" content="noindex, nofollow">{% endblock %}
+{% block meta_description %}<meta name="description" content="Wholesale Indian jewelry, bridal sets, and traditional bangles for weddings and festivals.">{% endblock %}
 {% block body_class %}wholesale{% endblock %}
 {% block main_class %}container mx-auto p-4{% endblock %}
 
@@ -10,48 +10,73 @@
     body.wholesale { background: #f8fafc; }
     .nav-btn { background: #be185d; color: white; padding: 6px 10px; border-radius: 7px; font-size: 13px; font-weight: 600; min-width: 0; line-height: 1.2; margin: 0 2px; transition: background 0.18s; text-decoration: none; display: inline-flex; align-items: center; }
     .nav-btn:hover { background: #9f1239; }
+
+    /* ── Mobile-first header ── */
+    .ws-header {
+        background: white;
+        border-bottom: 2px solid #fecdd3;
+        box-shadow: 0 1px 4px rgba(0,0,0,0.06);
+        padding: 10px 16px;
+        position: sticky; top: 0; z-index: 50;
+    }
+    .ws-brand-row {
+        display: flex; align-items: center; justify-content: space-between;
+        margin-bottom: 10px;
+    }
+    .ws-brand { display: flex; align-items: center; gap: 8px; text-decoration: none; }
+    .ws-brand img { height: 36px; border-radius: 4px; }
+    .ws-brand span { font-size: 1.05rem; font-weight: 800; color: #be185d; font-family: Georgia, serif; }
+    .ws-nav { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+    .ws-nav-pill {
+        background: #fff1f2; color: #be185d;
+        padding: 6px 12px; border-radius: 20px;
+        font-size: 0.78rem; font-weight: 700;
+        text-decoration: none; display: inline-flex;
+        align-items: center; gap: 4px;
+        border: 1.5px solid #fda4af;
+        transition: background 0.15s;
+    }
+    .ws-nav-pill:hover { background: #fce7f3; }
+    .ws-nav-pill.active { background: #be185d; color: white; border-color: #be185d; }
+    @media (min-width: 640px) {
+        .ws-brand-row { margin-bottom: 0; }
+        .ws-header-inner { display: flex; align-items: center; justify-content: space-between; }
+    }
+
     #categories-dropdown-menu { background: white; border: 1px solid #fecdd3; }
     #categories-dropdown-menu a { color: #be185d; font-weight: 600; font-size: 0.85rem; display: block; padding: 8px 16px; text-decoration: none; }
     #categories-dropdown-menu a:hover { background: #fff1f2; }
-    @media (max-width: 640px) {
-        .ws-header-row { flex-direction: column !important; gap: 0.5rem !important; }
-        .ws-right { align-self: flex-end; }
-    }
 </style>
 {% endblock %}
 
 {% block header %}
-<header class="w-full bg-white border-b-2 border-rose-200 shadow-sm px-3 py-2">
-    <div class="flex items-center justify-center gap-2 mb-2">
-        <a href="/" class="flex items-center gap-2">
-            <img src="/static/assets/logo.png" alt="Logo" style="height:32px;border-radius:4px;">
-            <span class="text-lg font-bold rose-accent font-serif">Nari Nakhre</span>
-        </a>
-    </div>
-    <div class="flex flex-row justify-between items-center ws-header-row">
-        <div class="flex flex-row items-center gap-2 flex-wrap">
-            <a href="/" class="nav-btn" style="background:#fce7f3;color:#be185d;">
-                <svg width="14" height="14" fill="none" stroke="#be185d" stroke-width="2" viewBox="0 0 24 24" style="margin-right:4px;"><path d="M3 12L12 4l9 8"/><path d="M9 21V9h6v12"/></svg>Home
+<header class="ws-header">
+    <div class="ws-header-inner">
+        <div class="ws-brand-row">
+            <a href="/wholesale" class="ws-brand">
+                <img src="/static/assets/logo.png" alt="Nari Nakhre">
+                <span>Nari Nakhre</span>
             </a>
-            <div class="relative">
-                <button id="categories-dropdown-btn" aria-haspopup="true" aria-expanded="false" class="nav-btn">
-                    <svg width="12" height="12" fill="none" stroke="#fff" stroke-width="2" viewBox="0 0 24 24" style="margin-right:4px;"><path d="M19 9l-7 7-7-7"/></svg>Categories
+        </div>
+        <nav class="ws-nav">
+            <a href="/wholesale" class="ws-nav-pill">🏠 Home</a>
+            <div class="relative" style="position:relative;">
+                <button id="categories-dropdown-btn"
+                        class="ws-nav-pill"
+                        style="cursor:pointer;border:none;background:#fff1f2;color:#be185d;border:1.5px solid #fda4af;">
+                    📦 Categories ▾
                 </button>
-                <div id="categories-dropdown-menu" class="hidden absolute z-50 mt-1 w-44 rounded-2xl shadow-2xl border">
+                <div id="categories-dropdown-menu"
+                     class="hidden absolute z-50 mt-1 rounded-2xl shadow-2xl border"
+                     style="min-width:160px;left:0;top:100%;">
                     {% for cat in categories %}
                     <a href="{{ url_for('category_products', category=cat) }}">{{ cat }}</a>
                     {% endfor %}
                 </div>
             </div>
-        </div>
-        <div class="flex flex-row items-center gap-2 ws-right">
-            <a href="{{ url_for('wholesale_contact') }}" class="nav-btn" style="background:#fce7f3;color:#be185d;">
-                <svg width="14" height="14" fill="none" stroke="#be185d" stroke-width="2" viewBox="0 0 24 24" style="margin-right:4px;"><circle cx="9" cy="21" r="1"/><circle cx="20" cy="21" r="1"/><path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"/></svg>Quote
-            </a>
-            <a href="{{ url_for('wholesale_contact') }}" class="nav-btn">
-                <svg width="12" height="12" fill="none" stroke="#fff" stroke-width="2" viewBox="0 0 24 24" style="margin-right:4px;"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07A19.5 19.5 0 0 1 4.69 12a19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 3.62 1h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L7.91 8.6a16 16 0 0 0 6 6l.96-.96a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 21.73 16z"/></svg>Contact
-            </a>
-        </div>
+            <a href="{{ url_for('wholesale_contact') }}" class="ws-nav-pill">📞 Contact</a>
+            <a href="{{ url_for('checkout') }}" class="ws-nav-pill active">📋 Request Quote</a>
+        </nav>
     </div>
 </header>
 {% endblock %}
@@ -80,13 +105,10 @@ document.addEventListener('DOMContentLoaded', function() {
     if (!btn || !menu) return;
     btn.addEventListener('click', function(e) {
         e.stopPropagation();
-        const open = btn.getAttribute('aria-expanded') === 'true';
-        btn.setAttribute('aria-expanded', !open);
         menu.classList.toggle('hidden');
     });
     document.addEventListener('click', function() {
         menu.classList.add('hidden');
-        btn.setAttribute('aria-expanded', 'false');
     });
 });
 </script>
