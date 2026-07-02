@@ -12,7 +12,6 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 
 from flask import Flask, g, jsonify, redirect, render_template, request, session, url_for, flash
-from flask_sqlalchemy import SQLAlchemy
 from werkzeug.routing import BuildError
 from supabase import create_client, Client as SupabaseClient
 
@@ -44,13 +43,9 @@ SUPABASE_KEY = os.environ.get('SUPABASE_KEY', '')
 app.config['SHIPPING_PROVIDER'] = os.environ.get('SHIPPING_PROVIDER', 'mock')
 app.config['DELHIVERY_API_KEY'] = os.environ.get('DELHIVERY_API_KEY', '')
 app.config['WAREHOUSE_PIN'] = os.environ.get('WAREHOUSE_PIN', '482001')
-app.config['WAREHOUSE_PIN'] = os.environ.get('WAREHOUSE_PIN', '400001')
 app.config['RAZORPAY_KEY_ID'] = os.environ.get('RAZORPAY_KEY_ID', '')
 app.config['RAZORPAY_KEY_SECRET'] = os.environ.get('RAZORPAY_KEY_SECRET', '')
-app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///:memory:'
-app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
-db = SQLAlchemy(app)
 
 # Supabase client for database operations
 _supabase_client: SupabaseClient = None
@@ -1551,12 +1546,16 @@ def apply_coupon():
             "message": "This coupon doesn't apply to any items in your cart"
         }), 200
 
-    discount = round(eligible_subtotal * (coupon['discount_percent'] / 100.0), 2)
+    raw_discount = round(eligible_subtotal * (coupon['discount_percent'] / 100.0), 2)
+    max_disc = float(coupon.get('max_discount_amount') or 0)
+    discount = round(min(raw_discount, max_disc) if max_disc > 0 else raw_discount, 2)
 
     session['applied_coupon'] = {
         "code": code,
         "discount_percent": coupon['discount_percent'],
         "discount_amount": discount,
+        "min_order_amount": float(coupon.get('min_order_amount') or 0),
+        "max_discount_amount": max_disc,
         "category": coupon['category'],
         "sub_category": coupon['sub_category']
     }
@@ -1566,6 +1565,10 @@ def apply_coupon():
         "status": "success",
         "message": f"Coupon applied! You saved \u20b9{discount:.0f}",
         "discount": discount,
+        "discount_amount": discount,
+        "discount_percent": coupon['discount_percent'],
+        "min_order_amount": float(coupon.get('min_order_amount') or 0),
+        "max_discount_amount": max_disc,
         "code": code
     })
 

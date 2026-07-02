@@ -279,7 +279,7 @@
             </div>
             <div class="ck-form-group">
               <label class="ck-form-label">Phone *</label>
-              <input type="tel" name="phone" required class="ck-form-input" placeholder="10-digit mobile" autocomplete="tel">
+              <input type="tel" name="phone" required class="ck-form-input" placeholder="10-digit mobile" autocomplete="tel" inputmode="numeric" pattern="[0-9]{10}">
             </div>
           </div>
           <div class="ck-form-group">
@@ -296,7 +296,7 @@
             <div class="ck-form-group">
               <label class="ck-form-label">Pincode *</label>
               <input type="text" id="ck-pin" name="pincode" required maxlength="6"
-                     class="ck-form-input" placeholder="6-digit PIN"
+                class="ck-form-input" placeholder="6-digit PIN" inputmode="numeric" pattern="[0-9]{6}"
                      autocomplete="postal-code" oninput="ckCheckPin()">
               <div id="ck-pin-status" class="ck-pin-status"></div>
               <input type="hidden" id="ck-state" name="state" value="">

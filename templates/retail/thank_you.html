@@ -60,6 +60,9 @@
             {% if waybill %}
             <div class="ty-row"><span class="ty-label">Tracking ID (AWB)</span><span class="ty-value">{{ waybill }}</span></div>
             {% endif %}
+            {% if amount_paid and amount_paid > 0 %}
+            <div class="ty-row"><span class="ty-label">Amount Paid</span><span class="ty-value">₹{{ '%.2f'|format(amount_paid) }}</span></div>
+            {% endif %}
         </div>
 
         {% if tracking_url and waybill %}

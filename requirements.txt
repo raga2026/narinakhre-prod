@@ -2,7 +2,6 @@ Flask
 gunicorn
 requests
 razorpay
-Flask-SQLAlchemy
 Werkzeug
 supabase
 pyotp
