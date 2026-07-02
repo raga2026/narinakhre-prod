@@ -68,6 +68,11 @@
         <div class="bg-gray-50 rounded-lg p-6 shadow flex flex-col items-center">
           <h3 class="text-lg font-semibold mb-4 text-gray-800">Marketing</h3>
           <div class="flex flex-col space-y-3 w-full">
+            <a href="{{ url_for('admin_orders') }}"
+               class="w-full bg-rose-600 text-white py-2 rounded-lg font-semibold shadow hover:bg-rose-700 transition text-center"
+               aria-label="Process orders, accept, dispatch, print labels, track status">
+              📦 Order Processing
+            </a>
             <a href="{{ url_for('admin_coupons') }}"
                class="w-full bg-rose-600 text-white py-2 rounded-lg font-semibold shadow hover:bg-rose-700 transition text-center"
                aria-label="Create and manage discount coupon codes">
