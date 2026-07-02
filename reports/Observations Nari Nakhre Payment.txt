@@ -24,3 +24,9 @@ i have completely changed all the files given by you and also ran the Alter comm
 12. i did not get any message from delhivery for order plaement or shipment collection, we should handle that as well, the pin 600083 is not serciable, the whol of indi should be deliverable, we should look into it as well
 
 13. eHHi have implemented the edits given by you, committed the code and also pushed it. Added all the env variables in render befoe doing that. Please note that if the order was COD, then we should initialize the order as soon as the address and details are submitted by the user and confirms the order . And Also one more issue,  The automatic pickup should be avoided, as i already mentioned abovem we need to create the order and the admin has to accept the order and only then the pickup shouldbe scheduled, i think there would be some pickup OTP which will be generated alogn wih shipping label . The Order Processing Module in admin should take caer of this
+
+14. Date: 2nd July 2026 after all the points were written before this (Points 1 to 13). We Went live, Nari Nakhre Retail at narinakhre.com and wholesale.narinakhre.com, the observations found when we placed a dummy order was
+a. THe payment went through but the thank you page only contained the thank you for your request and info@narinakhre.com, the dynamic tick and otder details with amount was missing. The thank You file in retail has to be fixed, we woked on it yesterday and its not fixed it.
+b. The emails after the orders were placed were not triggered .
+c. In the admin page, the order processing feature was not present, which included order acceprance, order details, order history etc was not present.
+d. In the retail section, if the stock is 0, the products should be last in each category and the recently added products with stock should be placed on the top and home page escpecialy
