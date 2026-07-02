@@ -1465,6 +1465,23 @@ def api_track_shipment(waybill):
         return jsonify({"status": False, "msg": "Could not fetch tracking info"}), 200
 
 
+@app.route('/api/email-status')
+def email_status():
+    """Temporary diagnostic route — remove after confirming email works."""
+    smtp_user = os.environ.get('SMTP_USER', '')
+    smtp_pass = os.environ.get('SMTP_PASS', '')
+    smtp_server = os.environ.get('SMTP_SERVER', '')
+    smtp_port = os.environ.get('SMTP_PORT', '')
+    return jsonify({
+        'smtp_server': smtp_server or 'NOT SET',
+        'smtp_port': smtp_port or 'NOT SET',
+        'smtp_user_set': bool(smtp_user),
+        'smtp_user_preview': (smtp_user[:4] + '...' + smtp_user[-8:]) if smtp_user else 'NOT SET',
+        'smtp_pass_set': bool(smtp_pass),
+        'smtp_pass_length': len(smtp_pass) if smtp_pass else 0,
+    })
+
+
 @app.route('/track/<waybill>')
 def track_order_page(waybill):
     """Public, shareable order-tracking page for customers."""
