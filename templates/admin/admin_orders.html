@@ -190,13 +190,29 @@
                         {% if o.delhivery_waybill %}
                         <div class="font-mono font-bold">{{ o.delhivery_waybill }}</div>
                         <a href="/track/{{ o.delhivery_waybill }}" target="_blank" class="text-blue-600 text-xs hover:underline">Track this shipment →</a>
+                        {% if o.status == 'accepted' %}
+                        <div class="mt-2"><a href="{{ url_for('admin_shipping_label', order_id=o.id) }}" target="_blank" class="text-xs font-bold text-white bg-blue-600 px-3 py-1 rounded-lg">🖨️ Print Shipping Label</a></div>
+                        {% endif %}
                         {% else %}<div class="text-gray-400">No waybill yet</div>{% endif %}
                         {% if o.pickup_id %}
                         <div class="mt-2 text-xs text-gray-500">Pickup ID: <span class="font-mono font-bold text-gray-700">{{ o.pickup_id }}</span></div>
                         {% endif %}
                         {% if o.pickup_date %}
                         <div class="text-xs text-gray-500">Pickup Date: <span class="font-semibold">{{ o.pickup_date }}</span></div>
-                        <div class="text-xs text-amber-600 font-semibold mt-1">⚠️ Delhivery executive will arrive with an OTP on their device. No action needed on your end — just hand over the package after verifying the OTP they show you.</div>
+                        <div class="text-xs text-amber-600 font-semibold mt-1">⚠️ Delhivery executive arrives with OTP on their device — hand over package after verifying.</div>
+                        {% endif %}
+                        </div>
+                        <div><div class="text-xs text-gray-400 font-bold mb-1">ORDER ITEMS</div>
+                        {% if o.cart_items_json %}
+                        {% set items = o.cart_items_json|fromjson %}
+                        {% for item in items %}
+                        <div class="text-xs mb-1 pb-1 border-b border-gray-100">
+                            <span class="font-semibold text-gray-800">{{ item.name }}</span><br>
+                            <span class="text-gray-500">SKU: {{ item.sku }} | Qty: {{ item.units }} | Size: {{ item.size or '—' }} | ₹{{ item.price }}/unit</span>
+                        </div>
+                        {% endfor %}
+                        {% else %}
+                        <div class="text-gray-400 text-xs">Item details not available for older orders</div>
                         {% endif %}
                         </div>
                     </div>

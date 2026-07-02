@@ -94,6 +94,7 @@
         <div class="inv-header">
             <div>
                 <div class="inv-logo">Nari Nakhre™</div>
+                <div style="font-size:11px;color:#6b7280;margin-top:1px;">by Mohini Cosmetics</div>
                 <div class="inv-logo-sub">A brand by Mohini Cosmetics</div>
                 {% if seller_gst %}
                 <div class="inv-gstin">GSTIN: {{ seller_gst }}</div>
@@ -113,7 +114,8 @@
         <div class="inv-parties">
             <div>
                 <div class="inv-party-label">Sold By</div>
-                <div class="inv-party-name">Nari Nakhre (Mohini Cosmetics)</div>
+                <div class="inv-party-name">Mohini Cosmetics</div>
+                <div style="font-size:11px;color:#881337;font-weight:600;">(Trading as: Nari Nakhre)</div>
                 <div class="inv-party-detail">
                     {{ seller_address or 'Jabalpur, Madhya Pradesh — 482001' }}<br>
                     Email: info@narinakhre.com<br>
@@ -151,6 +153,29 @@
                 {% set gst = order.gst_amount or 0 %}
                 {% set net_subtotal = subtotal - disc %}
                 {% set taxable_value = net_subtotal - gst %}
+                {% if order.cart_items_json %}
+                  {% set items = order.cart_items_json|fromjson %}
+                  {% for item in items %}
+                  {% set line_total = item.price * item.units %}
+                  {% set line_gst = line_total - (line_total / 1.03) %}
+                  {% set line_taxable = line_total - line_gst %}
+                  <tr>
+                    <td>{{ loop.index }}</td>
+                    <td>
+                        <strong>{{ item.name }}</strong><br>
+                        <span style="color:#9f9f9f;font-size:10px;">
+                            SKU: {{ item.sku }} | Qty: {{ item.units }}{% if item.size and item.size not in ['Standard',''] %} | Size: {{ item.size }}{% endif %}
+                            {% if order.coupon_code and loop.first %} · Coupon: {{ order.coupon_code }}{% endif %}
+                        </span>
+                    </td>
+                    <td class="num">7117</td>
+                    <td class="num">3%</td>
+                    <td class="num">₹{{ "%.2f"|format(line_taxable) }}</td>
+                    <td class="num">₹{{ "%.2f"|format(line_gst) }}</td>
+                    <td class="num">₹{{ "%.2f"|format(line_total) }}</td>
+                  </tr>
+                  {% endfor %}
+                {% else %}
                 <tr>
                     <td>1</td>
                     <td>
@@ -166,6 +191,7 @@
                     <td class="num">₹{{ "%.2f"|format(gst) }}</td>
                     <td class="num">₹{{ "%.2f"|format(net_subtotal) }}</td>
                 </tr>
+                {% endif %}
             </tbody>
         </table>
 
@@ -230,7 +256,7 @@
 
         <!-- Footer -->
         <div class="inv-footer">
-            <strong>Nari Nakhre</strong> — A brand by Mohini Cosmetics · info@narinakhre.com · narinakhre.com<br>
+            <strong>Mohini Cosmetics</strong> (trading as Nari Nakhre) · info@narinakhre.com · narinakhre.com<br>
             This is a computer-generated invoice. Prices are GST-inclusive (HSN 7117 — Imitation Jewellery, GST @ 3%).<br>
             For queries, contact info@narinakhre.com or call us.
             {% if order.consignee_state != 'Madhya Pradesh' %}

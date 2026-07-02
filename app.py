@@ -33,6 +33,16 @@ def load_env_file(env_path):
 
 
 app = Flask(__name__)
+
+@app.template_filter('fromjson')
+def fromjson_filter(value):
+    """Jinja2 filter to parse a JSON string into a Python object."""
+    if not value:
+        return []
+    try:
+        return json.loads(value)
+    except Exception:
+        return []
 load_env_file(os.path.join(os.path.dirname(os.path.abspath(__file__)), '.env'))
 app.secret_key = os.environ.get('FLASK_SECRET_KEY', 'nari-nakhre-dev-secret')
 
@@ -910,8 +920,9 @@ def checkout_process():
     consignee_city = (request.form.get('consignee_city') or '').strip()
     consignee_state = (request.form.get('consignee_state') or '').strip()
     consignee_pincode = (request.form.get('consignee_pincode') or '').strip()
+    consignee_email = (request.form.get('email') or '').strip()
+    payment_mode = (request.form.get('payment_mode') or 'Prepaid').strip()
 
-    # Delhivery-safe string formatter: strip forbidden symbols and normalize spaces.
     def sanitize_for_delhivery(value):
         cleaned = value or ''
         for char in ['#', '&', '%', ';']:
@@ -924,60 +935,67 @@ def checkout_process():
     internal_order_id = f"NN-SHP-{datetime.now().strftime('%Y%m%d%H%M%S')}-{consignee_phone[-4:]}"
     user_id = session.get('user_id')
 
+    # Calculate financials from cart
+    cart = session.get('cart', {})
+    if not cart:
+        return jsonify({'status': 'error', 'message': 'Cart is empty'}), 400
+
+    display_cart = list(cart.values())
+    subtotal_amount = sum(float(item.get('price', 0)) * int(item.get('units', item.get('qty', 1))) for item in display_cart)
+    applied_coupon = session.get('applied_coupon')
+    discount_amount = float(applied_coupon.get('discount_amount', 0)) if applied_coupon else 0.0
+    coupon_code = applied_coupon.get('code') if applied_coupon else None
+
+    gst_breakdown = calculate_inclusive_gst(display_cart, discount_amount, subtotal_amount)
+    gst_amount = gst_breakdown['total_gst']
+    cgst_amount = gst_breakdown['cgst']
+    sgst_amount = gst_breakdown['sgst']
+
+    # Shipping FREE for customers
+    actual_shipping_cost = 0.0
+    try:
+        provider = get_shipping_provider(
+            app.config['SHIPPING_PROVIDER'],
+            api_token=app.config.get('DELHIVERY_API_KEY')
+        )
+        cart_weight = max(sum(int(item.get('units', 1)) for item in display_cart) * 250, 250)
+        rates = provider.get_rates(app.config.get('WAREHOUSE_PIN', '482001'), consignee_pincode, cart_weight, mode=payment_mode)
+        actual_shipping_cost = float(rates.get('shipping_charge', 0) or 0)
+    except Exception as e:
+        app.logger.warning(f'Shipping rate fetch failed: {e}')
+
+    total_amount = max(subtotal_amount - discount_amount, 0)
+
+    # Store cart items as JSON for admin order view
+    cart_items_json = json.dumps([{
+        'sku': item.get('sku', ''),
+        'name': item.get('name', ''),
+        'price': float(item.get('price', 0)),
+        'units': int(item.get('units', item.get('qty', 1))),
+        'size': item.get('size', ''),
+    } for item in display_cart])
+
     conn = get_db()
     conn.execute(
         '''INSERT INTO order_shipping
-           (user_id, consignee_name, consignee_phone, consignee_address,
-            consignee_city, consignee_state, consignee_pincode, internal_order_id, status)
-           VALUES (?,?,?,?,?,?,?,?,'pending')''',
-        (user_id, cleaned_name, consignee_phone, cleaned_address,
-         consignee_city, consignee_state, consignee_pincode, internal_order_id)
+           (user_id, consignee_name, consignee_phone, consignee_email,
+            consignee_address, consignee_city, consignee_state, consignee_pincode,
+            internal_order_id, status, payment_mode,
+            subtotal_amount, gst_amount, cgst_amount, sgst_amount,
+            discount_amount, actual_shipping_cost, total_amount,
+            coupon_code, cart_items_json)
+           VALUES (?,?,?,?,?,?,?,?,?,'pending',?,?,?,?,?,?,?,?,?,?)''',
+        (user_id, cleaned_name, consignee_phone, consignee_email,
+         cleaned_address, consignee_city, consignee_state, consignee_pincode,
+         internal_order_id, payment_mode,
+         subtotal_amount, gst_amount, cgst_amount, sgst_amount,
+         discount_amount, actual_shipping_cost, total_amount,
+         coupon_code, cart_items_json)
     )
     conn.commit()
 
-    delhivery_payload = {
-        'shipments': [
-            {
-                'name': cleaned_name,
-                'phone': consignee_phone,
-                'add': cleaned_address,
-                'city': consignee_city,
-                'state': consignee_state,
-                'pin': consignee_pincode,
-                'country': 'IN',
-                'order': internal_order_id,
-                'payment_mode': 'Pre-paid',
-                'return_pin': app.config.get('WAREHOUSE_PIN', ''),
-                'client': DELHIVERY_CLIENT_NAME,
-            }
-        ],
-        'pickup_location': {
-            'name': DELHIVERY_PICKUP_LOCATION,
-        }
-    }
-
-    response = requests.post(
-        'https://track.delhivery.com/api/cmu/create.json',
-        data={
-            'format': 'json',
-            'data': json.dumps(delhivery_payload),
-        },
-        headers={
-            'Authorization': f'Token {DELHIVERY_API_TOKEN}',
-            'Content-Type': 'application/x-www-form-urlencoded',
-        },
-        timeout=30,
-    )
-
+    # Delhivery shipment created AFTER payment — not here
     waybill = None
-    if response.status_code == 200:
-        try:
-            resp_json = response.json()
-            packages = resp_json.get('packages', [])
-            if isinstance(packages, list) and packages:
-                waybill = packages[0].get('waybill')
-        except Exception:
-            waybill = None
 
     if waybill:
         conn.execute(

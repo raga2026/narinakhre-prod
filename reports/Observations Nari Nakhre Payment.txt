@@ -30,3 +30,13 @@ a. THe payment went through but the thank you page only contained the thank you 
 b. The emails after the orders were placed were not triggered .
 c. In the admin page, the order processing feature was not present, which included order acceprance, order details, order history etc was not present.
 d. In the retail section, if the stock is 0, the products should be last in each category and the recently added products with stock should be placed on the top and home page escpecialy
+15. The email is not getting triggered on contact us in retail 
+16. There is a human verification in the place order page so that phone number, email and address are authenticated
+16. there should be phone number and email address check in contact us as well
+
+
+Order Processing:
+17. The otder processing page doesn't have the shipping label printing process
+18. The Prouct Name, the SKU ID, Quantity, Size is not present for the admin to process the order
+19. The Amount Paid , CGST, SGST is 0.
+20. THe name of the company is Mohini Cosmetics, please use this in the invoice, aand the invoice should have the product name, SKU as well
