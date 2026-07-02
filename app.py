@@ -37,7 +37,15 @@ load_env_file(os.path.join(os.path.dirname(os.path.abspath(__file__)), '.env'))
 app.secret_key = os.environ.get('FLASK_SECRET_KEY', 'nari-nakhre-dev-secret')
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-SUPABASE_URL = os.environ.get('SUPABASE_URL', '').rstrip('/')
+def normalize_supabase_url(raw_url):
+    """Strip /rest/v1 suffix if accidentally included in env var."""
+    base = (raw_url or '').strip().rstrip('/')
+    for suffix in ['/rest/v1', '/rest/v1/']:
+        if base.endswith(suffix.rstrip('/')):
+            base = base[:-len(suffix.rstrip('/'))]
+    return base.rstrip('/')
+
+SUPABASE_URL = normalize_supabase_url(os.environ.get('SUPABASE_URL', ''))
 SUPABASE_KEY = os.environ.get('SUPABASE_KEY', '')
 
 app.config['SHIPPING_PROVIDER'] = os.environ.get('SHIPPING_PROVIDER', 'mock')
@@ -1064,8 +1072,21 @@ def payment_gateway_router():
     # Calculate amount from current cart
     cart = session.get('cart', {})
     subtotal = sum(item['price'] * item['qty'] for item in cart.values())
-    total_tax = subtotal * 0.18
-    amount_to_pay = subtotal + total_tax
+    # Use the persisted order total (GST-inclusive, discount applied) from the DB
+    # NEVER add 18% GST here — prices are already GST-inclusive at 3%
+    handover = session.get('checkout_handover', {})
+    order_id_for_amount = handover.get('internal_order_id', '')
+    amount_to_pay = subtotal  # fallback
+    total_tax = 0.0
+    if order_id_for_amount:
+        conn = get_db()
+        orow = conn.execute(
+            'SELECT total_amount, gst_amount FROM order_shipping WHERE internal_order_id=?',
+            (order_id_for_amount,)
+        ).fetchone()
+        if orow and orow['total_amount']:
+            amount_to_pay = float(orow['total_amount'])
+            total_tax = float(orow['gst_amount'] or 0)
     
     return render_site('payment_gateway.html',
         internal_order_id=internal_order_id,
@@ -1107,7 +1128,7 @@ def create_razorpay_order():
         if requested_amount is None:
             cart = session.get('cart', {})
             subtotal = sum(item['price'] * item['qty'] for item in cart.values())
-            requested_amount = subtotal + (subtotal * 0.18)
+            requested_amount = amount_to_pay  # from DB lookup above
 
         amount_paise = int(round(float(requested_amount) * 100))
         if amount_paise <= 0:
@@ -1210,7 +1231,13 @@ def confirm_cod_order():
             + (f"Waybill: {waybill}\n" if waybill else "Waybill pending\n"))
     except Exception as e:
         app.logger.warning(f"COD email failed: {e}")
-    session['checkout_handover'] = {'internal_order_id': internal_order_id, 'waybill': waybill}
+    total_for_session = float(order_row_dict.get('total_amount', 0) or 0)
+    session['checkout_handover'] = {
+        'internal_order_id': internal_order_id,
+        'waybill': waybill,
+        'amount_paid': total_for_session,
+        'payment_mode': 'COD',
+    }
     session.pop('cart', None)
     session.pop('applied_coupon', None)
     session.modified = True
@@ -1470,7 +1497,7 @@ def track_order_page(waybill):
     order = conn.execute(
         'SELECT * FROM order_shipping WHERE delhivery_waybill=?', (waybill,)
     ).fetchone()
-    return render_site('track_order.html', waybill=waybill, order=order)
+    return render_template('retail/track_order.html', waybill=waybill, order=order)
 
 
 @app.route('/apply_coupon', methods=['POST'])
@@ -1605,7 +1632,22 @@ def thank_you():
             waybill = row['delhivery_waybill']
 
     tracking_url = url_for('track_order_page', waybill=waybill, _external=True) if waybill else None
-    return render_site('thank_you.html', order_id=order_id, waybill=waybill, tracking_url=tracking_url)
+    # Pull amount_paid from session handover or DB
+    amount_paid = float(checkout_handover.get('amount_paid', 0) or 0)
+    if not amount_paid and order_id:
+        conn = get_db()
+        arow = conn.execute(
+            'SELECT total_amount FROM order_shipping WHERE internal_order_id=? LIMIT 1',
+            (order_id,)
+        ).fetchone()
+        if arow and arow['total_amount']:
+            amount_paid = float(arow['total_amount'])
+    payment_mode = checkout_handover.get('payment_mode', '')
+    return render_template('retail/thank_you.html',
+                           order_id=order_id, waybill=waybill,
+                           tracking_url=tracking_url,
+                           amount_paid=amount_paid,
+                           payment_mode=payment_mode)
 
 
 def admin_required(view_func):
