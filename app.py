@@ -581,7 +581,16 @@ def wholesale_thank_you():
 def detect_site_type():
     host = request.host.lower()
     path = request.path.lower()
-    g.site_type = 'retail' if ('retail' in host or path.startswith('/retail')) else 'wholesale'
+    if 'wholesale' in host:
+        g.site_type = 'wholesale'
+    elif 'retail' in host:
+        g.site_type = 'retail'
+    elif path.startswith('/retail'):
+        g.site_type = 'retail'
+    elif path.startswith('/wholesale'):
+        g.site_type = 'wholesale'
+    else:
+        g.site_type = 'wholesale'
 
 def render_site(template_name, **kwargs):
     site_type = getattr(g, 'site_type', 'wholesale')
@@ -810,6 +819,8 @@ def sitemap():
 # --- CART & CHECKOUT ---
 @app.route('/update-cart', methods=['POST'])
 def update_cart():
+    if g.site_type != 'retail':
+        return jsonify({'status': 'error', 'message': 'Cart disabled for wholesale'}), 403
     data = request.get_json()
     sku = data.get('product_id')
     qty = int(data.get('qty', 1))
@@ -1046,6 +1057,8 @@ def payment_cancel():
 
 @app.route('/api/create-order', methods=['POST'])
 def create_razorpay_order():
+    if g.site_type != 'retail':
+        return jsonify({'status': 'error', 'message': 'Retail-only endpoint'}), 403
     g.site_type = 'retail'
     payload = request.get_json(silent=True) or request.form or {}
 
@@ -1414,6 +1427,8 @@ def place_order():
 @app.route('/api/track/<waybill>', methods=['GET'])
 def api_track_shipment(waybill):
     """Live tracking status for a shipment, used by the public tracking page."""
+    if g.site_type != 'retail':
+        return jsonify({"status": False, "msg": "Unauthorized"}), 403
     provider = get_shipping_provider(
         app.config['SHIPPING_PROVIDER'],
         api_token=app.config.get('DELHIVERY_API_KEY')
@@ -1429,6 +1444,8 @@ def api_track_shipment(waybill):
 @app.route('/track/<waybill>')
 def track_order_page(waybill):
     """Public, shareable order-tracking page for customers."""
+    if g.site_type != 'retail':
+        return redirect(url_for('index'))
     conn = get_db()
     order = conn.execute(
         'SELECT * FROM order_shipping WHERE delhivery_waybill=?', (waybill,)
@@ -1545,6 +1562,11 @@ def remove_coupon():
 
 @app.route('/clear_quote', methods=['POST'])
 def clear_quote():
+    if g.site_type != 'retail':
+        session.pop('cart', None)
+        if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+            return ('', 204)
+        return redirect('/wholesale')
     session.pop('cart', None)
     if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
         return ('', 204)

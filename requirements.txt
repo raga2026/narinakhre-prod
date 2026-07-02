@@ -8,3 +8,4 @@ pyotp
 pandas
 openpyxl
 Pillow
+python-dotenv
