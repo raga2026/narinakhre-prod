@@ -62,15 +62,18 @@
         </nav>
 
 
+        {% set pdp_main_image = image_urls[0] if image_urls and image_urls|length > 0 else '' %}
+        {% set pdp_main_src = pdp_main_image if pdp_main_image and (pdp_main_image.startswith('http://') or pdp_main_image.startswith('https://') or pdp_main_image.startswith('/static/')) else (url_for('static', filename=pdp_main_image) if pdp_main_image else url_for('static', filename='assets/products/default.jpg')) %}
         <div class="pdp-grid">
             <!-- Images Left -->
             <div class="pdp-image-section">
                 <div class="main-img-container" style="background:#0f172a; border:2px solid #334155; border-radius:16px; display:flex; align-items:center; justify-content:center; height:420px; overflow-x:auto;">
-                    <img id="main-view" src="{{ url_for('static', filename=image_urls[0]) }}" alt="{{ product['name'] }} main image" onclick="openLightbox(0)" style="max-width:350px; max-height:380px; border-radius:12px; cursor:pointer; box-shadow:0 4px 32px #334155; border:2px solid #334155; background:#1e293b;">
+                    <img id="main-view" src="{{ pdp_main_src }}" alt="{{ product['name'] }} main image" onclick="openLightbox(0)" style="max-width:350px; max-height:380px; border-radius:12px; cursor:pointer; box-shadow:0 4px 32px #334155; border:2px solid #334155; background:#1e293b;">
                 </div>
                 <div class="thumb-grid" style="display:flex; gap:10px; justify-content:center; margin-top:18px; overflow-x:auto;">
                     {% for img in image_urls %}
-                        <img src="{{ url_for('static', filename=img) }}" class="thumb-img{% if loop.index0 == 0 %} active-thumb{% endif %}" data-idx="{{ loop.index0 }}" style="width:80px; height:80px; object-fit:cover; border-radius:8px; border:2px solid #334155; opacity:0.85; cursor:pointer; transition:0.2s;" onclick="setMainImage({{ loop.index0 }})">
+                        {% set thumb_src = img if img and (img.startswith('http://') or img.startswith('https://') or img.startswith('/static/')) else (url_for('static', filename=img) if img else url_for('static', filename='assets/products/default.jpg')) %}
+                        <img src="{{ thumb_src }}" class="thumb-img{% if loop.index0 == 0 %} active-thumb{% endif %}" data-idx="{{ loop.index0 }}" style="width:80px; height:80px; object-fit:cover; border-radius:8px; border:2px solid #334155; opacity:0.85; cursor:pointer; transition:0.2s;" onclick="setMainImage({{ loop.index0 }})">
                     {% endfor %}
                 </div>
             </div>
@@ -117,7 +120,10 @@
                         data-price="{{ product.tiers[0].price if product.tiers and product.tiers[0].price else product.price1 }}"
                         data-size="{{ product.sizes.split(',')[0]|trim if product.sizes else '' }}"
                     >Add to Quote</button>
-                    <button class="share-btn btn-quote" title="Share this product" onclick="shareProduct({{ product['name']|tojson|forceescape }}, {{ request.url|tojson|forceescape }}, {{ url_for('static', filename=image_urls[0], _external=True)|tojson|forceescape }})" style="display:flex;align-items:center;gap:8px;">
+                    <a class="btn-quote" href="{{ url_for('wholesale_contact', product_sku=product.sku, product_name=product.name) }}" style="display:flex;align-items:center;justify-content:center;gap:8px;text-decoration:none;">
+                        Get Quote
+                    </a>
+                    <button class="share-btn btn-quote" title="Share this product" onclick="shareProduct({{ product['name']|tojson|forceescape }}, {{ request.url|tojson|forceescape }}, {{ pdp_main_src|tojson|forceescape }})" style="display:flex;align-items:center;gap:8px;">
                         <img src="{{ url_for('static', filename='assets/share.svg') }}" alt="Share" style="width:22px;height:22px;vertical-align:middle;"> Share
                     </button>
                 </div>
@@ -163,7 +169,8 @@
                     <button id="lightbox-next" class="absolute right-8 top-1/2 transform -translate-y-1/2 text-5xl text-white hover:text-pink-500" style="background:none; border:none; cursor:pointer;">&#10095;</button>
                     <div class="thumb-grid" id="lb-thumb-grid" style="position:absolute; bottom:40px; left:50%; transform:translateX(-50%); display:flex; gap:10px; justify-content:center; background:rgba(30,41,59,0.8); padding:12px 24px; border-radius:12px;">
                         {% for img in image_urls %}
-                            <img src="{{ url_for('static', filename=img) }}" class="lb-thumb-img" data-idx="{{ loop.index0 }}" style="width:60px; height:60px; object-fit:cover; border-radius:8px; border:2px solid #334155; opacity:0.85; cursor:pointer; transition:0.2s;">
+                            {% set lb_thumb_src = img if img and (img.startswith('http://') or img.startswith('https://') or img.startswith('/static/')) else (url_for('static', filename=img) if img else url_for('static', filename='assets/products/default.jpg')) %}
+                            <img src="{{ lb_thumb_src }}" class="lb-thumb-img" data-idx="{{ loop.index0 }}" style="width:60px; height:60px; object-fit:cover; border-radius:8px; border:2px solid #334155; opacity:0.85; cursor:pointer; transition:0.2s;">
                         {% endfor %}
                     </div>
                 </div>

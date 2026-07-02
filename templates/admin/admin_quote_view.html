@@ -4,10 +4,14 @@
 <h1 class="text-3xl font-extrabold rose-accent mb-8 text-center tracking-wide drop-shadow-lg">Quote Details</h1>
 <div class="bg-slate-800/50 rounded-3xl shadow-xl p-8 border border-pink-500/20">
     <div class="mb-6">
-        <span class="font-bold text-pink-400">Customer:</span> {{ quote.customer_name }}<br>
-        <span class="font-bold text-pink-400">WhatsApp:</span> <a href="https://wa.me/91{{ quote.whatsapp }}" target="_blank" class="rose-btn px-4 py-2 rounded-xl font-bold shadow-lg">{{ quote.whatsapp }}</a><br>
-        <span class="font-bold text-pink-400">Total Amount:</span> ₹{{ quote.total_amount|round(2) }}<br>
-        <span class="font-bold text-pink-400">Status:</span> {{ quote.status or 'New' }}<br>
+        <span class="font-bold text-pink-400">Customer:</span> {{ quote.name or quote.customer_name }}<br>
+        <span class="font-bold text-pink-400">Phone:</span> {{ quote.phone or 'N/A' }}<br>
+        <span class="font-bold text-pink-400">WhatsApp:</span> <a href="https://wa.me/91{{ quote.whatsapp }}" target="_blank" class="rose-btn px-4 py-2 rounded-xl font-bold shadow-lg">{{ quote.whatsapp or 'N/A' }}</a><br>
+        <span class="font-bold text-pink-400">Email:</span> {{ quote.email or 'N/A' }}<br>
+        <span class="font-bold text-pink-400">Company:</span> {{ quote.company or 'N/A' }}<br>
+        <span class="font-bold text-pink-400">Product Details:</span> {{ quote.product_details or 'N/A' }}<br>
+        <span class="font-bold text-pink-400">Total Amount:</span> ₹{{ (quote.total_amount or 0)|round(2) }}<br>
+        <span class="font-bold text-pink-400">Status:</span> {{ quote.status or 'pending' }}<br>
         <span class="font-bold text-pink-400">Date:</span> {{ quote.created_at }}
     </div>
     <table class="w-full mb-6">
@@ -28,8 +32,9 @@
             {% endfor %}
         </tbody>
     </table>
-    <form method="post">
+    <form method="post" class="flex gap-3 flex-wrap">
         <button type="submit" name="mark_contacted" value="1" class="rose-btn px-6 py-3 rounded-xl font-bold shadow-lg bg-green-600 hover:bg-green-700">Mark as Contacted</button>
+        <button type="submit" name="mark_responded" value="1" class="rose-btn px-6 py-3 rounded-xl font-bold shadow-lg bg-blue-600 hover:bg-blue-700">Mark as Responded</button>
     </form>
 </div>
 {% endblock %}

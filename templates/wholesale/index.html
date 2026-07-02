@@ -234,11 +234,16 @@
                 </div>
                 {% endif %}
 
-                <!-- Add to quote -->
+                <!-- Quote actions -->
                 <button class="btn-quote add-to-quote-btn"
                         data-product-id="{{ product.sku }}">
                     Add to Quote
                 </button>
+                <a href="{{ url_for('wholesale_contact', product_sku=product.sku, product_name=product.name) }}"
+                   class="btn-quote mt-2 text-center"
+                   style="display:block;text-decoration:none;background:#fce7f3;color:#be185d;">
+                    Request Quote
+                </a>
             </div>
             {% endfor %}
         </div>

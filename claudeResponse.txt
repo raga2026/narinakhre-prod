@@ -1,412 +1,413 @@
-I’m starting a full production audit and will first scan the actual codebase for each of your 20 checkpoints, then apply targeted fixes in
-app.py (/c:/Users/ragha/Documents/NariNakhre/app.py)
-and any affected templates/utils, and finally run syntax checks plus
-test_suite.py (/c:/Users/ragha/Documents/NariNakhre/test_suite.py)
-to verify everything end-to-end.
-I’m gathering concrete evidence for each checklist item now by searching the live files (
-app.py (/c:/Users/ragha/Documents/NariNakhre/app.py)
-, retail checkout template, and shipping utils) before I patch anything.
-Errored. Running rg -n "flask\_sqlalchemy|SQLAlchemy\\\(|WAREHOUSE\_PIN|admin\_login|checkout\_proce.... rg -n "flask_sqlalchemy|SQLAlchemy\(|WAREHOUSE_PIN|admin_login|checkout_process|verify_payment|confirm_cod_order|thank_you\(|apply_coupon|remove_coupon|track_order_page|api_track_shipment|/api/delhivery/debug|admin_orders|create_client\(|SUPABASE_URL|SMTP_SSL|create_delhivery_shipment|calculate_inclusive_gst" app.py
-Errored. Running rg -n "form.\*submit|await|checkout/process|apply\_coupon|remove\_coupon|shippin.... rg -n "form.*submit|await|checkout/process|apply_coupon|remove_coupon|shipping" templates/retail/checkout.html
-Errored. Running rg -n "class DelhiveryProvider|verify\_pincode|get\_rates|create\_shipment|track.... rg -n "class DelhiveryProvider|verify_pincode|get_rates|create_shipment|track_shipment|api_token|Authorization|delhivery" utils/shipping_manager.py utils/delhivery_service.py
-Read memory
-I found that rg is unavailable in this environment, so I’m switching to PowerShell-native search and direct file reads to continue the audit without delay. Next I’ll inspect
-app.py (/c:/Users/ragha/Documents/NariNakhre/app.py)
-,
-checkout.html (/c:/Users/ragha/Documents/NariNakhre/templates/retail/checkout.html)
-, and utils/* sections tied to payment, shipping, admin auth, and coupon behavior.
-Read checkout.html, lines 1 to 400
-Read shipping_manager.py
-Read delhivery_service.py
-I’ve confirmed key areas and found the checkout template needs a deeper read for the async submit and coupon contract. I’m now pulling the rest of that script plus focused sections of
-app.py (/c:/Users/ragha/Documents/NariNakhre/app.py)
-before applying a consolidated patch.
-Running Select-String -Path app.py -Pattern "class User\\\(|class Address\\\(|class Produ.... Select-String -Path app.py -Pattern "class User\(|class Address\(|class Product\(|db = SQLAlchemy|from flask_sqlalchemy import SQLAlchemy|def checkout_process\(|def verify_payment\(|def confirm_cod_order\(|def thank_you\(|def apply_coupon\(|def remove_coupon\(|def api_track_shipment\(|def track_order_page\(|def admin_login\(|/api/delhivery/debug|create_client\(|SUPABASE_URL =|def create_delhivery_shipment\(|def calculate_inclusive_gst\(" | ForEach-Object { "{0}:{1}" -f $_.LineNumber, $_.Line }
-Running Select-String -Path app.py -Pattern "calculate\_inclusive\_gst\\\(" | ForEach-Obj.... Select-String -Path app.py -Pattern "calculate_inclusive_gst\(" | ForEach-Object { "{0}:{1}" -f $_.LineNumber, $_.Line }
-Read checkout.html, lines 401 to 635
-I’ve now validated the full checkout JS: the submit handler is already async and structurally correct. Next I’m extracting exact
-app.py (/c:/Users/ragha/Documents/NariNakhre/app.py)
-blocks (checkout, payment verify, COD, thank-you, coupons, track routes, constants/imports) to patch the backend behaviors and contracts you specified.
-Running Select-String -Path app.py -Pattern "flask\_sqlalchemy|SQLAlchemy\\\(" | ForEach.... Select-String -Path app.py -Pattern "flask_sqlalchemy|SQLAlchemy\(" | ForEach-Object { "{0}:{1}" -f $_.LineNumber, $_.Line }
-Running Select-String -Path app.py -Pattern "WAREHOUSE\_PIN" | ForEach-Object \{ "\{0\}:\{.... Select-String -Path app.py -Pattern "WAREHOUSE_PIN" | ForEach-Object { "{0}:{1}" -f $_.LineNumber, $_.Line }
-Running Select-String -Path app.py -Pattern "def checkout\_process\\\(|def create\_razorp.... Select-String -Path app.py -Pattern "def checkout_process\(|def create_razorpay_order\(|def confirm_cod_order\(|def verify_payment\(|def thank_you\(|def apply_coupon\(|def remove_coupon\(|def api_track_shipment\(|def track_order_page\(|def customer_invoice\(|def admin_orders\(|def admin_order_accept\(|def admin_order_dispatched\(|def admin_order_cancel\(|def admin_shipping_label\(|def admin_order_invoice\(" | ForEach-Object { "{0}:{1}" -f $_.LineNumber, $_.Line }
-Running Select-String -Path app.py -Pattern "create\_client\\\(|SUPABASE\_URL\\s\*=|send\_co.... Select-String -Path app.py -Pattern "create_client\(|SUPABASE_URL\s*=|send_contact_email\(|SMTP_SSL|SERVER_SOFTWARE|api/delhivery/debug|payment_mode|actual_shipping_cost|subtotal_amount|gst_amount|cgst_amount|sgst_amount|discount_amount|total_amount|consignee_email" | ForEach-Object { "{0}:{1}" -f $_.LineNumber, $_.Line }
-Read app.py, lines 1 to 240
-Read app.py, lines 280 to 560
-Read app.py, lines 900 to 1365
-Read app.py, lines 1440 to 1635
-Read app.py, lines 2220 to 2318
+Wholesale Test QA Prompt Response :
+
+Searched codebase for "`", 28 results. Files: c:\Users\ragha\Documents\NariNakhre\app.py, c:\Users\ragha\Documents\NariNakhre\CLAUDE_CODE_CONTEXT.md, c:\Users\ragha\Documents\NariNakhre\CLAUDE_CODE_CONTEXT.md, c:\Users\ragha\Documents\NariNakhre\CLAUDE_CODE_CONTEXT.md, c:\Users\ragha\Documents\NariNakhre\CLAUDE_CODE_CONTEXT.md, c:\Users\ragha\Documents\NariNakhre\CLAUDE_CODE_CONTEXT.md, c:\Users\ragha\Documents\NariNakhre\CLAUDE_CODE_CONTEXT.md, c:\Users\ragha\Documents\NariNakhre\CLAUDE_CODE_CONTEXT.md, c:\Users\ragha\Documents\NariNakhre\claudeResponse.txt, c:\Users\ragha\Documents\NariNakhre\claudeResponse.txt, c:\Users\ragha\Documents\NariNakhre\claudeResponse.txt, c:\Users\ragha\Documents\NariNakhre\email_template.py, c:\Users\ragha\Documents\NariNakhre\seed.py, c:\Users\ragha\Documents\NariNakhre\static\assets\style.css, c:\Users\ragha\Documents\NariNakhre\templates\admin\admin_login.html, c:\Users\ragha\Documents\NariNakhre\templates\base.html, c:\Users\ragha\Documents\NariNakhre\templates\Environment Variables Nari Nakhre.md, c:\Users\ragha\Documents\NariNakhre\templates\retail\contact.html, c:\Users\ragha\Documents\NariNakhre\templates\retail\history.html, c:\Users\ragha\Documents\NariNakhre\templates\retail\pdf_template.html, c:\Users\ragha\Documents\NariNakhre\templates\retail\thank_you.html, c:\Users\ragha\Documents\NariNakhre\templates\wholesale\contact.html, c:\Users\ragha\Documents\NariNakhre\templates\wholesale\history.html, c:\Users\ragha\Documents\NariNakhre\templates\wholesale\index.html, c:\Users\ragha\Documents\NariNakhre\templates\wholesale\index.html, c:\Users\ragha\Documents\NariNakhre\templates\wholesale\pdf_template.html, c:\Users\ragha\Documents\NariNakhre\test_suite.py, c:\Users\ragha\Documents\NariNakhre\thank_you.html
+I saw your last message was just a backtick, so I’m continuing the wholesale audit execution and fixes now; first I’ll collect current live behavior plus template/route evidence without interactive prompts.
+Running $ProgressPreference='SilentlyContinue'; $urls=@\('https://test-wholesale.narin.... $ProgressPreference='SilentlyContinue'; $urls=@('https://test-wholesale.narinakhre.com/','https://test-wholesale.narinakhre.com/wholesale','https://test-wholesale.narinakhre.com/wholesale/contact','https://test-wholesale.narinakhre.com/retail/checkout','https://test-wholesale.narinakhre.com/api/create-order','https://test-wholesale.narinakhre.com/track/1234567890','https://test-wholesale.narinakhre.com/api/track/1234567890'); foreach($u in $urls){ try { $r=Invoke-WebRequest -UseBasicParsing -Uri $u -Method GET -MaximumRedirection 0 -ErrorAction Stop; Write-Output ("URL={0} STATUS={1} LOC={2}" -f $u,$r.StatusCode,$r.Headers.Location) } catch { if($_.Exception.Response){ $resp=$_.Exception.Response; Write-Output ("URL={0} STATUS={1} LOC={2}" -f $u,[int]$resp.StatusCode,$resp.Headers.Location) } else { Write-Output ("URL={0} ERROR={1}" -f $u,$_.Exception.Message) } } }
+Running Select-String -Path app.py -Pattern "def detect\_site\_type|@app.route\\\('/whole.... Select-String -Path app.py -Pattern "def detect_site_type|@app.route\('/wholesale|@app.route\('/retail|def update_cart|def checkout\(|def checkout_process|def create_razorpay_order|def confirm_cod_order|def verify_payment|def api_track_shipment|def track_order_page|def admin_quote_view|def wholesale_contact|def wholesale_thank_you|@app.route\('/api/create-order'|@app.route\('/remove_coupon'|def remove_coupon" | ForEach-Object { "{0}:{1}" -f $_.LineNumber, $_.Line.Trim() }
+Running Select-String -Path templates/wholesale/\*.html -Pattern "cart|checkout|buy no.... Select-String -Path templates/wholesale/*.html -Pattern "cart|checkout|buy now|add to cart|request quote|add to quote|noindex|canonical|meta name=\"robots\"|account|login|track" -CaseSensitive:$false | ForEach-Object { "{0}:{1}:{2}" -f $_.Path.Replace((Get-Location).Path+'\\',''), $_.LineNumber, $_.Line.Trim() }
+The shell got stuck on an interactive web request warning, so I’m switching to non-interactive tools for live URL checks and direct file reads to keep the audit moving safely.
+Read app.py, lines 1 to 260
+Read app.py, lines 860 to 1335
+Read app.py, lines 1420 to 1710
+Fetched 6 resources. Files: \, \wholesale, \wholesale\contact, \retail\checkout, \track\1234567890, \api\track\1234567890
+Read base.html
+I’ve confirmed major wholesale bleed on live site (wholesale domain still exposes retail checkout and tracking behavior), and now I’m reading the remaining wholesale route/template sections to apply targeted fixes in one pass.
+Read app.py, lines 520 to 900
+Searched for files matching **/templates/wholesale/**, 13 matches. Files: c:\Users\ragha\Documents\NariNakhre\templates\wholesale\user_quotes.html, c:\Users\ragha\Documents\NariNakhre\templates\wholesale\thank_you.html, c:\Users\ragha\Documents\NariNakhre\templates\wholesale\product_detail.html, c:\Users\ragha\Documents\NariNakhre\templates\wholesale\pdf_template.html, c:\Users\ragha\Documents\NariNakhre\templates\wholesale\login.html, c:\Users\ragha\Documents\NariNakhre\templates\wholesale\index.html, c:\Users\ragha\Documents\NariNakhre\templates\wholesale\history.html, c:\Users\ragha\Documents\NariNakhre\templates\wholesale\gallery.html, c:\Users\ragha\Documents\NariNakhre\templates\wholesale\email_quote.html, c:\Users\ragha\Documents\NariNakhre\templates\wholesale\contact.html, c:\Users\ragha\Documents\NariNakhre\templates\wholesale\checkout.html, c:\Users\ragha\Documents\NariNakhre\templates\wholesale\category_products.html, c:\Users\ragha\Documents\NariNakhre\templates\wholesale\base.html
+Searched for regex submit_quote|quote|cart|checkout|retail/checkout|add-to-cart|buy now|update-cart (**/templates/wholesale/**), 75 results
+Read product_detail.html
+Searched for regex admin_quote_view|/admin/quote|mark_contacted|quotes|wholesale_submit|submit_quote|wholesale_contact (**/app.py), 20 results
+Read admin_quote_view.html
+Read category_products.html
+Read index.html
 Read thank_you.html
-Read track_order.html
-Running Select-String -Path app.py -Pattern "/api/delhivery/debug" | ForEach-Object \{.... Select-String -Path app.py -Pattern "/api/delhivery/debug" | ForEach-Object { "{0}:{1}" -f $_.LineNumber, $_.Line }
-I’ve identified the main backend breakpoints and I’m applying a single cohesive patch now to harden the order flow: remove SQLAlchemy remnants, fix Supabase URL normalization, rewrite checkout/payment/COD lifecycle, enforce retail-only tracking APIs, and align coupon/thank-you responses with frontend expectations.
-Generating patch (117 lines) in app.py
+I’ve isolated the concrete failures: wholesale host still exposes retail checkout/payment/tracking paths, quote records lack required wholesale fields/status, and wholesale UI still routes through quote cart paths. I’m applying a focused multi-file patch now to enforce wholesale-only behavior and proper quote flow.
+Generating patch (266 lines) in app.py
 ```
 ```
 ```
 ```
-Generating patch (55 lines) in app.py
-```
-```
-```
-```
-Generating patch (40 lines) in app.py
-```
-```
-```
-```
-Generating patch (18 lines) in app.py
-```
-```
-```
-```
-I’m now patching the critical order lifecycle routes. This edit removes the premature Delhivery booking in checkout, persists all required monetary fields on order creation, and ensures shipment creation happens only after payment/COD confirmation.
-Generating patch (151 lines) in app.py
-```
-```
-```
-```
-Generating patch (23 lines) in app.py
-```
-```
-```
-```
-Generating patch (35 lines) in app.py
-```
-```
-```
-```
-Generating patch (94 lines) in app.py
-```
-```
-```
-```
-Generating patch (102 lines) in app.py
-```
-```
-```
-```
-Generating patch (13 lines) in thank_you.html
-```
-```
-```
-```
-Generating patch (13 lines) in app.py
-```
-```
-```
-```
-Core backend patches are in place. I’m now running strict syntax validation on
+I’ve completed the backend isolation and quote-schema patch in
 app.py (/c:/Users/ragha/Documents/NariNakhre/app.py)
-and all Python files under
-utils (/c:/Users/ragha/Documents/NariNakhre/utils/)
-and then executing
-test_suite.py (/c:/Users/ragha/Documents/NariNakhre/test_suite.py)
-to verify behavior after the fixes.
+. Next I’m fixing wholesale templates to remove checkout/cart pathways and align quote submission fields and admin quote rendering.
+Generating patch (26 lines) in base.html
+Read base.html
+Generating patch (11 lines) in base.html
+```
+```
+```
+```
+Read product_detail.html
+Generating patch (46 lines) in product_detail.html
+```
+```
+```
+```
+Generating patch (20 lines) in index.html
+```
+```
+```
+```
+Generating patch (14 lines) in category_products.html
+```
+```
+```
+```
+Generating patch (30 lines) in admin_quote_view.html
+```
+```
+```
+```
+Template and admin quote-view fixes are now applied. I’m running a compile check and then the full test suite to validate the changes before I report each broken→fixed item.
+Running python -m py\_compile app.py utils\\shipping\_manager.py utils\\delhivery\_service.... python -m py_compile app.py utils\shipping_manager.py utils\delhivery_service.py utils\payment_manager.py
+The terminal hit an interactive PowerShell confirmation prompt again, so I’m switching to the Python environment tools to run the same validations non-interactively and avoid getting blocked.
 Configuring a Python Environment. Input: {
   "resourcePath": "c:\\Users\\ragha\\Documents\\NariNakhre"
 }
-Running c:/Users/ragha/Documents/NariNakhre/.venv/Scripts/python.exe -m py\_compile ap.... c:/Users/ragha/Documents/NariNakhre/.venv/Scripts/python.exe -m py_compile app.py utils/shipping_manager.py utils/delhivery_service.py
-Errored. Running c:/Users/ragha/Documents/NariNakhre/.venv/Scripts/python.exe test\_suite.py. c:/Users/ragha/Documents/NariNakhre/.venv/Scripts/python.exe test_suite.py
-Read content.txt
-Running Select-String -Path test\_results.log -Pattern "FAILED|ERROR|FAIL|Ran |OK|SKIP.... Select-String -Path test_results.log -Pattern "FAILED|ERROR|FAIL|Ran |OK|SKIPPED|AssertionError" | ForEach-Object { "{0}:{1}" -f $_.LineNumber, $_.Line }
-Read test_results.log
-One test failed and I already isolated it: checkout mobile inputs are missing inputmode attributes. I’m applying that quick frontend fix in
-templates/retail/checkout.html (/c:/Users/ragha/Documents/NariNakhre/templates/retail/checkout.html)
-and rerunning the test suite immediately.
-Generating patch (13 lines) in checkout.html
+Running c:/Users/ragha/Documents/NariNakhre/.venv/Scripts/python.exe -m py\_compile ap.... c:/Users/ragha/Documents/NariNakhre/.venv/Scripts/python.exe -m py_compile app.py utils\shipping_manager.py utils\delhivery_service.py utils\payment_manager.py
+Ran pylanceWorkspaceRoots. {}
+Ran pylanceRunCodeSnippet. {"workspaceRoot":"file:///c%3A/Users/ragha/Documents/NariNakhre","workingDirectory":"c:\\Users\\ragha\\Documents\\NariNakhre","codeSnippet":"import py_compile\nfiles = [\n    'app.py',\n    'utils/shipping_manager.py',\n    'utils/delhivery_service.py',\n    'utils/payment_manager.py',\n]\nfor f in files:\n    py_compile.compile(f, doraise=True)\nprint('PY_COMPILE_OK')"}
+Ran pylanceRunCodeSnippet. {"workspaceRoot":"file:///c%3A/Users/ragha/Documents/NariNakhre","workingDirectory":"c:\\Users\\ragha\\Documents\\NariNakhre","timeout":300000,"codeSnippet":"import subprocess, sys\ncmd = [sys.executable, 'test_suite.py']\nres = subprocess.run(cmd, capture_output=True, text=True)\nprint('TEST_EXIT_CODE', res.returncode)\nif res.stdout:\n    print('---STDOUT---')\n    print(res.stdout)\nif res.stderr:\n    print('---STDERR---')\n    print(res.stderr)\n"}
+Ran pylanceRunCodeSnippet. {"workspaceRoot":"file:///c%3A/Users/ragha/Documents/NariNakhre","workingDirectory":"c:\\Users\\ragha\\Documents\\NariNakhre","timeout":300000,"codeSnippet":"import subprocess, sys, os\ncmd = [sys.executable, 'test_suite.py']\nenv = dict(os.environ)\nenv['PYTHONIOENCODING'] = 'utf-8'\nenv['PYTHONUTF8'] = '1'\nres = subprocess.run(cmd, capture_output=True, text=True, env=env)\nprint('TEST_EXIT_CODE', res.returncode)\nif res.stdout:\n    print('---STDOUT---')\n    print(res.stdout)\nif res.stderr:\n    print('---STDERR---')\n    print(res.stderr)\n"}
+Ran pylanceRunCodeSnippet. {"workspaceRoot":"file:///c%3A/Users/ragha/Documents/NariNakhre","workingDirectory":"c:\\Users\\ragha\\Documents\\NariNakhre","timeout":300000,"codeSnippet":"import subprocess, sys\ncmd = [sys.executable, 'test_suite.py']\nres = subprocess.run(cmd, capture_output=True, text=True, encoding='utf-8', errors='replace')\nprint('TEST_EXIT_CODE', res.returncode)\nif res.stdout:\n    print('---STDOUT---')\n    print(res.stdout)\nif res.stderr:\n    print('---STDERR---')\n    print(res.stderr)\n"}
+Ran pylanceRunCodeSnippet. {"workspaceRoot":"file:///c%3A/Users/ragha/Documents/NariNakhre","workingDirectory":"c:\\Users\\ragha\\Documents\\NariNakhre","timeout":300000,"codeSnippet":"import subprocess, sys\ncmd = [sys.executable, 'test_suite.py']\nres = subprocess.run(cmd, capture_output=True, text=True, encoding='utf-8', errors='replace')\nout = (res.stdout or '').encode('ascii', 'replace').decode('ascii')\nerr = (res.stderr or '').encode('ascii', 'replace').decode('ascii')\nprint('TEST_EXIT_CODE', res.returncode)\nprint('STDOUT_LAST_2000')\nprint(out[-2000:])\nprint('STDERR_LAST_1000')\nprint(err[-1000:])\n"}
+Checked app.py, base.html, index.html, category_products.html, product_detail.html, admin_quote_view.html, 2 problems found
+Read app.py, lines 1080 to 1165
+Generating patch (11 lines) in app.py
 ```
 ```
 ```
 ```
-Errored. Running c:/Users/ragha/Documents/NariNakhre/.venv/Scripts/python.exe test\_suite.py. c:/Users/ragha/Documents/NariNakhre/.venv/Scripts/python.exe test_suite.py
-Running Select-String -Path test\_results.log -Pattern "Ran |FAILED|OK|Passed:|Failed:.... Select-String -Path test_results.log -Pattern "Ran |FAILED|OK|Passed:|Failed:|SKIP|FAIL:" | ForEach-Object { "{0}:{1}" -f $_.LineNumber, $_.Line }
-Read test_results.log, lines 238 to 238
-Read test_results.log, lines 1 to 220
+Checked app.py, 1 problem found
+Searched for regex DELHIVERY_API_TOKEN|detect_site_type|def update_cart\(|def checkout\(|def api_track_shipment\(|def track_order_page\(|def wholesale_contact\(|/wholesale/submit_quote|ALTER TABLE quotes ADD COLUMN IF NOT EXISTS phone|mark_responded|Retail-only endpoint (**/app.py), 22 results
+Searched for regex robots|url_for\('wholesale_contact'\)|Quote (**/templates/wholesale/base.html), 4 results
+Searched for regex Request Quote|wholesale_contact (**/templates/wholesale/index.html), 2 results
+Searched for regex Request Quote|wholesale_contact (**/templates/wholesale/category_products.html), 2 results
+Searched for regex pdp_main_src|wholesale_contact|thumb_src|lb_thumb_src (**/templates/wholesale/product_detail.html), 8 results
+Searched for regex quote\.name|quote\.phone|quote\.company|mark_responded|pending (**/templates/admin/admin_quote_view.html), 5 results
+Read app.py, lines 520 to 700
+Read app.py, lines 840 to 970
+Read app.py, lines 1088 to 1265
+Read app.py, lines 1468 to 1525
+Read app.py, lines 1768 to 1820
+Read app.py, lines 344 to 396
+Searched for regex def apply_coupon\(|def remove_coupon\(|@app.route\('/apply_coupon'|@app.route\('/remove_coupon' (**/app.py), 4 results
+Generating patch (15 lines) in app.py
+```
+```
+```
+```
+Searched for regex @app.route\('/cart|def cart\(|quoteCart|checkout (**/app.py), 45 results
+Ran pylanceRunCodeSnippet. {"workspaceRoot":"file:///c%3A/Users/ragha/Documents/NariNakhre","workingDirectory":"c:\\Users\\ragha\\Documents\\NariNakhre","codeSnippet":"import py_compile\nfor f in ['app.py','utils/shipping_manager.py','utils/delhivery_service.py','utils/payment_manager.py']:\n    py_compile.compile(f, doraise=True)\nprint('PY_COMPILE_OK')"}
+Ran pylanceRunCodeSnippet. {"workspaceRoot":"file:///c%3A/Users/ragha/Documents/NariNakhre","workingDirectory":"c:\\Users\\ragha\\Documents\\NariNakhre","timeout":120000,"codeSnippet":"from app import app\n\nresults = {}\nwith app.test_client() as c:\n    headers = {'Host': 'test-wholesale.narinakhre.com'}\n    r = c.get('/retail/checkout', headers=headers, follow_redirects=False)\n    results['GET /retail/checkout'] = (r.status_code, r.headers.get('Location'))\n\n    r = c.post('/api/create-order', headers=headers, json={})\n    results['POST /api/create-order'] = (r.status_code, r.get_json())\n\n    r = c.get('/api/track/1234567890', headers=headers)\n    results['GET /api/track/<waybill>'] = (r.status_code, r.get_json())\n\n    r = c.get('/track/1234567890', headers=headers, follow_redirects=False)\n    results['GET /track/<waybill>'] = (r.status_code, r.headers.get('Location'))\n\n    r = c.post('/apply_coupon', headers=headers, json={'coupon':'TEST10'})\n    results['POST /apply_coupon'] = (r.status_code, r.get_json())\n\n    r = c.post('/update-cart', headers=headers, json={'product_id':'SKU1','qty':1,'price':100,'size':'M'})\n    results['POST /update-cart'] = (r.status_code, r.get_json())\n\nfor k, v in results.items():\n    print(k, '=>', v)\n"}
+Installing supabase in Python 3.13.12 (.venv). {"resourcePath":"c:\\Users\\ragha\\Documents\\NariNakhre","packageList":["supabase"]}
+Ran pylanceRunCodeSnippet. {"workspaceRoot":"file:///c%3A/Users/ragha/Documents/NariNakhre","workingDirectory":"c:\\Users\\ragha\\Documents\\NariNakhre","timeout":120000,"codeSnippet":"from app import app\n\nresults = {}\nwith app.test_client() as c:\n    headers = {'Host': 'test-wholesale.narinakhre.com'}\n    r = c.get('/retail/checkout', headers=headers, follow_redirects=False)\n    results['GET /retail/checkout'] = (r.status_code, r.headers.get('Location'))\n\n    r = c.post('/api/create-order', headers=headers, json={})\n    results['POST /api/create-order'] = (r.status_code, r.get_json())\n\n    r = c.get('/api/track/1234567890', headers=headers)\n    results['GET /api/track/<waybill>'] = (r.status_code, r.get_json())\n\n    r = c.get('/track/1234567890', headers=headers, follow_redirects=False)\n    results['GET /track/<waybill>'] = (r.status_code, r.headers.get('Location'))\n\n    r = c.post('/apply_coupon', headers=headers, json={'coupon':'TEST10'})\n    results['POST /apply_coupon'] = (r.status_code, r.get_json())\n\n    r = c.post('/update-cart', headers=headers, json={'product_id':'SKU1','qty':1,'price':100,'size':'M'})\n    results['POST /update-cart'] = (r.status_code, r.get_json())\n\nfor k, v in results.items():\n    print(k, '=>', v)\n"}
 Read changed files in the active git repository
-Running if \(Test-Path \_\_pycache\_\_\) \{ Remove-Item -Recurse -Force \_\_pycache\_\_ \}; if \(T.... if (Test-Path __pycache__) { Remove-Item -Recurse -Force __pycache__ }; if (Test-Path utils/__pycache__) { Remove-Item -Recurse -Force utils/__pycache__ }
-Read changed files in the active git repository
-Errored. Running c:/Users/ragha/Documents/NariNakhre/.venv/Scripts/python.exe -m py\_compile ap.... c:/Users/ragha/Documents/NariNakhre/.venv/Scripts/python.exe -m py_compile app.py cart_utils.py email_template.py organize_images.py utils/shipping_manager.py utils/delhivery_service.py
-Running git restore \_\_pycache\_\_/app.cpython-313.pyc \_\_pycache\_\_/cart\_utils.cpython-31.... git restore __pycache__/app.cpython-313.pyc __pycache__/cart_utils.cpython-313.pyc __pycache__/email_template.cpython-313.pyc __pycache__/organize_images.cpython-313.pyc utils/__pycache__/delhivery_service.cpython-313.pyc utils/__pycache__/shipping_manager.cpython-313.pyc
-Running c:/Users/ragha/Documents/NariNakhre/.venv/Scripts/python.exe -m py\_compile ap.... c:/Users/ragha/Documents/NariNakhre/.venv/Scripts/python.exe -m py_compile app.py utils/shipping_manager.py utils/delhivery_service.py
-Read changed files in the active git repository
-Running git restore \_\_pycache\_\_/app.cpython-313.pyc utils/\_\_pycache\_\_/delhivery\_servi.... git restore __pycache__/app.cpython-313.pyc utils/__pycache__/delhivery_service.cpython-313.pyc utils/__pycache__/shipping_manager.cpython-313.pyc
-Read changed files in the active git repository
-Running git restore test\_results.log. git restore test_results.log
-Read changed files in the active git repository
-I’m compiling the final audit report in the exact format you requested, and I’ll pull the explicit 20-point list from the session transcript so each item is mapped to broken-versus-fixed code and current validation status.
-Read cc3f6261-34c3-402c-aeeb-18b08c7c738f.jsonl
-Running Select-String -Path "c:\\Users\\ragha\\AppData\\Roaming\\Code\\User\\workspaceStorag.... Select-String -Path "c:\Users\ragha\AppData\Roaming\Code\User\workspaceStorage\0371305de2fdc4839bfd3360d4aff710\GitHub.copilot-chat\transcripts\cc3f6261-34c3-402c-aeeb-18b08c7c738f.jsonl" -Pattern "PLEASE FIX|20|checklist|flask_sqlalchemy|remove_coupon|thank_you|inputmode|/api/delhivery/debug|admin_orders" | Select-Object -First 80 | ForEach-Object { "{0}:{1}" -f $_.LineNumber, $_.Line }
-Read cc3f6261-34c3-402c-aeeb-18b08c7c738f.jsonl, lines 1 to 80
-I’m running one fresh full test-suite pass now so I can give you an exact current result summary in the final report, then I’ll keep the working diff clean by restoring generated log artifacts.
-Errored. Running c:/Users/ragha/Documents/NariNakhre/.venv/Scripts/python.exe test\_suite.py. c:/Users/ragha/Documents/NariNakhre/.venv/Scripts/python.exe test_suite.py
-Read content.txt, lines 1 to 260
-Running git restore test\_results.log. git restore test_results.log
-Full audit + fix pass is complete across
-app.py (/c:/Users/ragha/Documents/NariNakhre/app.py)
-,
-templates/retail/checkout.html (/c:/Users/ragha/Documents/NariNakhre/templates/retail/checkout.html)
-, and
-templates/retail/thank_you.html (/c:/Users/ragha/Documents/NariNakhre/templates/retail/thank_you.html)
-.
-Below are the issues found and fixed, with broken code and fixed code for each.
-Removed invalid SQLAlchemy dependency remnants
-File:
-app.py (/c:/Users/ragha/Documents/NariNakhre/app.py)
-Broken:
-    from flask_sqlalchemy import SQLAlchemy
-    ...
-    app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///:memory:'
-    app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
-    db = SQLAlchemy(app)
-Fixed:
-    # SQLAlchemy import removed
-    # SQLAlchemy config removed
-    # SQLAlchemy db object removed
-Fixed Supabase base URL handling when env includes /rest/v1
-File:
-app.py (/c:/Users/ragha/Documents/NariNakhre/app.py)
-Broken:
-    SUPABASE_URL = os.environ.get('SUPABASE_URL', '').rstrip('/')
-Fixed:
-    def normalize_supabase_url(raw_url):
-        base = (raw_url or '').strip().rstrip('/')
-        if base.endswith('/rest/v1'):
-            base = base[:-8]
-        return base
-```
-SUPABASE_URL = normalize_supabase_url(os.environ.get('SUPABASE_URL', ''))
-```
-Fixed Delhivery API key env fallback
-File:
-app.py (/c:/Users/ragha/Documents/NariNakhre/app.py)
-Broken:
-    app.config['DELHIVERY_API_KEY'] = os.environ.get('DELHIVERY_API_KEY', '')
-Fixed:
-    app.config['DELHIVERY_API_KEY'] = os.environ.get('DELHIVERY_API_TOKEN', os.environ.get('DELHIVERY_API_KEY', ''))
-Fixed duplicate warehouse pin override
-File:
-app.py (/c:/Users/ragha/Documents/NariNakhre/app.py)
-Broken:
-    app.config['WAREHOUSE_PIN'] = os.environ.get('WAREHOUSE_PIN', '482001')
-    app.config['WAREHOUSE_PIN'] = os.environ.get('WAREHOUSE_PIN', '400001')
-Fixed:
-    app.config['WAREHOUSE_PIN'] = os.environ.get('WAREHOUSE_PIN', '482001')
-Added required checkout/order monetary and metadata columns
-File:
-app.py (/c:/Users/ragha/Documents/NariNakhre/app.py)
-Broken:
-    CREATE TABLE IF NOT EXISTS order_shipping (..., internal_order_id TEXT NOT NULL UNIQUE, delhivery_waybill TEXT)
-Fixed:
-    CREATE TABLE IF NOT EXISTS order_shipping (...,
-        consignee_email TEXT,
-        payment_mode TEXT DEFAULT 'Prepaid',
-        subtotal_amount FLOAT DEFAULT 0.0,
-        gst_amount FLOAT DEFAULT 0.0,
-        cgst_amount FLOAT DEFAULT 0.0,
-        sgst_amount FLOAT DEFAULT 0.0,
-        discount_amount FLOAT DEFAULT 0.0,
-        total_amount FLOAT DEFAULT 0.0,
-        actual_shipping_cost FLOAT DEFAULT 0.0,
-        delhivery_waybill TEXT,
-        pickup_id TEXT,
-        pickup_date DATE
-    )
-Replaced no-op schema ensure with real backfill migration helper
-File:
-app.py (/c:/Users/ragha/Documents/NariNakhre/app.py)
-Broken:
-    def ensure_checkout_tables_exist():
-        pass
-Fixed:
-    def ensure_checkout_tables_exist():
-        client = get_supabase()
-        alter_sql = [
-            "ALTER TABLE order_shipping ADD COLUMN IF NOT EXISTS consignee_email TEXT",
-            ...
-            "ALTER TABLE order_shipping ADD COLUMN IF NOT EXISTS pickup_date DATE",
-        ]
-        for sql in alter_sql:
-            try:
-                client.rpc('execute_sql', {'query': sql}).execute()
-            except Exception as e:
-                app.logger.warning(f'Checkout schema ensure warning: {e}')
-Corrected GST usage with a unified checkout amount calculator
-File:
-app.py (/c:/Users/ragha/Documents/NariNakhre/app.py)
-Broken:
-    subtotal = sum(item['price'] * item['units'] for item in display_cart)
-    discount = applied_coupon['discount_amount'] if applied_coupon else 0.0
-    grand_total = max(subtotal - discount, 0)
-    return render_site(..., total_tax=0.0, ...)
-Fixed:
-    pricing = calculate_checkout_amounts(cart, applied_coupon=applied_coupon)
-    subtotal = pricing['subtotal_amount']
-    discount = pricing['discount_amount']
-    grand_total = pricing['total_amount']
-    total_tax = pricing['gst_amount']
-    return render_site(..., total_tax=total_tax, ...)
-Fixed checkout process to persist complete order economics and defer shipment creation
-File:
-app.py (/c:/Users/ragha/Documents/NariNakhre/app.py)
-Broken:
-    # order inserted with minimal fields
-    # Delhivery shipment created during checkout/process
-    # response used status "ok"
-Fixed:
-    payment_mode = (request.form.get('payment_mode') or 'Prepaid').strip()
-    consignee_email = (request.form.get('email') or '').strip()
-    if not cart: return jsonify({'status': 'error', 'message': 'Cart is empty'}), 400
-```
-pricing = calculate_checkout_amounts(cart, applied_coupon=session.get('applied_coupon'))
-actual_shipping_cost = provider.get_rates(...)
-INSERT INTO order_shipping (..., subtotal_amount, gst_amount, cgst_amount, sgst_amount, discount_amount, total_amount, actual_shipping_cost)
-session['checkout_handover'] = {'internal_order_id': internal_order_id, 'waybill': None, 'amount_paid': pricing['total_amount']}
-return jsonify({'status': 'success', ...})
-```
-Fixed payment gateway amount to avoid re-adding GST
-File:
-app.py (/c:/Users/ragha/Documents/NariNakhre/app.py)
-Broken:
-    subtotal = sum(item['price'] * item['qty'] for item in cart.values())
-    total_tax = subtotal * 0.18
-    amount_to_pay = subtotal + total_tax
-Fixed:
-    pricing = calculate_checkout_amounts(cart, applied_coupon=session.get('applied_coupon'))
-    subtotal = pricing['subtotal_amount']
-    total_tax = pricing['gst_amount']
-    amount_to_pay = pricing['total_amount']
-Fixed Razorpay order creation amount source
-File:
-app.py (/c:/Users/ragha/Documents/NariNakhre/app.py)
-Broken:
-    requested_amount = subtotal + (subtotal * 0.18)
-Fixed:
-    # prefer persisted order total
-    order_row = conn.execute('SELECT total_amount FROM order_shipping WHERE internal_order_id=?', ...).fetchone()
-    requested_amount = float(order_row.get('total_amount', 0) or 0)
-Fixed prepaid verification flow to create shipment after successful signature verification
-File:
-app.py (/c:/Users/ragha/Documents/NariNakhre/app.py)
-Broken:
-    SELECT id FROM order_shipping ...
-    UPDATE order_shipping SET status='paid' ...
-    # no shipment creation
-    # mixed redirect/json behavior
-Fixed:
-    SELECT * FROM order_shipping ...
-    waybill, del_error = create_delhivery_shipment(order_row_dict, cart_items)
-    UPDATE order_shipping SET status='paid', payment_mode='Prepaid', delhivery_waybill=? ...
-    send customer/admin confirmation emails
-    return jsonify({'status': 'success', ...})
-Fixed COD confirmation to enforce COD mode and preserve paid amount in handover
-File:
-app.py (/c:/Users/ragha/Documents/NariNakhre/app.py)
-Broken:
-    # payment_mode not explicitly updated
-    total = order_row_dict.get('total_amount', 0)
-    session['checkout_handover'] = {'internal_order_id': internal_order_id, 'waybill': waybill}
-Fixed:
-    conn.execute('UPDATE order_shipping SET payment_mode=? WHERE internal_order_id=?', ('COD', internal_order_id))
-    total = float(order_row_dict.get('total_amount', 0) or 0)
-    session['checkout_handover'] = {'internal_order_id': internal_order_id, 'waybill': waybill, 'amount_paid': total}
-Enforced retail-only tracking API and tracking page behavior
-File:
-app.py (/c:/Users/ragha/Documents/NariNakhre/app.py)
-Broken:
+Generating patch (6 lines) in app.cpython-313.pyc, delhivery_service.cpython-313.pyc, shipping_manager.cpython-313.pyc, payment_manager.cpython-313.pyc
+Read __pycache__
+Read __pycache__
+Generating patch (3 lines) in app.cpython-313.pyc
+Implemented the wholesale QA isolation patch set and validated core behavior locally.
+Retail checkout/payment routes were reachable on wholesale host
+Broken code (before):
+ @app.route('/checkout')
+ @app.route('/retail/checkout')
+ @app.route('/wholesale/checkout')
+ def checkout():
+     if request.path.startswith('/retail'):
+         g.site_type = 'retail'
+     elif request.path.startswith('/wholesale'):
+         g.site_type = 'wholesale'
+Fixed code:
+    def checkout():
+        if g.site_type != 'retail':
+            return redirect(url_for('wholesale_contact'))
+        ...
+Also added retail-only guards on:
+/api/create-order
+/api/confirm-cod
+/api/verify-payment
+/checkout/shipping
+/checkout/process
+/payment/gateway
+/payment/cancel
+/retail/place_order
+References:
+app.py#L888 (/c:/Users/ragha/Documents/NariNakhre/app.py:888)
+-
+app.py#L1108 (/c:/Users/ragha/Documents/NariNakhre/app.py:1108)
+-
+app.py#L1186 (/c:/Users/ragha/Documents/NariNakhre/app.py:1186)
+-
+app.py#L1247 (/c:/Users/ragha/Documents/NariNakhre/app.py:1247)
+-
+app.py#L940 (/c:/Users/ragha/Documents/NariNakhre/app.py:940)
+-
+app.py#L1061 (/c:/Users/ragha/Documents/NariNakhre/app.py:1061)
+-
+app.py#L1094 (/c:/Users/ragha/Documents/NariNakhre/app.py:1094)
+-
+app.py#L1387 (/c:/Users/ragha/Documents/NariNakhre/app.py:1387)
+Fix confirmation:
+Flask test client with Host=test-wholesale... now returns:
+- GET /retail/checkout => 302 /wholesale/contact
+- POST /api/create-order => 403
+Wholesale could hit retail tracking APIs
+Broken code (before):
+ def api_track_shipment(waybill):
+     provider = get_shipping_provider(...)
+     ...
+ def track_order_page(waybill):
+     order = conn.execute(...)
+Fixed code:
     def api_track_shipment(waybill):
-        provider = get_shipping_provider(...)
+        if g.site_type != 'retail':
+            return jsonify({"status": False, "msg": "Unauthorized"}), 403
+        ...
 ```
 def track_order_page(waybill):
-    return render_site('track_order.html', ...)
-```
-Fixed:
     if g.site_type != 'retail':
-        return jsonify({"status": False, "msg": "Unauthorized"}), 403
+        return redirect(url_for('index'))
+    ...
 ```
-if g.site_type != 'retail':
-    return redirect(url_for('index'))
-g.site_type = 'retail'
-return render_template('retail/track_order.html', ...)
-```
-Fixed apply_coupon response/session contract and max-discount cap
-File:
+References:
+app.py#L1480 (/c:/Users/ragha/Documents/NariNakhre/app.py:1480)
+-
+app.py#L1497 (/c:/Users/ragha/Documents/NariNakhre/app.py:1497)
+Fix confirmation:
+GET /api/track/ on wholesale host => 403
+GET /track/ on wholesale host => 302 /wholesale
+Wholesale could still mutate retail cart/coupon state
+Broken code (before):
+ def update_cart():
+     ...
+ def apply_coupon():
+     ...
+ def remove_coupon():
+     ...
+Fixed code:
+    if g.site_type != 'retail':
+        return jsonify({'status': 'error', 'message': 'Retail-only endpoint'}), 403
+For update_cart:
+    return jsonify({'status': 'error', 'message': 'Cart disabled for wholesale'}), 403
+References:
+app.py#L858 (/c:/Users/ragha/Documents/NariNakhre/app.py:858)
+-
+app.py#L1509 (/c:/Users/ragha/Documents/NariNakhre/app.py:1509)
+-
+app.py#L1609 (/c:/Users/ragha/Documents/NariNakhre/app.py:1609)
+Fix confirmation:
+POST /update-cart on wholesale host => 403
+POST /apply_coupon on wholesale host => 403
+Wholesale quote schema missing required B2B fields/status
+Broken code (before):
+ CREATE TABLE quotes (... name, whatsapp, email, items_json, total_amount, status DEFAULT 'New')
+Fixed code:
+    CREATE TABLE quotes (... name, phone, whatsapp, email, company, product_details, items_json, total_amount, status DEFAULT 'pending')
+Also added migration-safe backfill:
+    ALTER TABLE quotes ADD COLUMN IF NOT EXISTS phone TEXT
+    ALTER TABLE quotes ADD COLUMN IF NOT EXISTS company TEXT
+    ALTER TABLE quotes ADD COLUMN IF NOT EXISTS product_details TEXT
+    ALTER TABLE quotes ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'pending'
+References:
+app.py#L320 (/c:/Users/ragha/Documents/NariNakhre/app.py:320)
+-
+app.py#L372 (/c:/Users/ragha/Documents/NariNakhre/app.py:372)
+Fix confirmation:
+App boot now attempts quote-table backfill automatically via Supabase RPC.
+Wholesale quote submission didn’t capture full B2B fields and used hardcoded admin email
+Broken code (before):
+ INSERT INTO quotes (request_id, name, whatsapp, email, items_json, total_amount) ...
+ send_contact_email('info@narinakhre.com', ...)
+Fixed code:
+    @app.route('/wholesale/submit_quote', methods=['POST'])
+    ...
+    phone, company, product_sku, product_name, product_size, product_tier parsed
+    product_details constructed
+    INSERT INTO quotes (... phone, company, product_details, ..., status='pending')
+    send_contact_email(ADMIN_EMAIL, ...)
+References:
+app.py#L533 (/c:/Users/ragha/Documents/NariNakhre/app.py:533)
+-
+app.py#L565 (/c:/Users/ragha/Documents/NariNakhre/app.py:565)
+-
+app.py#L597 (/c:/Users/ragha/Documents/NariNakhre/app.py:597)
+Fix confirmation:
+Wholesale submit endpoint now exists and writes pending-status B2B-rich quote payload.
+Admin quote detail used wrong keys and had limited status handling
+Broken code (before):
+ {{ quote.customer_name }}
+ {{ quote.status or 'New' }}
+ only Mark as Contacted (Contacted)
+Fixed code:
+    {{ quote.name or quote.customer_name }}
+    phone/email/company/product_details shown
+    {{ quote.status or 'pending' }}
+    mark_contacted => contacted
+    mark_responded => responded
+References:
+templates/admin/admin_quote_view.html#L7 (/c:/Users/ragha/Documents/NariNakhre/templates/admin/admin_quote_view.html:7)
+-
+templates/admin/admin_quote_view.html#L37 (/c:/Users/ragha/Documents/NariNakhre/templates/admin/admin_quote_view.html:37)
+-
+app.py#L1801 (/c:/Users/ragha/Documents/NariNakhre/app.py:1801)
+Fix confirmation:
+Admin template and handler now align with wholesale quote columns and status lifecycle.
+Wholesale nav still routed Quote to checkout
+Broken code (before):
+ <a>Quote</a>
+Fixed code:
+    Quote
+References:
+templates/wholesale/base.html#L48 (/c:/Users/ragha/Documents/NariNakhre/templates/wholesale/base.html:48)
+Fix confirmation:
+Wholesale header quote action now points to contact/quote flow, not checkout.
+Wholesale product detail image handling broke absolute Supabase URLs
+Broken code (before):
+ src="{{ url_for('static', filename=image_urls[0]) }}"
+ src="{{ url_for('static', filename=img) }}"
+Fixed code:
+    pdp_main_src/thumb_src/lb_thumb_src resolve absolute URLs directly, static only for relative paths.
+References:
+templates/wholesale/product_detail.html#L66 (/c:/Users/ragha/Documents/NariNakhre/templates/wholesale/product_detail.html:66)
+-
+templates/wholesale/product_detail.html#L75 (/c:/Users/ragha/Documents/NariNakhre/templates/wholesale/product_detail.html:75)
+-
+templates/wholesale/product_detail.html#L172 (/c:/Users/ragha/Documents/NariNakhre/templates/wholesale/product_detail.html:172)
+Fix confirmation:
+PDP now handles Supabase absolute URLs without forcing static path conversion.
+Quote-first CTA was incomplete in wholesale listing/PDP
+Broken code (before):
+ Add to Quote only (no direct quote request CTA)
+Fixed code:
+    Added Request Quote CTA to home cards and category cards
+    Added Get Quote CTA on PDP linking to wholesale_contact with product context
+References:
+templates/wholesale/index.html#L242 (/c:/Users/ragha/Documents/NariNakhre/templates/wholesale/index.html:242)
+-
+templates/wholesale/category_products.html#L167 (/c:/Users/ragha/Documents/NariNakhre/templates/wholesale/category_products.html:167)
+-
+templates/wholesale/product_detail.html#L123 (/c:/Users/ragha/Documents/NariNakhre/templates/wholesale/product_detail.html:123)
+Fix confirmation:
+Direct B2B quote path now present from key product surfaces.
+Wholesale SEO noindex missing
+Broken code (before):
+no robots meta in wholesale base metadata block
+Fixed code:
+References:
+templates/wholesale/base.html#L4 (/c:/Users/ragha/Documents/NariNakhre/templates/wholesale/base.html:4)
+Fix confirmation:
+Wholesale base now ships noindex/nofollow tag.
+Legacy SQLAlchemy model remnants in Supabase-RPC architecture
+Broken code (before):
+class User(db.Model), Address(db.Model), Product(db.Model) without SQLAlchemy setup
+Fixed code:
+    Removed dead ORM model blocks to prevent mixed-architecture confusion.
+Reference:
 app.py (/c:/Users/ragha/Documents/NariNakhre/app.py)
-Broken:
-    discount = round(eligible_subtotal * (coupon['discount_percent'] / 100.0), 2)
-    session['applied_coupon'] = {"code": ..., "discount_percent": ..., "discount_amount": ...}
-    return jsonify({"status":"success","message":..., "discount": discount, "code": code})
-Fixed:
-    max_discount_amount = float(coupon.get('max_discount_amount', 0) or 0)
-    discount = round(min(calculated_discount, max_discount_amount), 2)  # when cap exists
-```
-session['applied_coupon'] includes:
-min_order_amount, max_discount_amount, discount_amount
-response includes:
-discount_percent, min_order_amount, max_discount_amount, discount_amount, discount, code
-```
-Fixed remove_coupon behavior for AJAX and non-AJAX callers
-File:
+Fix confirmation:
+App now consistently uses Supabase RPC data-access path.
+Validation results
+What I ran:
+Python compile check (equivalent of py_compile) for:
+-
 app.py (/c:/Users/ragha/Documents/NariNakhre/app.py)
-Broken:
-    return jsonify({"status": "success"})
-Fixed:
-    if request.headers.get('X-Requested-With') == 'XMLHttpRequest' or request.is_json:
-        return ('', 204)
-    return redirect(url_for('checkout'))
-Fixed thank-you route context hydration and amount forwarding
-File:
-app.py (/c:/Users/ragha/Documents/NariNakhre/app.py)
-Broken:
-    order_id = request.args.get('ref') or session.get('internal_order_id', '')
-    waybill = checkout_handover.get('waybill') or session.get('waybill', '')
-    return render_site('thank_you.html', order_id=order_id, waybill=waybill, tracking_url=tracking_url)
-Fixed:
-    order_id = checkout_handover.get('internal_order_id') or ...
-    waybill = checkout_handover.get('waybill') or ...
-    amount_paid = float(checkout_handover.get('amount_paid', 0) or 0)
-    hydrate from DB if needed
-    return render_template('retail/thank_you.html', ..., amount_paid=amount_paid)
-Updated thank-you template to display amount paid
-File:
-templates/retail/thank_you.html (/c:/Users/ragha/Documents/NariNakhre/templates/retail/thank_you.html)
-Broken:
-    # no amount paid row
-Fixed:
-    {% if amount_paid and amount_paid > 0 %}
-    Amount Paid₹{{ '%.2f'|format(amount_paid) }}
-    {% endif %}
-Added mobile numeric keyboard hints for phone and pincode
-File:
-templates/retail/checkout.html (/c:/Users/ragha/Documents/NariNakhre/templates/retail/checkout.html)
-Broken:
-    <input type="tel" name="phone" ...>
-    <input type="text" id="ck-pin" name="pincode" ...>
-Fixed:
-    <input type="tel" name="phone" ... inputmode="numeric" pattern="[0-9]{10}">
-    <input type="text" id="ck-pin" name="pincode" ... inputmode="numeric" pattern="[0-9]{6}">
-Items audited and confirmed already correct (no code change needed):
-Checkout submit handler async/await structure was already correct in
-templates/retail/checkout.html (/c:/Users/ragha/Documents/NariNakhre/templates/retail/checkout.html)
-.
-2. No debug endpoint at /api/delhivery/debug exists in
-app.py (/c:/Users/ragha/Documents/NariNakhre/app.py)
-.
-3. Admin order management routes exist and remain admin-protected in
-app.py (/c:/Users/ragha/Documents/NariNakhre/app.py)
-.
-4. SMTP SSL 465 path and env-driven email handling were preserved in
-app.py (/c:/Users/ragha/Documents/NariNakhre/app.py)
-.
-Validation run results:
-Syntax check passed for audited Python files:
-app.py, utils/shipping_manager.py,
+-
+shipping_manager.py (/c:/Users/ragha/Documents/NariNakhre/utils/shipping_manager.py)
+-
 delhivery_service.py (/c:/Users/ragha/Documents/NariNakhre/utils/delhivery_service.py)
-Full test suite run executed:
-1 failed, 2 skipped, remaining tests passed.
-Current failing test:
-test_checkout_form_has_inputmode
-Failure context proves the test is reading deployed page content that still lacks inputmode in rendered HTML, while local template has been fixed. This indicates deployment/environment lag, not an unfixed local source issue.
-If you want, next I can do one of these:
-Prepare a deployment checklist to push these exact local fixes live and re-run the suite against production/staging.
-Add a focused local integration test that validates the checkout HTML contains inputmode attributes before deployment.
+-
+payment_manager.py (/c:/Users/ragha/Documents/NariNakhre/utils/payment_manager.py)
+Result:
+PASS: PY_COMPILE_OK
+test_suite.py (/c:/Users/ragha/Documents/NariNakhre/test_suite.py)
+run:
+Could not complete successfully due Windows console encoding failure inside
+test_suite.py (/c:/Users/ragha/Documents/NariNakhre/test_suite.py)
+print path:
+    UnicodeEncodeError at
+test_suite.py (/c:/Users/ragha/Documents/NariNakhre/test_suite.py)
+line 842.
+So full suite pass/fail cannot be claimed yet without fixing test output encoding in the test runner.
+Behavioral guard validation via Flask test client:
+- PASS: wholesale host now blocks retail checkout/payment/cart/coupon/tracking endpoints as expected (403/302).
+Notes:
+I installed missing dependency supabase into the workspace Python environment so app import/testing could execute.
+Running compile checks created pycache artifacts.
+Natural next steps:
+I can patch
+test_suite.py (/c:/Users/ragha/Documents/NariNakhre/test_suite.py)
+to be encoding-safe on Windows (utf-8 output guard), then rerun full suite end-to-end.
+2. I can add one focused WholesaleIsolationTests class so these host/route guard rules are permanently regression-tested.	
+
+
+
+Slenium Test Prompt COpilot Response:
+
+"I’m implementing this end-to-end now: I’ll create tests/conftest.py and tests/selenium_e2e.py with reusable fixtures, robust waits/selectors, screenshot-on-failure hook, and all requested test classes/coverage.
+Read NariNakhre
+Searched for files matching **/tests/**, no matches
+I’ve mapped out all required classes and assertions; next I’m creating the fixtures/hooks first so every test gets stable waits, environment loading, and automatic failure screenshots.
+Created conftest.py
+Created selenium_e2e.py
+Checked conftest.py, selenium_e2e.py, no problems found
+The suite files are in place and lint clean; I’m doing a quick pytest collection run to confirm discovery/imports before handing over run commands.
+Ran pylanceWorkspaceRoots. {}
+Ran pylanceRunCodeSnippet. {"workspaceRoot":"file:///c%3A/Users/ragha/Documents/NariNakhre","workingDirectory":"c:\\Users\\ragha\\Documents\\NariNakhre","timeout":120000,"codeSnippet":"import subprocess, sys\ncmd = [sys.executable, '-m', 'pytest', 'tests/selenium_e2e.py', '--collect-only', '-q']\nres = subprocess.run(cmd, capture_output=True, text=True, encoding='utf-8', errors='replace')\nprint('EXIT', res.returncode)\nprint(res.stdout[-4000:])\nprint(res.stderr[-1200:])"}
+Installing packages pytest, pytest-html, selenium in Python 3.13.12 (.venv). {"resourcePath":"c:\\Users\\ragha\\Documents\\NariNakhre","packageList":["pytest","selenium","pytest-html"]}
+Ran pylanceRunCodeSnippet. {"workspaceRoot":"file:///c%3A/Users/ragha/Documents/NariNakhre","workingDirectory":"c:\\Users\\ragha\\Documents\\NariNakhre","timeout":120000,"codeSnippet":"import subprocess, sys\ncmd = [sys.executable, '-m', 'pytest', 'tests/selenium_e2e.py', '--collect-only', '-q']\nres = subprocess.run(cmd, capture_output=True, text=True, encoding='utf-8', errors='replace')\nprint('EXIT', res.returncode)\nprint(res.stdout[-4000:])\nprint(res.stderr[-1200:])"}
+Implemented a comprehensive Selenium + pytest suite with fixtures, environment loading, and failure screenshots.
+Created files:
+tests/conftest.py (/c:/Users/ragha/Documents/NariNakhre/tests/conftest.py)
+-
+tests/selenium_e2e.py (/c:/Users/ragha/Documents/NariNakhre/tests/selenium_e2e.py)
+What is included:
+Driver setup and fixtures
+Chrome WebDriver fixture with optional headless mode via --headless flag.
+Page load timeout set to 15 seconds.
+Implicit wait set to 5 seconds.
+Class-scoped driver fixture so each test class gets a fresh browser session.
+base_url fixture for retail and wholesale_base_url fixture for wholesale.
+admin_driver fixture that auto-logs in using ADMIN_USERNAME and ADMIN_PASSWORD from .env/environment, with TOTP handling if required.
+cart_driver fixture that adds one item before test execution.
+Failure screenshot reporting
+Automatic screenshot capture on test failure via pytest hooks.
+Screenshots saved to reports/screenshots.
+Full requested test classes and coverage
+TestProductBrowsing
+TestCart
+TestCheckoutForm
+TestOrderFlow (conditionally skipped unless RUN_ORDER_FLOW=1)
+TestAdminPanel
+TestSEOAndMeta
+TestWholesaleSite
+Test quality details
+Every test has a clear docstring.
+Uses explicit waits and resilient selectors/fallbacks for UI variability.
+Includes direct HTTP checks with requests where status validation is required (for sitemap, robots, route status checks).
+Validation performed:
+Syntax/error checks passed for both files.
+Pytest collection succeeded: 23 tests discovered from
+tests/selenium_e2e.py (/c:/Users/ragha/Documents/NariNakhre/tests/selenium_e2e.py)
+.
+Packages installed in your virtual environment:
+pytest
+selenium
+pytest-html
+Run commands:
+Collect tests
+python -m pytest
+selenium_e2e.py (/c:/Users/ragha/Documents/NariNakhre/tests/selenium_e2e.py)
+--collect-only -q
+Run full suite with HTML report
+pytest
+selenium_e2e.py (/c:/Users/ragha/Documents/NariNakhre/tests/selenium_e2e.py)
+--html=reports/selenium_report.html
+Run in headless mode
+pytest
+selenium_e2e.py (/c:/Users/ragha/Documents/NariNakhre/tests/selenium_e2e.py)
+--headless --html=reports/selenium_report.html
+Notes:
+Coupon tests require TEST_COUPON_CODE in environment or .env.
+Order flow test is skipped unless RUN_ORDER_FLOW=1.
+Admin tests require ADMIN_USERNAME and ADMIN_PASSWORD (and ADMIN_TOTP_SECRET if TOTP is enforced)."
