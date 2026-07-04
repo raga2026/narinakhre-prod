@@ -472,34 +472,52 @@ def create_delhivery_shipment(order_row, cart_items):
 
 def send_contact_email(to_email, subject, body, html_body=None):
     """
-    Send email via Zoho Mail SMTP (info@narinakhre.com).
-    Uses SMTP_SSL on port 465 — same as the working wholesale site.
-    Credentials can be overridden via env vars SMTP_USER / SMTP_PASS,
-    but fall back to the known working Zoho credentials if not set.
+    Send email via Zeptomail SMTP (narinakhre.com domain).
+    Supports both port 465 (SSL) and port 587 (STARTTLS).
+    Credentials from Render environment variables:
+        SMTP_SERVER = smtp.zeptomail.in
+        SMTP_PORT   = 587
+        SMTP_USER   = emailapikey
+        SMTP_PASS   = <Zeptomail API key>
+    The From address must be a verified sender in Zeptomail.
     """
-    SMTP_SERVER = os.environ.get('SMTP_SERVER', 'smtp.zoho.in')
-    SMTP_PORT   = int(os.environ.get('SMTP_PORT', '465'))
+    SMTP_SERVER = os.environ.get('SMTP_SERVER', 'smtp.zeptomail.in')
+    SMTP_PORT   = int(os.environ.get('SMTP_PORT', '587'))
     SMTP_USER   = os.environ.get('SMTP_USER', '')
     SMTP_PASS   = os.environ.get('SMTP_PASS', '')
+    FROM_EMAIL  = os.environ.get('SMTP_FROM', 'info@narinakhre.com')
+
     if not SMTP_USER or not SMTP_PASS:
-        app.logger.warning('Email send skipped: SMTP_USER/SMTP_PASS not configured')
+        app.logger.warning('Email send skipped: SMTP_USER/SMTP_PASS not set in Render env vars')
         return False
     try:
         msg = MIMEMultipart('alternative')
-        msg['From']     = f'Nari Nakhre <{SMTP_USER}>'
+        msg['From']     = f'Nari Nakhre <{FROM_EMAIL}>'
         msg['To']       = to_email
         msg['Subject']  = subject
-        msg['Reply-To'] = SMTP_USER
+        msg['Reply-To'] = FROM_EMAIL
         msg.attach(MIMEText(body, 'plain', 'utf-8'))
         if html_body:
             msg.attach(MIMEText(html_body, 'html', 'utf-8'))
-        # Zoho uses SSL on port 465 (not STARTTLS on 587)
-        server = smtplib.SMTP_SSL(SMTP_SERVER, SMTP_PORT)
+
+        if SMTP_PORT == 465:
+            # SSL connection
+            server = smtplib.SMTP_SSL(SMTP_SERVER, SMTP_PORT)
+        else:
+            # STARTTLS connection (port 587 — Zeptomail default)
+            server = smtplib.SMTP(SMTP_SERVER, SMTP_PORT)
+            server.ehlo()
+            server.starttls()
+            server.ehlo()
+
         server.login(SMTP_USER, SMTP_PASS)
-        server.sendmail(SMTP_USER, to_email, msg.as_string())
+        server.sendmail(FROM_EMAIL, to_email, msg.as_string())
         server.quit()
         app.logger.info(f'Email sent to {to_email}: {subject}')
         return True
+    except smtplib.SMTPAuthenticationError as e:
+        app.logger.error(f'SMTP auth failed — check SMTP_USER/SMTP_PASS in Render env vars: {e}')
+        return False
     except Exception as e:
         app.logger.error(f'Email send failed to {to_email}: {type(e).__name__}: {e}')
         return False
@@ -1463,23 +1481,6 @@ def api_track_shipment(waybill):
     except Exception as e:
         app.logger.error(f'Tracking error: {e}')
         return jsonify({"status": False, "msg": "Could not fetch tracking info"}), 200
-
-
-@app.route('/api/email-status')
-def email_status():
-    """Temporary diagnostic route — remove after confirming email works."""
-    smtp_user = os.environ.get('SMTP_USER', '')
-    smtp_pass = os.environ.get('SMTP_PASS', '')
-    smtp_server = os.environ.get('SMTP_SERVER', '')
-    smtp_port = os.environ.get('SMTP_PORT', '')
-    return jsonify({
-        'smtp_server': smtp_server or 'NOT SET',
-        'smtp_port': smtp_port or 'NOT SET',
-        'smtp_user_set': bool(smtp_user),
-        'smtp_user_preview': (smtp_user[:4] + '...' + smtp_user[-8:]) if smtp_user else 'NOT SET',
-        'smtp_pass_set': bool(smtp_pass),
-        'smtp_pass_length': len(smtp_pass) if smtp_pass else 0,
-    })
 
 
 @app.route('/track/<waybill>')
