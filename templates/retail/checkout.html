@@ -622,9 +622,17 @@ document.getElementById('ck-form').addEventListener('submit', async function(e){
                 if (d4.status==='success') window.location.href='/thank_you';
                 else alert(d4.message||'Payment verification failed');
             },
-            modal:{ondismiss:()=>{ submitBtn.disabled=false; submitBtn.textContent='Place Order'; }}
+            modal:{ondismiss:()=>{
+                submitBtn.disabled=false; submitBtn.textContent='Place Order';
+                // Don't redirect on dismiss — user may want to retry
+            }}
         });
         rzp.open();
+        // Razorpay fires this on payment failure
+        rzp.on('payment.failed', function(resp) {
+            window.location.href = '/payment-failed?order_id=' + encodeURIComponent(orderData.order_id)
+                + '&reason=' + encodeURIComponent(resp.error.description || 'Payment failed');
+        });
     } catch(err) {
         alert(err.message||'Something went wrong. Please try again.');
         submitBtn.disabled=false; submitBtn.textContent='Place Order';

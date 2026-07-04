@@ -91,6 +91,19 @@
             </a>
             <a href="/retail/contact">Contact Us</a>
         </nav>
+        <!-- Categories pill — visible on mobile beside cart -->
+        <div class="mobile-cat-pill" style="position:relative;">
+            <button onclick="toggleMobileCatsHeader()" style="background:#fff1f2;border:1.5px solid #fda4af;color:#be185d;border-radius:20px;padding:5px 10px;font-size:0.75rem;font-weight:700;cursor:pointer;">
+                ☰ Categories
+            </button>
+            <div id="mobile-cat-header-menu" style="display:none;position:absolute;right:0;top:110%;background:white;border:1px solid #fce7f3;border-radius:14px;box-shadow:0 4px 20px rgba(0,0,0,0.12);min-width:160px;z-index:100;padding:6px 0;">
+                {% if categories %}
+                {% for cat in categories %}
+                <a href="/retail/category/{{ cat }}" style="display:block;padding:8px 16px;font-size:0.82rem;font-weight:600;color:#881337;text-decoration:none;" onclick="document.getElementById('mobile-cat-header-menu').style.display='none'">{{ cat }}</a>
+                {% endfor %}
+                {% endif %}
+            </div>
+        </div>
         <a href="/retail/checkout" class="mobile-cart-icon" aria-label="Cart">
             <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#be185d" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                 <circle cx="9" cy="21" r="1"></circle><circle cx="20" cy="21" r="1"></circle>
@@ -144,6 +157,16 @@
 
 {% block extra_scripts %}
 <script>
+function toggleMobileCatsHeader() {
+    const menu = document.getElementById('mobile-cat-header-menu');
+    menu.style.display = menu.style.display === 'none' ? 'block' : 'none';
+    document.addEventListener('click', function closeCatMenu(e) {
+        if (!e.target.closest('.mobile-cat-pill')) {
+            menu.style.display = 'none';
+            document.removeEventListener('click', closeCatMenu);
+        }
+    });
+}
 function toggleMobileNav() {
     document.getElementById('mobile-nav').classList.toggle('open');
 }

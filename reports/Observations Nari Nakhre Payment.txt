@@ -40,3 +40,10 @@ Order Processing:
 18. The Prouct Name, the SKU ID, Quantity, Size is not present for the admin to process the order
 19. The Amount Paid , CGST, SGST is 0.
 20. THe name of the company is Mohini Cosmetics, please use this in the invoice, aand the invoice should have the product name, SKU as well
+21. the email trigger should be from info@narinakhre.com for contact form submission to the user and also narinakhre@gmail.com , anything related to otders, tracking should be sent from orders-noreply@narinakhre.com
+22. categories  in the mobile version doest show the dropdown for all the categories, plae it beside teh cart instead
+23. in the admin panel. the current product details excel is nto downloadable. 
+24. There should be a mechanism to show that the payment has failed and if paid , it would be refunded .
+25. in   There should be a bulk edit feature in which we can upload excel to edit the existing products
+26. in the edit product page, the wholesale price tier is not present to edit
+27. There should be description colum in product table which should be visible in the product detail page

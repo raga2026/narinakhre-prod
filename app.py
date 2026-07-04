@@ -289,6 +289,7 @@ def initialize_database_if_needed():
         '''CREATE TABLE IF NOT EXISTS products (
             id BIGSERIAL PRIMARY KEY,
             sku TEXT NOT NULL UNIQUE,
+            description TEXT,
             name TEXT,
             slug TEXT,
             category TEXT,
@@ -470,7 +471,7 @@ def create_delhivery_shipment(order_row, cart_items):
         return None, str(e)
 
 
-def send_contact_email(to_email, subject, body, html_body=None):
+def send_contact_email(to_email, subject, body, html_body=None, from_email=None):
     """
     Send email via Zeptomail SMTP (narinakhre.com domain).
     Supports both port 465 (SSL) and port 587 (STARTTLS).
@@ -485,7 +486,8 @@ def send_contact_email(to_email, subject, body, html_body=None):
     SMTP_PORT   = int(os.environ.get('SMTP_PORT', '587'))
     SMTP_USER   = os.environ.get('SMTP_USER', '')
     SMTP_PASS   = os.environ.get('SMTP_PASS', '')
-    FROM_EMAIL  = os.environ.get('SMTP_FROM', 'info@narinakhre.com')
+    FROM_EMAIL  = from_email or os.environ.get('SMTP_FROM', 'info@narinakhre.com')
+    ORDERS_FROM = os.environ.get('SMTP_FROM_ORDERS', 'order-noreply@narinakhre.com')
 
     if not SMTP_USER or not SMTP_PASS:
         app.logger.warning('Email send skipped: SMTP_USER/SMTP_PASS not set in Render env vars')
@@ -1237,6 +1239,16 @@ def confirm_cod_order():
     return jsonify({'status': 'success', 'waybill': waybill, 'internal_order_id': internal_order_id}), 200
 
 
+@app.route('/payment-failed')
+def payment_failed():
+    """Page shown when Razorpay payment fails or is cancelled."""
+    g.site_type = 'retail'
+    order_id = request.args.get('order_id', '')
+    reason = request.args.get('reason', 'Payment was not completed')
+    return render_template('retail/payment_failed.html',
+                           order_id=order_id, reason=reason)
+
+
 @app.route('/api/verify-payment', methods=['POST'])
 def verify_payment():
     g.site_type = 'retail'
@@ -1883,8 +1895,49 @@ def download_quotes_excel():
 @app.route('/admin/download-products-excel', methods=['GET'])
 @admin_required
 def download_products_excel():
-    flash('Products export coming soon.')
-    return redirect(url_for('admin_dashboard'))
+    import io
+    try:
+        import openpyxl
+        from flask import send_file
+        conn = get_db()
+        products = conn.execute(
+            'SELECT sku, name, category, sub_category, description, '
+            'retail_price, mrp_price, wholesale_price, min_wholesale_qty, '
+            'gst_percent, hsn_code, material, weight_grams, '
+            'stock_total, is_active FROM products ORDER BY category, name'
+        ).fetchall()
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.title = 'Products'
+        headers = ['SKU', 'Name', 'Category', 'Sub Category', 'Description',
+                   'Retail Price', 'MRP Price', 'Wholesale Price',
+                   'Min Wholesale Qty', 'GST %', 'HSN Code',
+                   'Material', 'Weight (g)', 'Stock', 'Active']
+        ws.append(headers)
+        # Bold header row
+        from openpyxl.styles import Font
+        for cell in ws[1]:
+            cell.font = Font(bold=True)
+        for p in products:
+            ws.append([
+                p['sku'], p['name'], p['category'], p['sub_category'],
+                p['description'] or '',
+                p['retail_price'], p['mrp_price'], p['wholesale_price'],
+                p['min_wholesale_qty'], p['gst_percent'], p['hsn_code'],
+                p['material'], p['weight_grams'], p['stock_total'],
+                'Yes' if p['is_active'] else 'No'
+            ])
+        output = io.BytesIO()
+        wb.save(output)
+        output.seek(0)
+        from datetime import date
+        filename = f"NariNakhre_Products_{date.today().strftime('%Y%m%d')}.xlsx"
+        return send_file(output, mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                         as_attachment=True, download_name=filename)
+    except Exception as e:
+        app.logger.error(f'Product excel export failed: {e}')
+        flash(f'Export failed: {e}')
+        return redirect(url_for('admin_dashboard'))
 
 
 @app.route('/admin/upload-excel', methods=['POST'])
