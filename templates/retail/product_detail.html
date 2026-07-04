@@ -187,8 +187,10 @@
       {% if product.material and product.material != 'N/A' and product.material != 'material' %}
       <div class="text-sm text-gray-600 mb-1"><span class="font-semibold text-rose-700">Material:</span> {{ product.material }}</div>
       {% endif %}
-      {% if product.description %}
-      <div class="text-sm text-gray-600 bg-rose-50 rounded-xl p-3 mb-3 mt-2">{{ product.description }}</div>
+      {% if product.description and product.description.strip() %}
+      <div style="font-size:0.88rem;color:#4b5563;background:#fdf2f8;border-radius:14px;padding:14px;margin:10px 0;line-height:1.7;border:1px solid #fce7f3;">
+        {{ product.description }}
+      </div>
       {% endif %}
 
       <!-- Size -->
