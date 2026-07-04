@@ -626,12 +626,13 @@ def render_site(template_name, **kwargs):
     site_type = getattr(g, 'site_type', 'retail')
     db = get_db()
     # For retail, fetch categories from the products table's 'category' column
-    if site_type == 'retail':
-        cats = db.execute('SELECT DISTINCT category FROM products WHERE category IS NOT NULL AND category != ""').fetchall()
-        categories = [c['category'] for c in cats]
-    else:
-        cats = db.execute('SELECT DISTINCT c.name FROM products p JOIN categories c ON p.category_id = c.id WHERE c.name IS NOT NULL AND c.name != ""').fetchall()
-        categories = [c['name'] for c in cats]
+    try:
+        cats = db.execute(
+            "SELECT DISTINCT category FROM products WHERE is_active=1 AND category IS NOT NULL AND category != '' ORDER BY category"
+        ).fetchall()
+        categories = [c['category'] for c in cats if c['category']]
+    except Exception:
+        categories = []
     kwargs['categories'] = categories
     return render_template(f"{site_type}/{template_name}", **kwargs)
 

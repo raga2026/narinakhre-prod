@@ -93,14 +93,18 @@
         </nav>
         <!-- Categories pill — visible on mobile beside cart -->
         <div class="mobile-cat-pill" style="position:relative;">
-            <button onclick="toggleMobileCatsHeader()" style="background:#fff1f2;border:1.5px solid #fda4af;color:#be185d;border-radius:20px;padding:5px 10px;font-size:0.75rem;font-weight:700;cursor:pointer;">
+            <button onclick="toggleMobileCatsHeader(event)" style="background:#fff1f2;border:1.5px solid #fda4af;color:#be185d;border-radius:20px;padding:5px 10px;font-size:0.75rem;font-weight:700;cursor:pointer;">
                 ☰ Categories
             </button>
             <div id="mobile-cat-header-menu" style="display:none;position:absolute;right:0;top:110%;background:white;border:1px solid #fce7f3;border-radius:14px;box-shadow:0 4px 20px rgba(0,0,0,0.12);min-width:160px;z-index:100;padding:6px 0;">
-                {% if categories %}
+                {% if categories and categories|length > 0 %}
                 {% for cat in categories %}
                 <a href="/retail/category/{{ cat }}" style="display:block;padding:8px 16px;font-size:0.82rem;font-weight:600;color:#881337;text-decoration:none;" onclick="document.getElementById('mobile-cat-header-menu').style.display='none'">{{ cat }}</a>
                 {% endfor %}
+                {% else %}
+                <a href="/retail/category/Bangles" style="display:block;padding:8px 16px;font-size:0.82rem;font-weight:600;color:#881337;text-decoration:none;">Bangles</a>
+                <a href="/retail/category/Accessories" style="display:block;padding:8px 16px;font-size:0.82rem;font-weight:600;color:#881337;text-decoration:none;">Accessories</a>
+                <a href="/retail/categories" style="display:block;padding:8px 16px;font-size:0.82rem;font-weight:600;color:#6b7280;text-decoration:none;">All Categories →</a>
                 {% endif %}
             </div>
         </div>
@@ -157,15 +161,22 @@
 
 {% block extra_scripts %}
 <script>
-function toggleMobileCatsHeader() {
+function toggleMobileCatsHeader(e) {
+    e.stopPropagation(); // prevent the click bubbling to document close listener
     const menu = document.getElementById('mobile-cat-header-menu');
-    menu.style.display = menu.style.display === 'none' ? 'block' : 'none';
-    document.addEventListener('click', function closeCatMenu(e) {
-        if (!e.target.closest('.mobile-cat-pill')) {
-            menu.style.display = 'none';
-            document.removeEventListener('click', closeCatMenu);
-        }
-    });
+    const isOpen = menu.style.display === 'block';
+    menu.style.display = isOpen ? 'none' : 'block';
+    if (!isOpen) {
+        // Only add close listener when opening
+        setTimeout(function() {
+            document.addEventListener('click', function closeCatMenu(ev) {
+                if (!ev.target.closest('.mobile-cat-pill')) {
+                    menu.style.display = 'none';
+                    document.removeEventListener('click', closeCatMenu);
+                }
+            });
+        }, 10);
+    }
 }
 function toggleMobileNav() {
     document.getElementById('mobile-nav').classList.toggle('open');
