@@ -1,0 +1,61 @@
+{% extends "retail/base.html" %}
+{% block title %}Search: {{ query }} | Nari Nakhre{% endblock %}
+{% block content %}
+<div style="max-width:960px;margin:28px auto;padding:0 16px 60px;">
+    <!-- Search bar on results page -->
+    <form action="/search" method="GET" style="margin-bottom:24px;">
+        <div style="position:relative;max-width:560px;">
+            <span style="position:absolute;left:14px;top:50%;transform:translateY(-50%);color:#9f9f9f;">🔍</span>
+            <input type="text" name="q" value="{{ query }}"
+                   style="width:100%;padding:12px 16px 12px 40px;border:2px solid #be185d;border-radius:999px;font-size:0.95rem;outline:none;color:#1d1d1f;"
+                   placeholder="Search products, orders…" autofocus>
+        </div>
+    </form>
+
+    <h1 style="font-size:1.1rem;font-weight:700;color:#1d1d1f;margin-bottom:6px;">
+        {% if products %}{{ products|length }} result{{ 's' if products|length != 1 }} for
+        {% else %}No results for{% endif %}
+        "<span style="color:#be185d;">{{ query }}</span>"
+    </h1>
+
+    {% if not products %}
+    <div style="text-align:center;padding:48px 0;color:#9f9f9f;">
+        <div style="font-size:2rem;margin-bottom:12px;">🔍</div>
+        <div style="font-weight:600;margin-bottom:8px;">No products found</div>
+        <div style="font-size:0.85rem;">Try a different search term or browse by category</div>
+        <a href="/retail" style="display:inline-block;margin-top:16px;color:#be185d;font-weight:700;text-decoration:none;">← Back to Home</a>
+    </div>
+    {% else %}
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:16px;margin-top:20px;">
+        {% for p in products %}
+        {%- set img = p.image_field.split(',')[0].strip() if p.image_field else '' -%}
+        {%- set mrp = p.mrp_price or 0 -%}
+        {%- set rp  = p.retail_price or 0 -%}
+        {%- set disc = ((mrp-rp)/mrp*100)|round(0)|int if mrp and mrp > rp else 0 -%}
+        <a href="/retail/product/{{ p.id }}"
+           style="background:white;border-radius:16px;border:1px solid #f3f4f6;overflow:hidden;text-decoration:none;display:block;transition:box-shadow 0.15s;"
+           onmouseover="this.style.boxShadow='0 4px 16px rgba(0,0,0,0.1)'"
+           onmouseout="this.style.boxShadow='none'">
+            <img src="{{ img or url_for('static', filename='assets/logo.png') }}"
+                 alt="{{ p.name }}"
+                 onerror="this.src='{{ url_for('static', filename='assets/logo.png') }}'"
+                 style="width:100%;aspect-ratio:1;object-fit:contain;background:#fdf2f8;padding:8px;">
+            <div style="padding:10px 12px 14px;">
+                <div style="font-size:0.82rem;font-weight:600;color:#1d1d1f;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-bottom:4px;">{{ p.name }}</div>
+                <div style="font-size:0.72rem;color:#9f9f9f;margin-bottom:6px;">{{ p.category or '' }}</div>
+                <div style="display:flex;align-items:center;gap:5px;flex-wrap:wrap;">
+                    {% if mrp and mrp > rp %}
+                    <span style="font-size:0.72rem;color:#9f9f9f;text-decoration:line-through;">₹{{ mrp|round(0)|int }}</span>
+                    {% endif %}
+                    <span style="font-size:0.9rem;font-weight:800;color:#be185d;">₹{{ rp|round(0)|int }}</span>
+                    {% if disc %}
+                    <span style="font-size:0.65rem;font-weight:800;color:#16a34a;background:#dcfce7;border-radius:6px;padding:1px 5px;">{{ disc }}% off</span>
+                    {% endif %}
+                </div>
+            </div>
+        </a>
+        {% endfor %}
+    </div>
+    {% endif %}
+</div>
+{% endblock %}

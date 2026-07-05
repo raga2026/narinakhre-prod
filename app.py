@@ -1511,6 +1511,138 @@ def track_order_page(waybill):
     return render_template('retail/track_order.html', waybill=waybill, order=order)
 
 
+
+
+@app.route('/api/search')
+def api_search():
+    """
+    Live search API used by both retail and wholesale sites.
+    Returns products matching the query, and (retail only) order lookup by ID.
+
+    Query params:
+        q   — search term (min 2 chars)
+        t   — site type override ('retail' or 'wholesale'); defaults to g.site_type
+    """
+    q = (request.args.get('q') or '').strip()
+    site = request.args.get('t') or getattr(g, 'site_type', 'retail')
+
+    if len(q) < 2:
+        return jsonify({'products': [], 'orders': [], 'query': q})
+
+    conn = get_db()
+    results = {'products': [], 'orders': [], 'query': q}
+
+    # ── Product search ──────────────────────────────────────────────────────
+    try:
+        like = f'%{q}%'
+        rows = conn.execute(
+            """SELECT id, sku, name, category, sub_category, description,
+                      retail_price, mrp_price, image_field, is_active
+               FROM products
+               WHERE is_active = 1
+                 AND (name ILIKE ? OR sku ILIKE ? OR category ILIKE ?
+                      OR sub_category ILIKE ? OR description ILIKE ?)
+               ORDER BY
+                 CASE WHEN name ILIKE ? THEN 0
+                      WHEN sku  ILIKE ? THEN 1
+                      ELSE 2 END
+               LIMIT 8""",
+            (like, like, like, like, like, f'{q}%', f'{q}%')
+        ).fetchall()
+
+        for r in rows:
+            r_dict = dict(r)
+            # Get first image
+            img = ''
+            if r_dict.get('image_field'):
+                imgs = r_dict['image_field'].split(',')
+                img = imgs[0].strip() if imgs else ''
+
+            # Discount % for display
+            mrp = float(r_dict.get('mrp_price') or 0)
+            rp  = float(r_dict.get('retail_price') or 0)
+            disc = int((mrp - rp) / mrp * 100) if mrp and mrp > rp else 0
+
+            results['products'].append({
+                'id':       r_dict['id'],
+                'sku':      r_dict['sku'],
+                'name':     r_dict['name'],
+                'category': r_dict['category'] or '',
+                'price':    rp,
+                'mrp':      mrp,
+                'discount': disc,
+                'image':    img,
+                'url':      f'/retail/product/{r_dict["id"]}' if site == 'retail'
+                            else f'/wholesale/product/{r_dict["id"]}',
+            })
+    except Exception as e:
+        app.logger.error(f'Search products error: {e}')
+
+    # ── Order lookup (retail only — wholesale uses quotes, not orders) ──────
+    if site == 'retail':
+        try:
+            order = conn.execute(
+                """SELECT internal_order_id, consignee_name, status,
+                          total_amount, delhivery_waybill, created_at
+                   FROM order_shipping
+                   WHERE internal_order_id ILIKE ? OR delhivery_waybill ILIKE ?
+                   LIMIT 2""",
+                (f'%{q}%', f'%{q}%')
+            ).fetchall()
+
+            for o in order:
+                o_dict = dict(o)
+                results['orders'].append({
+                    'order_id': o_dict['internal_order_id'],
+                    'status':   (o_dict['status'] or 'pending').replace('_', ' ').title(),
+                    'waybill':  o_dict['delhivery_waybill'] or '',
+                    'name':     o_dict['consignee_name'] or '',
+                    'total':    float(o_dict['total_amount'] or 0),
+                    'url':      f"/track/{o_dict['delhivery_waybill']}"
+                                if o_dict['delhivery_waybill'] else '',
+                })
+        except Exception as e:
+            app.logger.error(f'Search orders error: {e}')
+
+    return jsonify(results)
+
+
+@app.route('/search')
+def search_page():
+    """Full search results page for longer queries or when JS is disabled."""
+    q = (request.args.get('q') or '').strip()
+    site = getattr(g, 'site_type', 'retail')
+    if not q:
+        return redirect('/' + site)
+
+    conn = get_db()
+    like = f'%{q}%'
+    try:
+        rows = conn.execute(
+            """SELECT id, sku, name, category, sub_category, description,
+                      retail_price, mrp_price, image_field
+               FROM products
+               WHERE is_active = 1
+                 AND (name ILIKE ? OR sku ILIKE ? OR category ILIKE ?
+                      OR sub_category ILIKE ? OR description ILIKE ?)
+               ORDER BY name LIMIT 40""",
+            (like, like, like, like, like)
+        ).fetchall()
+        products = []
+        for r in rows:
+            r_dict = dict(r)
+            imgs = (r_dict.get('image_field') or '').split(',')
+            r_dict['image'] = imgs[0].strip() if imgs else ''
+            mrp = float(r_dict.get('mrp_price') or 0)
+            rp  = float(r_dict.get('retail_price') or 0)
+            r_dict['discount'] = int((mrp - rp) / mrp * 100) if mrp and mrp > rp else 0
+            products.append(r_dict)
+    except Exception as e:
+        app.logger.error(f'Search page error: {e}')
+        products = []
+
+    return render_site('search_results.html', products=products, query=q)
+
 @app.route('/apply_coupon', methods=['POST'])
 def apply_coupon():
     data = request.get_json(silent=True) or {}

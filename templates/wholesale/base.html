@@ -44,6 +44,13 @@
     }
 
     #categories-dropdown-menu { background: white; border: 1px solid #fecdd3; }
+    /* Search */
+    .ws-search-wrap { position:relative; flex:1; max-width:360px; margin:0 8px; }
+    .ws-search-input { width:100%; padding:7px 14px 7px 34px; border:1.5px solid #fda4af; border-radius:999px; font-size:0.82rem; outline:none; background:#fff1f2; color:#1d1d1f; transition:border-color 0.2s; }
+    .ws-search-input:focus { border-color:#be185d; background:white; }
+    .ws-search-icon { position:absolute; left:10px; top:50%; transform:translateY(-50%); font-size:0.85rem; color:#be185d; pointer-events:none; }
+    .ws-search-dropdown { position:absolute; top:calc(100% + 6px); left:0; right:0; background:white; border:1px solid #fce7f3; border-radius:14px; box-shadow:0 8px 24px rgba(0,0,0,0.1); z-index:9999; max-height:400px; overflow-y:auto; display:none; }
+    .ws-search-dropdown.open { display:block; }
     #categories-dropdown-menu a { color: #be185d; font-weight: 600; font-size: 0.85rem; display: block; padding: 8px 16px; text-decoration: none; }
     #categories-dropdown-menu a:hover { background: #fff1f2; }
 </style>
@@ -75,6 +82,12 @@
                 </div>
             </div>
             <a href="{{ url_for('wholesale_contact') }}" class="ws-nav-pill">📞 Contact</a>
+            <div class="ws-search-wrap" id="ws-search-wrap">
+                <span class="ws-search-icon">🔍</span>
+                <input type="text" class="ws-search-input" id="ws-search"
+                       placeholder="Search products…" autocomplete="off">
+                <div class="ws-search-dropdown" id="ws-search-dropdown"></div>
+            </div>
             <a href="{{ url_for('checkout') }}" class="ws-nav-pill active">📋 Request Quote</a>
         </nav>
     </div>
@@ -99,6 +112,53 @@
 
 {% block extra_scripts %}
 <script>
+/* Wholesale search */
+(function() {
+    let _wst = null;
+    function initWsSearch() {
+        const inp = document.getElementById('ws-search');
+        const dd  = document.getElementById('ws-search-dropdown');
+        if (!inp) return;
+        inp.addEventListener('input', function() {
+            const q = this.value.trim();
+            clearTimeout(_wst);
+            if (q.length < 2) { dd.innerHTML=''; dd.classList.remove('open'); return; }
+            _wst = setTimeout(async () => {
+                try {
+                    const r = await fetch('/api/search?q=' + encodeURIComponent(q) + '&t=wholesale');
+                    const data = await r.json();
+                    let html = '';
+                    if (!data.products.length) {
+                        html = '<div style="padding:12px;text-align:center;font-size:0.82rem;color:#9f9f9f;">No products found</div>';
+                    } else {
+                        data.products.forEach(p => {
+                            html += '<a href="' + p.url + '" style="display:flex;gap:8px;align-items:center;padding:8px 12px;text-decoration:none;border-bottom:1px solid #f9f9f9;">'
+                                + '<img src="' + (p.image||'/static/assets/logo.png') + '" style="width:36px;height:36px;object-fit:contain;border-radius:8px;background:#fdf2f8;" onerror="this.src='/static/assets/logo.png'">'
+                                + '<div><div style="font-size:0.82rem;font-weight:600;color:#881337;">' + p.name + '</div>'
+                                + '<div style="font-size:0.7rem;color:#9f9f9f;">' + p.category + '</div></div>'
+                                + '</a>';
+                        });
+                        if (data.products.length >= 8) {
+                            html += '<a href="/search?q=' + encodeURIComponent(q) + '" style="display:block;text-align:center;padding:8px;font-size:0.78rem;font-weight:700;color:#be185d;border-top:1px solid #f3f4f6;">See all →</a>';
+                        }
+                    }
+                    dd.innerHTML = html;
+                    dd.classList.add('open');
+                } catch(e) {}
+            }, 250);
+        });
+        inp.addEventListener('keydown', function(e) {
+            if (e.key === 'Enter' && this.value.trim().length >= 2)
+                window.location.href = '/search?q=' + encodeURIComponent(this.value.trim());
+        });
+        document.addEventListener('click', function(e) {
+            if (!e.target.closest('#ws-search-wrap') && !e.target.closest('#ws-search'))
+                { dd.innerHTML=''; dd.classList.remove('open'); }
+        });
+    }
+    document.addEventListener('DOMContentLoaded', initWsSearch);
+})();
+
 document.addEventListener('DOMContentLoaded', function() {
     const btn = document.getElementById('categories-dropdown-btn');
     const menu = document.getElementById('categories-dropdown-menu');
