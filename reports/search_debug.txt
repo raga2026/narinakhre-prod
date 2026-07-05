@@ -1,14 +1,22 @@
 Traceback (most recent call last):
-  File "<string>", line 7, in <module>
-    from app import app, get_db, SupabaseCursor
-  File "c:\Users\ragha\Documents\NariNakhre\app.py", line 385, in <module>
+  File "C:\Users\ragha\Documents\NariNakhre\reports\search_debug_runner.py", line 7, in <module>
+    from app import app, get_db
+  File "C:\Users\ragha\Documents\NariNakhre\app.py", line 385, in <module>
     initialize_database_if_needed()
-  File "c:\Users\ragha\Documents\NariNakhre\app.py", line 371, in initialize_database_if_needed
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Users\ragha\Documents\NariNakhre\app.py", line 371, in initialize_database_if_needed
     client = get_supabase()
-  File "c:\Users\ragha\Documents\NariNakhre\app.py", line 74, in get_supabase
+  File "C:\Users\ragha\Documents\NariNakhre\app.py", line 74, in get_supabase
     _supabase_client = create_client(SUPABASE_URL, SUPABASE_KEY)
-  File "c:\Users\ragha\Documents\NariNakhre\.venv\Lib\site-packages\supabase\_sync\client.py", line 380, in create_client
+  File "C:\Users\ragha\Documents\NariNakhre\.venv\Lib\site-packages\supabase\_sync\client.py", line 380, in create_client
     return Client.create(
-  File "c:\Users\ragha\Documents\NariNakhre\.venv\Lib\site-packages\supabase\_sync\client.py", line 57, in __init__
+           ~~~~~~~~~~~~~^
+        supabase_url=supabase_url, supabase_key=supabase_key, options=options
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\ragha\Documents\NariNakhre\.venv\Lib\site-packages\supabase\_sync\client.py", line 109, in create
+    client = cls(supabase_url, supabase_key, options)
+  File "C:\Users\ragha\Documents\NariNakhre\.venv\Lib\site-packages\supabase\_sync\client.py", line 57, in __init__
     raise SupabaseException("supabase_url is required")
 supabase._sync.client.SupabaseException: supabase_url is required
