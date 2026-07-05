@@ -1535,20 +1535,24 @@ def api_search():
     # ── Product search ──────────────────────────────────────────────────────
     try:
         like = f'%{q}%'
+        # Use a simple query — avoid CASE WHEN with extra params since
+        # _format_sql requires exact param count match
         rows = conn.execute(
-            """SELECT id, sku, name, category, sub_category, description,
-                      retail_price, mrp_price, image_field, is_active
-               FROM products
-               WHERE is_active = 1
-                 AND (name ILIKE ? OR sku ILIKE ? OR category ILIKE ?
-                      OR sub_category ILIKE ? OR description ILIKE ?)
-               ORDER BY
-                 CASE WHEN name ILIKE ? THEN 0
-                      WHEN sku  ILIKE ? THEN 1
-                      ELSE 2 END
-               LIMIT 8""",
-            (like, like, like, like, like, f'{q}%', f'{q}%')
+            "SELECT id, sku, name, category, sub_category, description,"
+            " retail_price, mrp_price, image_field"
+            " FROM products"
+            " WHERE is_active = 1"
+            " AND (name ILIKE ? OR sku ILIKE ? OR category ILIKE ?"
+            " OR sub_category ILIKE ? OR description ILIKE ?)"
+            " LIMIT 12",
+            (like, like, like, like, like)
         ).fetchall()
+        # Sort in Python: name prefix matches first
+        q_lower = q.lower()
+        rows = sorted(rows, key=lambda r: (
+            0 if (r['name'] or '').lower().startswith(q_lower) else
+            1 if (r['sku'] or '').lower().startswith(q_lower) else 2
+        ))[:8]
 
         for r in rows:
             r_dict = dict(r)
@@ -1582,12 +1586,12 @@ def api_search():
     if site == 'retail':
         try:
             order = conn.execute(
-                """SELECT internal_order_id, consignee_name, status,
-                          total_amount, delhivery_waybill, created_at
-                   FROM order_shipping
-                   WHERE internal_order_id ILIKE ? OR delhivery_waybill ILIKE ?
-                   LIMIT 2""",
-                (f'%{q}%', f'%{q}%')
+                "SELECT internal_order_id, consignee_name, status,"
+                " total_amount, delhivery_waybill, created_at"
+                " FROM order_shipping"
+                " WHERE internal_order_id ILIKE ? OR delhivery_waybill ILIKE ?"
+                " LIMIT 2",
+                (like, like)
             ).fetchall()
 
             for o in order:
@@ -1619,13 +1623,13 @@ def search_page():
     like = f'%{q}%'
     try:
         rows = conn.execute(
-            """SELECT id, sku, name, category, sub_category, description,
-                      retail_price, mrp_price, image_field
-               FROM products
-               WHERE is_active = 1
-                 AND (name ILIKE ? OR sku ILIKE ? OR category ILIKE ?
-                      OR sub_category ILIKE ? OR description ILIKE ?)
-               ORDER BY name LIMIT 40""",
+            "SELECT id, sku, name, category, sub_category, description,"
+            " retail_price, mrp_price, image_field"
+            " FROM products"
+            " WHERE is_active = 1"
+            " AND (name ILIKE ? OR sku ILIKE ? OR category ILIKE ?"
+            " OR sub_category ILIKE ? OR description ILIKE ?)"
+            " ORDER BY name LIMIT 40",
             (like, like, like, like, like)
         ).fetchall()
         products = []
