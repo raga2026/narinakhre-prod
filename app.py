@@ -1515,14 +1515,6 @@ def track_order_page(waybill):
 
 @app.route('/api/search')
 def api_search():
-    """
-    Live search API used by both retail and wholesale sites.
-    Returns products matching the query, and (retail only) order lookup by ID.
-
-    Query params:
-        q   — search term (min 2 chars)
-        t   — site type override ('retail' or 'wholesale'); defaults to g.site_type
-    """
     q = (request.args.get('q') or '').strip()
     site = request.args.get('t') or getattr(g, 'site_type', 'retail')
 
@@ -1532,81 +1524,80 @@ def api_search():
     conn = get_db()
     results = {'products': [], 'orders': [], 'query': q}
 
-    # ── Product search ──────────────────────────────────────────────────────
     try:
-        like = f'%{q}%'
-        # Use a simple query — avoid CASE WHEN with extra params since
-        # _format_sql requires exact param count match
+        like = f'%{q.lower()}%'
         rows = conn.execute(
-            "SELECT id, sku, name, category, sub_category, description,"
+            "SELECT id, sku, name, category, sub_category,"
             " retail_price, mrp_price, image_field"
             " FROM products"
-            " WHERE is_active = 1"
-            " AND (name ILIKE ? OR sku ILIKE ? OR category ILIKE ?"
-            " OR sub_category ILIKE ? OR description ILIKE ?)"
+            " WHERE (is_active IS NOT FALSE AND is_active != 0)"
+            " AND ("
+            "   LOWER(name) LIKE ?"
+            "   OR LOWER(sku) LIKE ?"
+            "   OR LOWER(category) LIKE ?"
+            "   OR LOWER(sub_category) LIKE ?"
+            " )"
             " LIMIT 12",
-            (like, like, like, like, like)
+            (like, like, like, like)
         ).fetchall()
-        # Sort in Python: name prefix matches first
+
+        app.logger.info(f"Search '{q}' returned {len(rows)} products")
+
         q_lower = q.lower()
         rows = sorted(rows, key=lambda r: (
             0 if (r['name'] or '').lower().startswith(q_lower) else
-            1 if (r['sku'] or '').lower().startswith(q_lower) else 2
+            1 if (r['sku'] or '').lower().startswith(q_lower) else
+            2 if q_lower in (r['category'] or '').lower() else 3
         ))[:8]
 
         for r in rows:
             r_dict = dict(r)
-            # Get first image
             img = ''
             if r_dict.get('image_field'):
-                imgs = r_dict['image_field'].split(',')
-                img = imgs[0].strip() if imgs else ''
-
-            # Discount % for display
+                parts = r_dict['image_field'].split(',')
+                img = parts[0].strip() if parts else ''
             mrp = float(r_dict.get('mrp_price') or 0)
             rp  = float(r_dict.get('retail_price') or 0)
             disc = int((mrp - rp) / mrp * 100) if mrp and mrp > rp else 0
-
             results['products'].append({
                 'id':       r_dict['id'],
-                'sku':      r_dict['sku'],
-                'name':     r_dict['name'],
+                'sku':      r_dict['sku'] or '',
+                'name':     r_dict['name'] or '',
                 'category': r_dict['category'] or '',
                 'price':    rp,
                 'mrp':      mrp,
                 'discount': disc,
                 'image':    img,
-                'url':      f'/retail/product/{r_dict["id"]}' if site == 'retail'
-                            else f'/wholesale/product/{r_dict["id"]}',
+                'url': f"/retail/product/{r_dict['id']}" if site == 'retail'
+                       else f"/wholesale/product/{r_dict['id']}",
             })
     except Exception as e:
-        app.logger.error(f'Search products error: {e}')
+        app.logger.error(f'Search error: {type(e).__name__}: {e}')
 
-    # ── Order lookup (retail only — wholesale uses quotes, not orders) ──────
-    if site == 'retail':
+    if site == 'retail' and len(q) >= 6:
         try:
-            order = conn.execute(
+            orders = conn.execute(
                 "SELECT internal_order_id, consignee_name, status,"
-                " total_amount, delhivery_waybill, created_at"
+                " total_amount, delhivery_waybill"
                 " FROM order_shipping"
-                " WHERE internal_order_id ILIKE ? OR delhivery_waybill ILIKE ?"
+                " WHERE LOWER(internal_order_id) LIKE ?"
+                " OR LOWER(delhivery_waybill) LIKE ?"
                 " LIMIT 2",
-                (like, like)
+                (f"%{q.lower()}%", f"%{q.lower()}%")
             ).fetchall()
-
-            for o in order:
+            for o in orders:
                 o_dict = dict(o)
                 results['orders'].append({
                     'order_id': o_dict['internal_order_id'],
-                    'status':   (o_dict['status'] or 'pending').replace('_', ' ').title(),
+                    'status':   (o_dict['status'] or 'pending').replace('_',' ').title(),
                     'waybill':  o_dict['delhivery_waybill'] or '',
                     'name':     o_dict['consignee_name'] or '',
                     'total':    float(o_dict['total_amount'] or 0),
-                    'url':      f"/track/{o_dict['delhivery_waybill']}"
-                                if o_dict['delhivery_waybill'] else '',
+                    'url': f"/track/{o_dict['delhivery_waybill']}"
+                           if o_dict['delhivery_waybill'] else '',
                 })
         except Exception as e:
-            app.logger.error(f'Search orders error: {e}')
+            app.logger.error(f'Order search error: {e}')
 
     return jsonify(results)
 
