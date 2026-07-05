@@ -133,7 +133,7 @@
                     } else {
                         data.products.forEach(p => {
                             html += '<a href="' + p.url + '" style="display:flex;gap:8px;align-items:center;padding:8px 12px;text-decoration:none;border-bottom:1px solid #f9f9f9;">'
-                                + '<img src="' + (p.image||'/static/assets/logo.png') + '" style="width:36px;height:36px;object-fit:contain;border-radius:8px;background:#fdf2f8;" onerror="this.src='/static/assets/logo.png'">'
+                                + '<img src="' + (p.image||'/static/assets/logo.png') + '" style="width:36px;height:36px;object-fit:contain;border-radius:8px;background:#fdf2f8;" onerror="this.src=\'/static/assets/logo.png\'">'
                                 + '<div><div style="font-size:0.82rem;font-weight:600;color:#881337;">' + p.name + '</div>'
                                 + '<div style="font-size:0.7rem;color:#9f9f9f;">' + p.category + '</div></div>'
                                 + '</a>';

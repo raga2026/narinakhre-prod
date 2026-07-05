@@ -336,7 +336,7 @@ function renderDropdown(data, dropdown, q) {
         html += '<div class="sd-section-title">Products</div>';
         products.forEach(p => {
             const img = p.image
-                ? '<img src="' + escHtml(p.image) + '" alt="" onerror="this.src='/static/assets/logo.png'">'
+                ? '<img src="' + escHtml(p.image) + '" alt="" onerror="this.src=\'/static/assets/logo.png\'">'
                 : '<img src="/static/assets/logo.png" alt="">';
             const disc = p.discount ? '<span style="font-size:0.68rem;color:#16a34a;font-weight:800;margin-left:4px;">' + p.discount + '% off</span>' : '';
             const mrp  = p.mrp && p.mrp > p.price
