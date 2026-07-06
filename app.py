@@ -1525,23 +1525,25 @@ def api_search():
     results = {'products': [], 'orders': [], 'query': q}
 
     try:
-        like = f'%{q.lower()}%'
+        q_low = q.lower()
+        like  = f'%{q_low}%'
+
         rows = conn.execute(
             "SELECT id, sku, name, category, sub_category,"
             " retail_price, mrp_price, image_field"
             " FROM products"
-            " WHERE (is_active IS NOT FALSE AND is_active != 0)"
+            " WHERE is_active = 1"
             " AND ("
-            "   LOWER(name) LIKE ?"
-            "   OR LOWER(sku) LIKE ?"
-            "   OR LOWER(category) LIKE ?"
-            "   OR LOWER(sub_category) LIKE ?"
+            f"   LOWER(name) LIKE '{like}'"
+            f"   OR LOWER(category) LIKE '{like}'"
+            f"   OR LOWER(sub_category) LIKE '{like}'"
+            f"   OR LOWER(sku) LIKE '{like}'"
             " )"
             " LIMIT 12",
-            (like, like, like, like)
+            ()
         ).fetchall()
 
-        app.logger.info(f"Search '{q}' returned {len(rows)} products")
+        app.logger.info(f"Search '{q}' → {len(rows)} products")
 
         q_lower = q.lower()
         rows = sorted(rows, key=lambda r: (
@@ -1576,16 +1578,17 @@ def api_search():
 
     if site == 'retail' and len(q) >= 6:
         try:
-            orders = conn.execute(
+            q_low = q.lower()
+            rows = conn.execute(
                 "SELECT internal_order_id, consignee_name, status,"
                 " total_amount, delhivery_waybill"
                 " FROM order_shipping"
-                " WHERE LOWER(internal_order_id) LIKE ?"
-                " OR LOWER(delhivery_waybill) LIKE ?"
+                f" WHERE LOWER(internal_order_id) LIKE '%{q_low}%'"
+                f" OR LOWER(delhivery_waybill) LIKE '%{q_low}%'"
                 " LIMIT 2",
-                (f"%{q.lower()}%", f"%{q.lower()}%")
+                ()
             ).fetchall()
-            for o in orders:
+            for o in rows:
                 o_dict = dict(o)
                 results['orders'].append({
                     'order_id': o_dict['internal_order_id'],
@@ -1602,35 +1605,6 @@ def api_search():
     return jsonify(results)
 
 
-@app.route('/api/search-debug')
-def search_debug():
-    conn = get_db()
-    try:
-        total = conn.execute(
-            "SELECT COUNT(*) as n FROM products"
-        ).fetchone()
-        sample = conn.execute(
-            "SELECT id, name, category, is_active FROM products LIMIT 5"
-        ).fetchall()
-        like = '%bangle%'
-        bangle_like = conn.execute(
-            "SELECT id, name FROM products WHERE name LIKE ? LIMIT 3",
-            (like,)
-        ).fetchall()
-        no_filter = conn.execute(
-            "SELECT id, name FROM products LIMIT 3"
-        ).fetchall()
-        return jsonify({
-            'total_products': dict(total) if total else 'FAILED',
-            'sample_rows': [dict(r) for r in sample],
-            'bangle_like_results': [dict(r) for r in bangle_like],
-            'no_filter_results': [dict(r) for r in no_filter],
-        })
-    except Exception as e:
-        import traceback
-        return jsonify({'error': str(e), 'trace': traceback.format_exc()})
-
-
 @app.route('/search')
 def search_page():
     """Full search results page for longer queries or when JS is disabled."""
@@ -1640,17 +1614,24 @@ def search_page():
         return redirect('/' + site)
 
     conn = get_db()
-    like = f'%{q}%'
     try:
+        q_low = q.lower()
+        like  = f'%{q_low}%'
+
         rows = conn.execute(
             "SELECT id, sku, name, category, sub_category, description,"
             " retail_price, mrp_price, image_field"
             " FROM products"
             " WHERE is_active = 1"
-            " AND (name ILIKE ? OR sku ILIKE ? OR category ILIKE ?"
-            " OR sub_category ILIKE ? OR description ILIKE ?)"
+            " AND ("
+            f" LOWER(name) LIKE '{like}'"
+            f" OR LOWER(category) LIKE '{like}'"
+            f" OR LOWER(sub_category) LIKE '{like}'"
+            f" OR LOWER(sku) LIKE '{like}'"
+            f" OR LOWER(description) LIKE '{like}'"
+            " )"
             " ORDER BY name LIMIT 40",
-            (like, like, like, like, like)
+            ()
         ).fetchall()
         products = []
         for r in rows:
