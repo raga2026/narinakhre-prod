@@ -1602,6 +1602,35 @@ def api_search():
     return jsonify(results)
 
 
+@app.route('/api/search-debug')
+def search_debug():
+    conn = get_db()
+    try:
+        total = conn.execute(
+            "SELECT COUNT(*) as n FROM products"
+        ).fetchone()
+        sample = conn.execute(
+            "SELECT id, name, category, is_active FROM products LIMIT 5"
+        ).fetchall()
+        like = '%bangle%'
+        bangle_like = conn.execute(
+            "SELECT id, name FROM products WHERE name LIKE ? LIMIT 3",
+            (like,)
+        ).fetchall()
+        no_filter = conn.execute(
+            "SELECT id, name FROM products LIMIT 3"
+        ).fetchall()
+        return jsonify({
+            'total_products': dict(total) if total else 'FAILED',
+            'sample_rows': [dict(r) for r in sample],
+            'bangle_like_results': [dict(r) for r in bangle_like],
+            'no_filter_results': [dict(r) for r in no_filter],
+        })
+    except Exception as e:
+        import traceback
+        return jsonify({'error': str(e), 'trace': traceback.format_exc()})
+
+
 @app.route('/search')
 def search_page():
     """Full search results page for longer queries or when JS is disabled."""
