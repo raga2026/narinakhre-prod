@@ -293,7 +293,7 @@
                 {% set is_bangle = 'bangle' in (product.category|lower if product.category else '') or 'bangle' in (product.name|lower if product.name else '') %}
                 {% if is_bangle %}
                 <div style="display:flex;align-items:center;gap:4px;margin-bottom:2px;">
-                    <label style="font-size:0.6rem;font-weight:700;color:#9f9f9f;text-transform:uppercase;letter-spacing:0.05em;white-space:nowrap;">Size</label>
+                    <label style="font-size:0.65rem;font-weight:600;color:#9f9f9f;white-space:nowrap;">Size</label>
                     <select class="input-field size-select" id="size-{{ product.sku }}" style="margin-bottom:0;flex:1;">
                         <option value="2.4">2.4</option>
                         <option value="2.6">2.6</option>
@@ -302,7 +302,7 @@
                 </div>
                 {% elif product.size %}
                 <div style="display:flex;align-items:center;gap:4px;margin-bottom:2px;">
-                    <label style="font-size:0.6rem;font-weight:700;color:#9f9f9f;text-transform:uppercase;letter-spacing:0.05em;white-space:nowrap;">Size</label>
+                    <label style="font-size:0.65rem;font-weight:600;color:#9f9f9f;white-space:nowrap;">Size</label>
                     <select class="input-field size-select" id="size-{{ product.sku }}" style="margin-bottom:0;flex:1;">
                         {% for s in product.size.split(',') %}
                         <option value="{{ s|trim }}">{{ s|trim }}</option>
@@ -315,7 +315,7 @@
                 <div class="cart-container mt-auto" id="cart-action-{{ product.sku }}">
                     <!-- Qty select -->
                     <div style="display:flex;align-items:center;gap:4px;margin-bottom:3px;">
-                        <label style="font-size:0.6rem;font-weight:700;color:#9f9f9f;text-transform:uppercase;letter-spacing:0.05em;white-space:nowrap;">Qty</label>
+                        <label style="font-size:0.65rem;font-weight:600;color:#9f9f9f;white-space:nowrap;">Qty</label>
                         <select class="input-field qty-select" id="qty-{{ product.sku }}" style="margin-bottom:0;flex:1;">
                             <option value="1" selected>1</option>
                             <option value="2">2</option>

@@ -649,18 +649,25 @@ def get_supabase_image_urls(sku):
 def get_product_images(p_dict):
     """
     Return image URL list for a product.
-    Uses ONLY URLs explicitly stored in image_field (comma-separated).
-    Never generates speculative _1 to _9 URLs — they cause 404 gaps
-    when a product has fewer than 9 images.
+    Images are stored in Supabase as {SKU}_1.webp, {SKU}_2.webp etc.
+    Uses image_field as the primary/first image, then fills in the
+    rest from the SKU pattern. The template uses onerror to hide
+    broken images, so returning extra URLs that don't exist is safe.
     """
+    sku = p_dict.get('sku', '')
     image_field = (p_dict.get('image_field') or '').strip()
-    if not image_field:
-        return ['/static/assets/products/default.jpg']
-    if ',' in image_field:
-        urls = [u.strip() for u in image_field.split(',') if u.strip().startswith('http')]
-        return urls if urls else ['/static/assets/products/default.jpg']
+
+    # Get all SKU-based URLs (_1 through _9)
+    sku_urls = get_supabase_image_urls(sku) if sku else []
+
     if image_field.startswith('http'):
-        return [image_field]
+        # Put image_field first, then add remaining SKU urls
+        others = [u for u in sku_urls if u != image_field]
+        return [image_field] + others
+
+    if sku_urls:
+        return sku_urls
+
     return ['/static/assets/products/default.jpg']
 
 
