@@ -2183,29 +2183,40 @@ def admin_upload_excel():
             flash('Unsupported file format. Please upload a .csv or .xlsx file.')
             return redirect(url_for('admin_dashboard'))
 
-        # Normalize column names: lowercase, strip whitespace, replace spaces/hyphens with underscores
-        df.columns = (df.columns
-            .str.lower()
-            .str.strip()
-            .str.replace(r'[\s\-]+', '_', regex=True)
-        )
-        # Common aliases — map alternate Excel header names to standard names
+        # Normalize column names to match exactly what the code expects.
+        # Maps every header variant from the admin-exported Excel.
         col_aliases = {
-            'mrp': 'mrp_price',
-            'selling_price': 'retail_price',
-            'sale_price': 'retail_price',
-            'price': 'retail_price',
-            'sp': 'retail_price',
-            'discount_%': 'retail_discount_percent',
-            'discount_percent': 'retail_discount_percent',
-            'gst': 'gst_percent',
-            'stock': 'stock_total',
-            'qty': 'stock_total',
-            'quantity': 'stock_total',
-            'weight_g': 'weight_grams',
-            'wt': 'weight_grams',
+            # As exported by download-products-excel
+            'sub category':         'sub_category',
+            'retail price':         'retail_price',
+            'mrp price':            'mrp_price',
+            'wholesale price':      'wholesale_price',
+            'min wholesale qty':    'min_wholesale_qty',
+            'gst %':                'gst_percent',
+            'hsn code':             'hsn_code',
+            'weight (g)':           'weight_grams',
+            'stock':                'stock_total',
+            'active':               'is_active',
+            # Common alternates
+            'mrp':                  'mrp_price',
+            'selling price':        'retail_price',
+            'sale price':           'retail_price',
+            'price':                'retail_price',
+            'discount %':           'retail_discount_percent',
+            'discount percent':     'retail_discount_percent',
+            'gst':                  'gst_percent',
+            'gst percent':          'gst_percent',
+            'qty':                  'stock_total',
+            'quantity':             'stock_total',
+            'weight g':             'weight_grams',
+            'weight':               'weight_grams',
+            'wt':                   'weight_grams',
+            'sub_category':         'sub_category',  # already correct
         }
+        # Lowercase + strip headers first, then apply alias map
+        df.columns = df.columns.str.lower().str.strip()
         df.rename(columns=col_aliases, inplace=True)
+        app.logger.info(f"Excel columns after normalization: {list(df.columns)}")
 
         processed_rows = 0
         created_rows = 0
