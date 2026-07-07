@@ -747,25 +747,28 @@ def index():
             ' ORDER BY CASE WHEN stock_total > 0 THEN 0 ELSE 1 END, id DESC'
         ).fetchall()
 
-        # Build grouped products — category sorted by product count (most first)
+        # Build grouped products — category sorted by TOTAL product count (most first)
         grouped_products = {}
-        cat_counts = {}
         for p in products:
             cat = p['category'] or 'New Arrivals'
             if cat not in grouped_products:
                 grouped_products[cat] = []
-                cat_counts[cat] = 0
             p_dict = dict(p)
             p_dict['images'] = get_product_images(p_dict)
             p_dict['tiers'] = get_product_tiers(p_dict)
             grouped_products[cat].append(p_dict)
-            if p_dict.get('stock_total', 0) and p_dict['stock_total'] > 0:
-                cat_counts[cat] += 1
 
-        # Sort categories by in-stock count descending
+        # Sort by total number of products in category (not just in-stock)
+        # so Bangles (most listings) always appears first regardless of stock levels
         grouped_products = dict(
-            sorted(grouped_products.items(), key=lambda x: cat_counts.get(x[0], 0), reverse=True)
+            sorted(grouped_products.items(), key=lambda x: len(x[1]), reverse=True)
         )
+
+        # cat_counts for trending: in-stock only
+        cat_counts = {
+            cat: sum(1 for p in prods if p.get('stock_total', 0) and p['stock_total'] > 0)
+            for cat, prods in grouped_products.items()
+        }
 
         # Trending section: mix of highest discount + recently added in-stock products
         all_in_stock = [p for cat_prods in grouped_products.values()
