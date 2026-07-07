@@ -649,14 +649,13 @@ def get_supabase_image_urls(sku):
 def get_product_images(p_dict):
     """
     Return image URL list for a product.
-    Uses image_field from database — comma-separated list of real URLs.
-    Only returns URLs that are explicitly stored; never guesses _1 to _9
-    since those 404s cause visible gaps in the image gallery.
+    Uses ONLY URLs explicitly stored in image_field (comma-separated).
+    Never generates speculative _1 to _9 URLs — they cause 404 gaps
+    when a product has fewer than 9 images.
     """
-    image_field = p_dict.get('image_field') or ''
+    image_field = (p_dict.get('image_field') or '').strip()
     if not image_field:
         return ['/static/assets/products/default.jpg']
-    # image_field may be a comma-separated list of URLs
     if ',' in image_field:
         urls = [u.strip() for u in image_field.split(',') if u.strip().startswith('http')]
         return urls if urls else ['/static/assets/products/default.jpg']
@@ -745,20 +744,49 @@ def index():
     if g.site_type == 'retail':
         products = db.execute(
             'SELECT * FROM products WHERE is_active=1'
-            ' ORDER BY'
-            ' CASE WHEN stock_total > 0 THEN 0 ELSE 1 END,'
-            ' id DESC'
+            ' ORDER BY CASE WHEN stock_total > 0 THEN 0 ELSE 1 END, id DESC'
         ).fetchall()
+
+        # Build grouped products — category sorted by product count (most first)
         grouped_products = {}
+        cat_counts = {}
         for p in products:
             cat = p['category'] or 'New Arrivals'
             if cat not in grouped_products:
                 grouped_products[cat] = []
+                cat_counts[cat] = 0
             p_dict = dict(p)
             p_dict['images'] = get_product_images(p_dict)
             p_dict['tiers'] = get_product_tiers(p_dict)
             grouped_products[cat].append(p_dict)
-        return render_site('index.html', grouped_products=grouped_products, hero_images=hero_images)
+            if p_dict.get('stock_total', 0) and p_dict['stock_total'] > 0:
+                cat_counts[cat] += 1
+
+        # Sort categories by in-stock count descending
+        grouped_products = dict(
+            sorted(grouped_products.items(), key=lambda x: cat_counts.get(x[0], 0), reverse=True)
+        )
+
+        # Trending section: mix of highest discount + recently added in-stock products
+        all_in_stock = [p for cat_prods in grouped_products.values()
+                        for p in cat_prods
+                        if p.get('stock_total', 0) and p['stock_total'] > 0]
+
+        # Score: 60% weight on discount %, 40% on recency (id)
+        max_id = max((p['id'] for p in all_in_stock), default=1)
+        def trend_score(p):
+            mrp = float(p.get('mrp_price') or 0)
+            rp  = float(p.get('retail_price') or p.get('price1') or 0)
+            disc_pct = ((mrp - rp) / mrp * 100) if mrp and mrp > rp else 0
+            recency = (p['id'] / max_id) * 100
+            return disc_pct * 0.6 + recency * 0.4
+
+        trending = sorted(all_in_stock, key=trend_score, reverse=True)[:8]
+        import random
+        random.shuffle(trending)  # shuffle so it feels fresh each load
+
+        return render_site('index.html', grouped_products=grouped_products,
+                           trending=trending, hero_images=hero_images)
 
     products = db.execute('''
         SELECT p.*, c.name as category_name FROM products p
@@ -2155,7 +2183,29 @@ def admin_upload_excel():
             flash('Unsupported file format. Please upload a .csv or .xlsx file.')
             return redirect(url_for('admin_dashboard'))
 
-        df.columns = df.columns.str.lower().str.strip()
+        # Normalize column names: lowercase, strip whitespace, replace spaces/hyphens with underscores
+        df.columns = (df.columns
+            .str.lower()
+            .str.strip()
+            .str.replace(r'[\s\-]+', '_', regex=True)
+        )
+        # Common aliases — map alternate Excel header names to standard names
+        col_aliases = {
+            'mrp': 'mrp_price',
+            'selling_price': 'retail_price',
+            'sale_price': 'retail_price',
+            'price': 'retail_price',
+            'sp': 'retail_price',
+            'discount_%': 'retail_discount_percent',
+            'discount_percent': 'retail_discount_percent',
+            'gst': 'gst_percent',
+            'stock': 'stock_total',
+            'qty': 'stock_total',
+            'quantity': 'stock_total',
+            'weight_g': 'weight_grams',
+            'wt': 'weight_grams',
+        }
+        df.rename(columns=col_aliases, inplace=True)
 
         processed_rows = 0
         created_rows = 0
@@ -2234,77 +2284,90 @@ def admin_upload_excel():
                 )
                 created_rows += 1
             else:
-                # Only update columns that are explicitly present and non-empty
-                # in this Excel row — prevents zeroing prices when only stock changes
-                import pandas as _pd
-                def _cell_present(col):
-                    return col in row.index and _pd.notna(row.get(col)) and str(row.get(col)).strip() != ''
-                col_map = []
-                for col, val in [
-                    ('name',                    row_value(row, 'name')),
-                    ('slug',                    row_value(row, 'slug')),
-                    ('category',                row_value(row, 'category')),
-                    ('sub_category',            row_value(row, 'sub_category')),
-                    ('collection',              row_value(row, 'collection')),
-                    ('size',                    row_value(row, 'size')),
-                    ('retail_price',            to_float(row_value(row, 'retail_price'))),
-                    ('mrp_price',               to_float(row_value(row, 'mrp_price'))),
-                    ('retail_discount_percent', to_float(row_value(row, 'retail_discount_percent'))),
-                    ('wholesale_price',         to_float(row_value(row, 'wholesale_price'))),
-                    ('min_wholesale_qty',       to_int(row_value(row, 'min_wholesale_qty'))),
-                    ('sets_count',              to_int(row_value(row, 'sets_count'))),
-                    ('image_field',             final_image),
-                    ('price1',                  to_float(row_value(row, 'price1'))),
-                    ('quantity1',               to_int(row_value(row, 'quantity1'))),
-                    ('price2',                  to_float(row_value(row, 'price2'))),
-                    ('quantity2',               to_int(row_value(row, 'quantity2'))),
-                    ('price3',                  to_float(row_value(row, 'price3'))),
-                    ('quantity3',               to_int(row_value(row, 'quantity3'))),
-                    ('purchase_cost',           to_float(row_value(row, 'purchase_cost'))),
-                    ('making_charges',          to_float(row_value(row, 'making_charges'))),
-                    ('weight_grams',            to_float(row_value(row, 'weight_grams'))),
-                    ('material',                row_value(row, 'material')),
-                    ('hsn_code',                row_value(row, 'hsn_code')),
-                    ('gst_percent',             to_float(row_value(row, 'gst_percent'))),
-                    ('stock_total',             to_int(row_value(row, 'stock_total'))),
-                    ('box_packing_type',        row_value(row, 'box_packing_type')),
-                    ('vendor_id',               row_value(row, 'vendor_id')),
-                    ('status',                  row_value(row, 'status')),
-                    ('is_active',               1 if to_bool(row_value(row, 'is_active'), default=True) else 0),
-                    ('is_featured',             1 if to_bool(row_value(row, 'is_featured'), default=False) else 0),
-                    ('weight',                  to_float(row_value(row, 'weight'))),
-                    ('length',                  to_float(row_value(row, 'length'))),
-                    ('breadth',                 to_float(row_value(row, 'breadth'))),
-                    ('height',                  to_float(row_value(row, 'height'))),
-                ]:
-                    # Skip image if no new image in sheet
-                    if col == 'image_field' and not sheet_image:
-                        continue
-                    # Skip numeric fields that are 0 when cell is absent/blank
-                    numeric_cols = {'retail_price','mrp_price','retail_discount_percent',
-                                    'wholesale_price','min_wholesale_qty','sets_count',
-                                    'price1','price2','price3','quantity1','quantity2','quantity3',
-                                    'purchase_cost','making_charges','weight_grams','gst_percent',
-                                    'stock_total','weight','length','breadth','height'}
-                    if col in numeric_cols and not _cell_present(col):
-                        continue
-                    # Skip text fields that are None/empty
-                    if col not in numeric_cols and col not in ('is_active','is_featured') and val is None:
-                        continue
-                    col_map.append((col, val))
+                # Only update columns present AND non-empty in this Excel row
+                # Prevents zeroing prices when only stock_total column is uploaded
+                def _has_val(col):
+                    if col not in row.index:
+                        return False
+                    v = row.get(col)
+                    try:
+                        import math
+                        if isinstance(v, float) and math.isnan(v):
+                            return False
+                    except Exception:
+                        pass
+                    return v is not None and str(v).strip() not in ('', 'nan', 'None')
 
-                if col_map:
-                    set_clause = ', '.join(f'{c}=?' for c, _ in col_map)
-                    vals = [v for _, v in col_map] + [row_sku]
+                num_cols = {
+                    'retail_price','mrp_price','retail_discount_percent',
+                    'wholesale_price','min_wholesale_qty','sets_count',
+                    'price1','price2','price3','quantity1','quantity2','quantity3',
+                    'purchase_cost','making_charges','weight_grams','gst_percent',
+                    'stock_total','weight','length','breadth','height'
+                }
+                bool_cols = {'is_active', 'is_featured'}
+                col_map = [
+                    ('name', row_value(row, 'name')),
+                    ('slug', row_value(row, 'slug')),
+                    ('category', row_value(row, 'category')),
+                    ('sub_category', row_value(row, 'sub_category')),
+                    ('collection', row_value(row, 'collection')),
+                    ('size', row_value(row, 'size')),
+                    ('retail_price', to_float(row_value(row, 'retail_price'))),
+                    ('mrp_price', to_float(row_value(row, 'mrp_price'))),
+                    ('retail_discount_percent', to_float(row_value(row, 'retail_discount_percent'))),
+                    ('wholesale_price', to_float(row_value(row, 'wholesale_price'))),
+                    ('min_wholesale_qty', to_int(row_value(row, 'min_wholesale_qty'))),
+                    ('sets_count', to_int(row_value(row, 'sets_count'))),
+                    ('image_field', final_image if sheet_image else None),
+                    ('price1', to_float(row_value(row, 'price1'))),
+                    ('quantity1', to_int(row_value(row, 'quantity1'))),
+                    ('price2', to_float(row_value(row, 'price2'))),
+                    ('quantity2', to_int(row_value(row, 'quantity2'))),
+                    ('price3', to_float(row_value(row, 'price3'))),
+                    ('quantity3', to_int(row_value(row, 'quantity3'))),
+                    ('purchase_cost', to_float(row_value(row, 'purchase_cost'))),
+                    ('making_charges', to_float(row_value(row, 'making_charges'))),
+                    ('weight_grams', to_float(row_value(row, 'weight_grams'))),
+                    ('material', row_value(row, 'material')),
+                    ('hsn_code', row_value(row, 'hsn_code')),
+                    ('gst_percent', to_float(row_value(row, 'gst_percent'))),
+                    ('stock_total', to_int(row_value(row, 'stock_total'))),
+                    ('box_packing_type', row_value(row, 'box_packing_type')),
+                    ('vendor_id', row_value(row, 'vendor_id')),
+                    ('status', row_value(row, 'status')),
+                    ('is_active', 1 if to_bool(row_value(row, 'is_active'), default=True) else 0),
+                    ('is_featured', 1 if to_bool(row_value(row, 'is_featured'), default=False) else 0),
+                    ('weight', to_float(row_value(row, 'weight'))),
+                    ('length', to_float(row_value(row, 'length'))),
+                    ('breadth', to_float(row_value(row, 'breadth'))),
+                    ('height', to_float(row_value(row, 'height'))),
+                ]
+                to_set = []
+                for col, val in col_map:
+                    if col == 'image_field' and val is None:
+                        continue
+                    if col in num_cols and not _has_val(col):
+                        continue
+                    if col in bool_cols and not _has_val(col):
+                        continue
+                    if col not in num_cols and col not in bool_cols and val is None:
+                        continue
+                    to_set.append((col, val))
+                if to_set:
+                    set_clause = ', '.join(f'{c}=?' for c, _ in to_set)
+                    vals = [v for _, v in to_set] + [row_sku]
                     conn.execute(f'UPDATE products SET {set_clause} WHERE sku=?', vals)
                 updated_rows += 1
 
             processed_rows += 1
 
         conn.commit()
+        price_cols_found = [c for c in ['retail_price','mrp_price','stock_total'] if c in df.columns]
         flash(
-            f'Inventory synchronization complete. Processed {processed_rows} rows '
-            f'({created_rows} created, {updated_rows} updated).'
+            f'Sync complete: {processed_rows} rows processed '
+            f'({created_rows} created, {updated_rows} updated). '
+            f'Price columns detected: {price_cols_found or "NONE — check column headers in Excel"}'
         )
         return redirect(url_for('admin_dashboard'))
     except Exception as exc:
