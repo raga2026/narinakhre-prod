@@ -211,7 +211,10 @@
                     {%- set rp  = product.retail_price or product.price1 or 0 -%}
                     {%- set disc = ((mrp - rp) / mrp * 100)|round(0)|int if mrp and mrp > rp else 0 -%}
                     {% if mrp and mrp > rp %}
-                    <span class="prod-mrp">₹{{ mrp|round(0)|int }}</span>
+                    <span class="prod-mrp">
+                        <span style="font-size:0.6rem;font-weight:600;">MRP</span>
+                        ₹{{ mrp|round(0)|int }}
+                    </span>
                     {% endif %}
                     <span class="prod-price">₹{{ rp|round(0)|int }}</span>
                     {% if disc > 0 %}

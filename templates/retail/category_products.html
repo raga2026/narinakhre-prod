@@ -27,13 +27,16 @@
         {%- set mrp = product.mrp_price or 0 -%}
         {%- set rp  = product.retail_price or product.price1 or 0 -%}
         {%- set disc = ((mrp - rp) / mrp * 100)|round(0)|int if mrp and mrp > rp else 0 -%}
-        <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin:6px 0 8px;">
+        <div class="prod-price-wrap" style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin:6px 0 8px;">
             {% if mrp and mrp > rp %}
-            <span style="font-size:0.8rem;color:#9f9f9f;text-decoration:line-through;">₹{{ mrp|round(0)|int }}</span>
+            <span class="prod-mrp" style="font-size:0.8rem;color:#9f9f9f;text-decoration:line-through;">
+                <span style="font-size:0.6rem;font-weight:600;">MRP</span>
+                ₹{{ mrp|round(0)|int }}
+            </span>
             {% endif %}
-            <span style="font-size:1.1rem;font-weight:900;color:#881337;">₹{{ rp|round(0)|int }}</span>
+            <span class="prod-price" style="font-size:1.1rem;font-weight:900;color:#881337;">₹{{ rp|round(0)|int }}</span>
             {% if disc > 0 %}
-            <span style="font-size:0.72rem;font-weight:800;color:#16a34a;background:#dcfce7;border-radius:6px;padding:1px 6px;">{{ disc }}% off</span>
+            <span class="prod-disc" style="font-size:0.72rem;font-weight:800;color:#16a34a;background:#dcfce7;border-radius:6px;padding:1px 6px;">{{ disc }}% off</span>
             {% endif %}
         </div>
 
