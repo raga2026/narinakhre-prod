@@ -71,17 +71,20 @@
 
     /* ── Product name ── */
     .prod-name {
-        font-weight: bold;
-        font-size: 0.88rem;
-        margin-top: 8px;
-        margin-bottom: 4px;
-        white-space: nowrap;
+        font-weight: 600;
+        font-size: 0.70rem;
+        margin-top: 6px;
+        margin-bottom: 3px;
+        display: -webkit-box;
+        -webkit-line-clamp: 2;
+        -webkit-box-orient: vertical;
         overflow: hidden;
-        text-overflow: ellipsis;
         color: #1e293b;
+        line-height: 1.35;
+        min-height: 1.9em;
     }
     @media (min-width: 768px) {
-        .prod-name { font-size: 1rem; }
+        .prod-name { font-size: 0.75rem; }
     }
 
     /* ── Price ── */
@@ -171,9 +174,63 @@
 
 <!-- ── PRODUCTS ── -->
 <div id="shop-section" class="w-full max-w-screen-xl mx-auto px-3 py-8" style="box-sizing:border-box;overflow:hidden;">
-    {% for category, products in grouped_products.items() %}
+    <!-- Trending / Featured Products -->
+{% if trending and trending|length > 0 %}
+<section class="prod-section" style="margin-bottom:32px;">
+    <div class="prod-section-header">
+        <h2 class="prod-section-title" style="color:#be185d;">
+            🔥 Trending Now
+        </h2>
+        <span style="font-size:0.72rem;color:#9f9f9f;">Refreshes every visit</span>
+    </div>
+    <div class="prod-grid">
+    {% for product in trending %}
+    {%- set img_src = product.images[0] if product.images and product.images|length > 0 else '/static/assets/products/default.jpg' -%}
+    {%- set mrp = product.mrp_price or 0 -%}
+    {%- set rp  = product.retail_price or product.price1 or 0 -%}
+    {%- set disc = ((mrp - rp) / mrp * 100)|round(0)|int if mrp and mrp > rp else 0 -%}
+    <div class="prod-card">
+        <div class="prod-img-wrap">
+            {% if disc > 0 %}
+            <span class="prod-badge">{{ disc }}% off</span>
+            {% endif %}
+            <img class="prod-img" loading="lazy"
+                 src="{{ img_src }}"
+                 alt="{{ product.name }}"
+                 onerror="this.onerror=null;this.src='/static/assets/products/default.jpg';">
+        </div>
+        <div class="prod-info">
+            <div class="prod-name">{{ product.name }}</div>
+            <div class="prod-price-wrap">
+                {% if mrp and mrp > rp %}
+                <span class="prod-mrp"><span style="font-size:0.6rem;font-weight:600;">MRP</span> ₹{{ mrp|round(0)|int }}</span>
+                {% endif %}
+                <span class="prod-price">₹{{ rp|round(0)|int }}</span>
+            </div>
+            {% if product.stock_total and product.stock_total > 0 %}
+            <button class="add-to-cart-btn btn-add-cart"
+                    data-sku="{{ product.sku }}"
+                    data-price="{{ rp }}"
+                    data-name="{{ product.name }}"
+                    style="width:100%;margin-top:6px;padding:7px;border-radius:8px;font-size:0.75rem;font-weight:700;background:white;border:1.5px solid #be185d;color:#be185d;cursor:pointer;">
+                🛒 Add to Cart
+            </button>
+            {% else %}
+            <button disabled style="width:100%;margin-top:6px;padding:7px;border-radius:8px;font-size:0.75rem;font-weight:700;background:#e5e7eb;color:#9f9f9f;border:none;cursor:not-allowed;">
+                Out of Stock
+            </button>
+            {% endif %}
+        </div>
+    </div>
+    {% endfor %}
+    </div>
+</section>
+<hr style="border:none;border-top:1px solid #f3f4f6;margin:8px 0 24px;">
+{% endif %}
+
+{% for category, products in grouped_products.items() %}
     <div class="mb-10">
-        <h2 class="text-xl md:text-3xl font-serif font-bold text-rose-800 border-b border-rose-100 mb-4 pb-1">
+        <h2 class="text-base md:text-xl font-serif font-bold text-rose-800 border-b border-rose-100 mb-3 pb-1">
             <a href="/retail/category/{{ category }}" class="hover:underline">{{ category }}</a>
         </h2>
         <div class="retail-grid">
@@ -199,7 +256,7 @@
                          alt="{{ product.name }}"
                          data-images='{{ product.images|tojson }}'
                          data-index="0"
-                         loading="lazy" onerror="this.onerror=null;this.style.display='none';" />
+                         onerror="this.onerror=null;this.src='/static/assets/products/default.jpg';" />
                 </a>
 
                 <!-- Name -->
@@ -211,10 +268,7 @@
                     {%- set rp  = product.retail_price or product.price1 or 0 -%}
                     {%- set disc = ((mrp - rp) / mrp * 100)|round(0)|int if mrp and mrp > rp else 0 -%}
                     {% if mrp and mrp > rp %}
-                    <span class="prod-mrp">
-                        <span style="font-size:0.6rem;font-weight:600;">MRP</span>
-                        ₹{{ mrp|round(0)|int }}
-                    </span>
+                    <span class="prod-mrp"><span style="font-size:0.6rem;font-weight:600;letter-spacing:0.03em;">MRP</span> ₹{{ mrp|round(0)|int }}</span>
                     {% endif %}
                     <span class="prod-price">₹{{ rp|round(0)|int }}</span>
                     {% if disc > 0 %}
@@ -270,7 +324,7 @@
                         ⚡ Buy Now
                     </button>
                     {% else %}
-                    <button disabled style="width:100%;padding:10px;border-radius:10px;background:#e5e7eb;color:#9f9f9f;font-weight:700;border:none;cursor:not-allowed;font-size:0.85rem;">Out of Stock</button>
+                    <button disabled style="width:100%;padding:10px;border-radius:10px;background:#e5e7eb;color:#9f9f9f;font-weight:700;border:none;cursor:not-allowed;font-size:0.8rem;">Out of Stock</button>
                     {% endif %}
                 </div>
             </div>
