@@ -213,6 +213,7 @@
 
       <!-- Cart actions -->
       <div class="cart-container space-y-2 mt-3" id="cart-action-{{ product.sku }}">
+        {% if product.stock_total and product.stock_total > 0 %}
         <!-- Add to Cart -->
         <button class="add-to-cart-btn pd-btn-add"
                 data-sku="{{ product.sku }}" data-price="{{ product.retail_price }}" data-name="{{ product.name }}"
@@ -231,6 +232,10 @@
                 onclick="retailBuyNow(this)">
           ⚡ Buy Now
         </button>
+        {% else %}
+        <button disabled style="width:100%;padding:14px;border-radius:12px;background:#e5e7eb;color:#9f9f9f;font-weight:700;border:none;cursor:not-allowed;font-size:0.95rem;">Out of Stock</button>
+        <p style="font-size:0.78rem;color:#dc2626;margin-top:6px;text-align:center;">This item is currently out of stock.</p>
+        {% endif %}
       </div>
     </div>
   </div>

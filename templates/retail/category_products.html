@@ -71,6 +71,7 @@
                         <option value="5">5</option>
                     </select>
                 </div>
+                {% if product.stock_total and product.stock_total > 0 %}
                 <!-- Add to Cart Button (shown by default) -->
                 <button class="add-to-cart-btn w-full py-2 font-bold rounded-full transition-all duration-200 text-sm"
                     data-sku="{{product.sku}}" data-price="{{product.price1}}" data-name="{{product.name}}"
@@ -93,6 +94,9 @@
                     onclick="retailBuyNow(this)">
                     ⚡ Buy Now
                 </button>
+                {% else %}
+                <button disabled style="width:100%;padding:8px;border-radius:999px;background:#e5e7eb;color:#9f9f9f;font-weight:700;border:none;cursor:not-allowed;font-size:0.85rem;">Out of Stock</button>
+                {% endif %}
             </div>
         </div>
     </div>

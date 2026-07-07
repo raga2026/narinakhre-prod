@@ -245,6 +245,7 @@
                         <option value="4">4</option>
                         <option value="5">5</option>
                     </select>
+                    {% if product.stock_total and product.stock_total > 0 %}
                     <!-- Add to Cart -->
                     <button class="btn-add-cart add-to-cart-btn"
                             data-sku="{{ product.sku }}"
@@ -265,6 +266,9 @@
                             data-name="{{ product.name }}">
                         ⚡ Buy Now
                     </button>
+                    {% else %}
+                    <button disabled style="width:100%;padding:10px;border-radius:10px;background:#e5e7eb;color:#9f9f9f;font-weight:700;border:none;cursor:not-allowed;font-size:0.85rem;">Out of Stock</button>
+                    {% endif %}
                 </div>
             </div>
             {% endfor %}
