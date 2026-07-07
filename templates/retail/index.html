@@ -269,7 +269,7 @@
                          alt="{{ product.name }}"
                          data-images='{{ product.images|tojson }}'
                          data-index="0"
-                         onerror="this.onerror=null;this.src='/static/assets/products/default.jpg';" />
+                         onerror="this.onerror=null;" />
                 </a>
 
                 <!-- Name -->
@@ -414,15 +414,38 @@ document.addEventListener('DOMContentLoaded', function () {
 
     /* ── Product image carousel ── */
     document.querySelectorAll('.carousel-img[data-images]').forEach(function (img) {
-        var imgs = [];
-        try { imgs = JSON.parse(img.getAttribute('data-images') || '[]'); } catch(e) {}
-        if (imgs.length > 1) {
-            var idx = 0;
+        var allUrls = [];
+        try { allUrls = JSON.parse(img.getAttribute('data-images') || '[]'); } catch(e) {}
+        if (allUrls.length <= 1) return;
+
+        // Pre-validate which images actually load before starting carousel
+        var validUrls = [];
+        var checked = 0;
+        var defaultSrc = img.src; // first image already loaded
+
+        function startCarousel() {
+            if (validUrls.length <= 1) return; // only 1 real image, no carousel needed
+            var ci = 0;
             setInterval(function () {
-                idx = (idx + 1) % imgs.length;
-                img.src = imgs[idx];
+                ci = (ci + 1) % validUrls.length;
+                img.src = validUrls[ci];
             }, 3000);
         }
+
+        // Check each URL by attempting to load it in a hidden Image object
+        allUrls.forEach(function(url) {
+            var probe = new Image();
+            probe.onload = function() {
+                validUrls.push(url);
+                checked++;
+                if (checked === allUrls.length) startCarousel();
+            };
+            probe.onerror = function() {
+                checked++;
+                if (checked === allUrls.length) startCarousel();
+            };
+            probe.src = url;
+        });
     });
 
     /* ── Cart logic ── */
