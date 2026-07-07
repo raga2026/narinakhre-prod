@@ -199,7 +199,7 @@
                          alt="{{ product.name }}"
                          data-images='{{ product.images|tojson }}'
                          data-index="0"
-                         onerror="this.onerror=null;this.src='/static/assets/products/default.jpg';" />
+                         loading="lazy" onerror="this.onerror=null;this.style.display='none';" />
                 </a>
 
                 <!-- Name -->
