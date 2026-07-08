@@ -529,18 +529,42 @@ def send_contact_email(to_email, subject, body, html_body=None, from_email=None)
 def retail_contact():
     g.site_type = 'retail'
     if request.method == 'POST':
-        name = request.form.get('name')
-        whatsapp = request.form.get('whatsapp')
-        email = request.form.get('email')
-        message = request.form.get('message')
-        # Email to customer
-        customer_subject = 'Thank you for contacting Nari Nakhre'
-        customer_body = f"""Dear {name},\n\nThank you for reaching out to Nari Nakhre! We have received your message and will get back to you soon.\n\nYour Message:\n{message}\n\nBest regards,\nNari Nakhre Team"""
-        send_contact_email(email, customer_subject, customer_body)
-        # Email to admin
-        admin_subject = f'New Retail Contact Form Submission from {name}'
-        admin_body = f"""New contact form submission:\n\nName: {name}\nWhatsApp: {whatsapp}\nEmail: {email}\nMessage: {message}"""
-        send_contact_email('info@narinakhre.com', admin_subject, admin_body)
+        # Honeypot: bots fill hidden fields, humans don't
+        if (request.form.get('system_verification_token') or '').strip():
+            app.logger.warning(f'Bot caught on retail contact: {request.form.get("email")}')
+            return redirect('/retail/thank_you')  # silent discard
+
+        name    = (request.form.get('name') or '').strip()
+        whatsapp= (request.form.get('whatsapp') or '').strip()
+        email   = (request.form.get('email') or '').strip()
+        message = (request.form.get('message') or '').strip()
+
+        # Basic validation — reject obviously empty/spam submissions
+        if not name or not email or not message or len(message) < 5:
+            return redirect('/retail/thank_you')
+
+        # Only send to admin — don't auto-reply to unknown/spam emails
+        # This prevents Zeptomail from being blocked for sending to bad addresses
+        admin_body = (
+            f"New retail contact form submission:\n\n"
+            f"Name: {name}\nWhatsApp: {whatsapp}\nEmail: {email}\n"
+            f"Message: {message}"
+        )
+        send_contact_email(
+            os.environ.get('ADMIN_EMAIL', 'mohinicosmetics.india@gmail.com'),
+            f'New Contact: {name} | Nari Nakhre',
+            admin_body
+        )
+        # Only send customer reply if email looks legitimate
+        if email and '@' in email and '.' in email.split('@')[-1]:
+            customer_body = (
+                f"Dear {name},\n\n"
+                f"Thank you for reaching out to Nari Nakhre! "
+                f"We have received your message and will get back to you soon.\n\n"
+                f"Best regards,\nNari Nakhre Team\ninfo@narinakhre.com"
+            )
+            send_contact_email(email, 'Thank you for contacting Nari Nakhre', customer_body)
+
         return redirect('/retail/thank_you')
     return render_template('retail/contact.html')
 
