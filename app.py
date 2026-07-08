@@ -1031,8 +1031,8 @@ def checkout_process():
     actual_shipping_cost = 0.0
     try:
         provider = get_shipping_provider(
-            app.config['SHIPPING_PROVIDER'],
-            api_token=app.config.get('DELHIVERY_API_KEY')
+            app.config.get('SHIPPING_PROVIDER', 'delhivery'),
+            api_token=app.config.get('DELHIVERY_API_KEY') or app.config.get('DELHIVERY_API_TOKEN', '')
         )
         cart_weight = max(sum(int(item.get('units', 1)) for item in display_cart) * 250, 250)
         rates = provider.get_rates(app.config.get('WAREHOUSE_PIN', '482001'), consignee_pincode, cart_weight, mode=payment_mode)
@@ -1093,15 +1093,26 @@ def checkout_process():
 
     session['checkout_handover'] = {
         'internal_order_id': internal_order_id,
-        'waybill': waybill,
+        'waybill': None,
     }
     session.modified = True
 
-    # Return 200 OK for the fetch() call from checkout.html AJAX
+    # Verify the order was actually saved before returning success
+    verify = conn.execute(
+        'SELECT id FROM order_shipping WHERE internal_order_id=?',
+        (internal_order_id,)
+    ).fetchone()
+    if not verify:
+        app.logger.error(f'checkout_process: ORDER INSERT FAILED for {internal_order_id}')
+        return jsonify({
+            'status': 'error',
+            'message': 'Order could not be saved. Please try again.'
+        }), 500
+
+    app.logger.info(f'checkout_process: Order {internal_order_id} saved OK')
     return jsonify({
-        'status': 'ok',
+        'status': 'success',
         'internal_order_id': internal_order_id,
-        'waybill': waybill
     }), 200
 
 @app.route('/payment/gateway', methods=['GET'])
@@ -1240,10 +1251,36 @@ def confirm_cod_order():
     """Confirm a COD order immediately after address submission."""
     g.site_type = 'retail'
     checkout_handover = session.get('checkout_handover', {})
-    internal_order_id = checkout_handover.get('internal_order_id', '').strip()
+    internal_order_id = (checkout_handover.get('internal_order_id') or '').strip()
+    app.logger.info(f'confirm_cod: handover={checkout_handover}, order_id={internal_order_id}')
+
     if not internal_order_id:
-        return jsonify({'status': 'error', 'message': 'No active order found'}), 400
+        app.logger.error('confirm_cod: No internal_order_id in session')
+        return jsonify({'status': 'error', 'message': 'Session expired. Please go back and try again.'}), 400
+
     conn = get_db()
+
+    # First check if order exists at all (any status)
+    any_row = conn.execute(
+        'SELECT id, status FROM order_shipping WHERE internal_order_id=?',
+        (internal_order_id,)
+    ).fetchone()
+    app.logger.info(f'confirm_cod: DB lookup result={dict(any_row) if any_row else None}')
+
+    if not any_row:
+        app.logger.error(f'confirm_cod: Order {internal_order_id} not found in DB at all')
+        return jsonify({
+            'status': 'error',
+            'message': 'Order not saved — please go back and place your order again.'
+        }), 400
+
+    if any_row['status'] != 'pending':
+        app.logger.warning(f'confirm_cod: Order {internal_order_id} has status={any_row["status"]}')
+        if any_row['status'] in ('cod_confirmed', 'paid'):
+            # Already confirmed — just redirect to thank you
+            return jsonify({'status': 'success', 'waybill': None, 'internal_order_id': internal_order_id}), 200
+        return jsonify({'status': 'error', 'message': f'Order already processed (status: {any_row["status"]})'}), 400
+
     order_row = conn.execute(
         'SELECT * FROM order_shipping WHERE internal_order_id=? AND status=?',
         (internal_order_id, 'pending')
@@ -1398,8 +1435,8 @@ def delhivery_check_pincode(pincode):
         return jsonify({"status": False, "serviceable": False, "msg": "Invalid pincode format"}), 400
     try:
         provider = get_shipping_provider(
-            app.config['SHIPPING_PROVIDER'],
-            api_token=app.config.get('DELHIVERY_API_KEY')
+            app.config.get('SHIPPING_PROVIDER', 'delhivery'),
+            api_token=app.config.get('DELHIVERY_API_KEY') or app.config.get('DELHIVERY_API_TOKEN', '')
         )
         result = provider.verify_pincode(pincode)
         # Surface the real reason in logs for debugging (visible in Render logs)
@@ -1425,8 +1462,8 @@ def calculate_checkout_shipping():
         cart = session.get('cart', {})
         total_weight = max(sum(item.get('qty', 1) for item in cart.values()) * 250, 250)
         provider = get_shipping_provider(
-            app.config['SHIPPING_PROVIDER'],
-            api_token=app.config.get('DELHIVERY_API_KEY')
+            app.config.get('SHIPPING_PROVIDER', 'delhivery'),
+            api_token=app.config.get('DELHIVERY_API_KEY') or app.config.get('DELHIVERY_API_TOKEN', '')
         )
         rates = provider.get_rates(app.config.get('WAREHOUSE_PIN', ''), pincode, total_weight, mode=payment_mode)
         shipping_charge = rates.get('rate', 0) or rates.get('shipping_charge', 0)
