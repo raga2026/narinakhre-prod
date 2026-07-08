@@ -583,6 +583,11 @@ def wholesale_contact():
         email = (request.form.get('email') or '').strip()
         message = (request.form.get('message') or '').strip()
 
+        # Reject obviously empty/spam submissions
+        if not name or not message or len(message) < 5:
+            app.logger.warning(f'Wholesale contact spam rejected: name={name}, email={email}')
+            return redirect(url_for('wholesale_thank_you'))
+
         request_id = f"NN-QT-{datetime.now().strftime('%Y%m%d%H%M%S')}-{(whatsapp[-4:] if whatsapp else '0000')}"
         quote_payload = json.dumps({
             'source': 'wholesale_contact',
@@ -596,11 +601,12 @@ def wholesale_contact():
         )
         db_conn.commit()
 
-        if email:
+        # Only auto-reply if email looks legitimate (not spam/bot)
+        if email and '@' in email and '.' in email.split('@')[-1] and len(email) < 80:
             customer_subject = 'Thank you for your quote request - Nari Nakhre Wholesale'
             customer_body = (
                 f"Dear {name},\n\n"
-                'Your wholesale quote request has been received successfully. '\
+                'Your wholesale quote request has been received successfully. '
                 'Our team will review and get in touch shortly.\n\n'
                 f"Request ID: {request_id}\n\n"
                 'Regards,\nNari Nakhre Wholesale Team'
