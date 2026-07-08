@@ -316,6 +316,7 @@ def initialize_database_if_needed():
             hsn_code TEXT,
             gst_percent FLOAT DEFAULT 0.0,
             stock_total INTEGER DEFAULT 0,
+            stock_alert_threshold INTEGER DEFAULT 5,
             box_packing_type TEXT,
             vendor_id TEXT,
             status TEXT,
@@ -939,21 +940,30 @@ def checkout():
     
     cart = session.get('cart', {})
     display_cart = []
+    out_of_stock_items = []
     db = get_db()
     for item in cart.values():
         item_dict = dict(item)
         if 'units' not in item_dict:
             item_dict['units'] = item_dict.get('qty', 1)
-        # Look up product image for display using the same helper as product_detail
-        if not item_dict.get('image_url'):
-            p = db.execute('SELECT sku, image_field FROM products WHERE sku = ?', (item_dict.get('sku'),)).fetchone()
-            if p:
+        # Check live stock from DB
+        sku = item_dict.get('sku', '')
+        live = db.execute('SELECT stock_total, name, image_field FROM products WHERE sku=?', (sku,)).fetchone()
+        if live:
+            item_dict['stock_total'] = live['stock_total'] or 0
+            item_dict['is_out_of_stock'] = (live['stock_total'] or 0) == 0
+            if item_dict['is_out_of_stock']:
+                out_of_stock_items.append(item_dict.get('name') or live['name'] or sku)
+            # Get image
+            if not item_dict.get('image_url'):
                 try:
-                    imgs = get_product_images(dict(p))
-                    if imgs and len(imgs) > 0 and imgs[0].startswith('http'):
+                    imgs = get_product_images(dict(live))
+                    if imgs and imgs[0].startswith('http'):
                         item_dict['image_url'] = imgs[0]
                 except Exception:
                     pass
+        else:
+            item_dict['is_out_of_stock'] = False
         display_cart.append(item_dict)
     
     subtotal = sum(item['price'] * item['units'] for item in display_cart)
@@ -963,7 +973,8 @@ def checkout():
     grand_total = max(subtotal - discount, 0)
 
     return render_site('checkout.html', display_cart=display_cart, subtotal=subtotal, total_tax=0.0,
-                        discount=discount, grand_total=grand_total, coupon_code=coupon_code)
+                        discount=discount, grand_total=grand_total, coupon_code=coupon_code,
+                        out_of_stock_items=out_of_stock_items)
 
 @app.route('/checkout/shipping', methods=['GET', 'POST'])
 @app.route('/retail/checkout/shipping', methods=['GET', 'POST'])
@@ -1692,6 +1703,26 @@ def search_page():
 
     return render_site('search_results.html', products=products, query=q)
 
+@app.route('/clear_oos_items', methods=['POST'])
+def clear_oos_items():
+    """Remove out-of-stock items from cart, then redirect to checkout."""
+    g.site_type = 'retail'
+    cart = session.get('cart', {})
+    db = get_db()
+    to_remove = []
+    for key, item in cart.items():
+        sku = item.get('sku', '')
+        if sku:
+            row = db.execute('SELECT stock_total FROM products WHERE sku=?', (sku,)).fetchone()
+            if row and (row['stock_total'] or 0) == 0:
+                to_remove.append(key)
+    for key in to_remove:
+        del cart[key]
+    session['cart'] = cart
+    session.modified = True
+    return redirect(url_for('checkout'))
+
+
 @app.route('/apply_coupon', methods=['POST'])
 def apply_coupon():
     data = request.get_json(silent=True) or {}
@@ -1925,17 +1956,36 @@ def admin_edit_product_details():
         name = request.form.get('name', '').strip()
         retail_price = request.form.get('retail_price', 0)
         mrp_price = request.form.get('mrp_price', 0)
-        stock_total = request.form.get('stock_total', 0)
+        stock_total = int(request.form.get('stock_total', 0) or 0)
+        stock_alert_threshold = int(request.form.get('stock_alert_threshold', 5) or 5)
         category = request.form.get('category', '').strip()
         material = request.form.get('material', '').strip()
         slug = request.form.get('slug', '').strip()
         db.execute(
             '''UPDATE products SET name=?, retail_price=?, mrp_price=?,
-               stock_total=?, category=?, material=?, slug=? WHERE sku=?''',
-            (name, retail_price, mrp_price, stock_total, category, material, slug, sku)
+               stock_total=?, stock_alert_threshold=?, category=?, material=?, slug=? WHERE sku=?''',
+            (name, retail_price, mrp_price, stock_total, stock_alert_threshold,
+             category, material, slug, sku)
         )
         db.commit()
-        flash(f'Product {sku} updated successfully.')
+        # Send stock alert email if stock is at or below threshold
+        if stock_total <= stock_alert_threshold:
+            try:
+                admin_email = os.environ.get('ADMIN_EMAIL', 'mohinicosmetics.india@gmail.com')
+                send_contact_email(
+                    admin_email,
+                    f'⚠️ Low Stock Alert: {name} ({sku})',
+                    f'Product: {name}\nSKU: {sku}\n'
+                    f'Current Stock: {stock_total}\n'
+                    f'Alert Threshold: {stock_alert_threshold}\n\n'
+                    f'Please reorder this product soon.',
+                )
+                flash(f'Product {sku} updated. ⚠️ Stock alert sent — only {stock_total} units left!')
+            except Exception as e:
+                app.logger.warning(f'Stock alert email failed: {e}')
+                flash(f'Product {sku} updated. ⚠️ Stock low ({stock_total} units).')
+        else:
+            flash(f'Product {sku} updated successfully.')
         return redirect(url_for('admin_edit_product_details'))
     products = db.execute('SELECT * FROM products ORDER BY sku').fetchall()
     return render_template('admin/admin_edit_product_details.html', products=products)
@@ -2385,6 +2435,28 @@ def admin_upload_excel():
 
         conn.commit()
         price_cols_found = [c for c in ['retail_price','mrp_price','stock_total'] if c in df.columns]
+        # Send stock alerts for any products that hit the threshold during this upload
+        if 'stock_total' in df.columns:
+            try:
+                low_stock = db.execute(
+                    "SELECT sku, name, stock_total, stock_alert_threshold FROM products "
+                    "WHERE stock_total <= stock_alert_threshold AND stock_total >= 0"
+                ).fetchall()
+                if low_stock:
+                    items_str = '\n'.join(
+                        f"  - {r['name']} (SKU: {r['sku']}): {r['stock_total']} units "
+                        f"(alert at {r['stock_alert_threshold']})"
+                        for r in low_stock
+                    )
+                    admin_email = os.environ.get('ADMIN_EMAIL', 'mohinicosmetics.india@gmail.com')
+                    send_contact_email(
+                        admin_email,
+                        f'⚠️ Low Stock Alert — {len(low_stock)} product(s) need reordering',
+                        f'The following products are at or below their stock alert threshold:\n\n'
+                        f'{items_str}\n\nPlease reorder soon.',
+                    )
+            except Exception as e:
+                app.logger.warning(f'Bulk stock alert email failed: {e}')
         flash(
             f'Sync complete: {processed_rows} rows processed '
             f'({created_rows} created, {updated_rows} updated). '

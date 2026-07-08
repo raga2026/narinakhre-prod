@@ -29,7 +29,7 @@
                 <th>Name</th>
                 <th>Retail Price</th>
                 <th>MRP</th>
-                <th>Stock</th>
+                <th>Stock</th><th>Alert Below</th>
                 <th>Slug</th>
                 <th>Category</th>
                 <th>Material</th>
@@ -52,7 +52,7 @@
                     
                     <td><input type="number" step="0.01" name="retail_price" value="{{ product.retail_price or 0 }}" class="bulk-input price-retail"></td>
                     <td><input type="number" step="0.01" name="mrp_price" value="{{ product.mrp_price or 0 }}" class="bulk-input price-retail"></td>
-                    <td><input type="number" name="stock_total" value="{{ product.stock_total or 0 }}" class="bulk-input"></td>
+                    <td><input type="number" name="stock_total" value="{{ product.stock_total or 0 }}" class="bulk-input"><input type="number" name="stock_alert_threshold" value="{{ product.stock_alert_threshold or 5 }}" class="bulk-input" title="Send alert email when stock drops to this level" placeholder="Alert at"></td>
                     <td><input type="text" name="slug" value="{{ product.slug }}" class="bulk-input" readonly style="background:#334155; color:#94a3b8;"></td>
                     
                     <td><input type="text" name="category" value="{{ product.category }}" class="bulk-input"></td>
