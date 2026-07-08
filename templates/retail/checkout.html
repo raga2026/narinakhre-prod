@@ -229,7 +229,7 @@
                     Remove out-of-stock items &amp; continue
                 </button>
             </form>
-            <a href="/retail"
+            <a href="/retail/"
                 style="display:inline-flex;align-items:center;padding:8px 14px;border-radius:10px;font-size:0.8rem;font-weight:700;background:white;border:1.5px solid #dc2626;color:#dc2626;text-decoration:none;">
                 ← Back to shop
             </a>
@@ -332,20 +332,25 @@
             </div>
           </div>
 
-          <!-- Payment method -->
-          <div class="ck-form-group" style="margin-top:4px;">
+          <!-- Payment method — large tap-friendly toggle buttons -->
+          <div class="ck-form-group" style="margin-top:10px;">
             <label class="ck-form-label">Payment Method</label>
-            <div class="ck-payment-options">
-              <label class="ck-payment-option selected" id="opt-prepaid" onclick="selectPayment('Prepaid')">
-                <input type="radio" name="payment_mode" value="Prepaid" checked>
-                <span class="ck-payment-option-icon">💳</span>
-                <span class="ck-payment-option-label">Prepaid</span>
-              </label>
-              <label class="ck-payment-option" id="opt-cod" onclick="selectPayment('COD')">
-                <input type="radio" name="payment_mode" value="COD">
-                <span class="ck-payment-option-icon">💵</span>
-                <span class="ck-payment-option-label">Cash on Delivery</span>
-              </label>
+            <input type="hidden" name="payment_mode" id="payment_mode_input" value="Prepaid">
+            <div style="display:flex;gap:10px;margin-top:6px;">
+              <button type="button" id="btn-prepaid" onclick="setPayment('Prepaid')"
+                style="flex:1;padding:16px 8px;border-radius:16px;border:2.5px solid #be185d;
+                       background:#be185d;color:white;font-size:0.88rem;font-weight:800;
+                       cursor:pointer;line-height:1.4;text-align:center;">
+                💳<br>Prepaid<br>
+                <span style="font-size:0.68rem;font-weight:500;opacity:0.9;">Pay online now</span>
+              </button>
+              <button type="button" id="btn-cod" onclick="setPayment('COD')"
+                style="flex:1;padding:16px 8px;border-radius:16px;border:2.5px solid #d1d5db;
+                       background:white;color:#374151;font-size:0.88rem;font-weight:800;
+                       cursor:pointer;line-height:1.4;text-align:center;">
+                💵<br>Cash on Delivery<br>
+                <span style="font-size:0.68rem;font-weight:500;color:#6b7280;">Pay when delivered</span>
+              </button>
             </div>
           </div>
 
@@ -421,12 +426,29 @@ const gstBase = {{ total_tax|round(2) }};
 const discountBase = {{ discount|default(0)|round(2) }};
 
 /* ── Payment method toggle ── */
-function selectPayment(mode) {
-    document.querySelectorAll('.ck-payment-option').forEach(el => el.classList.remove('selected'));
-    document.getElementById('opt-' + mode.toLowerCase()).classList.add('selected');
-    document.querySelector(`input[value="${mode}"]`).checked = true;
+function setPayment(mode) {
+    document.getElementById('payment_mode_input').value = mode;
+    var prepaid = document.getElementById('btn-prepaid');
+    var cod = document.getElementById('btn-cod');
+    if (mode === 'Prepaid') {
+        prepaid.style.background = '#be185d';
+        prepaid.style.color = 'white';
+        prepaid.style.borderColor = '#be185d';
+        cod.style.background = 'white';
+        cod.style.color = '#6b7280';
+        cod.style.borderColor = '#d1d5db';
+    } else {
+        cod.style.background = '#be185d';
+        cod.style.color = 'white';
+        cod.style.borderColor = '#be185d';
+        prepaid.style.background = 'white';
+        prepaid.style.color = '#6b7280';
+        prepaid.style.borderColor = '#d1d5db';
+    }
     ckPayMode();
 }
+// Keep backward compat
+function selectPayment(mode) { setPayment(mode); }
 
 /* ── Cart controls ── */
 function ckDec(btn) {
@@ -580,7 +602,7 @@ document.getElementById('ck-form').addEventListener('submit', async function(e){
     const email = form.email.value.trim();
     const addr  = form.address.value.trim();
     const pin   = form.pincode.value.trim();
-    const mode  = form.payment_mode.value;
+    const mode  = document.getElementById('payment_mode_input').value || 'Prepaid';
     const city  = document.getElementById('ck-city').value;
 
     if (!/^\d{6}$/.test(pin)) {

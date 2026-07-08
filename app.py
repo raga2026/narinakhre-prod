@@ -1705,22 +1705,26 @@ def search_page():
 
 @app.route('/clear_oos_items', methods=['POST'])
 def clear_oos_items():
-    """Remove out-of-stock items from cart, then redirect to checkout."""
+    """Remove out-of-stock items from cart, then redirect back to retail checkout."""
     g.site_type = 'retail'
     cart = session.get('cart', {})
     db = get_db()
     to_remove = []
-    for key, item in cart.items():
+    for key, item in list(cart.items()):
         sku = item.get('sku', '')
-        if sku:
-            row = db.execute('SELECT stock_total FROM products WHERE sku=?', (sku,)).fetchone()
-            if row and (row['stock_total'] or 0) == 0:
-                to_remove.append(key)
+        if not sku:
+            continue
+        row = db.execute(
+            'SELECT stock_total FROM products WHERE sku=?', (sku,)
+        ).fetchone()
+        if row and (row['stock_total'] or 0) == 0:
+            to_remove.append(key)
     for key in to_remove:
-        del cart[key]
+        cart.pop(key, None)
     session['cart'] = cart
     session.modified = True
-    return redirect(url_for('checkout'))
+    # Always redirect to retail checkout explicitly
+    return redirect('/retail/checkout')
 
 
 @app.route('/apply_coupon', methods=['POST'])
