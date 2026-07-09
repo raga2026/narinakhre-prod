@@ -423,12 +423,16 @@ const RECAPTCHA_SITE_KEY = {{ (recaptcha_site_key or '')|tojson }};
 
 async function getRecaptchaToken(action) {
     if (!RECAPTCHA_SITE_KEY || typeof grecaptcha === 'undefined') return '';
+    const withTimeout = (promise, ms) => Promise.race([
+        promise,
+        new Promise((resolve) => setTimeout(() => resolve(''), ms)),
+    ]);
     try {
-        return await new Promise((resolve) => {
+        return await withTimeout(new Promise((resolve) => {
             grecaptcha.ready(() => {
                 grecaptcha.execute(RECAPTCHA_SITE_KEY, {action: action}).then(resolve).catch(() => resolve(''));
             });
-        });
+        }), 5000);
     } catch (e) {
         return '';
     }
