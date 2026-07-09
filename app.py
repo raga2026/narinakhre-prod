@@ -1134,7 +1134,7 @@ def checkout():
 
     return render_site('checkout.html', display_cart=display_cart, subtotal=subtotal, total_tax=0.0,
                         discount=discount, grand_total=grand_total, coupon_code=coupon_code,
-                        out_of_stock_items=out_of_stock_items)
+                        out_of_stock_items=out_of_stock_items, recaptcha_site_key=RECAPTCHA_SITE_KEY)
 
 @app.route('/checkout/shipping', methods=['GET', 'POST'])
 @app.route('/retail/checkout/shipping', methods=['GET', 'POST'])
@@ -1417,6 +1417,14 @@ def confirm_cod_order():
     if not internal_order_id:
         app.logger.error('confirm_cod: No internal_order_id in session')
         return jsonify({'status': 'error', 'message': 'Session expired. Please go back and try again.'}), 400
+
+    # reCAPTCHA v3 — COD orders skip Razorpay's natural fraud check (no real payment
+    # happens), so this is the one anti-bot/anti-fraud gate before a shipment gets
+    # created and Delhivery pickup gets scheduled for a fake order.
+    req_body = request.get_json(silent=True) or {}
+    if not verify_recaptcha(req_body.get('recaptcha_token'), remote_ip=request.remote_addr, expected_action='confirm_cod'):
+        app.logger.warning(f'confirm_cod: reCAPTCHA rejected for order {internal_order_id}')
+        return jsonify({'status': 'error', 'message': 'Verification failed. Please refresh the page and try again.'}), 400
 
     conn = get_db()
 

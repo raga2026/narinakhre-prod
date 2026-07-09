@@ -415,6 +415,25 @@
 </div><!-- end .ck-page -->
 
 <script src="https://checkout.razorpay.com/v1/checkout.js"></script>
+{% if recaptcha_site_key %}
+<script src="https://www.google.com/recaptcha/api.js?render={{ recaptcha_site_key }}"></script>
+{% endif %}
+<script>
+const RECAPTCHA_SITE_KEY = {{ (recaptcha_site_key or '')|tojson }};
+
+async function getRecaptchaToken(action) {
+    if (!RECAPTCHA_SITE_KEY || typeof grecaptcha === 'undefined') return '';
+    try {
+        return await new Promise((resolve) => {
+            grecaptcha.ready(() => {
+                grecaptcha.execute(RECAPTCHA_SITE_KEY, {action: action}).then(resolve).catch(() => resolve(''));
+            });
+        });
+    } catch (e) {
+        return '';
+    }
+}
+</script>
 <script>
 const RZP_KEY = {{ config.get('RAZORPAY_KEY_ID', '')|tojson }};
 let ckServiceable = false, ckShip = 0, ckCodFee = 0;
@@ -640,7 +659,8 @@ document.getElementById('ck-form').addEventListener('submit', async function(e){
         if (!r1.ok || d1.status === 'error') throw new Error(d1.message || 'Could not create order');
 
         if (mode === 'COD') {
-            const r2 = await fetch('/api/confirm-cod',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({})});
+            const codToken = await getRecaptchaToken('confirm_cod');
+            const r2 = await fetch('/api/confirm-cod',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({recaptcha_token: codToken})});
             const d2 = await r2.json();
             if (d2.status === 'success') { window.location.href = '/thank_you?ref=' + encodeURIComponent(d2.internal_order_id || ''); return; }
             throw new Error(d2.message || 'Could not confirm COD order');
