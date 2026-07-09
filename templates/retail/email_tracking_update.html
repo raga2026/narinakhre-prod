@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Your Nari Nakhre Order is On Its Way</title>
+    <style>
+        body { font-family: 'Segoe UI', Arial, sans-serif; background: #f8f9fa; margin: 0; }
+        .container { max-width: 600px; margin: 40px auto; background: #fff; border-radius: 16px; box-shadow: 0 2px 16px rgba(0,0,0,0.08); padding: 40px 32px; text-align: center; }
+        h1 { color: #be185d; margin-bottom: 8px; font-size: 1.5em; }
+        .order-id { color: #757575; font-size: 0.95em; margin-bottom: 24px; }
+        .track-btn { display: inline-block; background: #be185d; color: #fff !important; text-decoration: none;
+                     padding: 16px 32px; border-radius: 10px; font-weight: bold; font-size: 1.05em; margin: 20px 0; }
+        .awb-box { background: #fce4ec; border-radius: 10px; padding: 14px; margin: 16px 0; color: #be185d; font-weight: bold; font-size: 1.1em; }
+        .footer { margin-top: 32px; text-align: center; color: #757575; font-size: 0.9em; border-top: 1px solid #eeeeee; padding-top: 20px; }
+        .logo { height: 80px; margin-bottom: 20px; width: auto; }
+        .social { margin-top: 20px; }
+        .social img { height: 32px; vertical-align: middle; margin: 0 8px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <a href="https://narinakhre.com" target="_blank">
+            <img src="https://narinakhre.com/static/assets/logo.png" alt="Nari Nakhre Logo" class="logo">
+        </a>
+
+        <h1>Your order is on its way, {{ customer_name }}!</h1>
+        <div class="order-id">Order ID: <strong>{{ order_id }}</strong></div>
+
+        <div class="awb-box">AWB / Tracking ID: {{ waybill }}</div>
+
+        <a href="{{ tracking_url }}" class="track-btn">&#128230; Track Your Order</a>
+
+        {% if pickup_date %}
+        <p style="color:#757575;font-size:0.9em;">Expected pickup: {{ pickup_date }}</p>
+        {% endif %}
+
+        <div class="footer">
+            <div style="font-size:1.2em;font-weight:bold;margin-bottom:8px; color: #333;">Nari Nakhre</div>
+            <div>GSTIN: 23JFGPS7650J1ZV</div>
+            <div>136, Dharhai Rd, Kotwali, Jabalpur, Madhya Pradesh 482001</div>
+            <div style="margin-top: 8px;">WhatsApp: <a href="https://wa.me/919994144994" style="color:#be185d;">+91 99941 44994</a> | Email: <a href="mailto:info@narinakhre.com" style="color:#be185d;">info@narinakhre.com</a></div>
+            <div>Website: <a href="https://narinakhre.com" style="color:#be185d;text-decoration:none;">narinakhre.com</a></div>
+
+            <div class="social">
+                <a href="https://fb.com/narinakhre" target="_blank"><img src="https://img.icons8.com/color/48/facebook-new.png" alt="Facebook"></a>
+                <a href="https://instagram.com/narinakhre" target="_blank"><img src="https://img.icons8.com/color/48/instagram-new.png" alt="Instagram"></a>
+            </div>
+        </div>
+    </div>
+</body>
+</html>

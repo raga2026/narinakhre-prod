@@ -90,6 +90,9 @@ WAREHOUSE_STATE = os.environ.get('WAREHOUSE_STATE', 'Madhya Pradesh')
 WAREHOUSE_ADDRESS = os.environ.get('WAREHOUSE_ADDRESS', '')
 WAREHOUSE_PHONE = os.environ.get('WAREHOUSE_PHONE', '')
 ADMIN_EMAIL = os.environ.get('ADMIN_EMAIL', 'mohinicosmetics.india@gmail.com')
+# Order-related emails (confirmation, tracking updates) use a different From
+# address than contact-form replies, per SMTP_FROM_ORDERS in Render env vars.
+ORDERS_FROM_EMAIL = os.environ.get('SMTP_FROM_ORDERS', 'order-noreply@narinakhre.com')
 RAZORPAY_KEY_ID = os.environ.get('RAZORPAY_KEY_ID')
 RAZORPAY_KEY_SECRET = os.environ.get('RAZORPAY_KEY_SECRET')
 ADMIN_USERNAME = os.environ.get('ADMIN_USERNAME', '')
@@ -1486,18 +1489,42 @@ def confirm_cod_order():
         total = order_row_dict.get('total_amount', 0)
         tracking_url = f"{request.url_root.rstrip('/')}/track/{waybill}" if waybill else ''
         invoice_url = f"{request.url_root.rstrip('/')}/invoice/{internal_order_id}"
+        items_for_email = [{
+            'name': item.get('name', ''),
+            'size': item.get('size', ''),
+            'units': int(item.get('units', item.get('qty', 1))),
+            'price': float(item.get('price', 0)),
+            'row_total': float(item.get('price', 0)) * int(item.get('units', item.get('qty', 1))),
+        } for item in cart_items]
+
         if customer_email:
+            order_html = render_template('retail/email_order_confirmation.html',
+                customer_name=customer_name, order_id=internal_order_id,
+                items=items_for_email, payment_mode='COD', amount=total,
+                address_name=customer_name,
+                address_line=order_row_dict.get('consignee_address', ''),
+                address_city=order_row_dict.get('consignee_city', ''),
+                address_state=order_row_dict.get('consignee_state', ''),
+                address_pincode=order_row_dict.get('consignee_pincode', ''),
+                tracking_url=tracking_url or None, waybill=waybill or None,
+                invoice_url=invoice_url)
+            order_text = (
+                f"Hi {customer_name},\n\nYour COD order is confirmed!\n\nOrder ID: {internal_order_id}\n"
+                f"Amount to pay on delivery: ₹{total:.2f}\n"
+                + (f"Track: {tracking_url}\n" if tracking_url else "Tracking will be shared once your order is dispatched.\n")
+                + f"Invoice: {invoice_url}\n\nThank you for shopping with Nari Nakhre!"
+            )
             send_contact_email_async(customer_email,
                 f"Order Confirmed (COD) — {internal_order_id} | Nari Nakhre",
-                f"Hi {customer_name},\n\nYour COD order is confirmed!\n\nOrder ID: {internal_order_id}\nAmount to pay on delivery: ₹{total:.2f}\n"
-                + (f"Track: {tracking_url}\n" if tracking_url else "")
-                + f"Invoice: {invoice_url}\n\nThank you!\n- Nari Nakhre")
+                order_text, html_body=order_html, from_email=ORDERS_FROM_EMAIL)
+
         send_contact_email_async(ADMIN_EMAIL,
             f"🛍️ New COD Order — {internal_order_id}",
             f"COD Order\nCustomer: {customer_name}\nPhone: {order_row_dict.get('consignee_phone','')}\n"
             f"Address: {order_row_dict.get('consignee_address','')}, {order_row_dict.get('consignee_city','')}, {order_row_dict.get('consignee_pincode','')}\n"
             f"Amount: ₹{total:.2f}\n"
-            + (f"Waybill: {waybill}\n" if waybill else "Waybill pending\n"))
+            + (f"Waybill: {waybill}\n" if waybill else "Waybill pending\n"),
+            from_email=ORDERS_FROM_EMAIL)
     except Exception as e:
         app.logger.warning(f"COD email failed: {e}")
     total_for_session = float(order_row_dict.get('total_amount', 0) or 0)
@@ -2800,6 +2827,29 @@ def admin_order_accept(order_id):
         app.logger.warning(f"Pickup scheduling failed: {e}")
     conn.execute('UPDATE order_shipping SET status=? WHERE id=?', ('accepted', order_id))
     conn.commit()
+
+    try:
+        order_dict_for_email = dict(order)
+        customer_email = order_dict_for_email.get('consignee_email', '')
+        customer_name = order_dict_for_email.get('consignee_name', 'Customer')
+        internal_order_id = order_dict_for_email.get('internal_order_id', '')
+        if customer_email and waybill:
+            tracking_url = f"{request.url_root.rstrip('/')}/track/{waybill}"
+            tracking_html = render_template('retail/email_tracking_update.html',
+                customer_name=customer_name, order_id=internal_order_id,
+                waybill=waybill, tracking_url=tracking_url,
+                pickup_date=pickup_date if pickup_scheduled else None)
+            tracking_text = (
+                f"Hi {customer_name},\n\nYour order {internal_order_id} has been accepted and is on its way!\n\n"
+                f"AWB / Tracking ID: {waybill}\nTrack: {tracking_url}\n\n"
+                f"Thank you for shopping with Nari Nakhre!"
+            )
+            send_contact_email_async(customer_email,
+                f"Your Order is On Its Way — {internal_order_id} | Nari Nakhre",
+                tracking_text, html_body=tracking_html, from_email=ORDERS_FROM_EMAIL)
+    except Exception as e:
+        app.logger.warning(f"Order-accept tracking email failed: {e}")
+
     msg = f"Order accepted. Waybill: {waybill}."
     msg += " Pickup scheduled for tomorrow." if pickup_scheduled else " Note: Schedule pickup manually in Delhivery panel."
     flash(msg, 'success')

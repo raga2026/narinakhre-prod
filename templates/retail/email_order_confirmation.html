@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Nari Nakhre Order Confirmation</title>
+    <style>
+        body { font-family: 'Segoe UI', Arial, sans-serif; background: #f8f9fa; margin: 0; }
+        .container { max-width: 600px; margin: 40px auto; background: #fff; border-radius: 16px; box-shadow: 0 2px 16px rgba(0,0,0,0.08); padding: 40px 32px; }
+        h1 { color: #be185d; margin-bottom: 8px; font-size: 1.5em; }
+        .order-id { color: #757575; font-size: 0.95em; margin-bottom: 24px; }
+        table { width: 100%; border-collapse: collapse; margin-bottom: 16px; font-size: 14px; }
+        th, td { padding: 10px; border: 1px solid #eeeeee; text-align: left; }
+        th { background: #be185d; color: #fff; }
+        .totals-row td { font-weight: bold; background: #fce4ec; }
+        .track-btn { display: inline-block; background: #be185d; color: #fff !important; text-decoration: none;
+                     padding: 14px 28px; border-radius: 10px; font-weight: bold; margin: 16px 0; }
+        .address-box { background: #f8f9fa; border-radius: 10px; padding: 16px; margin: 16px 0; font-size: 14px; color: #333; }
+        .footer { margin-top: 32px; text-align: center; color: #757575; font-size: 0.9em; border-top: 1px solid #eeeeee; padding-top: 20px; }
+        .logo { height: 80px; margin-bottom: 20px; width: auto; }
+        .social { margin-top: 20px; }
+        .social img { height: 32px; vertical-align: middle; margin: 0 8px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div style="text-align: center;">
+            <a href="https://narinakhre.com" target="_blank">
+                <img src="https://narinakhre.com/static/assets/logo.png" alt="Nari Nakhre Logo" class="logo">
+            </a>
+        </div>
+
+        <h1>Thank you for your order, {{ customer_name }}!</h1>
+        <div class="order-id">Order ID: <strong>{{ order_id }}</strong></div>
+
+        {% if items and items|length > 0 %}
+        <table>
+            <thead>
+                <tr>
+                    <th>Item</th>
+                    <th>Size</th>
+                    <th>Qty</th>
+                    <th>Price</th>
+                    <th>Total</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for item in items %}
+                <tr>
+                    <td>{{ item.name }}</td>
+                    <td>{{ item.size or '-' }}</td>
+                    <td>{{ item.units }}</td>
+                    <td>&#8377;{{ '%.2f'|format(item.price|float) }}</td>
+                    <td>&#8377;{{ '%.2f'|format(item.row_total|float) }}</td>
+                </tr>
+                {% endfor %}
+                <tr class="totals-row">
+                    <td colspan="4" style="text-align:right;">{{ 'Amount to Pay on Delivery' if payment_mode == 'COD' else 'Amount Paid' }}</td>
+                    <td>&#8377;{{ '%.2f'|format(amount|float) }}</td>
+                </tr>
+            </tbody>
+        </table>
+        {% endif %}
+
+        <div class="address-box">
+            <strong>Shipping to:</strong><br>
+            {{ address_name }}<br>
+            {{ address_line }}<br>
+            {{ address_city }}, {{ address_state }} - {{ address_pincode }}
+        </div>
+
+        {% if tracking_url and waybill %}
+        <div style="text-align:center;">
+            <a href="{{ tracking_url }}" class="track-btn">&#128230; Track Your Order &mdash; AWB {{ waybill }}</a>
+        </div>
+        {% else %}
+        <p style="color:#757575; font-size:0.9em;">Tracking details will be shared once your order is dispatched.</p>
+        {% endif %}
+
+        {% if invoice_url %}
+        <p style="text-align:center;"><a href="{{ invoice_url }}" style="color:#be185d;font-weight:bold;text-decoration:none;">&#129534; Download GST Invoice</a></p>
+        {% endif %}
+
+        <div class="footer">
+            <div style="font-size:1.2em;font-weight:bold;margin-bottom:8px; color: #333;">Nari Nakhre</div>
+            <div>GSTIN: 23JFGPS7650J1ZV</div>
+            <div>136, Dharhai Rd, Kotwali, Jabalpur, Madhya Pradesh 482001</div>
+            <div style="margin-top: 8px;">WhatsApp: <a href="https://wa.me/919994144994" style="color:#be185d;">+91 99941 44994</a> | Email: <a href="mailto:info@narinakhre.com" style="color:#be185d;">info@narinakhre.com</a></div>
+            <div>Website: <a href="https://narinakhre.com" style="color:#be185d;text-decoration:none;">narinakhre.com</a></div>
+
+            <div class="social">
+                <a href="https://fb.com/narinakhre" target="_blank"><img src="https://img.icons8.com/color/48/facebook-new.png" alt="Facebook"></a>
+                <a href="https://instagram.com/narinakhre" target="_blank"><img src="https://img.icons8.com/color/48/instagram-new.png" alt="Instagram"></a>
+            </div>
+        </div>
+    </div>
+</body>
+</html>
