@@ -1518,12 +1518,38 @@ def confirm_cod_order():
                 f"Order Confirmed (COD) — {internal_order_id} | Nari Nakhre",
                 order_text, html_body=order_html, from_email=ORDERS_FROM_EMAIL)
 
+        item_lines = '\n'.join(
+            f"  - {it['name']}" + (f" ({it['size']})" if it['size'] else '')
+            + f" x{it['units']} @ ₹{it['price']:.2f} = ₹{it['row_total']:.2f}"
+            for it in items_for_email
+        ) or '  (no item details)'
+        subtotal = float(order_row_dict.get('subtotal_amount', 0) or 0)
+        discount = float(order_row_dict.get('discount_amount', 0) or 0)
+        gst = float(order_row_dict.get('gst_amount', 0) or 0)
+        shipping_cost = float(order_row_dict.get('actual_shipping_cost', 0) or 0)
+        coupon_code = order_row_dict.get('coupon_code') or ''
+        admin_orders_url = f"{request.url_root.rstrip('/')}/admin/orders"
+
+        admin_body = (
+            f"New COD order placed.\n\n"
+            f"Order ID: {internal_order_id}\n"
+            f"Customer: {customer_name}\n"
+            f"Phone: {order_row_dict.get('consignee_phone','')}\n"
+            f"Email: {customer_email or '-'}\n\n"
+            f"Items:\n{item_lines}\n\n"
+            f"Subtotal: ₹{subtotal:.2f}\n"
+            + (f"Coupon ({coupon_code}) discount: -₹{discount:.2f}\n" if discount else "")
+            + (f"GST (incl.): ₹{gst:.2f}\n" if gst else "")
+            + (f"Shipping: ₹{shipping_cost:.2f}\n" if shipping_cost else "Shipping: Free\n")
+            + f"Total to collect (COD): ₹{total:.2f}\n\n"
+            f"Shipping Address:\n{order_row_dict.get('consignee_address','')}, "
+            f"{order_row_dict.get('consignee_city','')}, {order_row_dict.get('consignee_state','')} - {order_row_dict.get('consignee_pincode','')}\n\n"
+            + (f"Waybill: {waybill}\n" if waybill else "Waybill: pending\n")
+            + f"Admin orders panel: {admin_orders_url}\n"
+        )
         send_contact_email_async(ADMIN_EMAIL,
             f"🛍️ New COD Order — {internal_order_id}",
-            f"COD Order\nCustomer: {customer_name}\nPhone: {order_row_dict.get('consignee_phone','')}\n"
-            f"Address: {order_row_dict.get('consignee_address','')}, {order_row_dict.get('consignee_city','')}, {order_row_dict.get('consignee_pincode','')}\n"
-            f"Amount: ₹{total:.2f}\n"
-            + (f"Waybill: {waybill}\n" if waybill else "Waybill pending\n"),
+            admin_body,
             from_email=ORDERS_FROM_EMAIL)
     except Exception as e:
         app.logger.warning(f"COD email failed: {e}")
@@ -1599,7 +1625,7 @@ def verify_payment():
 
         conn = get_db()
         row = conn.execute(
-            'SELECT id FROM order_shipping WHERE internal_order_id=?',
+            'SELECT * FROM order_shipping WHERE internal_order_id=?',
             (internal_order_id,)
         ).fetchone()
         if row is None:
@@ -1607,12 +1633,91 @@ def verify_payment():
                 'status': 'error',
                 'message': 'No active order found for this payment'
             }), 400
+        order_row_dict = dict(row)
 
         conn.execute(
             'UPDATE order_shipping SET status=? WHERE internal_order_id=?',
             ('paid', internal_order_id)
         )
         conn.commit()
+
+        # Order confirmation + admin notification emails (best-effort, never
+        # blocks payment verification). Mirrors the COD confirmation emails —
+        # prepaid orders previously sent none at all.
+        try:
+            customer_email = order_row_dict.get('consignee_email', '')
+            customer_name = order_row_dict.get('consignee_name', 'Customer')
+            total = float(order_row_dict.get('total_amount', 0) or 0)
+            invoice_url = f"{request.url_root.rstrip('/')}/invoice/{internal_order_id}"
+            cart_items = []
+            if order_row_dict.get('cart_items_json'):
+                try:
+                    cart_items = json.loads(order_row_dict['cart_items_json'])
+                except (ValueError, TypeError):
+                    cart_items = []
+            items_for_email = [{
+                'name': item.get('name', ''),
+                'size': item.get('size', ''),
+                'units': int(item.get('units', item.get('qty', 1))),
+                'price': float(item.get('price', 0)),
+                'row_total': float(item.get('price', 0)) * int(item.get('units', item.get('qty', 1))),
+            } for item in cart_items]
+
+            if customer_email:
+                order_html = render_template('retail/email_order_confirmation.html',
+                    customer_name=customer_name, order_id=internal_order_id,
+                    items=items_for_email, payment_mode='Prepaid', amount=total,
+                    address_name=customer_name,
+                    address_line=order_row_dict.get('consignee_address', ''),
+                    address_city=order_row_dict.get('consignee_city', ''),
+                    address_state=order_row_dict.get('consignee_state', ''),
+                    address_pincode=order_row_dict.get('consignee_pincode', ''),
+                    tracking_url=None, waybill=None,
+                    invoice_url=invoice_url)
+                order_text = (
+                    f"Hi {customer_name},\n\nYour payment for order {internal_order_id} was successful!\n\n"
+                    f"Amount paid: ₹{total:.2f}\n"
+                    f"Tracking details will be shared once your order is dispatched.\n"
+                    f"Invoice: {invoice_url}\n\nThank you for shopping with Nari Nakhre!"
+                )
+                send_contact_email_async(customer_email,
+                    f"Order Confirmed — {internal_order_id} | Nari Nakhre",
+                    order_text, html_body=order_html, from_email=ORDERS_FROM_EMAIL)
+
+            item_lines = '\n'.join(
+                f"  - {it['name']}" + (f" ({it['size']})" if it['size'] else '')
+                + f" x{it['units']} @ ₹{it['price']:.2f} = ₹{it['row_total']:.2f}"
+                for it in items_for_email
+            ) or '  (no item details)'
+            subtotal = float(order_row_dict.get('subtotal_amount', 0) or 0)
+            discount = float(order_row_dict.get('discount_amount', 0) or 0)
+            gst = float(order_row_dict.get('gst_amount', 0) or 0)
+            shipping_cost = float(order_row_dict.get('actual_shipping_cost', 0) or 0)
+            coupon_code = order_row_dict.get('coupon_code') or ''
+            admin_orders_url = f"{request.url_root.rstrip('/')}/admin/orders"
+            admin_body = (
+                f"New prepaid order — payment received via Razorpay.\n\n"
+                f"Order ID: {internal_order_id}\n"
+                f"Payment ID: {razorpay_payment_id}\n"
+                f"Customer: {customer_name}\n"
+                f"Phone: {order_row_dict.get('consignee_phone','')}\n"
+                f"Email: {customer_email or '-'}\n\n"
+                f"Items:\n{item_lines}\n\n"
+                f"Subtotal: ₹{subtotal:.2f}\n"
+                + (f"Coupon ({coupon_code}) discount: -₹{discount:.2f}\n" if discount else "")
+                + (f"GST (incl.): ₹{gst:.2f}\n" if gst else "")
+                + (f"Shipping: ₹{shipping_cost:.2f}\n" if shipping_cost else "Shipping: Free\n")
+                + f"Total paid: ₹{total:.2f}\n\n"
+                f"Shipping Address:\n{order_row_dict.get('consignee_address','')}, "
+                f"{order_row_dict.get('consignee_city','')}, {order_row_dict.get('consignee_state','')} - {order_row_dict.get('consignee_pincode','')}\n\n"
+                f"Admin orders panel: {admin_orders_url}\n"
+            )
+            send_contact_email_async(ADMIN_EMAIL,
+                f"💳 New Prepaid Order — {internal_order_id}",
+                admin_body,
+                from_email=ORDERS_FROM_EMAIL)
+        except Exception as e:
+            app.logger.warning(f"Prepaid order email failed: {e}")
 
         session.pop('razorpay_order_id', None)
         session.pop('payment_pending', None)
