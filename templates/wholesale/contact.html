@@ -75,11 +75,13 @@
     {% endif %}
 
     <div class="wc-card">
-        <form method="POST" action="{{ url_for('wholesale_contact') }}">
+        <form method="POST" action="{{ url_for('wholesale_contact') }}" id="wholesale-contact-form">
             <!-- Honeypot -->
             <div style="display:none !important;" aria-hidden="true">
                 <input type="text" name="system_verification_token" tabindex="-1" autocomplete="off">
             </div>
+            <input type="hidden" name="form_rendered_at" value="{{ form_rendered_at }}">
+            <input type="hidden" name="recaptcha_token" id="recaptcha_token">
 
             <div class="wc-group">
                 <label class="wc-label">Full Name *</label>
@@ -122,4 +124,28 @@
         </div>
     </div>
 </div>
+
+{% if recaptcha_site_key %}
+<script src="https://www.google.com/recaptcha/api.js?render={{ recaptcha_site_key }}"></script>
+<script>
+(function() {
+    var form = document.getElementById('wholesale-contact-form');
+    if (!form) return;
+    form.addEventListener('submit', function(e) {
+        if (form.dataset.recaptchaDone === 'true') return;
+        e.preventDefault();
+        grecaptcha.ready(function() {
+            grecaptcha.execute('{{ recaptcha_site_key }}', {action: 'wholesale_contact'}).then(function(token) {
+                document.getElementById('recaptcha_token').value = token;
+                form.dataset.recaptchaDone = 'true';
+                form.submit();
+            }).catch(function() {
+                form.dataset.recaptchaDone = 'true';
+                form.submit();
+            });
+        });
+    });
+})();
+</script>
+{% endif %}
 {% endblock %}

@@ -1,5 +1,7 @@
 
 import os
+import re
+import time
 import json
 import hmac
 import smtplib
@@ -13,6 +15,7 @@ from email.mime.text import MIMEText
 
 from flask import Flask, g, jsonify, redirect, render_template, request, session, url_for, flash
 from werkzeug.routing import BuildError
+from werkzeug.middleware.proxy_fix import ProxyFix
 from supabase import create_client, Client as SupabaseClient
 
 from utils.shipping_manager import get_shipping_provider
@@ -33,6 +36,10 @@ def load_env_file(env_path):
 
 
 app = Flask(__name__)
+# Render sits in front of the app behind a proxy; without this, request.remote_addr
+# shows an internal 10.x.x.x hop IP (see Render logs) instead of the real visitor IP,
+# which makes IP-based bot/rate-limit checks useless.
+app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
 
 @app.template_filter('fromjson')
 def fromjson_filter(value):
@@ -525,14 +532,122 @@ def send_contact_email(to_email, subject, body, html_body=None, from_email=None)
         app.logger.error(f'Email send failed to {to_email}: {type(e).__name__}: {e}')
         return False
 
+
+# --- CONTACT FORM ANTI-BOT HELPERS ---
+# A prior bot attack (on PythonAnywhere hosting) hammered the contact forms with
+# fake-but-regex-valid addresses; the resulting bounces/complaints got Zeptomail
+# to block the whole sending org ("Sender Org Blocked"). These three checks —
+# strict email format, a minimum human-fill-time trap, and per-IP throttling —
+# run in addition to the existing honeypot field.
+EMAIL_RE = re.compile(r'^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$')
+
+# In-memory only — resets on deploy/restart and is per-worker-process, not shared
+# across multiple gunicorn workers/dynos. Good enough to blunt simple bot floods;
+# not a substitute for a real WAF/CAPTCHA if attacks continue.
+_contact_last_submit = {}
+CONTACT_RATE_LIMIT_SECONDS = 30
+CONTACT_MIN_FILL_SECONDS = 3
+CONTACT_MAX_FORM_AGE_SECONDS = 3600
+
+
+def is_valid_email(email):
+    return bool(email) and bool(EMAIL_RE.match(email)) and len(email) < 100
+
+
+def contact_form_is_bot(form_rendered_at):
+    """True if the timestamp hidden field is missing/malformed, filled in too
+    fast to be a human, or is stale (replayed from a cached/old page)."""
+    try:
+        rendered_at = float(form_rendered_at)
+    except (TypeError, ValueError):
+        return True
+    elapsed = time.time() - rendered_at
+    return elapsed < CONTACT_MIN_FILL_SECONDS or elapsed > CONTACT_MAX_FORM_AGE_SECONDS
+
+
+def contact_ip_is_rate_limited(ip):
+    now = time.time()
+    last = _contact_last_submit.get(ip)
+    _contact_last_submit[ip] = now
+    # Opportunistically trim so this dict doesn't grow forever
+    if len(_contact_last_submit) > 5000:
+        cutoff = now - CONTACT_RATE_LIMIT_SECONDS
+        for k, v in list(_contact_last_submit.items()):
+            if v < cutoff:
+                del _contact_last_submit[k]
+    return last is not None and (now - last) < CONTACT_RATE_LIMIT_SECONDS
+
+
+# reCAPTCHA v3 config — set RECAPTCHA_SITE_KEY / RECAPTCHA_SECRET_KEY on Render.
+# If unset, the check is skipped entirely (so the form still works before you've
+# generated keys) and a one-time warning is logged.
+RECAPTCHA_SITE_KEY = os.environ.get('RECAPTCHA_SITE_KEY', '')
+RECAPTCHA_SECRET_KEY = os.environ.get('RECAPTCHA_SECRET_KEY', '')
+RECAPTCHA_MIN_SCORE = 0.5
+_recaptcha_unconfigured_warned = False
+
+
+def verify_recaptcha(token, remote_ip=None, expected_action=None):
+    """Returns True if the submission should be allowed through.
+    Fails OPEN (allows the submission) if reCAPTCHA isn't configured yet, or if
+    Google's API can't be reached — the timing/IP/honeypot checks still apply
+    either way, so this is a defense layer, not the only one."""
+    global _recaptcha_unconfigured_warned
+    if not RECAPTCHA_SECRET_KEY:
+        if not _recaptcha_unconfigured_warned:
+            app.logger.warning('RECAPTCHA_SECRET_KEY not set — skipping reCAPTCHA checks on contact forms')
+            _recaptcha_unconfigured_warned = True
+        return True
+
+    if not token:
+        app.logger.warning('reCAPTCHA rejected: no token submitted')
+        return False
+
+    try:
+        resp = requests.post(
+            'https://www.google.com/recaptcha/api/siteverify',
+            data={'secret': RECAPTCHA_SECRET_KEY, 'response': token, 'remoteip': remote_ip},
+            timeout=5,
+        )
+        result = resp.json()
+    except Exception as e:
+        app.logger.error(f'reCAPTCHA verify request failed, allowing through: {type(e).__name__}: {e}')
+        return True
+
+    if not result.get('success'):
+        app.logger.warning(f'reCAPTCHA rejected: {result.get("error-codes")}')
+        return False
+    if expected_action and result.get('action') != expected_action:
+        app.logger.warning(f'reCAPTCHA action mismatch: expected {expected_action}, got {result.get("action")}')
+        return False
+    score = result.get('score', 0)
+    if score < RECAPTCHA_MIN_SCORE:
+        app.logger.warning(f'reCAPTCHA score too low: {score}')
+        return False
+    return True
+
 @app.route('/retail/contact', methods=['GET', 'POST'])
 def retail_contact():
     g.site_type = 'retail'
     if request.method == 'POST':
         # Honeypot: bots fill hidden fields, humans don't
         if (request.form.get('system_verification_token') or '').strip():
-            app.logger.warning(f'Bot caught on retail contact: {request.form.get("email")}')
+            app.logger.warning(f'Bot caught on retail contact (honeypot): {request.form.get("email")}')
             return redirect('/retail/thank_you')  # silent discard
+
+        # Timing trap: bots submit instantly, or replay a stale cached page
+        if contact_form_is_bot(request.form.get('form_rendered_at')):
+            app.logger.warning(f'Bot caught on retail contact (timing): {request.form.get("email")}')
+            return redirect('/retail/thank_you')
+
+        client_ip = request.remote_addr or 'unknown'
+        if contact_ip_is_rate_limited(client_ip):
+            app.logger.warning(f'Retail contact rate-limited: ip={client_ip}')
+            return redirect('/retail/thank_you')
+
+        if not verify_recaptcha(request.form.get('recaptcha_token'), remote_ip=client_ip, expected_action='retail_contact'):
+            app.logger.warning(f'Bot caught on retail contact (recaptcha): {request.form.get("email")}')
+            return redirect('/retail/thank_you')
 
         name    = (request.form.get('name') or '').strip()
         whatsapp= (request.form.get('whatsapp') or '').strip()
@@ -555,8 +670,8 @@ def retail_contact():
             f'New Contact: {name} | Nari Nakhre',
             admin_body
         )
-        # Only send customer reply if email looks legitimate
-        if email and '@' in email and '.' in email.split('@')[-1]:
+        # Only send customer reply if email passes strict format validation
+        if is_valid_email(email):
             customer_body = (
                 f"Dear {name},\n\n"
                 f"Thank you for reaching out to Nari Nakhre! "
@@ -566,7 +681,7 @@ def retail_contact():
             send_contact_email(email, 'Thank you for contacting Nari Nakhre', customer_body)
 
         return redirect('/retail/thank_you')
-    return render_template('retail/contact.html')
+    return render_template('retail/contact.html', form_rendered_at=time.time(), recaptcha_site_key=RECAPTCHA_SITE_KEY)
 
 
 @app.route('/contact', methods=['GET', 'POST'])
@@ -576,6 +691,21 @@ def wholesale_contact():
     if request.method == 'POST':
         # Honeypot defense: silently discard bot submissions.
         if (request.form.get('system_verification_token') or '').strip():
+            app.logger.warning(f'Bot caught on wholesale contact (honeypot): {request.form.get("email")}')
+            return redirect(url_for('wholesale_thank_you'))
+
+        # Timing trap: bots submit instantly, or replay a stale cached page
+        if contact_form_is_bot(request.form.get('form_rendered_at')):
+            app.logger.warning(f'Bot caught on wholesale contact (timing): {request.form.get("email")}')
+            return redirect(url_for('wholesale_thank_you'))
+
+        client_ip = request.remote_addr or 'unknown'
+        if contact_ip_is_rate_limited(client_ip):
+            app.logger.warning(f'Wholesale contact rate-limited: ip={client_ip}')
+            return redirect(url_for('wholesale_thank_you'))
+
+        if not verify_recaptcha(request.form.get('recaptcha_token'), remote_ip=client_ip, expected_action='wholesale_contact'):
+            app.logger.warning(f'Bot caught on wholesale contact (recaptcha): {request.form.get("email")}')
             return redirect(url_for('wholesale_thank_you'))
 
         name = (request.form.get('name') or '').strip()
@@ -601,8 +731,8 @@ def wholesale_contact():
         )
         db_conn.commit()
 
-        # Only auto-reply if email looks legitimate (not spam/bot)
-        if email and '@' in email and '.' in email.split('@')[-1] and len(email) < 80:
+        # Only auto-reply if email passes strict format validation (not spam/bot)
+        if is_valid_email(email):
             customer_subject = 'Thank you for your quote request - Nari Nakhre Wholesale'
             customer_body = (
                 f"Dear {name},\n\n"
@@ -627,7 +757,7 @@ def wholesale_contact():
         session.modified = True
         return redirect(url_for('wholesale_thank_you'))
 
-    return render_template('wholesale/contact.html')
+    return render_template('wholesale/contact.html', form_rendered_at=time.time(), recaptcha_site_key=RECAPTCHA_SITE_KEY)
 
 
 @app.route('/wholesale/thank_you')
