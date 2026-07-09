@@ -8,9 +8,10 @@
         .container { max-width: 600px; margin: 40px auto; background: #fff; border-radius: 16px; box-shadow: 0 2px 16px rgba(0,0,0,0.08); padding: 40px 32px; }
         h1 { color: #be185d; margin-bottom: 8px; font-size: 1.5em; }
         .order-id { color: #757575; font-size: 0.95em; margin-bottom: 24px; }
-        table { width: 100%; border-collapse: collapse; margin-bottom: 16px; font-size: 14px; }
-        th, td { padding: 10px; border: 1px solid #eeeeee; text-align: left; }
-        th { background: #be185d; color: #fff; }
+        table { width: 100%; border-collapse: collapse; margin-bottom: 16px; font-size: 13px; table-layout: fixed; }
+        th, td { padding: 8px 6px; border: 1px solid #eeeeee; text-align: left; word-wrap: break-word; overflow-wrap: break-word; }
+        th { background: #be185d; color: #fff; font-size: 12px; }
+        td:first-child, th:first-child { word-break: break-word; }
         .totals-row td { font-weight: bold; background: #fce4ec; }
         .track-btn { display: inline-block; background: #be185d; color: #fff !important; text-decoration: none;
                      padding: 14px 28px; border-radius: 10px; font-weight: bold; margin: 16px 0; }
@@ -34,6 +35,13 @@
 
         {% if items and items|length > 0 %}
         <table>
+            <colgroup>
+                <col style="width:36%;">
+                <col style="width:14%;">
+                <col style="width:10%;">
+                <col style="width:18%;">
+                <col style="width:22%;">
+            </colgroup>
             <thead>
                 <tr>
                     <th>Item</th>
@@ -88,8 +96,9 @@
             <div>Website: <a href="https://narinakhre.com" style="color:#be185d;text-decoration:none;">narinakhre.com</a></div>
 
             <div class="social">
-                <a href="https://fb.com/narinakhre" target="_blank"><img src="https://img.icons8.com/color/48/facebook-new.png" alt="Facebook"></a>
-                <a href="https://instagram.com/narinakhre" target="_blank"><img src="https://img.icons8.com/color/48/instagram-new.png" alt="Instagram"></a>
+                <a href="https://fb.com/narinakhre" target="_blank"><img src="https://narinakhre.com/static/assets/facebook-logo.png" alt="Facebook"></a>
+                <a href="https://instagram.com/narinakhre" target="_blank"><img src="https://narinakhre.com/static/assets/instagram-logo.jpg" alt="Instagram"></a>
+                <a href="https://youtube.com/narinakhre" target="_blank"><img src="https://narinakhre.com/static/assets/youtube-logo.png" alt="YouTube"></a>
             </div>
         </div>
     </div>

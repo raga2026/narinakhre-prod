@@ -197,7 +197,7 @@
       {% endif %}
 
       <!-- Size -->
-      {% set is_bangle = 'bangle' in (product.category|lower if product.category else '') or 'bangle' in (product.name|lower if product.name else '') %}
+      {% set is_bangle = 'bangle' in (product.category|lower if product.category else '') or 'bangle' in (product.sub_category|lower if product.sub_category else '') or 'bangle' in (product.name|lower if product.name else '') %}
       {% if is_bangle %}
       <div class="mb-3">
         <label class="block text-xs font-bold text-rose-500 mb-1 uppercase">Size</label>
@@ -205,11 +205,11 @@
           <option value="2.4">2.4</option><option value="2.6">2.6</option><option value="2.8">2.8</option>
         </select>
       </div>
-      {% elif product.sizes %}
+      {% elif product.size %}
       <div class="mb-3">
         <label class="block text-xs font-bold text-rose-500 mb-1 uppercase">Size</label>
         <select id="size-main" class="size-select w-full p-2.5 border-2 border-rose-100 rounded-xl bg-white font-semibold text-sm focus:border-rose-400 outline-none">
-          {% for s in product.sizes.split(',') %}<option value="{{ s|trim }}">{{ s|trim }}</option>{% endfor %}
+          {% for s in product.size.split(',') %}<option value="{{ s|trim }}">{{ s|trim }}</option>{% endfor %}
         </select>
       </div>
       {% endif %}
@@ -343,7 +343,7 @@ document.addEventListener('DOMContentLoaded', function() {
         plus && plus.addEventListener('click', function() {
             const sku = addBtn.dataset.sku, price = addBtn.dataset.price;
             const ss = document.getElementById('size-main');
-            const size = ss ? ss.value : 'Standard';
+            const size = ss ? ss.value : '';
             let qty = parseInt(display.textContent) + 1;
             fetch('/update-cart', { method:'POST', headers:{'Content-Type':'application/json'},
                 body: JSON.stringify({product_id:sku, qty:qty, price:price, size:size})})
@@ -356,7 +356,7 @@ document.addEventListener('DOMContentLoaded', function() {
         minus && minus.addEventListener('click', function() {
             const sku = addBtn.dataset.sku, price = addBtn.dataset.price;
             const ss = document.getElementById('size-main');
-            const size = ss ? ss.value : 'Standard';
+            const size = ss ? ss.value : '';
             let qty = parseInt(display.textContent) - 1;
             if (qty <= 0) {
                 fetch('/update-cart', { method:'POST', headers:{'Content-Type':'application/json'},

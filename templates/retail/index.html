@@ -290,7 +290,7 @@
                 </div>
 
                 <!-- Size select for bangles -->
-                {% set is_bangle = 'bangle' in (product.category|lower if product.category else '') or 'bangle' in (product.name|lower if product.name else '') %}
+                {% set is_bangle = 'bangle' in (product.category|lower if product.category else '') or 'bangle' in (product.sub_category|lower if product.sub_category else '') or 'bangle' in (product.name|lower if product.name else '') %}
                 {% if is_bangle %}
                 <div style="display:flex;align-items:center;gap:4px;margin-bottom:2px;">
                     <label style="font-size:0.65rem;font-weight:600;color:#9f9f9f;white-space:nowrap;">Size</label>

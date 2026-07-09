@@ -64,7 +64,7 @@ function retailAddToCart(btn) {
     const c = btn.closest('.cart-container');
     const sku = btn.getAttribute('data-sku'), price = btn.getAttribute('data-price');
     const ss = c.querySelector('.size-select') || document.getElementById('size-main');
-    const size = (ss && ss.value && ss.value !== 'Standard') ? ss.value : (ss ? ss.value : '');
+    const size = ss ? ss.value : '';
     fetch('/update-cart', {method:'POST',headers:{'Content-Type':'application/json'},
         body: JSON.stringify({product_id:sku,qty:1,price,size})})
     .then(r=>r.json()).then(d=>{
@@ -81,7 +81,7 @@ function retailIncrement(btn) {
     const ab = c.querySelector('.add-to-cart-btn');
     const sku = ab.getAttribute('data-sku'), price = ab.getAttribute('data-price');
     const ss = c.querySelector('.size-select') || document.getElementById('size-main');
-    const size = (ss && ss.value && ss.value !== 'Standard') ? ss.value : (ss ? ss.value : '');
+    const size = ss ? ss.value : '';
     let qty = parseInt(uc.querySelector('.qty-display').innerText)||1; qty++;
     fetch('/update-cart',{method:'POST',headers:{'Content-Type':'application/json'},
         body:JSON.stringify({product_id:sku,qty,price,size})})
@@ -94,7 +94,7 @@ function retailDecrement(btn) {
     const ab = c.querySelector('.add-to-cart-btn');
     const sku = ab.getAttribute('data-sku'), price = ab.getAttribute('data-price');
     const ss = c.querySelector('.size-select') || document.getElementById('size-main');
-    const size = (ss && ss.value && ss.value !== 'Standard') ? ss.value : (ss ? ss.value : '');
+    const size = ss ? ss.value : '';
     let qty = parseInt(uc.querySelector('.qty-display').innerText)||1;
     if(qty<=1){
         fetch('/update-cart',{method:'POST',headers:{'Content-Type':'application/json'},
@@ -114,7 +114,7 @@ function retailBuyNow(btn) {
     const c = btn.closest('.cart-container');
     const sku = btn.getAttribute('data-sku'), price = btn.getAttribute('data-price');
     const ss = c.querySelector('.size-select') || document.getElementById('size-main');
-    const size = (ss && ss.value && ss.value !== 'Standard') ? ss.value : (ss ? ss.value : '');
+    const size = ss ? ss.value : '';
     const uc = c.querySelector('.unit-counter');
     const qty = (uc && !uc.classList.contains('hidden')) ? (parseInt(uc.querySelector('.qty-display').innerText)||1) : 1;
     fetch('/update-cart',{method:'POST',headers:{'Content-Type':'application/json'},

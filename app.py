@@ -1085,7 +1085,7 @@ def update_cart():
     sku = data.get('product_id')
     qty = int(data.get('qty', 1))
     price = float(data.get('price', 0))
-    size = data.get('size', 'Standard')
+    size = data.get('size') or ''
     
     cart = session.get('cart', {})
     cart_key = f"{sku}_{size}"

@@ -24,7 +24,7 @@ function addToCart(btn) {
     const productId = btn.getAttribute('data-sku') || btn.getAttribute('data-product-id');
     const name = btn.getAttribute('data-name');
     let price = btn.getAttribute('data-price');
-    let size = 'Standard';
+    let size = '';
     let qty = 1;
     let tier = 1;
 
