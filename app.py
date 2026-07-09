@@ -481,52 +481,55 @@ def create_delhivery_shipment(order_row, cart_items):
 
 def send_contact_email(to_email, subject, body, html_body=None, from_email=None):
     """
-    Send email via Zeptomail SMTP (narinakhre.com domain).
-    Supports both port 465 (SSL) and port 587 (STARTTLS).
+    Send email via Zeptomail's HTTP API (NOT SMTP).
+    This replaces the old smtplib-based sender: a raw SMTP socket can wedge
+    indefinitely if Zeptomail's server accepts the TCP connection but doesn't
+    respond cleanly (which is exactly what "Sender Org Blocked" can cause).
+    An HTTPS POST via `requests` with an explicit timeout can't do that — it
+    either succeeds, fails, or times out in 10s. No other behavior change.
+
     Credentials from Render environment variables:
-        SMTP_SERVER = smtp.zeptomail.in
-        SMTP_PORT   = 587
-        SMTP_USER   = emailapikey
-        SMTP_PASS   = <Zeptomail API key>
+        ZEPTOMAIL_API_URL  = https://api.zeptomail.in/v1.1/email  (default, .in region)
+        ZEPTOMAIL_API_KEY  = Zeptomail "Send Mail Token"
+    If ZEPTOMAIL_API_KEY isn't set, falls back to SMTP_PASS — Zeptomail's SMTP
+    password and the API send-token are typically the same generated value for
+    a Mail Agent, so this should work without adding a new env var. If sends
+    start failing after this deploy, generate a dedicated API key in Zeptomail
+    (Mail Agents -> API) and set ZEPTOMAIL_API_KEY explicitly.
     The From address must be a verified sender in Zeptomail.
     """
-    SMTP_SERVER = os.environ.get('SMTP_SERVER', 'smtp.zeptomail.in')
-    SMTP_PORT   = int(os.environ.get('SMTP_PORT', '587'))
-    SMTP_USER   = os.environ.get('SMTP_USER', '')
-    SMTP_PASS   = os.environ.get('SMTP_PASS', '')
-    FROM_EMAIL  = from_email or os.environ.get('SMTP_FROM', 'info@narinakhre.com')
-    ORDERS_FROM = os.environ.get('SMTP_FROM_ORDERS', 'order-noreply@narinakhre.com')
+    api_url = os.environ.get('ZEPTOMAIL_API_URL', 'https://api.zeptomail.in/v1.1/email')
+    api_key = os.environ.get('ZEPTOMAIL_API_KEY') or os.environ.get('SMTP_PASS', '')
+    FROM_EMAIL = from_email or os.environ.get('SMTP_FROM', 'info@narinakhre.com')
 
-    if not SMTP_USER or not SMTP_PASS:
-        app.logger.warning('Email send skipped: SMTP_USER/SMTP_PASS not set in Render env vars')
+    if not api_key:
+        app.logger.warning('Email send skipped: ZEPTOMAIL_API_KEY (or SMTP_PASS fallback) not set in Render env vars')
         return False
+
+    payload = {
+        'from': {'address': FROM_EMAIL, 'name': 'Nari Nakhre'},
+        'to': [{'email_address': {'address': to_email, 'name': to_email}}],
+        'subject': subject,
+        'textbody': body,
+    }
+    if html_body:
+        payload['htmlbody'] = html_body
+
+    headers = {
+        'Authorization': f'Zoho-enczapikey {api_key}',
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+    }
+
     try:
-        msg = MIMEMultipart('alternative')
-        msg['From']     = f'Nari Nakhre <{FROM_EMAIL}>'
-        msg['To']       = to_email
-        msg['Subject']  = subject
-        msg['Reply-To'] = FROM_EMAIL
-        msg.attach(MIMEText(body, 'plain', 'utf-8'))
-        if html_body:
-            msg.attach(MIMEText(html_body, 'html', 'utf-8'))
-
-        if SMTP_PORT == 465:
-            # SSL connection
-            server = smtplib.SMTP_SSL(SMTP_SERVER, SMTP_PORT, timeout=10)
-        else:
-            # STARTTLS connection (port 587 — Zeptomail default)
-            server = smtplib.SMTP(SMTP_SERVER, SMTP_PORT, timeout=10)
-            server.ehlo()
-            server.starttls()
-            server.ehlo()
-
-        server.login(SMTP_USER, SMTP_PASS)
-        server.sendmail(FROM_EMAIL, to_email, msg.as_string())
-        server.quit()
-        app.logger.info(f'Email sent to {to_email}: {subject}')
-        return True
-    except smtplib.SMTPAuthenticationError as e:
-        app.logger.error(f'SMTP auth failed — check SMTP_USER/SMTP_PASS in Render env vars: {e}')
+        resp = requests.post(api_url, json=payload, headers=headers, timeout=10)
+        if resp.status_code in (200, 201):
+            app.logger.info(f'Email sent to {to_email}: {subject}')
+            return True
+        app.logger.error(f'Zeptomail API error ({resp.status_code}) sending to {to_email}: {resp.text[:500]}')
+        return False
+    except requests.exceptions.Timeout:
+        app.logger.error(f'Zeptomail API call timed out (10s) sending to {to_email}')
         return False
     except Exception as e:
         app.logger.error(f'Email send failed to {to_email}: {type(e).__name__}: {e}')
