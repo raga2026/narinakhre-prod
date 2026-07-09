@@ -61,12 +61,28 @@
             <div class="ty-row"><span class="ty-label">Tracking ID (AWB)</span><span class="ty-value">{{ waybill }}</span></div>
             {% endif %}
             {% if amount_paid and amount_paid > 0 %}
-            <div class="ty-row"><span class="ty-label">Amount Paid</span><span class="ty-value">₹{{ '%.2f'|format(amount_paid) }}</span></div>
+            <div class="ty-row">
+                <span class="ty-label">{{ 'Amount to be Paid on Delivery' if payment_mode == 'COD' else 'Amount Paid' }}</span>
+                <span class="ty-value">₹{{ '%.2f'|format(amount_paid) }}</span>
+            </div>
             {% endif %}
         </div>
 
-        {% if tracking_url and waybill %}
-        <a href="{{ tracking_url }}" class="ty-track-btn">📦 Track Your Order</a>
+        {% if cart_items %}
+        <div class="ty-card">
+            {% for item in cart_items %}
+            <div class="ty-row">
+                <span class="ty-label">
+                    {{ item.name }}{% if item.size %} ({{ item.size }}){% endif %} × {{ item.units }}
+                </span>
+                <span class="ty-value">₹{{ '%.2f'|format((item.price|float) * (item.units|int)) }}</span>
+            </div>
+            {% endfor %}
+        </div>
+        {% endif %}
+
+        {% if waybill %}
+        <a href="{{ tracking_url }}" class="ty-track-btn">📦 Track Your Order — AWB {{ waybill }}</a>
         {% if order_id %}
         <a href="/invoice/{{ order_id }}" target="_blank"
            style="display:block;text-align:center;margin-top:10px;color:#be185d;font-weight:700;font-size:0.85rem;text-decoration:none;">
@@ -74,6 +90,16 @@
         </a>
         {% endif %}
         <div class="ty-hint">Save this link — you can share it via WhatsApp or email.</div>
+        {% else %}
+        <div class="ty-hint" style="margin-top:16px;font-size:0.8rem;">
+            Tracking will be available once your order is dispatched. We'll email you the tracking link.
+        </div>
+        {% if order_id %}
+        <a href="/invoice/{{ order_id }}" target="_blank"
+           style="display:block;text-align:center;margin-top:10px;color:#be185d;font-weight:700;font-size:0.85rem;text-decoration:none;">
+            🧾 Download GST Invoice
+        </a>
+        {% endif %}
         {% endif %}
 
         <div class="ty-contact">Need help? Contact <a href="mailto:info@narinakhre.com">info@narinakhre.com</a></div>

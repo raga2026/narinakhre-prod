@@ -1445,8 +1445,12 @@ def verify_payment():
 
         # If called via AJAX (fetch), return JSON; if form POST, redirect
         if request.is_json or request.headers.get('X-Requested-With') == 'XMLHttpRequest' or request.content_type == 'application/json':
-            return jsonify({'status': 'success', 'message': 'Payment verified and order finalized'}), 200
-        return redirect(url_for('thank_you'))
+            return jsonify({
+                'status': 'success',
+                'message': 'Payment verified and order finalized',
+                'internal_order_id': internal_order_id,
+            }), 200
+        return redirect(url_for('thank_you', ref=internal_order_id))
     except Exception as e:
         app.logger.error(f'Payment verification error: {e}')
         if request.is_json or request.headers.get('X-Requested-With') == 'XMLHttpRequest' or request.content_type == 'application/json':
@@ -1910,38 +1914,53 @@ def clear_quote():
 
 @app.route('/thank_you')
 def thank_you():
-    # Pull order_id/waybill from session (set during checkout_process) if not passed via query
-    order_id = request.args.get('ref') or session.get('internal_order_id', '')
+    # Pull order_id from query (?ref=) first, then session (set during checkout_process)
     checkout_handover = session.get('checkout_handover', {})
-    waybill = checkout_handover.get('waybill') or session.get('waybill', '')
+    order_id = (request.args.get('ref')
+                or session.get('internal_order_id', '')
+                or checkout_handover.get('internal_order_id', ''))
 
-    # If still missing, try to look up the most recent waybill for this internal_order_id
-    if order_id and not waybill:
+    waybill = ''
+    payment_mode = ''
+    amount_paid = 0.0
+    cart_items = []
+
+    # DB is the source of truth — session data may already be popped (e.g. after
+    # a Razorpay payment verification) by the time this page loads
+    if order_id:
         conn = get_db()
         row = conn.execute(
-            'SELECT delhivery_waybill FROM order_shipping WHERE internal_order_id=? ORDER BY id DESC LIMIT 1',
+            'SELECT delhivery_waybill, payment_mode, total_amount, cart_items_json '
+            'FROM order_shipping WHERE internal_order_id=? ORDER BY id DESC LIMIT 1',
             (order_id,)
         ).fetchone()
-        if row and row['delhivery_waybill']:
-            waybill = row['delhivery_waybill']
+        if row:
+            waybill = row['delhivery_waybill'] or ''
+            payment_mode = row['payment_mode'] or ''
+            amount_paid = float(row['total_amount'] or 0)
+            if row['cart_items_json']:
+                try:
+                    cart_items = json.loads(row['cart_items_json'])
+                except (ValueError, TypeError):
+                    cart_items = []
+
+    # Fill any gaps from the freshly-set session handover (covers the moment right
+    # after order placement, before/without a DB round trip)
+    if not waybill:
+        waybill = checkout_handover.get('waybill') or session.get('waybill', '') or ''
+    if not payment_mode:
+        payment_mode = checkout_handover.get('payment_mode', '')
+    if not amount_paid:
+        amount_paid = float(checkout_handover.get('amount_paid', 0) or 0)
 
     tracking_url = url_for('track_order_page', waybill=waybill, _external=True) if waybill else None
-    # Pull amount_paid from session handover or DB
-    amount_paid = float(checkout_handover.get('amount_paid', 0) or 0)
-    if not amount_paid and order_id:
-        conn = get_db()
-        arow = conn.execute(
-            'SELECT total_amount FROM order_shipping WHERE internal_order_id=? LIMIT 1',
-            (order_id,)
-        ).fetchone()
-        if arow and arow['total_amount']:
-            amount_paid = float(arow['total_amount'])
-    payment_mode = checkout_handover.get('payment_mode', '')
+
     return render_template('retail/thank_you.html',
                            order_id=order_id, waybill=waybill,
                            tracking_url=tracking_url,
                            amount_paid=amount_paid,
-                           payment_mode=payment_mode)
+                           payment_mode=payment_mode,
+                           cart_items=cart_items)
 
 
 def admin_required(view_func):

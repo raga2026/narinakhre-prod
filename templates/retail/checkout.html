@@ -642,7 +642,7 @@ document.getElementById('ck-form').addEventListener('submit', async function(e){
         if (mode === 'COD') {
             const r2 = await fetch('/api/confirm-cod',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({})});
             const d2 = await r2.json();
-            if (d2.status === 'success') { window.location.href = '/thank_you'; return; }
+            if (d2.status === 'success') { window.location.href = '/thank_you?ref=' + encodeURIComponent(d2.internal_order_id || ''); return; }
             throw new Error(d2.message || 'Could not confirm COD order');
         }
 
@@ -664,7 +664,7 @@ document.getElementById('ck-form').addEventListener('submit', async function(e){
                 const r4 = await fetch('/api/verify-payment',{method:'POST',headers:{'Content-Type':'application/json'},
                     body:JSON.stringify({razorpay_order_id:resp.razorpay_order_id,razorpay_payment_id:resp.razorpay_payment_id,razorpay_signature:resp.razorpay_signature})});
                 const d4 = await r4.json();
-                if (d4.status==='success') window.location.href='/thank_you';
+                if (d4.status==='success') window.location.href='/thank_you?ref=' + encodeURIComponent(d4.internal_order_id || '');
                 else alert(d4.message||'Payment verification failed');
             },
             modal:{ondismiss:()=>{
