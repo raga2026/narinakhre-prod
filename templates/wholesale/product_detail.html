@@ -97,8 +97,10 @@
                 <div class="pdp-field">
                     <label>Select Size</label>
                     <select id="size-{{ product.id }}" class="pdp-select size-select">
-                        {% for s in product['sizes'].split(',') %}
+                        {% for s in (product['size'] or '').split(',') %}
+                            {% if s.strip() %}
                             <option value="{{ s|trim }}">{{ s|trim }}</option>
+                            {% endif %}
                         {% endfor %}
                     </select>
                 </div>
