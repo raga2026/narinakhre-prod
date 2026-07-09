@@ -512,10 +512,10 @@ def send_contact_email(to_email, subject, body, html_body=None, from_email=None)
 
         if SMTP_PORT == 465:
             # SSL connection
-            server = smtplib.SMTP_SSL(SMTP_SERVER, SMTP_PORT)
+            server = smtplib.SMTP_SSL(SMTP_SERVER, SMTP_PORT, timeout=10)
         else:
             # STARTTLS connection (port 587 — Zeptomail default)
-            server = smtplib.SMTP(SMTP_SERVER, SMTP_PORT)
+            server = smtplib.SMTP(SMTP_SERVER, SMTP_PORT, timeout=10)
             server.ehlo()
             server.starttls()
             server.ehlo()
@@ -531,6 +531,16 @@ def send_contact_email(to_email, subject, body, html_body=None, from_email=None)
     except Exception as e:
         app.logger.error(f'Email send failed to {to_email}: {type(e).__name__}: {e}')
         return False
+
+
+def send_contact_email_async(*args, **kwargs):
+    """Fire-and-forget wrapper around send_contact_email. Use this on any
+    customer-facing request path (order confirmation, etc.) so a slow or
+    blocked SMTP server (see: Zeptomail 'Sender Org Blocked') can never hang
+    the HTTP response the customer is waiting on."""
+    t = threading.Thread(target=send_contact_email, args=args, kwargs=kwargs, daemon=True)
+    t.start()
+    return t
 
 
 # --- CONTACT FORM ANTI-BOT HELPERS ---
@@ -665,7 +675,7 @@ def retail_contact():
             f"Name: {name}\nWhatsApp: {whatsapp}\nEmail: {email}\n"
             f"Message: {message}"
         )
-        send_contact_email(
+        send_contact_email_async(
             os.environ.get('ADMIN_EMAIL', 'mohinicosmetics.india@gmail.com'),
             f'New Contact: {name} | Nari Nakhre',
             admin_body
@@ -678,7 +688,7 @@ def retail_contact():
                 f"We have received your message and will get back to you soon.\n\n"
                 f"Best regards,\nNari Nakhre Team\ninfo@narinakhre.com"
             )
-            send_contact_email(email, 'Thank you for contacting Nari Nakhre', customer_body)
+            send_contact_email_async(email, 'Thank you for contacting Nari Nakhre', customer_body)
 
         return redirect('/retail/thank_you')
     return render_template('retail/contact.html', form_rendered_at=time.time(), recaptcha_site_key=RECAPTCHA_SITE_KEY)
@@ -741,7 +751,7 @@ def wholesale_contact():
                 f"Request ID: {request_id}\n\n"
                 'Regards,\nNari Nakhre Wholesale Team'
             )
-            send_contact_email(email, customer_subject, customer_body)
+            send_contact_email_async(email, customer_subject, customer_body)
 
         admin_subject = f'New Wholesale Contact/Quote Request: {request_id}'
         admin_body = (
@@ -751,7 +761,7 @@ def wholesale_contact():
             f"Email: {email}\n\n"
             f"Message:\n{message}"
         )
-        send_contact_email('info@narinakhre.com', admin_subject, admin_body)
+        send_contact_email_async('info@narinakhre.com', admin_subject, admin_body)
 
         session['wholesale_contact_user'] = {'name': name, 'email': email}
         session.modified = True
@@ -1474,12 +1484,12 @@ def confirm_cod_order():
         tracking_url = f"{request.url_root.rstrip('/')}/track/{waybill}" if waybill else ''
         invoice_url = f"{request.url_root.rstrip('/')}/invoice/{internal_order_id}"
         if customer_email:
-            send_contact_email(customer_email,
+            send_contact_email_async(customer_email,
                 f"Order Confirmed (COD) — {internal_order_id} | Nari Nakhre",
                 f"Hi {customer_name},\n\nYour COD order is confirmed!\n\nOrder ID: {internal_order_id}\nAmount to pay on delivery: ₹{total:.2f}\n"
                 + (f"Track: {tracking_url}\n" if tracking_url else "")
                 + f"Invoice: {invoice_url}\n\nThank you!\n- Nari Nakhre")
-        send_contact_email(ADMIN_EMAIL,
+        send_contact_email_async(ADMIN_EMAIL,
             f"🛍️ New COD Order — {internal_order_id}",
             f"COD Order\nCustomer: {customer_name}\nPhone: {order_row_dict.get('consignee_phone','')}\n"
             f"Address: {order_row_dict.get('consignee_address','')}, {order_row_dict.get('consignee_city','')}, {order_row_dict.get('consignee_pincode','')}\n"
