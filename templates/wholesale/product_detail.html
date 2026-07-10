@@ -219,8 +219,10 @@
                     <div class="pdp-field">
                         <label>Select Size</label>
                         <select id="size-{{ rel.id }}" class="pdp-select size-select">
-                            {% for s in rel.sizes.split(',') %}
+                            {% for s in (rel.size or '').split(',') %}
+                                {% if s.strip() %}
                                 <option value="{{ s|trim }}">{{ s|trim }}</option>
+                                {% endif %}
                             {% endfor %}
                         </select>
                     </div>
@@ -240,7 +242,7 @@
                             data-product-id="{{ rel.sku }}"
                             data-tier="{{ rel.tiers[0].qty if rel.tiers and rel.tiers[0].qty else 1 }}"
                             data-price="{{ rel.tiers[0].price if rel.tiers and rel.tiers[0].price else rel.price1 }}"
-                            data-size="{{ rel.sizes.split(',')[0]|trim if rel.sizes else '' }}"
+                            data-size="{{ rel.size.split(',')[0]|trim if rel.size else '' }}"
                         >Add to Quote</button>
                     </div>
                 </div>
