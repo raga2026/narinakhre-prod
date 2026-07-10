@@ -53,6 +53,10 @@
     .nav-lb:hover { color: #be185d; }
     .prev-lb { left: 20px; }
     .next-lb { right: 20px; }
+    .product-features { list-style: none; padding: 0; margin: 18px 0 0; display: grid; gap: 10px; }
+    .product-features-title { color: #be185d; display: block; margin-bottom: 10px; font-weight: 600; }
+    .product-features li { display: flex; align-items: flex-start; gap: 10px; font-size: 1rem; color: #22223b; line-height: 1.5; }
+    .pf-check { flex-shrink: 0; width: 20px; height: 20px; border-radius: 50%; background: #fce7f3; color: #be185d; display: flex; align-items: center; justify-content: center; font-size: 0.7rem; font-weight: 900; margin-top: 2px; }
 </style>
 
 <div class="pdp-bg">
@@ -94,6 +98,17 @@
                     <strong style="color:#be185d; display:block; margin-bottom:10px;">Product Description:</strong>
                     <span style="color:#22223b;">{{ product['description'] or 'No description available for this product.' }}</span>
                 </div>
+                {% set wh_feature_list = (product['key_features'] or '').split('\n') | select | map('trim') | select | list %}
+                {% if wh_feature_list %}
+                <div class="product-desc">
+                    <strong class="product-features-title">Key Features:</strong>
+                    <ul class="product-features">
+                        {% for feature in wh_feature_list %}
+                        <li><span class="pf-check">&#10003;</span> {{ feature }}</li>
+                        {% endfor %}
+                    </ul>
+                </div>
+                {% endif %}
                 <div class="pdp-field">
                     <label>Select Size</label>
                     <select id="size-{{ product.id }}" class="pdp-select size-select">

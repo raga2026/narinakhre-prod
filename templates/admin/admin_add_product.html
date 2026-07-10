@@ -167,6 +167,20 @@
             </div>
         </div>
 
+        <div class="section-title">Description & Key Features</div>
+        <div class="form-grid">
+            <div class="form-group full">
+                <label for="description">Product Description</label>
+                <textarea id="description" name="description" style="height:110px;" placeholder="A short paragraph describing the product — shown on the product detail page."></textarea>
+            </div>
+            <div class="form-group full">
+                <label for="key_features">Key Features <span style="color:#f43f5e">*</span></label>
+                <textarea id="key_features" name="key_features" style="height:120px;" placeholder="One feature per line, e.g.&#10;Handcrafted brass bangles&#10;Tarnish-resistant finish&#10;Adjustable for comfort&#10;Traditional Rajasthani design" required></textarea>
+                <span class="hint">One bullet point per line. Add at least 4 — these appear as key feature bullets on the product page. Not included in Excel bulk upload.</span>
+                <span id="kf-count" class="hint"></span>
+            </div>
+        </div>
+
         <div class="section-title">Product Image</div>
         <div class="form-grid">
             <div class="form-group full">
@@ -179,4 +193,32 @@
         <button type="submit" class="btn-submit">Add Product</button>
     </form>
 </div>
+
+<script>
+    (function() {
+        var kfField = document.getElementById('key_features');
+        var kfCount = document.getElementById('kf-count');
+        var form = kfField.closest('form');
+
+        function countLines() {
+            return kfField.value.split('\n').map(function(l) { return l.trim(); }).filter(Boolean).length;
+        }
+        function updateCount() {
+            var n = countLines();
+            kfCount.textContent = n + ' feature' + (n === 1 ? '' : 's') + ' entered' + (n < 4 ? ' — need at least 4' : '');
+            kfCount.style.color = n < 4 ? '#f43f5e' : '#4ade80';
+        }
+        kfField.addEventListener('input', updateCount);
+        updateCount();
+
+        form.addEventListener('submit', function(e) {
+            if (countLines() < 4) {
+                e.preventDefault();
+                updateCount();
+                kfField.focus();
+                alert('Please add at least 4 key features, one per line.');
+            }
+        });
+    })();
+</script>
 {% endblock %}

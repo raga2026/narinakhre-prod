@@ -336,7 +336,8 @@ def initialize_database_if_needed():
             weight FLOAT DEFAULT 0.0,
             length FLOAT DEFAULT 0.0,
             breadth FLOAT DEFAULT 0.0,
-            height FLOAT DEFAULT 0.0
+            height FLOAT DEFAULT 0.0,
+            key_features TEXT
         )''',
         '''CREATE TABLE IF NOT EXISTS quotes (
             id BIGSERIAL PRIMARY KEY,
@@ -394,6 +395,18 @@ def initialize_database_if_needed():
             client.rpc('execute_sql', {'query': sql}).execute()
         except Exception as e:
             app.logger.warning(f'Table init warning (may already exist): {e}')
+
+    # Columns added after the initial table definitions — kept separate so
+    # they can be applied to tables that already existed pre-migration.
+    alter_sql = [
+        'ALTER TABLE products ADD COLUMN IF NOT EXISTS key_features TEXT',
+    ]
+    for sql in alter_sql:
+        try:
+            client.rpc('execute_sql', {'query': sql}).execute()
+        except Exception as e:
+            app.logger.warning(f'Column init warning (may already exist): {e}')
+
     app.logger.info('Database tables verified/created via Supabase RPC.')
 
 
@@ -2545,6 +2558,10 @@ def admin_add_product():
         quantity2 = int(request.form.get('quantity2', 0) or 0)
         price3 = float(request.form.get('price3', 0) or 0)
         quantity3 = int(request.form.get('quantity3', 0) or 0)
+        description = request.form.get('description', '').strip()
+        key_features_raw = request.form.get('key_features', '')
+        key_features_list = [line.strip() for line in key_features_raw.splitlines() if line.strip()]
+        key_features = '\n'.join(key_features_list)
 
         # Auto-generate slug from name if not provided
         slug = request.form.get('slug', '').strip()
@@ -2554,6 +2571,10 @@ def admin_add_product():
 
         if not sku:
             flash('SKU is required.')
+            return redirect(url_for('admin_add_product'))
+
+        if len(key_features_list) < 4:
+            flash('Please add at least 4 key features (one per line).')
             return redirect(url_for('admin_add_product'))
 
         existing = db.execute('SELECT id FROM products WHERE sku=?', (sku,)).fetchone()
@@ -2575,15 +2596,15 @@ def admin_add_product():
                 weight_grams, length, breadth, height,
                 sets_count, min_wholesale_qty,
                 slug, price1, quantity1, price2, quantity2,
-                price3, quantity3, image_field, is_active)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,1)''',
+                price3, quantity3, image_field, description, key_features, is_active)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,1)''',
             (sku, name, category, sub_category, collection,
              retail_price, mrp_price, wholesale_price,
              stock_total, material, size, hsn_code, gst_percent,
              weight_grams, length, breadth, height,
              sets_count, min_wholesale_qty,
              slug, price1, quantity1, price2, quantity2,
-             price3, quantity3, image_url)
+             price3, quantity3, image_url, description, key_features)
         )
         db.commit()
         flash(f'Product {sku} added successfully.')

@@ -134,6 +134,19 @@
   .pd-rel-counter.visible { display: flex; }
   .pd-rel-uc { width: 24px; height: 24px; border-radius: 50%; border: none; background: #ffe4e6; color: #be185d; font-size: 0.9rem; font-weight: bold; cursor: pointer; }
   .pd-rel-qty { font-weight: 800; font-size: 0.85rem; color: #9f1239; }
+
+  /* Meta chips (color/material) */
+  .pd-meta-row { display: flex; gap: 8px; flex-wrap: wrap; margin: 2px 0 14px; }
+  .pd-chip { font-size: 0.72rem; font-weight: 700; color: #be185d; background: #fdf2f8; border: 1px solid #fbcfe8; border-radius: 20px; padding: 4px 12px; }
+
+  /* Details section (description + key features) */
+  .pd-details-section { margin-top: 28px; border-top: 1px solid #fce7f3; padding-top: 22px; }
+  .pd-section-title { font-size: 0.95rem; font-weight: 800; color: #881337; text-transform: uppercase; letter-spacing: 0.04em; margin: 0 0 10px; display: flex; align-items: center; gap: 8px; }
+  .pd-section-title::before { content: ''; width: 4px; height: 16px; background: #be185d; border-radius: 2px; display: inline-block; }
+  .pd-desc-card { font-size: 0.88rem; color: #4b5563; background: #fdf2f8; border-radius: 14px; padding: 14px; margin-bottom: 24px; line-height: 1.7; border: 1px solid #fce7f3; }
+  .pd-features-list { list-style: none; padding: 0; margin: 0; display: grid; gap: 10px; }
+  .pd-features-list li { display: flex; align-items: flex-start; gap: 10px; font-size: 0.88rem; color: #374151; line-height: 1.5; }
+  .pd-feature-check { flex-shrink: 0; width: 20px; height: 20px; border-radius: 50%; background: #fce7f3; color: #be185d; display: flex; align-items: center; justify-content: center; font-size: 0.68rem; font-weight: 900; margin-top: 1px; }
 </style>
 
 <div class="pd-wrap">
@@ -184,15 +197,12 @@
           {% endif %}
       </div>
 
-      {% if product.color and product.color != 'N/A' %}
-      <div class="text-sm text-gray-600 mb-1"><span class="font-semibold text-rose-700">Color:</span> {{ product.color }}</div>
-      {% endif %}
-      {% if product.material and product.material != 'N/A' and product.material != 'material' %}
-      <div class="text-sm text-gray-600 mb-1"><span class="font-semibold text-rose-700">Material:</span> {{ product.material }}</div>
-      {% endif %}
-      {% if product.description and product.description.strip() %}
-      <div style="font-size:0.88rem;color:#4b5563;background:#fdf2f8;border-radius:14px;padding:14px;margin:10px 0;line-height:1.7;border:1px solid #fce7f3;">
-        {{ product.description }}
+      {% set has_color = product.color and product.color != 'N/A' %}
+      {% set has_material = product.material and product.material != 'N/A' and product.material != 'material' %}
+      {% if has_color or has_material %}
+      <div class="pd-meta-row">
+        {% if has_color %}<span class="pd-chip">Color: {{ product.color }}</span>{% endif %}
+        {% if has_material %}<span class="pd-chip">Material: {{ product.material }}</span>{% endif %}
       </div>
       {% endif %}
 
@@ -245,6 +255,27 @@
       </div>
     </div>
   </div>
+
+  <!-- ── PRODUCT DETAILS (description + key features) ── -->
+  {% set has_description = product.description and product.description.strip() %}
+  {% set feature_list = (product.key_features or '').split('\n') | select | map('trim') | select | list %}
+  {% if has_description or feature_list %}
+  <div class="pd-details-section">
+    {% if has_description %}
+    <h2 class="pd-section-title">Description</h2>
+    <div class="pd-desc-card">{{ product.description }}</div>
+    {% endif %}
+
+    {% if feature_list %}
+    <h2 class="pd-section-title">Key Features</h2>
+    <ul class="pd-features-list">
+      {% for feature in feature_list %}
+      <li><span class="pd-feature-check">&#10003;</span> {{ feature }}</li>
+      {% endfor %}
+    </ul>
+    {% endif %}
+  </div>
+  {% endif %}
 
   <!-- ── RELATED PRODUCTS ── -->
   {% if related_products %}
