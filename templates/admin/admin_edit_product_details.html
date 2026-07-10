@@ -52,7 +52,26 @@
                     
                     <td><input type="number" step="0.01" name="retail_price" value="{{ product.retail_price or 0 }}" class="bulk-input price-retail"></td>
                     <td><input type="number" step="0.01" name="mrp_price" value="{{ product.mrp_price or 0 }}" class="bulk-input price-retail"></td>
-                    <td><input type="number" name="stock_total" value="{{ product.stock_total or 0 }}" class="bulk-input"><input type="number" name="stock_alert_threshold" value="{{ product.stock_alert_threshold or 5 }}" class="bulk-input" title="Send alert email when stock drops to this level" placeholder="Alert at"></td>
+                    <td>
+                        {% if product.size_stock is defined %}
+                        <input type="hidden" name="bangle_size_stock" value="1">
+                        <div style="display:flex; flex-direction:column; gap:4px; min-width:150px;">
+                            {% for bsize in ['2.4', '2.6', '2.8'] %}
+                            <label style="display:flex; align-items:center; gap:6px; font-size:0.72rem; color:#cbd5e1;">
+                                <span style="width:34px;">{{ bsize }} mm</span>
+                                <input type="number" min="0" name="stock_{{ bsize.replace('.', '_') }}"
+                                       value="{{ product.size_stock.get(bsize, 0) }}"
+                                       aria-label="Stock for size {{ bsize }} mm"
+                                       class="bulk-input" style="width:70px;">
+                            </label>
+                            {% endfor %}
+                            <span style="font-size:0.68rem; color:#94a3b8;">Total: {{ product.stock_total or 0 }} | Alert below:
+                                <input type="number" name="stock_alert_threshold" value="{{ product.stock_alert_threshold or 5 }}" class="bulk-input" style="width:50px; display:inline-block;" title="Send alert email when stock drops to this level"></span>
+                        </div>
+                        {% else %}
+                        <input type="number" name="stock_total" value="{{ product.stock_total or 0 }}" class="bulk-input"><input type="number" name="stock_alert_threshold" value="{{ product.stock_alert_threshold or 5 }}" class="bulk-input" title="Send alert email when stock drops to this level" placeholder="Alert at">
+                        {% endif %}
+                    </td>
                     <td><input type="text" name="slug" value="{{ product.slug }}" class="bulk-input" readonly style="background:#334155; color:#94a3b8;"></td>
                     
                     <td><input type="text" name="category" value="{{ product.category }}" class="bulk-input"></td>

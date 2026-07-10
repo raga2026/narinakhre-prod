@@ -197,7 +197,42 @@
   text-align: center; font-size: 0.68rem; color: #6e6e73;
   margin-top: 10px; line-height: 1.5;
 }
+
+/* ── Order-processing overlay ── */
+.ck-loading-overlay {
+  display: none;
+  position: fixed; inset: 0; z-index: 9999;
+  background: rgba(20, 8, 16, 0.72);
+  backdrop-filter: blur(3px);
+  align-items: center; justify-content: center;
+  flex-direction: column;
+}
+.ck-loading-overlay.active { display: flex; }
+.ck-loading-ring {
+  width: 68px; height: 68px;
+  border-radius: 50%;
+  border: 5px solid rgba(244, 114, 182, 0.25);
+  border-top-color: #f472b6;
+  border-right-color: #be185d;
+  animation: ck-spin 0.85s linear infinite;
+}
+@keyframes ck-spin { to { transform: rotate(360deg); } }
+.ck-loading-msg {
+  margin-top: 20px; color: #fff; font-family: 'Playfair Display', serif;
+  font-weight: 700; font-size: 1.15rem; text-align: center; padding: 0 24px;
+  animation: ck-pulse 1.6s ease-in-out infinite;
+}
+@keyframes ck-pulse { 0%, 100% { opacity: 0.75; } 50% { opacity: 1; } }
+.ck-loading-sub {
+  margin-top: 6px; color: rgba(255,255,255,0.7); font-size: 0.8rem; text-align: center;
+}
 </style>
+
+<div class="ck-loading-overlay" id="ck-loading-overlay">
+  <div class="ck-loading-ring"></div>
+  <div class="ck-loading-msg" id="ck-loading-msg">Placing your order…</div>
+  <div class="ck-loading-sub">Please wait, don't close this page ✨</div>
+</div>
 
 <div class="ck-page">
   <!-- Top bar -->
@@ -614,6 +649,28 @@ function ckPayMode() {
     if (ckServiceable && /^\d{6}$/.test(pin)) ckFetchShipping(pin);
 }
 
+/* ── Loading overlay ── */
+const ckLoadingMessages = ['Placing your order…', 'Talking to our courier partner…', 'Almost there…'];
+let ckLoadingInterval = null;
+function ckShowLoading(msg) {
+    const overlay = document.getElementById('ck-loading-overlay');
+    const msgEl = document.getElementById('ck-loading-msg');
+    msgEl.textContent = msg;
+    overlay.classList.add('active');
+    if (msg === 'Placing your order…') {
+        let i = 0;
+        clearInterval(ckLoadingInterval);
+        ckLoadingInterval = setInterval(() => {
+            i = (i + 1) % ckLoadingMessages.length;
+            msgEl.textContent = ckLoadingMessages[i];
+        }, 2200);
+    }
+}
+function ckHideLoading() {
+    clearInterval(ckLoadingInterval);
+    document.getElementById('ck-loading-overlay').classList.remove('active');
+}
+
 /* ── Form submit ── */
 document.getElementById('ck-form').addEventListener('submit', async function(e){
     e.preventDefault();
@@ -640,6 +697,7 @@ document.getElementById('ck-form').addEventListener('submit', async function(e){
 
     submitBtn.disabled = true;
     submitBtn.textContent = 'Processing…';
+    ckShowLoading('Placing your order…');
 
     let sub = 0;
     document.querySelectorAll('.ck-item').forEach(r=>{
@@ -674,6 +732,7 @@ document.getElementById('ck-form').addEventListener('submit', async function(e){
         const orderData = await r3.json();
         if (orderData.status !== 'success' || !orderData.order_id) throw new Error(orderData.message || 'Payment initiation failed');
 
+        ckHideLoading(); // Razorpay shows its own modal next
         const rzp = new Razorpay({
             key: orderData.key_id || RZP_KEY,
             amount: orderData.amount,
@@ -685,14 +744,16 @@ document.getElementById('ck-form').addEventListener('submit', async function(e){
             prefill: {name, email, contact:phone},
             theme: {color:'#be185d'},
             handler: async function(resp){
+                ckShowLoading('Verifying your payment…');
                 const r4 = await fetch('/api/verify-payment',{method:'POST',headers:{'Content-Type':'application/json'},
                     body:JSON.stringify({razorpay_order_id:resp.razorpay_order_id,razorpay_payment_id:resp.razorpay_payment_id,razorpay_signature:resp.razorpay_signature})});
                 const d4 = await r4.json();
                 if (d4.status==='success') window.location.href='/thank_you?ref=' + encodeURIComponent(d4.internal_order_id || '');
-                else alert(d4.message||'Payment verification failed');
+                else { ckHideLoading(); alert(d4.message||'Payment verification failed'); }
             },
             modal:{ondismiss:()=>{
                 submitBtn.disabled=false; submitBtn.textContent='Place Order';
+                ckHideLoading();
                 // Don't redirect on dismiss — user may want to retry
             }}
         });
@@ -703,6 +764,7 @@ document.getElementById('ck-form').addEventListener('submit', async function(e){
                 + '&reason=' + encodeURIComponent(resp.error.description || 'Payment failed');
         });
     } catch(err) {
+        ckHideLoading();
         alert(err.message||'Something went wrong. Please try again.');
         submitBtn.disabled=false; submitBtn.textContent='Place Order';
     }

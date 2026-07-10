@@ -295,9 +295,10 @@
                 <div style="display:flex;align-items:center;gap:4px;margin-bottom:2px;">
                     <label style="font-size:0.65rem;font-weight:600;color:#9f9f9f;white-space:nowrap;">Size</label>
                     <select class="input-field size-select" id="size-{{ product.sku }}" style="margin-bottom:0;flex:1;">
-                        <option value="2.4">2.4</option>
-                        <option value="2.6">2.6</option>
-                        <option value="2.8">2.8</option>
+                        {% for bsize in ['2.4', '2.6', '2.8'] %}
+                        {%- set bstock = product.size_stock.get(bsize, 0) if product.size_stock else None -%}
+                        <option value="{{ bsize }}" {% if bstock is not none and bstock <= 0 %}disabled{% endif %}>{{ bsize }}{% if bstock is not none and bstock <= 0 %} (Out of stock){% endif %}</option>
+                        {% endfor %}
                     </select>
                 </div>
                 {% elif product.size %}
@@ -450,7 +451,8 @@ document.addEventListener('DOMContentLoaded', function () {
 
     /* ── Cart logic ── */
     function getSize(container) {
-        const s = container.querySelector('.size-select');
+        const card = container.closest('.product-card') || container;
+        const s = card.querySelector('.size-select');
         return s ? s.value : 'Standard';
     }
     function updateCartCount(data) {

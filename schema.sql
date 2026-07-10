@@ -66,6 +66,17 @@ CREATE TABLE IF NOT EXISTS quotes (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
+    -- Per-size stock for bangles: each master SKU gets 3 size variants (2.4/2.6/2.8)
+    CREATE TABLE IF NOT EXISTS product_variants (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        master_sku TEXT NOT NULL,
+        variant_sku TEXT NOT NULL UNIQUE,
+        size TEXT NOT NULL,
+        stock_total INTEGER DEFAULT 0,
+        stock_alert_threshold INTEGER DEFAULT 5,
+        UNIQUE(master_sku, size)
+    );
+
     -- Orders table for retail order placement and shipment tracking
     CREATE TABLE IF NOT EXISTS orders (
         id INTEGER PRIMARY KEY AUTOINCREMENT,

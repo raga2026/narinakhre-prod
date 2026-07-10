@@ -377,6 +377,15 @@ def initialize_database_if_needed():
             usage_limit INTEGER DEFAULT 0,
             times_used INTEGER DEFAULT 0,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )''',
+        '''CREATE TABLE IF NOT EXISTS product_variants (
+            id BIGSERIAL PRIMARY KEY,
+            master_sku TEXT NOT NULL,
+            variant_sku TEXT NOT NULL UNIQUE,
+            size TEXT NOT NULL,
+            stock_total INTEGER DEFAULT 0,
+            stock_alert_threshold INTEGER DEFAULT 5,
+            UNIQUE(master_sku, size)
         )'''
     ]
     client = get_supabase()
@@ -863,6 +872,52 @@ def get_product_tiers(p_dict):
     return tiers if tiers else [{'qty': 1, 'price': 0}]
 
 
+BANGLE_SIZES = ['2.4', '2.6', '2.8']
+
+
+def is_bangle_product(p_dict):
+    """Same detection rule used in templates: category/sub_category/name mentions 'bangle'."""
+    for field in ('category', 'sub_category', 'name'):
+        val = (p_dict.get(field) or '').lower()
+        if 'bangle' in val:
+            return True
+    return False
+
+
+def get_variant_sku(master_sku, size):
+    return f"{master_sku}-{size.replace('.', '')}"
+
+
+def get_bangle_size_stock(db, master_sku):
+    """
+    Return {size: stock_total} for a bangle's per-size variants.
+    On first call for a given master SKU (no variant rows yet), lazily creates the
+    3 size variants by splitting the product's current total stock evenly across
+    2.4/2.6/2.8 — so no separate one-off migration is needed for existing products.
+    """
+    rows = db.execute(
+        'SELECT size, stock_total FROM product_variants WHERE master_sku=?', (master_sku,)
+    ).fetchall()
+    if rows:
+        return {r['size']: (r['stock_total'] or 0) for r in rows}
+
+    prod = db.execute('SELECT stock_total FROM products WHERE sku=?', (master_sku,)).fetchone()
+    total = (prod['stock_total'] or 0) if prod else 0
+    base, remainder = divmod(total, len(BANGLE_SIZES))
+    size_map = {}
+    for i, size in enumerate(BANGLE_SIZES):
+        stock = base + (1 if i < remainder else 0)
+        variant_sku = get_variant_sku(master_sku, size)
+        db.execute(
+            'INSERT INTO product_variants (master_sku, variant_sku, size, stock_total) '
+            'VALUES (?, ?, ?, ?) ON CONFLICT (master_sku, size) DO NOTHING',
+            (master_sku, variant_sku, size, stock)
+        )
+        size_map[size] = stock
+    db.commit()
+    return size_map
+
+
 def get_random_hero_images(db, count=4):
     """Pick random product images from Supabase for hero banners."""
     rows = db.execute(
@@ -940,6 +995,8 @@ def index():
             p_dict = dict(p)
             p_dict['images'] = get_product_images(p_dict)
             p_dict['tiers'] = get_product_tiers(p_dict)
+            if is_bangle_product(p_dict):
+                p_dict['size_stock'] = get_bangle_size_stock(db, p_dict['sku'])
             grouped_products[cat].append(p_dict)
 
         # Sort by total number of products in category (not just in-stock)
@@ -1015,6 +1072,8 @@ def category_products(category):
         p_dict = dict(p)
         p_dict['images'] = get_product_images(p_dict)
         p_dict['tiers'] = get_product_tiers(p_dict)
+        if is_bangle_product(p_dict):
+            p_dict['size_stock'] = get_bangle_size_stock(db, p_dict['sku'])
         products.append(p_dict)
     return render_site('category_products.html', category=category, products=products)
 
@@ -1033,6 +1092,8 @@ def product_detail(product_id):
     p_dict = dict(product)
     image_urls = get_product_images(p_dict)
     p_dict['tiers'] = get_product_tiers(p_dict)
+    if is_bangle_product(p_dict):
+        p_dict['size_stock'] = get_bangle_size_stock(db, p_dict['sku'])
 
     related = db.execute(
         'SELECT * FROM products WHERE id != ? ORDER BY RANDOM() LIMIT 4',
@@ -1042,6 +1103,8 @@ def product_detail(product_id):
     for r in related:
         r_dict = dict(r)
         r_dict['images'] = get_product_images(r_dict)
+        if is_bangle_product(r_dict):
+            r_dict['size_stock'] = get_bangle_size_stock(db, r_dict['sku'])
         related_products.append(r_dict)
     return render_site('product_detail.html', product=p_dict, image_urls=image_urls, related_products=related_products)
 
@@ -1091,7 +1154,11 @@ def update_cart():
     cart_key = f"{sku}_{size}"
     if qty > 0:
         db = get_db()
-        p = db.execute('SELECT name FROM products WHERE sku = ?', (sku,)).fetchone()
+        p = db.execute('SELECT name, category, sub_category FROM products WHERE sku = ?', (sku,)).fetchone()
+        if p and is_bangle_product(dict(p)) and size:
+            size_stock = get_bangle_size_stock(db, sku)
+            if size_stock and size_stock.get(size, 0) <= 0:
+                return jsonify({'status': 'error', 'message': f'Size {size} is out of stock for this product.'}), 409
         cart[cart_key] = {
             'sku': sku,
             'name': p['name'] if p else sku,
@@ -1124,10 +1191,16 @@ def checkout():
             item_dict['units'] = item_dict.get('qty', 1)
         # Check live stock from DB
         sku = item_dict.get('sku', '')
-        live = db.execute('SELECT stock_total, name, image_field FROM products WHERE sku=?', (sku,)).fetchone()
+        live = db.execute('SELECT stock_total, name, image_field, category, sub_category FROM products WHERE sku=?', (sku,)).fetchone()
         if live:
-            item_dict['stock_total'] = live['stock_total'] or 0
-            item_dict['is_out_of_stock'] = (live['stock_total'] or 0) == 0
+            item_size = item_dict.get('size') or ''
+            if item_size and is_bangle_product(dict(live)):
+                size_stock = get_bangle_size_stock(db, sku)
+                effective_stock = size_stock.get(item_size, 0) if size_stock else (live['stock_total'] or 0)
+            else:
+                effective_stock = live['stock_total'] or 0
+            item_dict['stock_total'] = effective_stock
+            item_dict['is_out_of_stock'] = effective_stock == 0
             if item_dict['is_out_of_stock']:
                 out_of_stock_items.append(item_dict.get('name') or live['name'] or sku)
             # Get image
@@ -2069,9 +2142,17 @@ def clear_oos_items():
         if not sku:
             continue
         row = db.execute(
-            'SELECT stock_total FROM products WHERE sku=?', (sku,)
+            'SELECT stock_total, category, sub_category, name FROM products WHERE sku=?', (sku,)
         ).fetchone()
-        if row and (row['stock_total'] or 0) == 0:
+        if not row:
+            continue
+        item_size = item.get('size') or ''
+        if item_size and is_bangle_product(dict(row)):
+            size_stock = get_bangle_size_stock(db, sku)
+            effective_stock = size_stock.get(item_size, 0) if size_stock else (row['stock_total'] or 0)
+        else:
+            effective_stock = row['stock_total'] or 0
+        if effective_stock == 0:
             to_remove.append(key)
     for key in to_remove:
         cart.pop(key, None)
@@ -2329,11 +2410,28 @@ def admin_edit_product_details():
         name = request.form.get('name', '').strip()
         retail_price = request.form.get('retail_price', 0)
         mrp_price = request.form.get('mrp_price', 0)
-        stock_total = int(request.form.get('stock_total', 0) or 0)
         stock_alert_threshold = int(request.form.get('stock_alert_threshold', 5) or 5)
         category = request.form.get('category', '').strip()
         material = request.form.get('material', '').strip()
         slug = request.form.get('slug', '').strip()
+
+        is_bangle_row = 'bangle_size_stock' in request.form
+        if is_bangle_row:
+            stock_total = 0
+            for size in BANGLE_SIZES:
+                field = 'stock_' + size.replace('.', '_')
+                size_stock = int(request.form.get(field, 0) or 0)
+                stock_total += size_stock
+                variant_sku = get_variant_sku(sku, size)
+                db.execute(
+                    'INSERT INTO product_variants (master_sku, variant_sku, size, stock_total) '
+                    'VALUES (?, ?, ?, ?) ON CONFLICT (master_sku, size) '
+                    'DO UPDATE SET stock_total=EXCLUDED.stock_total',
+                    (sku, variant_sku, size, size_stock)
+                )
+        else:
+            stock_total = int(request.form.get('stock_total', 0) or 0)
+
         db.execute(
             '''UPDATE products SET name=?, retail_price=?, mrp_price=?,
                stock_total=?, stock_alert_threshold=?, category=?, material=?, slug=? WHERE sku=?''',
@@ -2360,7 +2458,13 @@ def admin_edit_product_details():
         else:
             flash(f'Product {sku} updated successfully.')
         return redirect(url_for('admin_edit_product_details'))
-    products = db.execute('SELECT * FROM products ORDER BY sku').fetchall()
+    raw_products = db.execute('SELECT * FROM products ORDER BY sku').fetchall()
+    products = []
+    for p in raw_products:
+        p_dict = dict(p)
+        if is_bangle_product(p_dict):
+            p_dict['size_stock'] = get_bangle_size_stock(db, p_dict['sku'])
+        products.append(p_dict)
     return render_template('admin/admin_edit_product_details.html', products=products)
 
 

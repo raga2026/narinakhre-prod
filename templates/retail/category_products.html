@@ -45,9 +45,10 @@
         <div class="w-full mb-2">
             <label for="size-{{ product.sku }}" class="block text-xs font-semibold text-rose-500 mb-1 ml-1">Size</label>
             <select class="input-field size-select w-full" style="font-size:0.95rem;" id="size-{{ product.sku }}">
-                <option value="2.4" selected>2.4</option>
-                <option value="2.6">2.6</option>
-                <option value="2.8">2.8</option>
+                {% for bsize in ['2.4', '2.6', '2.8'] %}
+                {%- set bstock = product.size_stock.get(bsize, 0) if product.size_stock else None -%}
+                <option value="{{ bsize }}" {% if loop.first %}selected{% endif %} {% if bstock is not none and bstock <= 0 %}disabled{% endif %}>{{ bsize }}{% if bstock is not none and bstock <= 0 %} (Out of stock){% endif %}</option>
+                {% endfor %}
             </select>
         </div>
         {% elif product.size %}
@@ -79,8 +80,7 @@
                 <button class="add-to-cart-btn w-full py-2 font-bold rounded-full transition-all duration-200 text-sm"
                     data-sku="{{product.sku}}" data-price="{{product.price1}}" data-name="{{product.name}}"
                     style="background:white; border:2px solid #be185d; color:#be185d;"
-                    onmouseenter="this.style.background='#fff1f2'" onmouseleave="this.style.background='white'"
-                    onclick="retailAddToCart(this)">
+                    onmouseenter="this.style.background='#fff1f2'" onmouseleave="this.style.background='white'">
                     🛒 Add to Cart
                 </button>
                 <!-- Unit Counter (hidden by default, replaces Add to Cart) -->
@@ -93,8 +93,7 @@
                 <button class="buy-now-btn w-full py-2 font-bold rounded-full transition-all duration-200 text-sm mt-1"
                     data-sku="{{product.sku}}" data-price="{{product.price1}}" data-name="{{product.name}}"
                     style="background:linear-gradient(135deg,#be185d 0%,#f472b6 100%); border:none; color:#fff; box-shadow:0 3px 10px rgba(190,24,93,0.25);"
-                    onmouseenter="this.style.opacity='0.9'" onmouseleave="this.style.opacity='1'"
-                    onclick="retailBuyNow(this)">
+                    onmouseenter="this.style.opacity='0.9'" onmouseleave="this.style.opacity='1'">
                     ⚡ Buy Now
                 </button>
                 {% else %}
@@ -158,7 +157,8 @@ document.addEventListener('DOMContentLoaded', function() {
 
     // --- Retail Cart UI Logic ---
     function getSize(container) {
-        const sizeSel = container.querySelector('.size-select');
+        const card = container.closest('.product-card') || container;
+        const sizeSel = card.querySelector('.size-select');
         return sizeSel ? sizeSel.value : '';
     }
     function getQty(container) {

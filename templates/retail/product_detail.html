@@ -202,7 +202,10 @@
       <div class="mb-3">
         <label class="block text-xs font-bold text-rose-500 mb-1 uppercase">Size</label>
         <select id="size-main" class="size-select w-full p-2.5 border-2 border-rose-100 rounded-xl bg-white font-semibold text-sm focus:border-rose-400 outline-none">
-          <option value="2.4">2.4</option><option value="2.6">2.6</option><option value="2.8">2.8</option>
+          {% for bsize in ['2.4', '2.6', '2.8'] %}
+          {%- set bstock = product.size_stock.get(bsize, 0) if product.size_stock else None -%}
+          <option value="{{ bsize }}" {% if bstock is not none and bstock <= 0 %}disabled{% endif %}>{{ bsize }}{% if bstock is not none and bstock <= 0 %} (Out of stock){% endif %}</option>
+          {% endfor %}
         </select>
       </div>
       {% elif product.size %}
