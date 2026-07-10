@@ -154,7 +154,7 @@
 <header class="site-header">
     <div class="header-inner">
         <a href="/retail" class="site-logo">
-            <img src="/static/assets/logo.png" alt="Nari Nakhre">
+            <img src="https://eopqwvssznmxfxrfzqbx.supabase.co/storage/v1/object/public/products/site/logo.png" alt="Nari Nakhre">
             <span>Nari Nakhre</span>
         </a>
         <!-- Desktop search bar -->
@@ -254,9 +254,9 @@
         <a href="/retail/contact">Contact Us</a>
     </div>
     <div class="footer-social" style="text-align:center;margin-bottom:12px;">
-        <a href="https://fb.com/narinakhre" target="_blank"><img src="/static/assets/facebook-logo.png" alt="Facebook" style="display:inline;height:26px;vertical-align:middle;margin:0 4px;"></a>
-        <a href="https://instagram.com/narinakhre" target="_blank"><img src="/static/assets/instagram-logo.jpg" alt="Instagram" style="display:inline;height:26px;vertical-align:middle;margin:0 4px;"></a>
-        <a href="https://youtube.com/narinakhre" target="_blank"><img src="/static/assets/youtube-logo.png" alt="YouTube" style="display:inline;height:26px;vertical-align:middle;margin:0 4px;"></a>
+        <a href="https://fb.com/narinakhre" target="_blank"><img src="https://eopqwvssznmxfxrfzqbx.supabase.co/storage/v1/object/public/products/site/facebook-logo.png" alt="Facebook" style="display:inline;height:26px;vertical-align:middle;margin:0 4px;"></a>
+        <a href="https://instagram.com/narinakhre" target="_blank"><img src="https://eopqwvssznmxfxrfzqbx.supabase.co/storage/v1/object/public/products/site/instagram-logo.jpg" alt="Instagram" style="display:inline;height:26px;vertical-align:middle;margin:0 4px;"></a>
+        <a href="https://youtube.com/narinakhre" target="_blank"><img src="https://eopqwvssznmxfxrfzqbx.supabase.co/storage/v1/object/public/products/site/youtube-logo.png" alt="YouTube" style="display:inline;height:26px;vertical-align:middle;margin:0 4px;"></a>
     </div>
     <div class="footer-copy">
         <div>Nari Nakhre &copy; 2026. All Rights Reserved.</div>
@@ -342,7 +342,7 @@ function renderDropdown(data, dropdown, q) {
         products.forEach(p => {
             const img = p.image
                 ? '<img src="' + escHtml(p.image) + '" alt="" onerror="this.src=\'/static/assets/logo.png\'">'
-                : '<img src="/static/assets/logo.png" alt="">';
+                : '<img src="https://eopqwvssznmxfxrfzqbx.supabase.co/storage/v1/object/public/products/site/logo.png" alt="">';
             const disc = p.discount ? '<span style="font-size:0.68rem;color:#16a34a;font-weight:800;margin-left:4px;">' + p.discount + '% off</span>' : '';
             const mrp  = p.mrp && p.mrp > p.price
                 ? '<span style="font-size:0.7rem;text-decoration:line-through;color:#9f9f9f;margin-right:4px;">₹' + Math.round(p.mrp) + '</span>'

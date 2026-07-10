@@ -148,7 +148,7 @@
           <img src="{{ url_for('static', filename='assets/share.svg') }}" alt="Share" style="width:18px;height:18px;">
         </button>
         <button class="pd-nav-btn pd-nav-prev" onclick="pdNav(-1)">&#10094;</button>
-        <img id="pd-main" src="{{ image_urls[0] if image_urls else url_for('static', filename='assets/logo.png') }}"
+        <img id="pd-main" src="{{ image_urls[0] if image_urls else 'https://eopqwvssznmxfxrfzqbx.supabase.co/storage/v1/object/public/products/site/logo.png' }}"
              alt="{{ product.name }}"
              onclick="pdOpenLightbox(pdIdx)"
              onerror="this.onerror=null;this.src='{{ url_for('static', filename='assets/logo.png') }}'">
@@ -251,7 +251,7 @@
       {% for rel in related_products %}
       <div class="pd-rel-card">
         <a href="/retail/product/{{ rel.id }}">
-          <img src="{{ rel.images[0] if rel.images and rel.images|length > 0 else url_for('static', filename='assets/logo.png') }}"
+          <img src="{{ rel.images[0] if rel.images and rel.images|length > 0 else 'https://eopqwvssznmxfxrfzqbx.supabase.co/storage/v1/object/public/products/site/logo.png' }}"
                alt="{{ rel.name }}"
                onerror="this.src='{{ url_for('static', filename='assets/logo.png') }}'">
         </a>

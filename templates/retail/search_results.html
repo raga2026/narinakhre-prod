@@ -36,7 +36,7 @@
            style="background:white;border-radius:16px;border:1px solid #f3f4f6;overflow:hidden;text-decoration:none;display:block;transition:box-shadow 0.15s;"
            onmouseover="this.style.boxShadow='0 4px 16px rgba(0,0,0,0.1)'"
            onmouseout="this.style.boxShadow='none'">
-            <img src="{{ img or url_for('static', filename='assets/logo.png') }}"
+            <img src="{{ img or 'https://eopqwvssznmxfxrfzqbx.supabase.co/storage/v1/object/public/products/site/logo.png' }}"
                  alt="{{ p.name }}"
                  onerror="this.src='{{ url_for('static', filename='assets/logo.png') }}'"
                  style="width:100%;aspect-ratio:1;object-fit:contain;background:#fdf2f8;padding:8px;">

@@ -253,7 +253,7 @@
         {%- set img_src = item.image_url if item.image_url and item.image_url.startswith('http') else '' -%}
         <div class="ck-item" data-sku="{{ item.sku }}" data-size="{{ item.size }}" data-price="{{ item.price }}">
           <img class="ck-item-img"
-               src="{{ img_src or url_for('static', filename='assets/logo.png') }}"
+               src="{{ img_src or 'https://eopqwvssznmxfxrfzqbx.supabase.co/storage/v1/object/public/products/site/logo.png' }}"
                alt="{{ item.name }}"
                onerror="this.onerror=null;this.src='{{ url_for('static', filename='assets/logo.png') }}'">
           <div class="ck-item-right">
@@ -680,7 +680,7 @@ document.getElementById('ck-form').addEventListener('submit', async function(e){
             currency: orderData.currency || 'INR',
             name: 'Nari Nakhre',
             description: 'Jewellery Order',
-            image: '/static/assets/logo.png',
+            image: 'https://eopqwvssznmxfxrfzqbx.supabase.co/storage/v1/object/public/products/site/logo.png',
             order_id: orderData.order_id,
             prefill: {name, email, contact:phone},
             theme: {color:'#be185d'},

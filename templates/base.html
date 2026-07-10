@@ -15,7 +15,7 @@
     <!-- Default OG tags — overridden per page -->
     <meta property="og:site_name" content="Nari Nakhre">
     <meta property="og:locale" content="en_IN">
-    <meta property="og:image" content="{{ request.url_root }}static/assets/logo.png">
+    <meta property="og:image" content="https://eopqwvssznmxfxrfzqbx.supabase.co/storage/v1/object/public/products/site/logo.png">
     <meta property="og:image:width" content="512">
     <meta property="og:image:height" content="512">
     <meta name="twitter:card" content="summary_large_image">
@@ -42,7 +42,18 @@
 </head>
 <body class="flex flex-col min-h-screen {% block body_class %}{% endblock %}">
 
-{% block header %}{% endblock %}
+
+    
+        
+    
+    
+    
+    
+    
+    
+        
+        
+    {% block header %}{% endblock %}
 
 <main class="{% block main_class %}flex-grow{% endblock %}">
     {% block content %}{% endblock %}
