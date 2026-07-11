@@ -181,12 +181,13 @@
             </div>
         </div>
 
-        <div class="section-title">Product Image</div>
+        <div class="section-title">Product Images</div>
         <div class="form-grid">
             <div class="form-group full">
-                <label for="image">Upload Product Image</label>
-                <input type="file" id="image" name="image" accept="image/*">
-                <span class="hint">Image will be automatically compressed to WebP and uploaded to Supabase. You can add more images later via Manage Images.</span>
+                <label for="images">Upload Product Images <span style="color:#f43f5e">*</span></label>
+                <input type="file" id="images" name="images" accept="image/*" multiple required>
+                <span class="hint">Upload up to 5 images — at least 1 is required. The first image becomes the main listing photo. Images are automatically compressed to WebP and uploaded to Supabase. You can add or replace more later via Manage Images.</span>
+                <span id="img-count" class="hint"></span>
             </div>
         </div>
 
@@ -219,6 +220,28 @@
                 alert('Please add at least 4 key features, one per line.');
             }
         });
+    })();
+
+    (function() {
+        var imgField = document.getElementById('images');
+        var imgCount = document.getElementById('img-count');
+        var MAX_IMAGES = 5;
+
+        function updateCount() {
+            var n = imgField.files.length;
+            imgCount.textContent = n + ' image' + (n === 1 ? '' : 's') + ' selected' + (n === 0 ? ' — at least 1 required' : '');
+            imgCount.style.color = n === 0 ? '#f43f5e' : '#4ade80';
+        }
+        imgField.addEventListener('change', function() {
+            if (imgField.files.length > MAX_IMAGES && typeof DataTransfer !== 'undefined') {
+                var dt = new DataTransfer();
+                for (var i = 0; i < MAX_IMAGES; i++) dt.items.add(imgField.files[i]);
+                imgField.files = dt.files;
+                alert('Maximum ' + MAX_IMAGES + ' images allowed. Only the first ' + MAX_IMAGES + ' selected files were kept.');
+            }
+            updateCount();
+        });
+        updateCount();
     })();
 </script>
 {% endblock %}

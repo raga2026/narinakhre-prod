@@ -2577,16 +2577,21 @@ def admin_add_product():
             flash('Please add at least 4 key features (one per line).')
             return redirect(url_for('admin_add_product'))
 
+        image_files = [f for f in request.files.getlist('images') if f and f.filename][:5]
+        if not image_files:
+            flash('At least one product image is required.')
+            return redirect(url_for('admin_add_product'))
+
         existing = db.execute('SELECT id FROM products WHERE sku=?', (sku,)).fetchone()
         if existing:
             flash(f'A product with SKU {sku} already exists.')
             return redirect(url_for('admin_add_product'))
 
         image_url = None
-        image_file = request.files.get('image')
-        if image_file and image_file.filename:
-            filename = f"{sku}_1.webp"
-            image_url = upload_image_to_supabase(image_file, filename)
+        for idx, image_file in enumerate(image_files, start=1):
+            uploaded_url = upload_image_to_supabase(image_file, f"{sku}_{idx}.webp")
+            if idx == 1:
+                image_url = uploaded_url
 
         db.execute(
             '''INSERT INTO products
