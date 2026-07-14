@@ -9,3 +9,4 @@ pandas
 openpyxl
 Pillow
 python-dotenv
+Authlib>=1.3

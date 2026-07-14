@@ -835,6 +835,11 @@ def render_site(template_name, **kwargs):
     kwargs['categories'] = categories
     return render_template(f"{site_type}/{template_name}", **kwargs)
 
+@app.route('/terms')
+def terms():
+    """Combined Terms & Conditions / Privacy Policy page, shared by retail and wholesale."""
+    return render_site('terms.html')
+
 # --- IMAGE HELPERS ---
 def get_supabase_image_urls(sku):
     """Build Supabase image URLs for a SKU — _1 through _9."""
