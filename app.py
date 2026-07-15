@@ -836,8 +836,12 @@ def render_site(template_name, **kwargs):
     return render_template(f"{site_type}/{template_name}", **kwargs)
 
 @app.route('/terms')
+@app.route('/privacy')
+@app.route('/privacy-policy')
 def terms():
-    """Combined Terms & Conditions / Privacy Policy page, shared by retail and wholesale."""
+    """Combined Terms & Conditions / Privacy Policy page, shared by retail and wholesale.
+    Also served at /privacy and /privacy-policy so it resolves regardless of which
+    URL is registered as the Privacy Policy link on the Google OAuth consent screen."""
     return render_site('terms.html')
 
 # --- IMAGE HELPERS ---
