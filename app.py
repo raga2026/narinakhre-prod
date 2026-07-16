@@ -8,6 +8,7 @@ import smtplib
 import requests
 import razorpay
 import pyotp
+from authlib.integrations.flask_client import OAuth
 from datetime import datetime
 from functools import wraps
 from email.mime.multipart import MIMEMultipart
@@ -99,6 +100,17 @@ ADMIN_USERNAME = os.environ.get('ADMIN_USERNAME', '')
 ADMIN_PASSWORD = os.environ.get('ADMIN_PASSWORD', '')
 ADMIN_TOTP_SECRET = os.environ.get('ADMIN_TOTP_SECRET', '')
 razorpay_client = razorpay.Client(auth=(os.environ.get("RAZORPAY_KEY_ID"), os.environ.get("RAZORPAY_KEY_SECRET")))
+
+GOOGLE_CLIENT_ID = os.environ.get('GOOGLE_CLIENT_ID', '')
+GOOGLE_CLIENT_SECRET = os.environ.get('GOOGLE_CLIENT_SECRET', '')
+oauth = OAuth(app)
+oauth.register(
+    name='google',
+    client_id=GOOGLE_CLIENT_ID,
+    client_secret=GOOGLE_CLIENT_SECRET,
+    server_metadata_url='https://accounts.google.com/.well-known/openid-configuration',
+    client_kwargs={'scope': 'openid email profile'},
+)
 
 
 def upload_image_to_supabase(file_storage_object, filename):
@@ -400,6 +412,13 @@ def initialize_database_if_needed():
     # they can be applied to tables that already existed pre-migration.
     alter_sql = [
         'ALTER TABLE products ADD COLUMN IF NOT EXISTS key_features TEXT',
+        'ALTER TABLE users ADD COLUMN IF NOT EXISTS google_sub TEXT UNIQUE',
+        'ALTER TABLE users ADD COLUMN IF NOT EXISTS name TEXT',
+        'ALTER TABLE users ADD COLUMN IF NOT EXISTS email TEXT',
+        'ALTER TABLE users ADD COLUMN IF NOT EXISTS picture_url TEXT',
+        'ALTER TABLE users ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP',
+        'ALTER TABLE quotes ADD COLUMN IF NOT EXISTS user_id BIGINT REFERENCES users(id)',
+        'ALTER TABLE order_shipping ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP',
     ]
     for sql in alter_sql:
         try:
@@ -764,8 +783,8 @@ def wholesale_contact():
 
         db_conn = get_db()
         db_conn.execute(
-            'INSERT INTO quotes (request_id, name, whatsapp, email, items_json, total_amount) VALUES (?, ?, ?, ?, ?, ?)',
-            (request_id, name, whatsapp, email, quote_payload, None),
+            'INSERT INTO quotes (request_id, name, whatsapp, email, items_json, total_amount, user_id) VALUES (?, ?, ?, ?, ?, ?, ?)',
+            (request_id, name, whatsapp, email, quote_payload, None, session.get('user_id')),
         )
         db_conn.commit()
 
@@ -843,6 +862,92 @@ def terms():
     Also served at /privacy and /privacy-policy so it resolves regardless of which
     URL is registered as the Privacy Policy link on the Google OAuth consent screen."""
     return render_site('terms.html')
+
+@app.context_processor
+def inject_logged_in_user():
+    if not session.get('user_id'):
+        return {'logged_in_user': None}
+    return {'logged_in_user': {'name': session.get('user_name'), 'email': session.get('user_email')}}
+
+@app.route('/auth/google/login')
+def google_login():
+    site_home = '/wholesale' if g.site_type == 'wholesale' else '/retail'
+    session['post_login_redirect'] = request.referrer or site_home
+    return oauth.google.authorize_redirect(url_for('google_callback', _external=True))
+
+@app.route('/auth/google/callback')
+def google_callback():
+    site_home = '/wholesale' if g.site_type == 'wholesale' else '/retail'
+    try:
+        token = oauth.google.authorize_access_token()
+    except Exception as e:
+        app.logger.warning(f'Google OAuth callback failed: {e}')
+        flash('Sign-in was cancelled or failed. Please try again.', 'error')
+        return redirect(session.pop('post_login_redirect', site_home))
+    userinfo = token.get('userinfo') or {}
+    google_sub = userinfo.get('sub')
+    name = userinfo.get('name') or ''
+    email = userinfo.get('email') or ''
+    picture = userinfo.get('picture') or ''
+
+    if not google_sub:
+        app.logger.warning('Google callback missing sub claim; aborting login.')
+        return redirect(session.pop('post_login_redirect', url_for('index')))
+
+    db_conn = get_db()
+    existing = db_conn.execute('SELECT id FROM users WHERE google_sub=?', (google_sub,)).fetchone()
+    if existing:
+        db_conn.execute(
+            'UPDATE users SET name=?, email=?, picture_url=? WHERE google_sub=?',
+            (name, email, picture, google_sub),
+        )
+    else:
+        db_conn.execute(
+            'INSERT INTO users (google_sub, name, email, picture_url) VALUES (?,?,?,?)',
+            (google_sub, name, email, picture),
+        )
+    db_conn.commit()
+    user_row = db_conn.execute('SELECT id FROM users WHERE google_sub=?', (google_sub,)).fetchone()
+
+    session['user_id'] = user_row['id']
+    session['user_name'] = name
+    session['user_email'] = email
+
+    return redirect(session.pop('post_login_redirect', '/'))
+
+@app.route('/auth/logout')
+def logout():
+    session.pop('user_id', None)
+    session.pop('user_name', None)
+    session.pop('user_email', None)
+    site_home = '/wholesale' if g.site_type == 'wholesale' else '/retail'
+    return redirect(request.referrer or site_home)
+
+@app.route('/my-orders')
+def my_orders():
+    if g.site_type != 'retail':
+        return redirect('/')
+    if not session.get('user_id'):
+        return redirect(url_for('google_login'))
+    db_conn = get_db()
+    orders = db_conn.execute(
+        'SELECT * FROM order_shipping WHERE user_id=? ORDER BY created_at DESC',
+        (session['user_id'],),
+    ).fetchall()
+    return render_site('orders.html', orders=orders)
+
+@app.route('/my-quotes')
+def my_quotes():
+    if g.site_type != 'wholesale':
+        return redirect('/')
+    if not session.get('user_id'):
+        return redirect(url_for('google_login'))
+    db_conn = get_db()
+    quotes = db_conn.execute(
+        'SELECT * FROM quotes WHERE user_id=? ORDER BY created_at DESC',
+        (session['user_id'],),
+    ).fetchall()
+    return render_site('history.html', quotes=quotes)
 
 # --- IMAGE HELPERS ---
 def get_supabase_image_urls(sku):

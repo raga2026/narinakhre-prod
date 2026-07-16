@@ -89,6 +89,12 @@
                 <div class="ws-search-dropdown" id="ws-search-dropdown"></div>
             </div>
             <a href="{{ url_for('checkout') }}" class="ws-nav-pill active">📋 Request Quote</a>
+            {% if logged_in_user %}
+            <a href="{{ url_for('my_quotes') }}" class="ws-nav-pill">📄 My Quotes</a>
+            <a href="{{ url_for('logout') }}" class="ws-nav-pill">🚪 Sign Out</a>
+            {% else %}
+            <a href="{{ url_for('google_login') }}" class="ws-nav-pill">🔐 Sign in</a>
+            {% endif %}
         </nav>
     </div>
 </header>

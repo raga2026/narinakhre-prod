@@ -17,9 +17,9 @@
             </thead>
             <tbody class="text-slate-200">
                 {% for q in quotes %}
-                {% set cart = q['cart_json'] | safe | from_json %}
-                {% set total_items = cart|length %}
-                {% set total_price = cart | map(attribute='Fixed_Price') | sum %}
+                {% set cart = q['items_json'] | fromjson %}
+                {% set total_items = cart|length if cart is iterable and cart is not mapping else 1 %}
+                {% set total_price = q['total_amount'] or 0 %}
                 <tr class="border-b border-slate-700/50">
                     <td class="py-4">{{ q['created_at'] }}</td>
                     <td class="py-4">{{ q['id'] }}</td>

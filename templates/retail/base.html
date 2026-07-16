@@ -182,6 +182,17 @@
                 Cart <span id="cart-count" class="cart-count">{{ session.get('cart', {})|length }}</span>
             </a>
             <a href="/retail/contact">Contact Us</a>
+            {% if logged_in_user %}
+            <div class="cat-dropdown">
+                <button class="cat-dropdown-btn">Hi, {{ (logged_in_user.name or 'Account').split(' ')[0] }} ▾</button>
+                <div class="cat-menu">
+                    <a href="{{ url_for('my_orders') }}">My Orders</a>
+                    <a href="{{ url_for('logout') }}">Sign Out</a>
+                </div>
+            </div>
+            {% else %}
+            <a href="{{ url_for('google_login') }}">Sign in</a>
+            {% endif %}
         </nav>
         <!-- Categories pill — visible on mobile beside cart -->
         <div class="mobile-cat-pill" style="position:relative;">
@@ -225,6 +236,12 @@
             Cart <span id="cart-count-mobile" style="background:#be185d;color:white;border-radius:50%;padding:1px 6px;font-size:11px;">{{ session.get('cart', {})|length }}</span>
         </a>
         <a href="/retail/contact">Contact Us</a>
+        {% if logged_in_user %}
+        <a href="{{ url_for('my_orders') }}">My Orders</a>
+        <a href="{{ url_for('logout') }}">Sign Out</a>
+        {% else %}
+        <a href="{{ url_for('google_login') }}">Sign in with Google</a>
+        {% endif %}
     </nav>
     <div class="pincode-bar">
         <input id="pincode-input" type="text" placeholder="Enter Pincode">
