@@ -413,6 +413,8 @@ def initialize_database_if_needed():
         'ALTER TABLE users ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP',
         'ALTER TABLE quotes ADD COLUMN IF NOT EXISTS user_id BIGINT REFERENCES users(id)',
         'ALTER TABLE order_shipping ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP',
+        'ALTER TABLE users ADD COLUMN IF NOT EXISTS referral_code TEXT UNIQUE',
+        'ALTER TABLE users ADD COLUMN IF NOT EXISTS referred_by BIGINT REFERENCES users(id)',
     ]
     for sql in alter_sql:
         try:
@@ -863,10 +865,26 @@ def inject_logged_in_user():
         return {'logged_in_user': None}
     return {'logged_in_user': {'name': session.get('user_name'), 'email': session.get('user_email')}}
 
+def generate_referral_code(db_conn):
+    """8-char, human-typeable, collision-checked referral code."""
+    import random
+    import string
+    alphabet = string.ascii_uppercase + string.digits
+    for _ in range(10):
+        code = ''.join(random.choices(alphabet, k=8))
+        if not db_conn.execute('SELECT id FROM users WHERE referral_code=?', (code,)).fetchone():
+            return code
+    # Astronomically unlikely, but never loop forever
+    return ''.join(random.choices(alphabet, k=12))
+
+
 @app.route('/auth/google/login')
 def google_login():
     site_home = '/wholesale' if g.site_type == 'wholesale' else '/retail'
     session['post_login_redirect'] = request.referrer or site_home
+    ref_code = (request.args.get('ref') or '').strip()
+    if ref_code:
+        session['pending_referral_code'] = ref_code
     # redirect_uri is built per-request (not a fixed APP_BASE_URL env var)
     # because this one Flask app serves four different domains
     # (narinakhre.com, wholesale.narinakhre.com, and the two test-* hosts);
@@ -903,9 +921,18 @@ def google_callback():
             (name, email, picture, google_sub),
         )
     else:
+        # New account -- assign a referral code, and credit whoever referred
+        # them, if a valid ?ref= code was carried through from google_login.
+        referred_by_id = None
+        pending_ref = session.pop('pending_referral_code', None)
+        if pending_ref:
+            referrer = db_conn.execute('SELECT id FROM users WHERE referral_code=?', (pending_ref,)).fetchone()
+            if referrer:
+                referred_by_id = referrer['id']
+        new_code = generate_referral_code(db_conn)
         db_conn.execute(
-            'INSERT INTO users (google_sub, name, email, picture_url) VALUES (?,?,?,?)',
-            (google_sub, name, email, picture),
+            'INSERT INTO users (google_sub, name, email, picture_url, referral_code, referred_by) VALUES (?,?,?,?,?,?)',
+            (google_sub, name, email, picture, new_code, referred_by_id),
         )
     db_conn.commit()
     user_row = db_conn.execute('SELECT id FROM users WHERE google_sub=?', (google_sub,)).fetchone()
@@ -924,18 +951,57 @@ def logout():
     site_home = '/wholesale' if g.site_type == 'wholesale' else '/retail'
     return redirect(request.referrer or site_home)
 
-@app.route('/my-orders')
-def my_orders():
+@app.route('/profile')
+def profile():
     if g.site_type != 'retail':
         return redirect('/')
     if not session.get('user_id'):
+        session['post_login_redirect'] = url_for('profile')
         return redirect(url_for('google_login'))
+
     db_conn = get_db()
+    user_id = session['user_id']
+    user_row = db_conn.execute('SELECT * FROM users WHERE id=?', (user_id,)).fetchone()
+
+    # Backfill a referral code for accounts created before this feature existed.
+    if user_row and not user_row['referral_code']:
+        new_code = generate_referral_code(db_conn)
+        db_conn.execute('UPDATE users SET referral_code=? WHERE id=?', (new_code, user_id))
+        db_conn.commit()
+        user_row = db_conn.execute('SELECT * FROM users WHERE id=?', (user_id,)).fetchone()
+
     orders = db_conn.execute(
         'SELECT * FROM order_shipping WHERE user_id=? ORDER BY created_at DESC',
-        (session['user_id'],),
+        (user_id,),
     ).fetchall()
-    return render_site('orders.html', orders=orders)
+
+    # "Money saved" = coupon/discount savings actually applied at checkout.
+    # This does not include MRP-vs-selling-price markdowns, which aren't
+    # captured per-order, so it's a conservative (understated), exact figure
+    # rather than an approximation.
+    total_saved = sum(float(o['discount_amount'] or 0) for o in orders)
+
+    referral_row = db_conn.execute(
+        'SELECT COUNT(*) as c FROM users WHERE referred_by=?', (user_id,)
+    ).fetchone()
+    referral_count = referral_row['c'] if referral_row else 0
+
+    referral_code = user_row['referral_code'] if user_row else ''
+    referral_link = f"{request.url_root.rstrip('/')}/retail?ref={referral_code}" if referral_code else ''
+
+    return render_site(
+        'profile.html',
+        user=user_row,
+        orders=orders,
+        total_saved=total_saved,
+        referral_code=referral_code,
+        referral_link=referral_link,
+        referral_count=referral_count,
+    )
+
+@app.route('/my-orders')
+def my_orders():
+    return redirect(url_for('profile'))
 
 @app.route('/my-quotes')
 def my_quotes():

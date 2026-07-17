@@ -186,7 +186,7 @@
             <div class="cat-dropdown">
                 <button class="cat-dropdown-btn">Hi, {{ (logged_in_user.name or 'Account').split(' ')[0] }} ▾</button>
                 <div class="cat-menu">
-                    <a href="{{ url_for('my_orders') }}">My Orders</a>
+                    <a href="{{ url_for('profile') }}">My Profile</a>
                     <a href="{{ url_for('logout') }}">Sign Out</a>
                 </div>
             </div>
@@ -237,7 +237,7 @@
         </a>
         <a href="/retail/contact">Contact Us</a>
         {% if logged_in_user %}
-        <a href="{{ url_for('my_orders') }}">My Orders</a>
+        <a href="{{ url_for('profile') }}">My Profile</a>
         <a href="{{ url_for('logout') }}">Sign Out</a>
         {% else %}
         <a href="{{ url_for('google_login') }}">Sign in with Google</a>

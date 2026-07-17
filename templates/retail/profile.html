@@ -1,0 +1,163 @@
+{% extends "retail/base.html" %}
+{% block title %}My Profile - Nari Nakhre{% endblock %}
+{% block content %}
+<style>
+    .profile-wrap { max-width: 960px; margin: 0 auto; padding: 32px 16px 60px; }
+    .profile-header {
+        display: flex; align-items: center; gap: 16px; margin-bottom: 24px;
+        background: linear-gradient(135deg, #fdf2f8, #fce7f3);
+        border-radius: 20px; padding: 20px; border: 1px solid #fbcfe8;
+    }
+    .profile-avatar {
+        width: 56px; height: 56px; border-radius: 50%; object-fit: cover;
+        border: 2px solid #fff; box-shadow: 0 2px 8px rgba(190,24,93,0.2); flex-shrink: 0;
+    }
+    .profile-avatar-fallback {
+        width: 56px; height: 56px; border-radius: 50%; flex-shrink: 0;
+        background: #be185d; color: #fff; display: flex; align-items: center; justify-content: center;
+        font-weight: 800; font-size: 1.3rem;
+    }
+    .profile-name { font-weight: 800; font-size: 1.15rem; color: #881337; }
+    .profile-email { font-size: 0.85rem; color: #6b7280; }
+    .profile-logout {
+        margin-left: auto; background: #fff; border: 1.5px solid #be185d; color: #be185d;
+        font-weight: 700; font-size: 0.8rem; padding: 8px 16px; border-radius: 999px;
+        text-decoration: none; white-space: nowrap;
+    }
+    .profile-logout:hover { background: #fff1f2; }
+
+    .stat-row { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; margin-bottom: 24px; }
+    .stat-card {
+        background: #fff; border: 1px solid #fce7f3; border-radius: 16px;
+        padding: 16px; text-align: center;
+    }
+    .stat-value { font-weight: 800; font-size: 1.4rem; color: #be185d; }
+    .stat-label { font-size: 0.72rem; color: #9ca3af; font-weight: 600; text-transform: uppercase; letter-spacing: 0.03em; margin-top: 2px; }
+
+    .referral-card {
+        background: #fff; border: 1px solid #fce7f3; border-radius: 16px;
+        padding: 18px 20px; margin-bottom: 28px;
+    }
+    .referral-title { font-weight: 800; color: #881337; font-size: 1rem; margin-bottom: 4px; }
+    .referral-sub { font-size: 0.8rem; color: #6b7280; margin-bottom: 14px; }
+    .referral-link-row { display: flex; gap: 8px; flex-wrap: wrap; }
+    .referral-link-input {
+        flex: 1; min-width: 200px; background: #fdf2f8; border: 1px solid #fbcfe8;
+        border-radius: 10px; padding: 9px 12px; font-size: 0.78rem; color: #881337;
+        font-family: monospace;
+    }
+    .referral-copy-btn {
+        background: #be185d; color: #fff; border: none; border-radius: 10px;
+        padding: 9px 18px; font-weight: 700; font-size: 0.8rem; cursor: pointer;
+    }
+    .referral-copy-btn:hover { background: #9f1239; }
+
+    .section-title { font-weight: 800; color: #881337; font-size: 1.05rem; margin-bottom: 12px; }
+
+    @media (min-width: 640px) {
+        .stat-row { grid-template-columns: repeat(3, 1fr); }
+    }
+</style>
+
+<div class="profile-wrap">
+    <div class="profile-header">
+        {% if user.picture_url %}
+        <img src="{{ user.picture_url }}" alt="" class="profile-avatar">
+        {% else %}
+        <div class="profile-avatar-fallback">{{ (user.name or user.email or '?')[0]|upper }}</div>
+        {% endif %}
+        <div>
+            <div class="profile-name">{{ user.name or 'Nari Nakhre Customer' }}</div>
+            <div class="profile-email">{{ user.email }}</div>
+        </div>
+        <a href="{{ url_for('logout') }}" class="profile-logout">Sign Out</a>
+    </div>
+
+    <div class="stat-row">
+        <div class="stat-card">
+            <div class="stat-value">₹{{ '%.0f'|format(total_saved) }}</div>
+            <div class="stat-label">Saved via coupons</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-value">{{ orders|length }}</div>
+            <div class="stat-label">Orders placed</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-value">{{ referral_count }}</div>
+            <div class="stat-label">Friends referred</div>
+        </div>
+    </div>
+
+    <div class="referral-card">
+        <div class="referral-title">🎁 Refer friends</div>
+        <div class="referral-sub">Share your link — anyone who signs in with it is counted as your referral.</div>
+        <div class="referral-link-row">
+            <input type="text" class="referral-link-input" id="referral-link-field" value="{{ referral_link }}" readonly>
+            <button type="button" class="referral-copy-btn" onclick="copyReferralLink()">Copy Link</button>
+        </div>
+    </div>
+
+    <div class="section-title">My Orders</div>
+    {% if orders and orders|length > 0 %}
+    <div class="overflow-x-auto">
+        <table class="w-full mb-6 bg-white rounded-2xl shadow-lg" style="border-collapse:collapse;">
+            <thead>
+                <tr class="text-left" style="background:#fdf2f8;">
+                    <th class="py-3 px-4 rose-accent">Order ID</th>
+                    <th class="py-3 px-4 rose-accent">Date</th>
+                    <th class="py-3 px-4 rose-accent">Items</th>
+                    <th class="py-3 px-4 rose-accent">Total</th>
+                    <th class="py-3 px-4 rose-accent">Payment</th>
+                    <th class="py-3 px-4 rose-accent">Delivery Status</th>
+                    <th class="py-3 px-4 rose-accent">Track</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for order in orders %}
+                {% set items = order['cart_items_json'] | fromjson %}
+                {% set status_labels = {
+                    'pending': 'Payment Pending', 'paid': 'Payment Confirmed',
+                    'cod_confirmed': 'Confirmed (COD)', 'accepted': 'Preparing to Ship',
+                    'dispatched': 'Dispatched', 'delivered': 'Delivered', 'cancelled': 'Cancelled'
+                } %}
+                <tr style="border-top:1px solid #fce7f3;">
+                    <td class="py-3 px-4 font-mono text-sm">{{ order['internal_order_id'] }}</td>
+                    <td class="py-3 px-4">{{ order['created_at'] }}</td>
+                    <td class="py-3 px-4">{{ items|length }}</td>
+                    <td class="py-3 px-4">₹{{ order['total_amount'] }}</td>
+                    <td class="py-3 px-4">{{ order['payment_mode'] or '-' }}</td>
+                    <td class="py-3 px-4 font-semibold">{{ status_labels.get(order['status'], order['status']|capitalize) }}</td>
+                    <td class="py-3 px-4">
+                        {% if order['delhivery_waybill'] %}
+                        <a href="/track/{{ order['delhivery_waybill'] }}" class="rose-accent underline font-semibold">Track</a>
+                        {% else %}
+                        <span class="text-gray-400">Not yet shipped</span>
+                        {% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <div class="text-center py-16">
+        <h2 class="text-xl text-gray-400 mb-4">No orders yet.</h2>
+        <a href="/retail" class="btn-retail-main inline-block px-8 py-3">Start Shopping</a>
+    </div>
+    {% endif %}
+</div>
+
+<script>
+function copyReferralLink() {
+    const field = document.getElementById('referral-link-field');
+    field.select();
+    field.setSelectionRange(0, 99999);
+    navigator.clipboard.writeText(field.value).then(function() {
+        const btn = document.querySelector('.referral-copy-btn');
+        const original = btn.textContent;
+        btn.textContent = 'Copied!';
+        setTimeout(function() { btn.textContent = original; }, 1500);
+    }).catch(function() {});
+}
+</script>
+{% endblock %}
