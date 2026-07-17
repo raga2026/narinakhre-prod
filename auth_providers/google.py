@@ -22,10 +22,15 @@ class GoogleAuthProvider(BaseAuthProvider):
 
     def __init__(self, flask_app):
         oauth = OAuth(flask_app)
+        # .strip() guards against a stray trailing newline/whitespace in the
+        # Render env var (e.g. from a copy-paste) -- an unstripped value
+        # breaks the handshake with a mismatched-client_id error that's
+        # otherwise very hard to notice, since the redirect still "looks"
+        # correct at a glance.
         self._client = oauth.register(
             name='google',
-            client_id=os.environ.get('GOOGLE_CLIENT_ID', ''),
-            client_secret=os.environ.get('GOOGLE_CLIENT_SECRET', ''),
+            client_id=os.environ.get('GOOGLE_CLIENT_ID', '').strip(),
+            client_secret=os.environ.get('GOOGLE_CLIENT_SECRET', '').strip(),
             server_metadata_url='https://accounts.google.com/.well-known/openid-configuration',
             client_kwargs={'scope': 'openid email profile'},
         )
