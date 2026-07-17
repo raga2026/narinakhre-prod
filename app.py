@@ -8,7 +8,6 @@ import smtplib
 import requests
 import razorpay
 import pyotp
-from authlib.integrations.flask_client import OAuth
 from datetime import datetime
 from functools import wraps
 from email.mime.multipart import MIMEMultipart
@@ -20,6 +19,7 @@ from werkzeug.middleware.proxy_fix import ProxyFix
 from supabase import create_client, Client as SupabaseClient
 
 from utils.shipping_manager import get_shipping_provider
+import auth_providers
 import io
 from PIL import Image as PILImage
 
@@ -101,16 +101,10 @@ ADMIN_PASSWORD = os.environ.get('ADMIN_PASSWORD', '')
 ADMIN_TOTP_SECRET = os.environ.get('ADMIN_TOTP_SECRET', '')
 razorpay_client = razorpay.Client(auth=(os.environ.get("RAZORPAY_KEY_ID"), os.environ.get("RAZORPAY_KEY_SECRET")))
 
-GOOGLE_CLIENT_ID = os.environ.get('GOOGLE_CLIENT_ID', '')
-GOOGLE_CLIENT_SECRET = os.environ.get('GOOGLE_CLIENT_SECRET', '')
-oauth = OAuth(app)
-oauth.register(
-    name='google',
-    client_id=GOOGLE_CLIENT_ID,
-    client_secret=GOOGLE_CLIENT_SECRET,
-    server_metadata_url='https://accounts.google.com/.well-known/openid-configuration',
-    client_kwargs={'scope': 'openid email profile'},
-)
+# Auth providers are pluggable -- see auth_providers/base.py. Adding another
+# login option later (e.g. Facebook) means adding auth_providers/facebook.py
+# and an init_provider() call here; no route handler changes required.
+auth_providers.init_provider('google', app)
 
 
 def upload_image_to_supabase(file_storage_object, filename):
@@ -873,18 +867,25 @@ def inject_logged_in_user():
 def google_login():
     site_home = '/wholesale' if g.site_type == 'wholesale' else '/retail'
     session['post_login_redirect'] = request.referrer or site_home
-    return oauth.google.authorize_redirect(url_for('google_callback', _external=True))
+    # redirect_uri is built per-request (not a fixed APP_BASE_URL env var)
+    # because this one Flask app serves four different domains
+    # (narinakhre.com, wholesale.narinakhre.com, and the two test-* hosts);
+    # url_for(_external=True) picks the right one automatically.
+    provider = auth_providers.get_auth_provider('google')
+    redirect_uri = url_for('google_callback', _external=True)
+    return redirect(provider.get_auth_url(redirect_uri))
 
 @app.route('/auth/google/callback')
 def google_callback():
     site_home = '/wholesale' if g.site_type == 'wholesale' else '/retail'
+    provider = auth_providers.get_auth_provider('google')
     try:
-        token = oauth.google.authorize_access_token()
+        token = provider.exchange_code()
+        userinfo = provider.get_user_info(token)
     except Exception as e:
         app.logger.warning(f'Google OAuth callback failed: {e}')
         flash('Sign-in was cancelled or failed. Please try again.', 'error')
         return redirect(session.pop('post_login_redirect', site_home))
-    userinfo = token.get('userinfo') or {}
     google_sub = userinfo.get('sub')
     name = userinfo.get('name') or ''
     email = userinfo.get('email') or ''
