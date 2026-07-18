@@ -82,6 +82,39 @@
         .retail-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 20px; }
     }
 
+    /* ── Trending shelf ── */
+    .prod-section-header {
+        display: flex; align-items: baseline; justify-content: space-between;
+        margin-bottom: 10px; padding: 0 2px;
+    }
+    .prod-section-title {
+        font-family: 'Playfair Display', serif; font-size: 1.05rem; font-weight: 800;
+        margin: 0; display: flex; align-items: center; gap: 6px;
+    }
+    @media (min-width: 768px) { .prod-section-title { font-size: 1.3rem; } }
+    .prod-grid {
+        display: flex; gap: 10px; overflow-x: auto; padding: 4px 2px 14px;
+        scroll-snap-type: x mandatory; -webkit-overflow-scrolling: touch;
+        scrollbar-width: none;
+    }
+    .prod-grid::-webkit-scrollbar { display: none; }
+    .prod-card {
+        background: white; border-radius: 16px; padding: 8px;
+        box-shadow: 0 2px 10px rgba(190,24,93,0.1); border: 1px solid #fce7f3;
+        flex: 0 0 132px; width: 132px; scroll-snap-align: start;
+        display: flex; flex-direction: column; position: relative;
+    }
+    @media (min-width: 768px) {
+        .prod-card { flex-basis: 190px; width: 190px; border-radius: 20px; padding: 12px; }
+    }
+    .prod-img-wrap { position: relative; border-radius: 12px; overflow: hidden; background: #fdf2f8; }
+    .prod-img-wrap .prod-img { width: 100%; height: 110px; object-fit: contain; display: block; }
+    @media (min-width: 768px) { .prod-img-wrap .prod-img { height: 165px; } }
+    .prod-badge {
+        position: absolute; top: 6px; left: 6px; background: #16a34a; color: white;
+        font-size: 0.6rem; font-weight: 800; padding: 2px 6px; border-radius: 6px; z-index: 2;
+    }
+
     /* ── Product card ── */
     .product-card {
         background: white;
@@ -284,9 +317,12 @@
             {% if disc > 0 %}
             <span class="prod-badge">{{ disc }}% off</span>
             {% endif %}
-            <img class="prod-img" loading="lazy"
+            <img id="carousel-img-trending-{{ product.id }}"
+                 class="prod-img carousel-img" loading="lazy"
                  src="{{ img_src }}"
                  alt="{{ product.name }}"
+                 data-images='{{ product.images|tojson }}'
+                 data-index="0"
                  onerror="this.onerror=null;this.src='/static/assets/products/default.jpg';">
         </div>
         <div class="prod-info">
