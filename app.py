@@ -966,7 +966,7 @@ def generate_referral_code(db_conn):
 # Nari Nakhre Credits -- an in-app store-credit wallet, redeemable at
 # checkout. Balance is never stored as a column (avoids it drifting out of
 # sync with reality); it's always the sum of this ledger, computed fresh.
-COD_ROUNDING_CREDIT = 10  # flat credits awarded when COD rounding goes against the customer
+COD_ROUNDING_CREDIT = 10  # flat bonus credited on top of the actual rounding excess when COD rounding goes against the customer
 
 
 def round_cod_amount(amount):
@@ -978,10 +978,11 @@ def round_cod_amount(amount):
 
     Returns (rounded_amount, rounded_up). rounded_up is True only when the
     customer ends up paying MORE cash than the order actually costs -- that
-    gap is what earns them a flat Nari Nakhre Credits award (see
-    COD_ROUNDING_CREDIT) instead of physical change. Rounding DOWN (customer
-    pays less) needs no special handling -- it's simply a smaller cash
-    collection, i.e. an automatic discount.
+    gap (rounded_amount - original amount), plus a flat COD_ROUNDING_CREDIT
+    bonus, is what earns them a Nari Nakhre Credits award instead of
+    physical change. Rounding DOWN (customer pays less) needs no special
+    handling -- it's simply a smaller cash collection, i.e. an automatic
+    discount.
     """
     amount = float(amount or 0)
     base = int(amount // 10) * 10
@@ -1997,10 +1998,11 @@ def confirm_cod_order():
 
     # Delhivery COD agents collect whole-rupee cash, so the collection amount
     # is rounded to the nearest ₹10. If that rounds UP, the customer earns a
-    # flat Nari Nakhre Credits award for the difference instead of getting
-    # physical change. Guest checkouts (no account to credit) never round
-    # up -- only down -- so a guest is never charged more with nothing given
-    # back for it.
+    # Nari Nakhre Credits award instead of getting physical change: the
+    # actual rounding excess (cod_collect_amount - original_total) PLUS a
+    # flat COD_ROUNDING_CREDIT bonus on top. Guest checkouts (no account to
+    # credit) never round up -- only down -- so a guest is never charged
+    # more with nothing given back for it.
     original_total = float(order_row_dict.get('total_amount', 0) or 0)
     cod_user_id = order_row_dict.get('user_id')
     if cod_user_id:
@@ -2008,7 +2010,7 @@ def confirm_cod_order():
     else:
         cod_collect_amount = float(int(original_total // 10) * 10)
         cod_rounded_up = False
-    cod_credit_awarded = COD_ROUNDING_CREDIT if cod_rounded_up else 0
+    cod_credit_awarded = round((cod_collect_amount - original_total) + COD_ROUNDING_CREDIT, 2) if cod_rounded_up else 0
 
     waybill, del_error = create_delhivery_shipment(order_row_dict, cart_items, cod_amount_override=cod_collect_amount)
     if waybill:
