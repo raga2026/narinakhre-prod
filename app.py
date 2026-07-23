@@ -415,6 +415,9 @@ def initialize_database_if_needed():
         'ALTER TABLE order_shipping ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP',
         'ALTER TABLE users ADD COLUMN IF NOT EXISTS referral_code TEXT UNIQUE',
         'ALTER TABLE users ADD COLUMN IF NOT EXISTS referred_by BIGINT REFERENCES users(id)',
+        'ALTER TABLE products ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP',
+        "UPDATE products SET status='published' WHERE status IS NULL OR status=''",
+        "ALTER TABLE products ALTER COLUMN status SET DEFAULT 'published'",
     ]
     for sql in alter_sql:
         try:
@@ -1415,9 +1418,19 @@ def checkout():
     coupon_code = applied_coupon['code'] if applied_coupon else ''
     grand_total = max(subtotal - discount, 0)
 
+    # Signed-in retail customers get their last shipping address prefilled
+    # on checkout instead of retyping it — same source data as profile().
+    saved_address = None
+    if g.site_type == 'retail' and session.get('user_id'):
+        saved_address = db.execute(
+            'SELECT * FROM order_shipping WHERE user_id=? ORDER BY created_at DESC LIMIT 1',
+            (session['user_id'],),
+        ).fetchone()
+
     return render_site('checkout.html', display_cart=display_cart, subtotal=subtotal, total_tax=0.0,
                         discount=discount, grand_total=grand_total, coupon_code=coupon_code,
-                        out_of_stock_items=out_of_stock_items, recaptcha_site_key=RECAPTCHA_SITE_KEY)
+                        out_of_stock_items=out_of_stock_items, recaptcha_site_key=RECAPTCHA_SITE_KEY,
+                        saved_address=saved_address)
 
 @app.route('/checkout/shipping', methods=['GET', 'POST'])
 @app.route('/retail/checkout/shipping', methods=['GET', 'POST'])
@@ -2662,6 +2675,155 @@ def admin_edit_product_details():
     return render_template('admin/admin_edit_product_details.html', products=products)
 
 
+@app.route('/admin/edit-product', methods=['GET'])
+@admin_required
+def admin_edit_product_search():
+    db = get_db()
+    q = request.args.get('q', '').strip()
+    if q:
+        like = f'%{q}%'
+        products = db.execute(
+            'SELECT * FROM products WHERE sku LIKE ? OR name LIKE ? ORDER BY updated_at DESC',
+            (like, like)
+        ).fetchall()
+    else:
+        products = db.execute('SELECT * FROM products ORDER BY updated_at DESC').fetchall()
+
+    drafts = db.execute("SELECT * FROM products WHERE status='draft' ORDER BY updated_at DESC").fetchall()
+
+    published_product = None
+    published_id = request.args.get('published_id', type=int)
+    if published_id:
+        published_product = db.execute('SELECT id, name, sku FROM products WHERE id=?', (published_id,)).fetchone()
+
+    return render_template('admin/admin_edit_product.html', products=products, q=q,
+                            drafts=drafts, published_product=published_product)
+
+
+@app.route('/admin/edit-product/<int:id>', methods=['GET', 'POST'])
+@admin_required
+def admin_edit_product_form(id):
+    db = get_db()
+    product = db.execute('SELECT * FROM products WHERE id=?', (id,)).fetchone()
+    if not product:
+        flash('Product not found.')
+        return redirect(url_for('admin_edit_product_search'))
+
+    if request.method == 'POST':
+        intent = request.form.get('intent', 'draft')
+        new_sku = request.form.get('sku', '').strip()
+        name = request.form.get('name', '').strip()
+        category = request.form.get('category', '').strip()
+        sub_category = request.form.get('sub_category', '').strip()
+        collection = request.form.get('collection', '').strip()
+        retail_price = float(request.form.get('retail_price', 0) or 0)
+        mrp_price = float(request.form.get('mrp_price', 0) or 0)
+        wholesale_price = float(request.form.get('wholesale_price', 0) or 0)
+        stock_total = int(request.form.get('stock_total', 0) or 0)
+        material = request.form.get('material', '').strip()
+        size = request.form.get('size', '').strip()
+        hsn_code = request.form.get('hsn_code', '').strip()
+        gst_percent = float(request.form.get('gst_percent', 3) or 3)
+        weight_grams = float(request.form.get('weight_grams', 0) or 0)
+        length = float(request.form.get('length', 0) or 0)
+        breadth = float(request.form.get('breadth', 0) or 0)
+        height = float(request.form.get('height', 0) or 0)
+        sets_count = int(request.form.get('sets_count', 1) or 1)
+        min_wholesale_qty = int(request.form.get('min_wholesale_qty', 0) or 0)
+        price1 = float(request.form.get('price1', 0) or 0)
+        quantity1 = int(request.form.get('quantity1', 0) or 0)
+        price2 = float(request.form.get('price2', 0) or 0)
+        quantity2 = int(request.form.get('quantity2', 0) or 0)
+        price3 = float(request.form.get('price3', 0) or 0)
+        quantity3 = int(request.form.get('quantity3', 0) or 0)
+        description = request.form.get('description', '').strip()
+        key_features_raw = request.form.get('key_features', '')
+        key_features_list = [line.strip() for line in key_features_raw.splitlines() if line.strip()]
+        key_features = '\n'.join(key_features_list)
+        slug = request.form.get('slug', '').strip()
+        if not slug and name:
+            slug = re.sub(r'[^a-z0-9]+', '-', name.lower()).strip('-')
+
+        if not new_sku:
+            flash('SKU is required.')
+            return redirect(url_for('admin_edit_product_form', id=id))
+
+        image_files = [f for f in request.files.getlist('images') if f and f.filename][:5]
+
+        if intent == 'publish':
+            if len(key_features_list) < 4:
+                flash('Please add at least 4 key features before publishing (or save as draft).')
+                return redirect(url_for('admin_edit_product_form', id=id))
+            if not product['image_field'] and not image_files:
+                flash('At least one product image is required before publishing (or save as draft).')
+                return redirect(url_for('admin_edit_product_form', id=id))
+
+        old_sku = product['sku']
+        sku_changed = new_sku != old_sku
+        if sku_changed:
+            clash = db.execute('SELECT id FROM products WHERE sku=? AND id<>?', (new_sku, id)).fetchone()
+            if clash:
+                flash(f'Another product already uses SKU {new_sku}.')
+                return redirect(url_for('admin_edit_product_form', id=id))
+
+        image_url = product['image_field']
+        for idx, image_file in enumerate(image_files, start=1):
+            uploaded_url = upload_image_to_supabase(image_file, f"{new_sku}_{idx}.webp")
+            if idx == 1:
+                image_url = uploaded_url
+
+        new_status = 'published' if intent == 'publish' else 'draft'
+        new_is_active = 1 if intent == 'publish' else 0
+
+        db.execute(
+            '''UPDATE products SET
+                 sku=?, name=?, category=?, sub_category=?, collection=?,
+                 retail_price=?, mrp_price=?, wholesale_price=?, stock_total=?,
+                 material=?, size=?, hsn_code=?, gst_percent=?,
+                 weight_grams=?, length=?, breadth=?, height=?,
+                 sets_count=?, min_wholesale_qty=?, slug=?,
+                 price1=?, quantity1=?, price2=?, quantity2=?, price3=?, quantity3=?,
+                 image_field=?, description=?, key_features=?, status=?, is_active=?, updated_at=NOW()
+               WHERE id=?''',
+            (new_sku, name, category, sub_category, collection,
+             retail_price, mrp_price, wholesale_price, stock_total,
+             material, size, hsn_code, gst_percent,
+             weight_grams, length, breadth, height,
+             sets_count, min_wholesale_qty, slug,
+             price1, quantity1, price2, quantity2, price3, quantity3,
+             image_url, description, key_features, new_status, new_is_active, id)
+        )
+
+        if sku_changed:
+            variant_rows = db.execute(
+                'SELECT size FROM product_variants WHERE master_sku=?', (old_sku,)
+            ).fetchall()
+            for v in variant_rows:
+                new_variant_sku = get_variant_sku(new_sku, v['size'])
+                db.execute(
+                    'UPDATE product_variants SET master_sku=?, variant_sku=? WHERE master_sku=? AND size=?',
+                    (new_sku, new_variant_sku, old_sku, v['size'])
+                )
+
+        db.commit()
+
+        if intent == 'publish':
+            flash(f'Product {new_sku} published successfully.')
+            return redirect(url_for('admin_edit_product_search', published_id=id))
+        else:
+            flash(f'Draft {new_sku} saved.')
+            return redirect(url_for('admin_edit_product_form', id=id))
+
+    p_dict = dict(product)
+    variants = {}
+    if is_bangle_product(p_dict):
+        variants = get_bangle_size_stock(db, p_dict['sku'])
+    drafts = db.execute(
+        "SELECT * FROM products WHERE status='draft' AND id<>? ORDER BY updated_at DESC", (id,)
+    ).fetchall()
+    return render_template('admin/admin_edit_product_form.html', product=p_dict, variants=variants, drafts=drafts)
+
+
 @app.route('/admin/delete-products', methods=['GET'])
 @admin_required
 def admin_delete_products():
@@ -2714,6 +2876,7 @@ def admin_quote_view(quote_id):
 def admin_add_product():
     db = get_db()
     if request.method == 'POST':
+        intent = request.form.get('intent', 'publish')
         sku = request.form.get('sku', '').strip()
         name = request.form.get('name', '').strip()
         category = request.form.get('category', '').strip()
@@ -2747,21 +2910,21 @@ def admin_add_product():
         # Auto-generate slug from name if not provided
         slug = request.form.get('slug', '').strip()
         if not slug and name:
-            import re
             slug = re.sub(r'[^a-z0-9]+', '-', name.lower()).strip('-')
 
         if not sku:
             flash('SKU is required.')
             return redirect(url_for('admin_add_product'))
 
-        if len(key_features_list) < 4:
-            flash('Please add at least 4 key features (one per line).')
-            return redirect(url_for('admin_add_product'))
-
         image_files = [f for f in request.files.getlist('images') if f and f.filename][:5]
-        if not image_files:
-            flash('At least one product image is required.')
-            return redirect(url_for('admin_add_product'))
+
+        if intent == 'publish':
+            if len(key_features_list) < 4:
+                flash('Please add at least 4 key features (one per line), or save as draft.')
+                return redirect(url_for('admin_add_product'))
+            if not image_files:
+                flash('At least one product image is required to publish, or save as draft.')
+                return redirect(url_for('admin_add_product'))
 
         existing = db.execute('SELECT id FROM products WHERE sku=?', (sku,)).fetchone()
         if existing:
@@ -2774,6 +2937,9 @@ def admin_add_product():
             if idx == 1:
                 image_url = uploaded_url
 
+        new_status = 'published' if intent == 'publish' else 'draft'
+        new_is_active = 1 if intent == 'publish' else 0
+
         db.execute(
             '''INSERT INTO products
                (sku, name, category, sub_category, collection,
@@ -2782,21 +2948,35 @@ def admin_add_product():
                 weight_grams, length, breadth, height,
                 sets_count, min_wholesale_qty,
                 slug, price1, quantity1, price2, quantity2,
-                price3, quantity3, image_field, description, key_features, is_active)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,1)''',
+                price3, quantity3, image_field, description, key_features,
+                status, is_active, updated_at)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,NOW())''',
             (sku, name, category, sub_category, collection,
              retail_price, mrp_price, wholesale_price,
              stock_total, material, size, hsn_code, gst_percent,
              weight_grams, length, breadth, height,
              sets_count, min_wholesale_qty,
              slug, price1, quantity1, price2, quantity2,
-             price3, quantity3, image_url, description, key_features)
+             price3, quantity3, image_url, description, key_features,
+             new_status, new_is_active)
         )
         db.commit()
-        flash(f'Product {sku} added successfully.')
-        return redirect(url_for('admin_dashboard'))
 
-    return render_template('admin/admin_add_product.html')
+        if intent == 'publish':
+            new_id_row = db.execute('SELECT id FROM products WHERE sku=?', (sku,)).fetchone()
+            new_id = new_id_row['id'] if new_id_row else None
+            flash(f'Product {sku} published successfully.')
+            return redirect(url_for('admin_add_product', published_id=new_id))
+        else:
+            flash(f'Draft {sku} saved. Continue editing it any time from the Drafts list below.')
+            return redirect(url_for('admin_add_product'))
+
+    drafts = db.execute("SELECT * FROM products WHERE status='draft' ORDER BY updated_at DESC").fetchall()
+    published_product = None
+    published_id = request.args.get('published_id', type=int)
+    if published_id:
+        published_product = db.execute('SELECT id, name, sku FROM products WHERE id=?', (published_id,)).fetchone()
+    return render_template('admin/admin_add_product.html', drafts=drafts, published_product=published_product)
 
 
 @app.route('/admin/download-users-excel', methods=['GET'])

@@ -2,7 +2,7 @@ th{% extends "retail/base.html" %}
 {% block title %}Contact - NariNakhre{% endblock %}
 {% block content %}
 <h1 class="text-3xl font-extrabold rose-accent mb-8 text-center tracking-wide drop-shadow-lg">Contact Us</h1>
-<form id="contact-form" method="POST" action="/contact" class="max-w-xl mx-auto bg-slate-900 rounded-2xl shadow-2xl p-8 flex flex-col gap-6 contact-scroll-form" style="background:#181c2a;">
+<form id="contact-form" method="POST" action="{{ url_for('retail_contact') }}" class="max-w-xl mx-auto bg-slate-900 rounded-2xl shadow-2xl p-8 flex flex-col gap-6 contact-scroll-form" style="background:#181c2a;">
     
     <!-- Anti-Bot Cryptographic Honeypot Trap -->
     <div class="security-honeypot-trap-wrapper" style="display: none !important; visibility: hidden !important;" aria-hidden="true">

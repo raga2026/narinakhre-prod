@@ -329,41 +329,71 @@
 
       <!-- Shipping address form — shown inline on desktop, stays visible -->
       <div class="ck-section">
+        {% if not logged_in_user %}
+        <div id="ck-signin-card" style="display:none;background:#fff7f8;border:1.5px solid #fda4af;border-radius:14px;padding:14px 16px;margin-bottom:16px;">
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;">
+            <div style="font-size:0.82rem;color:#831843;line-height:1.4;">
+              <strong>Sign in with Google</strong> to autofill your name, phone and address.
+            </div>
+            <div style="display:flex;gap:8px;flex-shrink:0;">
+              <a href="{{ url_for('google_login') }}"
+                 style="display:inline-flex;align-items:center;gap:6px;padding:8px 14px;border-radius:10px;background:#be185d;color:white;font-size:0.8rem;font-weight:700;text-decoration:none;white-space:nowrap;">
+                Sign in with Google
+              </a>
+              <button type="button" onclick="ckSkipSignin()"
+                      style="padding:8px 12px;border-radius:10px;border:1.5px solid #d2d2d7;background:white;color:#6e6e73;font-size:0.8rem;font-weight:600;cursor:pointer;white-space:nowrap;">
+                Skip
+              </button>
+            </div>
+          </div>
+        </div>
+        <script>
+          if (!localStorage.getItem('nn_checkout_signin_skipped')) {
+            document.getElementById('ck-signin-card').style.display = 'block';
+          }
+          function ckSkipSignin() {
+            localStorage.setItem('nn_checkout_signin_skipped', '1');
+            document.getElementById('ck-signin-card').style.display = 'none';
+          }
+        </script>
+        {% endif %}
         <div class="ck-section-title">Shipping Address</div>
         <form id="ck-form">
           <div class="ck-form-row">
             <div class="ck-form-group">
               <label class="ck-form-label">Full Name *</label>
-              <input type="text" name="name" required class="ck-form-input" placeholder="Ananya Sharma" autocomplete="name">
+              <input type="text" name="name" required class="ck-form-input" placeholder="Ananya Sharma" autocomplete="name" value="{{ saved_address.consignee_name if saved_address else '' }}">
             </div>
             <div class="ck-form-group">
               <label class="ck-form-label">Phone *</label>
-              <input type="tel" name="phone" required class="ck-form-input" placeholder="10-digit mobile" autocomplete="tel" inputmode="numeric" pattern="[0-9]{10}">
+              <input type="tel" name="phone" required class="ck-form-input" placeholder="10-digit mobile" autocomplete="tel" inputmode="numeric" pattern="[0-9]{10}" value="{{ saved_address.consignee_phone if saved_address else '' }}">
             </div>
           </div>
           <div class="ck-form-group">
             <label class="ck-form-label">Email *</label>
-            <input type="email" name="email" required class="ck-form-input" placeholder="name@example.com" autocomplete="email">
+            <input type="email" name="email" required class="ck-form-input" placeholder="name@example.com" autocomplete="email" value="{{ logged_in_user.email if logged_in_user else '' }}">
           </div>
           <div class="ck-form-group">
             <label class="ck-form-label">Address *</label>
             <textarea name="address" rows="2" required class="ck-form-input"
                       placeholder="House No, Street, Area" autocomplete="street-address"
-                      style="resize:vertical;"></textarea>
+                      style="resize:vertical;">{{ saved_address.consignee_address if saved_address else '' }}</textarea>
           </div>
           <div class="ck-form-row">
             <div class="ck-form-group">
               <label class="ck-form-label">Pincode *</label>
               <input type="text" id="ck-pin" name="pincode" required maxlength="6"
                      class="ck-form-input" placeholder="6-digit PIN"
-                     autocomplete="postal-code" inputmode="numeric" pattern="[0-9]{6}" oninput="ckCheckPin()">
+                     autocomplete="postal-code" inputmode="numeric" pattern="[0-9]{6}" oninput="ckCheckPin()"
+                     value="{{ saved_address.consignee_pincode if saved_address else '' }}">
               <div id="ck-pin-status" class="ck-pin-status"></div>
-              <input type="hidden" id="ck-state" name="state" value="">
+              <input type="hidden" id="ck-state" name="state" value="{{ saved_address.consignee_state if saved_address else '' }}">
             </div>
             <div class="ck-form-group">
               <label class="ck-form-label">City / State</label>
               <input type="text" id="ck-city" readonly class="ck-form-input"
-                     style="background:#f9f9f9;color:#6e6e73;" placeholder="Auto-detected">
+                     style="background:#f9f9f9;color:#6e6e73;" placeholder="Auto-detected"
+                     value="{{ saved_address.consignee_city if saved_address else '' }}">
             </div>
           </div>
 
@@ -648,6 +678,10 @@ function ckPayMode() {
     const pin = document.getElementById('ck-pin').value.trim();
     if (ckServiceable && /^\d{6}$/.test(pin)) ckFetchShipping(pin);
 }
+
+// Prefilled pincode (signed-in user's saved address) — verify it immediately
+// instead of waiting for the user to touch the field.
+if (document.getElementById('ck-pin').value.trim()) ckCheckPin();
 
 /* ── Loading overlay ── */
 const ckLoadingMessages = ['Placing your order…', 'Talking to our courier partner…', 'Almost there…'];

@@ -1,0 +1,87 @@
+{% extends "base.html" %}
+{% block title %}Edit Product{% endblock %}
+{% block content %}
+<div style="margin-bottom: 20px; padding: 20px;">
+    <a href="{{ url_for('admin_dashboard') }}" style="background:#be185d; color:white; padding:8px 18px; border-radius:8px; font-weight:bold; text-decoration:none;">Back to Admin</a>
+</div>
+
+<style>
+    body { background-color: #0f172a; color: white; font-family: sans-serif; }
+    .form-container { max-width: 1000px; margin: 0 auto; padding: 20px; }
+    h1 { color: #f8fafc; border-bottom: 2px solid #be185d; padding-bottom: 10px; margin-bottom: 24px; }
+    .section-title { color: #f472b6; font-size: 0.9rem; font-weight: bold; text-transform: uppercase; letter-spacing: 0.05em; margin: 24px 0 12px; border-bottom: 1px solid #334155; padding-bottom: 6px; }
+    input, select, textarea { background: #1e293b; border: 1px solid #334155; border-radius: 6px; padding: 8px 10px; color: white; font-size: 0.9rem; }
+    input:focus { outline: none; border-color: #be185d; }
+    .flash-msg { background: #1e293b; border: 1px solid #be185d; color: #f472b6; padding: 12px; border-radius: 8px; margin-bottom: 16px; }
+    .status-badge { padding: 3px 10px; border-radius: 999px; font-size: 0.72rem; font-weight: bold; text-transform: uppercase; }
+    .status-published { background: #064e3b; color: #4ade80; }
+    .status-draft { background: #451a03; color: #fbbf24; }
+</style>
+
+<div class="form-container">
+    <h1>Edit Product</h1>
+
+    {% if published_product %}
+    <div class="flash-msg" style="border-color:#10b981; color:#4ade80;">
+        Product "{{ published_product.name }}" ({{ published_product.sku }}) is now live.
+        <a href="/retail/product/{{ published_product.id }}" target="_blank" style="color:#4ade80; text-decoration:underline;">View Product →</a>
+    </div>
+    {% endif %}
+
+    {% with messages = get_flashed_messages() %}
+    {% if messages %}
+        {% for msg in messages %}
+        <div class="flash-msg">{{ msg }}</div>
+        {% endfor %}
+    {% endif %}
+    {% endwith %}
+
+    <form method="get" action="{{ url_for('admin_edit_product_search') }}" style="margin-bottom: 20px; display:flex; gap:10px;">
+        <input type="text" name="q" placeholder="Search by SKU or name…" value="{{ q|default('') }}" style="flex:1;">
+        <button type="submit" style="padding: 8px 18px; border-radius: 6px; background: #be185d; color: white; border: none; cursor: pointer; font-weight:bold;">Search</button>
+    </form>
+
+    <table style="width:100%; border-collapse: collapse; background: #1e293b; border: 1px solid #334155;">
+        <tr style="background: #334155; text-align: left;">
+            <th style="padding: 12px;">SKU</th>
+            <th style="padding: 12px;">Name</th>
+            <th style="padding: 12px;">Category</th>
+            <th style="padding: 12px;">Status</th>
+            <th style="padding: 12px;">Last edited</th>
+            <th style="padding: 12px;">Action</th>
+        </tr>
+        {% for product in products %}
+        <tr style="border-bottom: 1px solid #334155;">
+            <td style="padding: 12px; color: #f472b6; font-weight: bold;">{{ product.sku }}</td>
+            <td style="padding: 12px;">{{ product.name }}</td>
+            <td style="padding: 12px;">{{ product.category }}</td>
+            <td style="padding: 12px;">
+                <span class="status-badge {{ 'status-draft' if product.status == 'draft' else 'status-published' }}">{{ product.status or 'published' }}</span>
+            </td>
+            <td style="padding: 12px; font-size:0.8rem; color:#94a3b8;">{{ product.updated_at }}</td>
+            <td style="padding: 12px;"><a href="{{ url_for('admin_edit_product_form', id=product.id) }}" style="color:#4ade80; font-weight:bold;">Edit →</a></td>
+        </tr>
+        {% else %}
+        <tr><td colspan="6" style="padding: 16px; text-align:center; color:#94a3b8;">No products found.</td></tr>
+        {% endfor %}
+    </table>
+
+    {% if drafts %}
+    <div class="section-title" style="margin-top:40px;">Drafts ({{ drafts|length }})</div>
+    <table style="width:100%; border-collapse:collapse; background:#1e293b; border:1px solid #334155;">
+        <tr style="background:#334155; text-align:left;">
+            <th style="padding:10px;">SKU</th><th style="padding:10px;">Name</th>
+            <th style="padding:10px;">Last edited</th><th style="padding:10px;">Action</th>
+        </tr>
+        {% for d in drafts %}
+        <tr style="border-bottom:1px solid #334155;">
+            <td style="padding:10px; color:#f472b6;">{{ d.sku }}</td>
+            <td style="padding:10px;">{{ d.name or '(unnamed)' }}</td>
+            <td style="padding:10px; font-size:0.8rem; color:#94a3b8;">{{ d.updated_at }}</td>
+            <td style="padding:10px;"><a href="{{ url_for('admin_edit_product_form', id=d.id) }}" style="color:#4ade80;">Resume editing →</a></td>
+        </tr>
+        {% endfor %}
+    </table>
+    {% endif %}
+</div>
+{% endblock %}

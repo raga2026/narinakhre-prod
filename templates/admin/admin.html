@@ -10,6 +10,11 @@
         .bg-rose-600 { background-color:#e11d48 !important; }
         .bg-rose-600:hover, .hover\:bg-rose-700:hover { background-color:#be123c !important; }
         .text-rose-600 { color:#e11d48 !important; }
+        .tab-btn { border-bottom: 2px solid transparent; color: #6b7280; cursor: pointer; background: none; }
+        .tab-btn.active { color: #e11d48; border-bottom-color: #e11d48; }
+        .tab-panel { display: none; }
+        .tab-panel.active { display: block; }
+        .tab-badge { background: #f3f4f6; color: #374151; font-size: 0.7rem; padding: 1px 8px; border-radius: 999px; margin-left: 6px; }
     </style>
 </head>
 <body class="bg-gray-100 min-h-screen flex items-center justify-center">
@@ -29,16 +34,18 @@
         {% endif %}
       {% endwith %}
 
-      <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
-        <div class="bg-gray-50 rounded-lg p-6 shadow flex flex-col items-center">
-          <h3 class="text-lg font-semibold mb-4 text-gray-800">Excel Reports</h3>
-          <div class="flex flex-col space-y-3 w-full">
-            <a href="{{ url_for('download_users_excel') }}" class="w-full bg-pink-600 text-white py-2 rounded-lg font-semibold hover:bg-pink-700 transition text-center">Users List</a>
-            <a href="{{ url_for('download_quotes_excel') }}" class="w-full bg-pink-600 text-white py-2 rounded-lg font-semibold hover:bg-pink-700 transition text-center">Wholesale Quotes</a>
-            <a href="{{ url_for('download_products_excel') }}" class="w-full bg-pink-600 text-white py-2 rounded-lg font-semibold hover:bg-pink-700 transition text-center">Full Product Master</a>
-          </div>
-        </div>
+      <div class="mb-6 flex space-x-6 border-b border-gray-300">
+        <button class="tab-btn px-2 py-2 font-semibold" data-tab="products" onclick="showTab('products')">
+          Products <span class="tab-badge">{{ products|length }}</span>
+        </button>
+        <button class="tab-btn px-2 py-2 font-semibold" data-tab="orders" onclick="showTab('orders')">Orders &amp; Marketing</button>
+        <button class="tab-btn px-2 py-2 font-semibold" data-tab="reports" onclick="showTab('reports')">Reports</button>
+        <button class="tab-btn px-2 py-2 font-semibold" data-tab="quotes" onclick="showTab('quotes')">
+          Quotes / Inbox <span class="tab-badge">{{ quotes|length }}</span>
+        </button>
+      </div>
 
+      <div id="tab-products" class="tab-panel mb-8">
         <div class="bg-gray-50 rounded-lg p-6 shadow flex flex-col items-center">
           <h3 class="text-lg font-semibold mb-4 text-gray-800">Inventory & Store Management</h3>
           <div class="flex flex-col space-y-3 w-full">
@@ -47,10 +54,15 @@
                aria-label="Add a single new product with image upload">
               ＋ Add New Product
             </a>
+            <a href="{{ url_for('admin_edit_product_search') }}"
+               class="w-full bg-emerald-600 text-white py-2 rounded-lg font-semibold shadow hover:bg-emerald-700 transition text-center"
+               aria-label="Search for a single product by SKU or name and edit every field">
+              🔍 Edit Product
+            </a>
             <a href="{{ url_for('admin_edit_product_details') }}"
                class="w-full bg-blue-700 text-white py-2 rounded-lg font-semibold shadow hover:bg-blue-800 transition text-center"
-               aria-label="Edit product details including retail and wholesale prices">
-              Edit Product Details
+               aria-label="Bulk-edit product details including retail and wholesale prices">
+              Edit Product Details (Bulk)
             </a>
             <a href="{{ url_for('admin_manage_images') }}"
                class="w-full bg-pink-700 text-white py-2 rounded-lg font-semibold shadow hover:bg-pink-800 transition text-center"
@@ -64,9 +76,11 @@
             </a>
           </div>
         </div>
+      </div>
 
+      <div id="tab-orders" class="tab-panel mb-8">
         <div class="bg-gray-50 rounded-lg p-6 shadow flex flex-col items-center">
-          <h3 class="text-lg font-semibold mb-4 text-gray-800">Marketing</h3>
+          <h3 class="text-lg font-semibold mb-4 text-gray-800">Orders &amp; Marketing</h3>
           <div class="flex flex-col space-y-3 w-full">
             <a href="{{ url_for('admin_orders') }}"
                class="w-full bg-rose-600 text-white py-2 rounded-lg font-semibold shadow hover:bg-rose-700 transition text-center"
@@ -82,7 +96,17 @@
         </div>
       </div>
 
-      <div class="bg-gray-50 rounded-lg p-6 shadow mb-8">
+      <div id="tab-reports" class="tab-panel mb-8">
+        <div class="bg-gray-50 rounded-lg p-6 shadow flex flex-col items-center mb-6">
+          <h3 class="text-lg font-semibold mb-4 text-gray-800">Excel Reports</h3>
+          <div class="flex flex-col space-y-3 w-full">
+            <a href="{{ url_for('download_users_excel') }}" class="w-full bg-pink-600 text-white py-2 rounded-lg font-semibold hover:bg-pink-700 transition text-center">Users List</a>
+            <a href="{{ url_for('download_quotes_excel') }}" class="w-full bg-pink-600 text-white py-2 rounded-lg font-semibold hover:bg-pink-700 transition text-center">Wholesale Quotes</a>
+            <a href="{{ url_for('download_products_excel') }}" class="w-full bg-pink-600 text-white py-2 rounded-lg font-semibold hover:bg-pink-700 transition text-center">Full Product Master</a>
+          </div>
+        </div>
+
+        <div class="bg-gray-50 rounded-lg p-6 shadow">
           <h3 class="text-lg font-semibold mb-4 text-gray-800">Retail & Wholesale Bulk Upload</h3>
           <form method="post" action="{{ url_for('admin_upload_excel') }}" enctype="multipart/form-data" class="flex flex-col md:flex-row items-end space-y-4 md:space-y-0 md:space-x-4">
             <div class="flex-1 w-full">
@@ -91,11 +115,36 @@
             </div>
             <button type="submit" class="bg-blue-600 text-white px-8 py-2 rounded-lg font-bold hover:bg-blue-700 transition">Run Master Sync</button>
           </form>
+        </div>
+      </div>
+
+      <div id="tab-quotes" class="tab-panel mb-8">
+        <div class="bg-gray-50 rounded-lg p-6 shadow flex flex-col items-center">
+          <h3 class="text-lg font-semibold mb-4 text-gray-800">Quotes / Inbox</h3>
+          <div class="flex flex-col space-y-3 w-full">
+            <a href="{{ url_for('admin_inbox') }}"
+               class="w-full bg-rose-600 text-white py-2 rounded-lg font-semibold shadow hover:bg-rose-700 transition text-center"
+               aria-label="View wholesale quote requests submitted by customers">
+              📥 Wholesale Inbox
+            </a>
+          </div>
+        </div>
       </div>
 
       <div class="flex justify-start">
         <a href="/" class="px-6 py-2 rounded-lg font-bold shadow bg-gray-200 text-gray-800 hover:bg-gray-300 transition">View Live Site</a>
       </div>
     </div>
+
+    <script>
+      function showTab(name) {
+        document.querySelectorAll('.tab-panel').forEach(function(p) { p.classList.remove('active'); });
+        document.getElementById('tab-' + name).classList.add('active');
+        document.querySelectorAll('.tab-btn').forEach(function(b) {
+          b.classList.toggle('active', b.dataset.tab === name);
+        });
+      }
+      showTab('products');
+    </script>
 </body>
 </html>
