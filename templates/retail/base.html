@@ -123,7 +123,8 @@
     .cat-dropdown-btn { color: #be185d; font-weight: 700; font-size: 0.9rem; background: none; border: none; cursor: pointer; padding: 6px 12px; border-radius: 999px; transition: background 0.15s; }
     .cat-dropdown-btn:hover { background: #fff1f2; }
     .cat-menu { display: none; position: absolute; left: 0; top: calc(100% + 4px); min-width: 180px; background: white; border: 1px solid #fecdd3; border-radius: 14px; box-shadow: 0 8px 24px rgba(190,24,93,0.12); z-index: 200; overflow: hidden; }
-    .cat-dropdown:hover .cat-menu { display: block; }
+    .cat-dropdown:hover .cat-menu,
+    .cat-dropdown.open .cat-menu { display: block; }
     .cat-menu a { display: block; padding: 10px 16px; color: #be185d; font-weight: 600; text-decoration: none; font-size: 0.88rem; font-family: 'Playfair Display', serif; }
     .cat-menu a:hover { background: #fff1f2; }
 
@@ -170,8 +171,10 @@
             <a href="/retail">Home</a>
             {% if categories and categories|length > 0 %}
             <div class="cat-dropdown">
-                <button class="cat-dropdown-btn">Categories ▾</button>
-                <div class="cat-menu">
+                <button type="button" class="cat-dropdown-btn" id="categories-toggle-btn"
+                        aria-expanded="false" aria-controls="categories-menu-panel"
+                        aria-label="Browse categories" onclick="toggleCatDropdown(this)">Categories ▾</button>
+                <div class="cat-menu" id="categories-menu-panel">
                     {% for cat in categories %}<a href="/retail/category/{{ cat }}">{{ cat }}</a>{% endfor %}
                 </div>
             </div>
@@ -184,8 +187,10 @@
             <a href="/retail/contact">Contact Us</a>
             {% if logged_in_user %}
             <div class="cat-dropdown">
-                <button class="cat-dropdown-btn">Hi, {{ (logged_in_user.name or 'Account').split(' ')[0] }} ▾</button>
-                <div class="cat-menu">
+                <button type="button" class="cat-dropdown-btn" id="profile-toggle-btn"
+                        aria-expanded="false" aria-controls="profile-menu-panel"
+                        aria-label="Profile options" onclick="toggleCatDropdown(this)">Hi, {{ (logged_in_user.name or 'Account').split(' ')[0] }} ▾</button>
+                <div class="cat-menu" id="profile-menu-panel">
                     <a href="{{ url_for('profile') }}">My Profile</a>
                     <a href="{{ url_for('logout') }}">Sign Out</a>
                 </div>
@@ -406,6 +411,48 @@ function escHtml(str) {
 document.addEventListener('DOMContentLoaded', function() {
     initSearch('desktop');
     initSearch('mobile');
+});
+
+/* ── Desktop nav disclosures (Categories / Profile) ──
+   Native <button>s already fire a click on both Enter and Space (and the
+   browser already preventDefaults Space's page-scroll for a focused
+   button), so a single click handler covers mouse and keyboard alike --
+   no separate keydown handler is needed, and adding one that re-ran this
+   same toggle would double-fire and immediately close what it just opened. */
+function toggleCatDropdown(btn) {
+    const wrapper = btn.closest('.cat-dropdown');
+    const isOpen = btn.getAttribute('aria-expanded') === 'true';
+    document.querySelectorAll('.cat-dropdown.open').forEach(function(openWrap) {
+        if (openWrap !== wrapper) {
+            const openBtn = openWrap.querySelector('.cat-dropdown-btn');
+            if (openBtn) closeCatDropdown(openBtn, openWrap);
+        }
+    });
+    if (isOpen) {
+        closeCatDropdown(btn, wrapper);
+    } else {
+        btn.setAttribute('aria-expanded', 'true');
+        wrapper.classList.add('open');
+    }
+}
+function closeCatDropdown(btn, wrapper) {
+    btn.setAttribute('aria-expanded', 'false');
+    wrapper.classList.remove('open');
+}
+document.addEventListener('click', function(e) {
+    document.querySelectorAll('.cat-dropdown.open').forEach(function(wrap) {
+        if (!wrap.contains(e.target)) {
+            const btn = wrap.querySelector('.cat-dropdown-btn');
+            if (btn) closeCatDropdown(btn, wrap);
+        }
+    });
+});
+document.addEventListener('keydown', function(e) {
+    if (e.key !== 'Escape') return;
+    document.querySelectorAll('.cat-dropdown.open').forEach(function(wrap) {
+        const btn = wrap.querySelector('.cat-dropdown-btn');
+        if (btn) { closeCatDropdown(btn, wrap); btn.focus(); }
+    });
 });
 
 function toggleMobileCatsHeader(e) {
