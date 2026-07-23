@@ -69,6 +69,15 @@
         </table>
         {% endif %}
 
+        {% if cod_credit_awarded %}
+        <div style="background:#fdf2f8;border:1px solid #fbcfe8;border-radius:10px;padding:12px 16px;margin:16px 0;font-size:0.85em;color:#4b5563;line-height:1.6;">
+            <strong style="color:#881337;">🎁 {{ cod_credit_awarded }} Nari Nakhre Credits added to your account!</strong><br>
+            Our delivery partner requires Cash on Delivery amounts to be a whole number, so this order was
+            rounded up. Instead of collecting exact change, we've credited the difference to your account
+            as Nari Nakhre Credits — usable on your next order.
+        </div>
+        {% endif %}
+
         <div class="address-box">
             <strong>Shipping to:</strong><br>
             {{ address_name }}<br>

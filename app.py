@@ -393,6 +393,14 @@ def initialize_database_if_needed():
             stock_total INTEGER DEFAULT 0,
             stock_alert_threshold INTEGER DEFAULT 5,
             UNIQUE(master_sku, size)
+        )''',
+        '''CREATE TABLE IF NOT EXISTS credit_transactions (
+            id BIGSERIAL PRIMARY KEY,
+            user_id BIGINT NOT NULL REFERENCES users(id),
+            amount NUMERIC NOT NULL,
+            reason TEXT NOT NULL,
+            internal_order_id TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )'''
     ]
     client = get_supabase()
@@ -418,6 +426,9 @@ def initialize_database_if_needed():
         'ALTER TABLE products ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP',
         "UPDATE products SET status='published' WHERE status IS NULL OR status=''",
         "ALTER TABLE products ALTER COLUMN status SET DEFAULT 'published'",
+        'ALTER TABLE order_shipping ADD COLUMN IF NOT EXISTS cod_collected_amount NUMERIC',
+        'ALTER TABLE order_shipping ADD COLUMN IF NOT EXISTS cod_credit_awarded NUMERIC DEFAULT 0',
+        'ALTER TABLE order_shipping ADD COLUMN IF NOT EXISTS credits_redeemed NUMERIC DEFAULT 0',
     ]
     for sql in alter_sql:
         try:
@@ -464,8 +475,14 @@ def calculate_inclusive_gst(display_cart, discount=0.0, full_subtotal=0.0):
     return {'total_gst': total_gst, 'cgst': half, 'sgst': round(total_gst - half, 2)}
 
 
-def create_delhivery_shipment(order_row, cart_items):
-    """Create a Delhivery shipment after payment confirmation. Returns (waybill, error_msg)."""
+def create_delhivery_shipment(order_row, cart_items, cod_amount_override=None):
+    """Create a Delhivery shipment after payment confirmation. Returns (waybill, error_msg).
+
+    cod_amount_override, when given, is the whole-rupee amount actually
+    collected in cash (see round_cod_amount) -- Delhivery gets told to
+    collect this instead of the exact order total, which may have decimals
+    or not be a multiple of 10.
+    """
     if not DELHIVERY_API_TOKEN:
         return None, "Delhivery API token not configured"
     order_row_dict = dict(order_row) if not isinstance(order_row, dict) else order_row
@@ -478,6 +495,7 @@ def create_delhivery_shipment(order_row, cart_items):
     internal_order_id = order_row_dict.get('internal_order_id', '')
     payment_mode = order_row_dict.get('payment_mode', 'Prepaid')
     total_amount = float(order_row_dict.get('total_amount', 0) or 0)
+    cod_amount = float(cod_amount_override) if cod_amount_override is not None else total_amount
     total_qty = max(sum(int(item.get('units', item.get('qty', 1))) for item in cart_items), 1) if cart_items else 1
     weight_grams = max(total_qty * 250, 250)
     delhivery_payment_mode = 'COD' if payment_mode == 'COD' else 'Prepaid'
@@ -486,7 +504,7 @@ def create_delhivery_shipment(order_row, cart_items):
         'city': city, 'state': state, 'pin': pincode, 'country': 'IN',
         'order': internal_order_id,
         'payment_mode': delhivery_payment_mode,
-        'cod_amount': total_amount if delhivery_payment_mode == 'COD' else 0,
+        'cod_amount': cod_amount if delhivery_payment_mode == 'COD' else 0,
         'weight': weight_grams,
         'shipment_width': 15, 'shipment_height': 10, 'shipment_length': 20,
         'quantity': total_qty, 'hsn_code': '7117',
@@ -881,6 +899,64 @@ def generate_referral_code(db_conn):
     return ''.join(random.choices(alphabet, k=12))
 
 
+# Nari Nakhre Credits -- an in-app store-credit wallet, redeemable at
+# checkout. Balance is never stored as a column (avoids it drifting out of
+# sync with reality); it's always the sum of this ledger, computed fresh.
+COD_ROUNDING_CREDIT = 10  # flat credits awarded when COD rounding goes against the customer
+
+
+def round_cod_amount(amount):
+    """Round a COD cash-collection amount to the nearest ₹10.
+
+    Delhivery's COD delivery agents collect physical cash and can't
+    practically make exact change, so the amount they're told to collect
+    has to be a whole multiple of 10, not the exact order total.
+
+    Returns (rounded_amount, rounded_up). rounded_up is True only when the
+    customer ends up paying MORE cash than the order actually costs -- that
+    gap is what earns them a flat Nari Nakhre Credits award (see
+    COD_ROUNDING_CREDIT) instead of physical change. Rounding DOWN (customer
+    pays less) needs no special handling -- it's simply a smaller cash
+    collection, i.e. an automatic discount.
+    """
+    amount = float(amount or 0)
+    base = int(amount // 10) * 10
+    remainder = round(amount - base, 2)
+    if remainder >= 5:
+        return float(base + 10), True
+    return float(base), False
+
+
+def get_credit_balance(db_conn, user_id):
+    if not user_id:
+        return 0.0
+    row = db_conn.execute(
+        'SELECT COALESCE(SUM(amount), 0) as bal FROM credit_transactions WHERE user_id=?',
+        (user_id,)
+    ).fetchone()
+    return float(row['bal']) if row and row['bal'] is not None else 0.0
+
+
+def award_credits(db_conn, user_id, amount, reason, internal_order_id=None):
+    """Add a positive ledger entry. Caller is responsible for conn.commit()."""
+    if not user_id or amount <= 0:
+        return
+    db_conn.execute(
+        'INSERT INTO credit_transactions (user_id, amount, reason, internal_order_id) VALUES (?,?,?,?)',
+        (user_id, amount, reason, internal_order_id),
+    )
+
+
+def redeem_credits(db_conn, user_id, amount, internal_order_id=None):
+    """Add a negative ledger entry. Caller is responsible for conn.commit()."""
+    if not user_id or amount <= 0:
+        return
+    db_conn.execute(
+        'INSERT INTO credit_transactions (user_id, amount, reason, internal_order_id) VALUES (?,?,?,?)',
+        (user_id, -amount, 'redeemed_at_checkout', internal_order_id),
+    )
+
+
 @app.route('/auth/google/login')
 def google_login():
     site_home = '/wholesale' if g.site_type == 'wholesale' else '/retail'
@@ -992,6 +1068,12 @@ def profile():
     referral_code = user_row['referral_code'] if user_row else ''
     referral_link = f"{request.url_root.rstrip('/')}/retail?ref={referral_code}" if referral_code else ''
 
+    credit_balance = get_credit_balance(db_conn, user_id)
+    credit_history = db_conn.execute(
+        'SELECT * FROM credit_transactions WHERE user_id=? ORDER BY created_at DESC LIMIT 20',
+        (user_id,),
+    ).fetchall()
+
     return render_site(
         'profile.html',
         user=user_row,
@@ -1000,6 +1082,8 @@ def profile():
         referral_code=referral_code,
         referral_link=referral_link,
         referral_count=referral_count,
+        credit_balance=credit_balance,
+        credit_history=credit_history,
     )
 
 @app.route('/my-orders')
@@ -1416,21 +1500,33 @@ def checkout():
     applied_coupon = session.get('applied_coupon')
     discount = applied_coupon['discount_amount'] if applied_coupon else 0.0
     coupon_code = applied_coupon['code'] if applied_coupon else ''
-    grand_total = max(subtotal - discount, 0)
 
     # Signed-in retail customers get their last shipping address prefilled
     # on checkout instead of retyping it — same source data as profile().
     saved_address = None
+    credit_balance = 0.0
+    applied_credits_row = session.get('applied_credits')
+    credits_applied = float(applied_credits_row.get('amount', 0)) if applied_credits_row else 0.0
     if g.site_type == 'retail' and session.get('user_id'):
         saved_address = db.execute(
             'SELECT * FROM order_shipping WHERE user_id=? ORDER BY created_at DESC LIMIT 1',
             (session['user_id'],),
         ).fetchone()
+        credit_balance = get_credit_balance(db, session['user_id'])
+        if credits_applied > credit_balance:
+            # Stale session value (balance changed elsewhere) — drop it rather
+            # than let the customer redeem more than they actually have.
+            credits_applied = 0.0
+            session.pop('applied_credits', None)
+            session.modified = True
+
+    grand_total = max(subtotal - discount - credits_applied, 0)
 
     return render_site('checkout.html', display_cart=display_cart, subtotal=subtotal, total_tax=0.0,
                         discount=discount, grand_total=grand_total, coupon_code=coupon_code,
                         out_of_stock_items=out_of_stock_items, recaptcha_site_key=RECAPTCHA_SITE_KEY,
-                        saved_address=saved_address)
+                        saved_address=saved_address, credit_balance=credit_balance,
+                        credits_applied=credits_applied)
 
 @app.route('/checkout/shipping', methods=['GET', 'POST'])
 @app.route('/retail/checkout/shipping', methods=['GET', 'POST'])
@@ -1478,6 +1574,21 @@ def checkout_process():
     discount_amount = float(applied_coupon.get('discount_amount', 0)) if applied_coupon else 0.0
     coupon_code = applied_coupon.get('code') if applied_coupon else None
 
+    # Nari Nakhre Credits redemption -- re-validated against the real ledger
+    # balance here (not just trusted from session) since this is what
+    # actually gets charged. The ledger itself is only debited once the
+    # order is confirmed (see confirm_cod_order / verify_payment), not here,
+    # so an abandoned/never-confirmed order never actually spends credits.
+    conn_for_credits = get_db()
+    applied_credits_row = session.get('applied_credits')
+    credits_redeemed = float(applied_credits_row.get('amount', 0)) if applied_credits_row else 0.0
+    if credits_redeemed > 0 and user_id:
+        available_balance = get_credit_balance(conn_for_credits, user_id)
+        credits_redeemed = min(credits_redeemed, available_balance, max(subtotal_amount - discount_amount, 0))
+        credits_redeemed = round(credits_redeemed, 2)
+    else:
+        credits_redeemed = 0.0
+
     gst_breakdown = calculate_inclusive_gst(display_cart, discount_amount, subtotal_amount)
     gst_amount = gst_breakdown['total_gst']
     cgst_amount = gst_breakdown['cgst']
@@ -1496,7 +1607,7 @@ def checkout_process():
     except Exception as e:
         app.logger.warning(f'Shipping rate fetch failed: {e}')
 
-    total_amount = max(subtotal_amount - discount_amount, 0)
+    total_amount = max(subtotal_amount - discount_amount - credits_redeemed, 0)
 
     # Store cart items as JSON for admin order view
     cart_items_json = json.dumps([{
@@ -1515,16 +1626,17 @@ def checkout_process():
             internal_order_id, status, payment_mode,
             subtotal_amount, gst_amount, cgst_amount, sgst_amount,
             discount_amount, actual_shipping_cost, total_amount,
-            coupon_code, cart_items_json)
-           VALUES (?,?,?,?,?,?,?,?,?,'pending',?,?,?,?,?,?,?,?,?,?)''',
+            coupon_code, cart_items_json, credits_redeemed)
+           VALUES (?,?,?,?,?,?,?,?,?,'pending',?,?,?,?,?,?,?,?,?,?,?)''',
         (user_id, cleaned_name, consignee_phone, consignee_email,
          cleaned_address, consignee_city, consignee_state, consignee_pincode,
          internal_order_id, payment_mode,
          subtotal_amount, gst_amount, cgst_amount, sgst_amount,
          discount_amount, actual_shipping_cost, total_amount,
-         coupon_code, cart_items_json)
+         coupon_code, cart_items_json, credits_redeemed)
     )
     conn.commit()
+    session.pop('applied_credits', None)
 
     # Delhivery shipment created AFTER payment — not here
     waybill = None
@@ -1642,11 +1754,23 @@ def create_razorpay_order():
         }), 500
 
     try:
-        requested_amount = payload.get('amount')
+        # The DB's total_amount is the source of truth for what to charge --
+        # it already reflects any coupon discount and Nari Nakhre Credits
+        # redeemed at checkout_process time. The client-supplied `amount` is
+        # never trusted for this (it can't account for credits, and taking
+        # it at face value would let a tampered request set its own price);
+        # it's only a last-resort fallback if the order can't be found.
+        requested_amount = None
+        if internal_order_id:
+            order_row_for_amount = get_db().execute(
+                'SELECT total_amount FROM order_shipping WHERE internal_order_id=?',
+                (internal_order_id,)
+            ).fetchone()
+            if order_row_for_amount and order_row_for_amount['total_amount'] is not None:
+                requested_amount = float(order_row_for_amount['total_amount'])
+
         if requested_amount is None:
-            cart = session.get('cart', {})
-            subtotal = sum(item['price'] * item['qty'] for item in cart.values())
-            requested_amount = amount_to_pay  # from DB lookup above
+            requested_amount = payload.get('amount')
 
         amount_paise = int(round(float(requested_amount) * 100))
         if amount_paise <= 0:
@@ -1754,19 +1878,51 @@ def confirm_cod_order():
     order_row_dict = dict(order_row)
     cart = session.get('cart', {})
     cart_items = list(cart.values()) if cart else []
-    waybill, del_error = create_delhivery_shipment(order_row_dict, cart_items)
+
+    # Delhivery COD agents collect whole-rupee cash, so the collection amount
+    # is rounded to the nearest ₹10. If that rounds UP, the customer earns a
+    # flat Nari Nakhre Credits award for the difference instead of getting
+    # physical change. Guest checkouts (no account to credit) never round
+    # up -- only down -- so a guest is never charged more with nothing given
+    # back for it.
+    original_total = float(order_row_dict.get('total_amount', 0) or 0)
+    cod_user_id = order_row_dict.get('user_id')
+    if cod_user_id:
+        cod_collect_amount, cod_rounded_up = round_cod_amount(original_total)
+    else:
+        cod_collect_amount = float(int(original_total // 10) * 10)
+        cod_rounded_up = False
+    cod_credit_awarded = COD_ROUNDING_CREDIT if cod_rounded_up else 0
+
+    waybill, del_error = create_delhivery_shipment(order_row_dict, cart_items, cod_amount_override=cod_collect_amount)
     if waybill:
-        conn.execute('UPDATE order_shipping SET status=?, delhivery_waybill=? WHERE internal_order_id=?',
-                     ('cod_confirmed', waybill, internal_order_id))
+        conn.execute(
+            'UPDATE order_shipping SET status=?, delhivery_waybill=?, cod_collected_amount=?, cod_credit_awarded=? WHERE internal_order_id=?',
+            ('cod_confirmed', waybill, cod_collect_amount, cod_credit_awarded, internal_order_id))
     else:
         app.logger.error(f"Delhivery failed for COD {internal_order_id}: {del_error}")
-        conn.execute('UPDATE order_shipping SET status=? WHERE internal_order_id=?',
-                     ('cod_confirmed', internal_order_id))
+        conn.execute(
+            'UPDATE order_shipping SET status=?, cod_collected_amount=?, cod_credit_awarded=? WHERE internal_order_id=?',
+            ('cod_confirmed', cod_collect_amount, cod_credit_awarded, internal_order_id))
+    if cod_credit_awarded:
+        try:
+            award_credits(conn, cod_user_id, cod_credit_awarded, 'cod_rounding', internal_order_id)
+        except Exception as e:
+            app.logger.warning(f"Failed to award COD rounding credits for {internal_order_id}: {e}")
+    # Credits redeemed toward this order were already baked into total_amount
+    # at checkout_process time; the ledger debit only happens now, on actual
+    # confirmation, so an abandoned pending order never really spends credits.
+    credits_redeemed = float(order_row_dict.get('credits_redeemed', 0) or 0)
+    if credits_redeemed and cod_user_id:
+        try:
+            redeem_credits(conn, cod_user_id, credits_redeemed, internal_order_id)
+        except Exception as e:
+            app.logger.warning(f"Failed to redeem credits for {internal_order_id}: {e}")
     conn.commit()
     try:
         customer_email = order_row_dict.get('consignee_email', '')
         customer_name = order_row_dict.get('consignee_name', 'Customer')
-        total = order_row_dict.get('total_amount', 0)
+        total = cod_collect_amount
         tracking_url = f"{request.url_root.rstrip('/')}/track/{waybill}" if waybill else ''
         invoice_url = f"{request.url_root.rstrip('/')}/invoice/{internal_order_id}"
         items_for_email = [{
@@ -1787,10 +1943,16 @@ def confirm_cod_order():
                 address_state=order_row_dict.get('consignee_state', ''),
                 address_pincode=order_row_dict.get('consignee_pincode', ''),
                 tracking_url=tracking_url or None, waybill=waybill or None,
-                invoice_url=invoice_url)
+                invoice_url=invoice_url, cod_credit_awarded=cod_credit_awarded)
             order_text = (
                 f"Hi {customer_name},\n\nYour COD order is confirmed!\n\nOrder ID: {internal_order_id}\n"
                 f"Amount to pay on delivery: ₹{total:.2f}\n"
+                + (
+                    f"\nNote: our delivery partner requires COD amounts to be a whole number, so this "
+                    f"was rounded up from the order total. Instead of collecting exact change, we've "
+                    f"credited {cod_credit_awarded} Nari Nakhre Credits to your account for use on a "
+                    f"future order.\n" if cod_credit_awarded else ""
+                )
                 + (f"Track: {tracking_url}\n" if tracking_url else "Tracking will be shared once your order is dispatched.\n")
                 + f"Invoice: {invoice_url}\n\nThank you for shopping with Nari Nakhre!"
             )
@@ -1821,7 +1983,9 @@ def confirm_cod_order():
             + (f"Coupon ({coupon_code}) discount: -₹{discount:.2f}\n" if discount else "")
             + (f"GST (incl.): ₹{gst:.2f}\n" if gst else "")
             + (f"Shipping: ₹{shipping_cost:.2f}\n" if shipping_cost else "Shipping: Free\n")
-            + f"Total to collect (COD): ₹{total:.2f}\n\n"
+            + f"Total to collect (COD): ₹{total:.2f}\n"
+            + (f"(rounded up from ₹{original_total:.2f}; {cod_credit_awarded} Nari Nakhre Credits awarded to customer)\n" if cod_credit_awarded else "")
+            + "\n"
             f"Shipping Address:\n{order_row_dict.get('consignee_address','')}, "
             f"{order_row_dict.get('consignee_city','')}, {order_row_dict.get('consignee_state','')} - {order_row_dict.get('consignee_pincode','')}\n\n"
             + (f"Waybill: {waybill}\n" if waybill else "Waybill: pending\n")
@@ -1833,11 +1997,11 @@ def confirm_cod_order():
             from_email=ORDERS_FROM_EMAIL)
     except Exception as e:
         app.logger.warning(f"COD email failed: {e}")
-    total_for_session = float(order_row_dict.get('total_amount', 0) or 0)
     session['checkout_handover'] = {
         'internal_order_id': internal_order_id,
         'waybill': waybill,
-        'amount_paid': total_for_session,
+        'amount_paid': cod_collect_amount,
+        'cod_credit_awarded': cod_credit_awarded,
         'payment_mode': 'COD',
     }
     session.pop('cart', None)
@@ -1919,6 +2083,15 @@ def verify_payment():
             'UPDATE order_shipping SET status=? WHERE internal_order_id=?',
             ('paid', internal_order_id)
         )
+        # Credits redeemed toward this order were already baked into
+        # total_amount at checkout_process time; the ledger debit only
+        # happens now, on confirmed payment.
+        credits_redeemed = float(order_row_dict.get('credits_redeemed', 0) or 0)
+        if credits_redeemed and order_row_dict.get('user_id'):
+            try:
+                redeem_credits(conn, order_row_dict['user_id'], credits_redeemed, internal_order_id)
+            except Exception as e:
+                app.logger.warning(f"Failed to redeem credits for {internal_order_id}: {e}")
         conn.commit()
 
         # Order confirmation + admin notification emails (best-effort, never
@@ -2476,6 +2649,50 @@ def remove_coupon():
     return jsonify({"status": "success"})
 
 
+@app.route('/apply_credits', methods=['POST'])
+def apply_credits():
+    if not session.get('user_id'):
+        return jsonify({"status": "error", "message": "Please sign in to use Nari Nakhre Credits"}), 200
+
+    data = request.get_json(silent=True) or {}
+    try:
+        amount = float(data.get('amount', 0))
+    except (TypeError, ValueError):
+        amount = 0
+    if amount <= 0:
+        return jsonify({"status": "error", "message": "Enter a valid credit amount"}), 200
+
+    db = get_db()
+    balance = get_credit_balance(db, session['user_id'])
+    if amount > balance:
+        return jsonify({"status": "error", "message": f"You only have {balance:.0f} Nari Nakhre Credits available"}), 200
+
+    cart = session.get('cart', {})
+    subtotal = sum(item.get('price', 0) * item.get('units', item.get('qty', 1)) for item in cart.values())
+    applied_coupon = session.get('applied_coupon')
+    coupon_discount = float(applied_coupon.get('discount_amount', 0)) if applied_coupon else 0.0
+    max_redeemable = max(subtotal - coupon_discount, 0)
+    amount = round(min(amount, max_redeemable), 2)
+    if amount <= 0:
+        return jsonify({"status": "error", "message": "Your order total is already ₹0"}), 200
+
+    session['applied_credits'] = {"amount": amount}
+    session.modified = True
+    return jsonify({
+        "status": "success",
+        "message": f"₹{amount:.0f} Nari Nakhre Credits applied",
+        "amount": amount,
+        "balance": balance,
+    })
+
+
+@app.route('/remove_credits', methods=['POST'])
+def remove_credits():
+    session.pop('applied_credits', None)
+    session.modified = True
+    return jsonify({"status": "success"})
+
+
 @app.route('/clear_quote', methods=['POST'])
 def clear_quote():
     session.pop('cart', None)
@@ -2495,20 +2712,23 @@ def thank_you():
     payment_mode = ''
     amount_paid = 0.0
     cart_items = []
+    cod_credit_awarded = 0
 
     # DB is the source of truth — session data may already be popped (e.g. after
     # a Razorpay payment verification) by the time this page loads
     if order_id:
         conn = get_db()
         row = conn.execute(
-            'SELECT delhivery_waybill, payment_mode, total_amount, cart_items_json '
+            'SELECT delhivery_waybill, payment_mode, total_amount, cart_items_json, '
+            'cod_collected_amount, cod_credit_awarded '
             'FROM order_shipping WHERE internal_order_id=? ORDER BY id DESC LIMIT 1',
             (order_id,)
         ).fetchone()
         if row:
             waybill = row['delhivery_waybill'] or ''
             payment_mode = row['payment_mode'] or ''
-            amount_paid = float(row['total_amount'] or 0)
+            amount_paid = float(row['cod_collected_amount'] or row['total_amount'] or 0)
+            cod_credit_awarded = float(row['cod_credit_awarded'] or 0)
             if row['cart_items_json']:
                 try:
                     cart_items = json.loads(row['cart_items_json'])
@@ -2523,12 +2743,15 @@ def thank_you():
         payment_mode = checkout_handover.get('payment_mode', '')
     if not amount_paid:
         amount_paid = float(checkout_handover.get('amount_paid', 0) or 0)
+    if not cod_credit_awarded:
+        cod_credit_awarded = float(checkout_handover.get('cod_credit_awarded', 0) or 0)
 
     tracking_url = url_for('track_order_page', waybill=waybill, _external=True) if waybill else None
 
     return render_template('retail/thank_you.html',
                            order_id=order_id, waybill=waybill,
                            tracking_url=tracking_url,
+                           cod_credit_awarded=cod_credit_awarded,
                            amount_paid=amount_paid,
                            payment_mode=payment_mode,
                            cart_items=cart_items)

@@ -325,6 +325,25 @@
           <button onclick="removeCoupon()" style="background:none;border:none;color:#dc2626;font-size:0.75rem;font-weight:600;cursor:pointer;">Remove</button>
         </div>
         {% endif %}
+
+        <!-- Nari Nakhre Credits -->
+        {% if logged_in_user and credit_balance and credit_balance > 0 %}
+        <div class="ck-coupon-row">
+          <input type="number" id="ck-credits" class="ck-coupon-input" style="text-transform:none;"
+                 min="1" max="{{ credit_balance|int }}" step="1"
+                 placeholder="Apply Nari Nakhre Credits (max {{ credit_balance|int }})">
+          <button onclick="applyCredits()" class="ck-coupon-btn">Apply</button>
+        </div>
+        <div id="ck-credits-msg" class="ck-coupon-msg" style="display:none;"></div>
+        {% if credits_applied and credits_applied > 0 %}
+        <div style="display:flex;align-items:center;justify-content:space-between;background:#fdf2f8;border:1.5px solid #fbcfe8;border-radius:10px;padding:8px 12px;margin-top:8px;">
+          <span style="font-size:0.8rem;font-weight:600;color:#881337;">🎁 ₹{{ credits_applied|round(0)|int }} Nari Nakhre Credits applied</span>
+          <button onclick="removeCredits()" style="background:none;border:none;color:#dc2626;font-size:0.75rem;font-weight:600;cursor:pointer;">Remove</button>
+        </div>
+        {% else %}
+        <div style="font-size:0.72rem;color:#9ca3af;margin-top:4px;">You have ₹{{ credit_balance|round(0)|int }} in Nari Nakhre Credits available.</div>
+        {% endif %}
+        {% endif %}
       </div>
 
       <!-- Shipping address form — shown inline on desktop, stays visible -->
@@ -511,6 +530,7 @@ let currentDiscount = {{ discount|default(0)|round(2) }};
 const subtotalBase = {{ subtotal|round(2) }};
 const gstBase = {{ total_tax|round(2) }};
 const discountBase = {{ discount|default(0)|round(2) }};
+const creditsApplied = {{ credits_applied|default(0)|round(2) }};
 
 /* ── Payment method toggle ── */
 function setPayment(mode) {
@@ -586,7 +606,7 @@ function ckRecalc() {
     let disc = appliedCoupon ? Math.min(sub*(appliedCoupon.pct/100), appliedCoupon.max_discount>0?appliedCoupon.max_discount:Infinity) : discountBase;
     if (appliedCoupon && sub < appliedCoupon.min_order) { disc = 0; }
     currentDiscount = disc;
-    document.getElementById('s-total').textContent = '₹'+Math.max(sub-disc,0).toFixed(0);
+    document.getElementById('s-total').textContent = '₹'+Math.max(sub-disc-creditsApplied,0).toFixed(0);
 }
 
 /* ── Coupon ── */
@@ -613,6 +633,33 @@ function applyCoupon() {
 }
 function removeCoupon() {
     fetch('/remove_coupon', {method:'POST'}).then(()=>location.reload());
+}
+
+/* ── Nari Nakhre Credits ── */
+function applyCredits() {
+    const input = document.getElementById('ck-credits');
+    const amount = parseFloat(input.value);
+    const msgEl = document.getElementById('ck-credits-msg');
+    if (!amount || amount <= 0) return;
+    fetch('/apply_credits', {method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({amount: amount})})
+    .then(r=>r.json()).then(d=>{
+        msgEl.style.display = 'block';
+        if (d.status === 'success') {
+            msgEl.style.color = '#15803d';
+            msgEl.textContent = d.message;
+            setTimeout(()=>location.reload(), 600);
+        } else {
+            msgEl.style.color = '#dc2626';
+            msgEl.textContent = d.message || 'Could not apply credits';
+        }
+    }).catch(()=>{
+        msgEl.style.display='block'; msgEl.style.color='#dc2626';
+        msgEl.textContent='Could not apply credits. Please try again.';
+    });
+}
+function removeCredits() {
+    fetch('/remove_credits', {method:'POST'}).then(()=>location.reload());
 }
 
 /* ── Clear cart ── */
@@ -737,7 +784,10 @@ document.getElementById('ck-form').addEventListener('submit', async function(e){
     document.querySelectorAll('.ck-item').forEach(r=>{
         sub += +r.dataset.price * +r.querySelector('.ck-qty').textContent;
     });
-    const totalRupees = Math.max(sub - currentDiscount, 0);
+    // Informational only -- the server derives the actual charge from the
+    // order's stored total_amount (which already reflects credits), never
+    // trusting this value directly.
+    const totalRupees = Math.max(sub - currentDiscount - creditsApplied, 0);
 
     const fd = new FormData();
     fd.append('consignee_name', name);
