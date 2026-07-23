@@ -436,6 +436,70 @@ def initialize_database_if_needed():
         except Exception as e:
             app.logger.warning(f'Column init warning (may already exist): {e}')
 
+    # Nari Nakhre Credits reservation -- these two functions run the
+    # check-balance-then-insert as a single atomic Postgres statement (a
+    # plpgsql function body executes strictly sequentially, unlike a CTE,
+    # so pg_advisory_xact_lock genuinely blocks a concurrent caller until
+    # this one's transaction ends), so two tabs/devices redeeming at the
+    # same instant can't both succeed against the same balance.
+    functions_sql = [
+        '''CREATE OR REPLACE FUNCTION sweep_expired_credit_holds(p_user_id BIGINT)
+           RETURNS VOID AS $func$
+           BEGIN
+               PERFORM pg_advisory_xact_lock(hashtext('nn_credits_' || p_user_id::text));
+               INSERT INTO credit_transactions (user_id, amount, reason, internal_order_id)
+               SELECT t.user_id, -t.amount, 'hold_expired', t.internal_order_id
+               FROM credit_transactions t
+               WHERE t.user_id = p_user_id
+                 AND t.reason = 'hold_for_order'
+                 AND t.created_at < NOW() - INTERVAL '30 minutes'
+                 AND NOT EXISTS (
+                     SELECT 1 FROM credit_transactions r
+                     WHERE r.internal_order_id = t.internal_order_id
+                       AND r.reason IN ('hold_expired', 'redeemed_at_checkout')
+                 );
+           END;
+           $func$ LANGUAGE plpgsql''',
+        '''CREATE OR REPLACE FUNCTION reserve_credits_atomic(
+               p_user_id BIGINT, p_amount NUMERIC, p_order_id TEXT,
+               p_reason TEXT DEFAULT 'hold_for_order'
+           )
+           RETURNS BOOLEAN AS $func$
+           DECLARE
+               v_available NUMERIC;
+           BEGIN
+               PERFORM pg_advisory_xact_lock(hashtext('nn_credits_' || p_user_id::text));
+               PERFORM sweep_expired_credit_holds(p_user_id);
+               SELECT COALESCE(SUM(amount), 0) INTO v_available
+               FROM credit_transactions WHERE user_id = p_user_id;
+               IF v_available >= p_amount THEN
+                   INSERT INTO credit_transactions (user_id, amount, reason, internal_order_id)
+                   VALUES (p_user_id, -p_amount, p_reason, p_order_id);
+                   RETURN TRUE;
+               ELSE
+                   RETURN FALSE;
+               END IF;
+           END;
+           $func$ LANGUAGE plpgsql''',
+        '''CREATE OR REPLACE FUNCTION finalize_credit_hold(p_order_id TEXT)
+           RETURNS BOOLEAN AS $func$
+           DECLARE
+               v_updated INT;
+           BEGIN
+               UPDATE credit_transactions
+               SET reason = 'redeemed_at_checkout'
+               WHERE internal_order_id = p_order_id AND reason = 'hold_for_order';
+               GET DIAGNOSTICS v_updated = ROW_COUNT;
+               RETURN v_updated > 0;
+           END;
+           $func$ LANGUAGE plpgsql''',
+    ]
+    for sql in functions_sql:
+        try:
+            client.rpc('execute_sql', {'query': sql}).execute()
+        except Exception as e:
+            app.logger.warning(f'Function init warning: {e}')
+
     app.logger.info('Database tables verified/created via Supabase RPC.')
 
 
@@ -930,6 +994,13 @@ def round_cod_amount(amount):
 def get_credit_balance(db_conn, user_id):
     if not user_id:
         return 0.0
+    # Release any checkout-time holds that expired (order was never
+    # confirmed) before computing the balance, so an abandoned cart doesn't
+    # permanently lock those credits away.
+    try:
+        db_conn.execute('SELECT sweep_expired_credit_holds(?)', (user_id,))
+    except Exception as e:
+        app.logger.warning(f'Credit hold sweep failed for user {user_id}: {e}')
     row = db_conn.execute(
         'SELECT COALESCE(SUM(amount), 0) as bal FROM credit_transactions WHERE user_id=?',
         (user_id,)
@@ -947,14 +1018,49 @@ def award_credits(db_conn, user_id, amount, reason, internal_order_id=None):
     )
 
 
-def redeem_credits(db_conn, user_id, amount, internal_order_id=None):
-    """Add a negative ledger entry. Caller is responsible for conn.commit()."""
+def reserve_credits(db_conn, user_id, amount, internal_order_id, reason='hold_for_order'):
+    """Atomically reserve `amount` credits against a not-yet-confirmed order.
+
+    Returns True if the reservation succeeded, False if the user doesn't
+    actually have enough available (e.g. a concurrent checkout in another
+    tab/device already claimed them). The check-then-insert happens inside
+    a single Postgres function call (reserve_credits_atomic) guarded by an
+    advisory lock, so two simultaneous callers for the same user_id are
+    genuinely serialized by the database rather than racing on a
+    read-then-write from Python. Caller is responsible for conn.commit().
+    """
+    if not user_id or amount <= 0:
+        return True
+    row = db_conn.execute(
+        "SELECT reserve_credits_atomic(?, ?, ?, ?) as ok",
+        (user_id, amount, internal_order_id, reason),
+    ).fetchone()
+    return bool(row['ok']) if row else False
+
+
+def finalize_credit_redemption(db_conn, user_id, amount, internal_order_id):
+    """Convert a checkout-time hold into a final, confirmed debit.
+
+    Normally just relabels the existing 'hold_for_order' ledger row created
+    by reserve_credits() at checkout time -- no new row, so this never
+    double-debits. Falls back to a fresh atomic reservation (tagged as
+    already-redeemed) only if that hold already expired, which can happen
+    if confirmation took longer than the hold's window; if the balance
+    isn't there anymore at that point, the credits are simply not honored
+    for this order rather than blocking the confirmation. Caller is
+    responsible for conn.commit().
+    """
     if not user_id or amount <= 0:
         return
-    db_conn.execute(
-        'INSERT INTO credit_transactions (user_id, amount, reason, internal_order_id) VALUES (?,?,?,?)',
-        (user_id, -amount, 'redeemed_at_checkout', internal_order_id),
-    )
+    row = db_conn.execute("SELECT finalize_credit_hold(?) as ok", (internal_order_id,)).fetchone()
+    if row and row['ok']:
+        return
+    ok = reserve_credits(db_conn, user_id, amount, internal_order_id, reason='redeemed_at_checkout')
+    if not ok:
+        app.logger.warning(
+            f"Could not finalize {amount} credits for order {internal_order_id}: "
+            f"hold had already expired and insufficient balance remains."
+        )
 
 
 @app.route('/auth/google/login')
@@ -1574,20 +1680,30 @@ def checkout_process():
     discount_amount = float(applied_coupon.get('discount_amount', 0)) if applied_coupon else 0.0
     coupon_code = applied_coupon.get('code') if applied_coupon else None
 
-    # Nari Nakhre Credits redemption -- re-validated against the real ledger
-    # balance here (not just trusted from session) since this is what
-    # actually gets charged. The ledger itself is only debited once the
-    # order is confirmed (see confirm_cod_order / verify_payment), not here,
-    # so an abandoned/never-confirmed order never actually spends credits.
+    # Nari Nakhre Credits redemption -- reserved here (not just validated)
+    # against the real ledger via an atomic DB-side check-and-hold, so two
+    # tabs/devices redeeming at the same instant can't both succeed against
+    # the same balance (see reserve_credits_atomic). The hold is only
+    # finalized into a real debit once the order is confirmed (see
+    # confirm_cod_order / verify_payment) -- and released automatically if
+    # this order is never confirmed -- so an abandoned checkout doesn't
+    # permanently spend credits either.
     conn_for_credits = get_db()
     applied_credits_row = session.get('applied_credits')
-    credits_redeemed = float(applied_credits_row.get('amount', 0)) if applied_credits_row else 0.0
-    if credits_redeemed > 0 and user_id:
-        available_balance = get_credit_balance(conn_for_credits, user_id)
-        credits_redeemed = min(credits_redeemed, available_balance, max(subtotal_amount - discount_amount, 0))
-        credits_redeemed = round(credits_redeemed, 2)
-    else:
-        credits_redeemed = 0.0
+    credits_requested = float(applied_credits_row.get('amount', 0)) if applied_credits_row else 0.0
+    credits_redeemed = 0.0
+    if credits_requested > 0 and user_id:
+        credits_requested = round(min(credits_requested, max(subtotal_amount - discount_amount, 0)), 2)
+        if credits_requested > 0:
+            reserved = reserve_credits(conn_for_credits, user_id, credits_requested, internal_order_id)
+            conn_for_credits.commit()
+            if reserved:
+                credits_redeemed = credits_requested
+            else:
+                app.logger.warning(
+                    f"Could not reserve {credits_requested} credits for user {user_id} on {internal_order_id}: "
+                    f"insufficient balance (likely already claimed by another session)."
+                )
 
     gst_breakdown = calculate_inclusive_gst(display_cart, discount_amount, subtotal_amount)
     gst_amount = gst_breakdown['total_gst']
@@ -1909,15 +2025,15 @@ def confirm_cod_order():
             award_credits(conn, cod_user_id, cod_credit_awarded, 'cod_rounding', internal_order_id)
         except Exception as e:
             app.logger.warning(f"Failed to award COD rounding credits for {internal_order_id}: {e}")
-    # Credits redeemed toward this order were already baked into total_amount
-    # at checkout_process time; the ledger debit only happens now, on actual
-    # confirmation, so an abandoned pending order never really spends credits.
+    # Credits redeemed toward this order were already reserved (held) at
+    # checkout_process time; finalize that hold into a real debit now that
+    # the order is actually confirmed.
     credits_redeemed = float(order_row_dict.get('credits_redeemed', 0) or 0)
     if credits_redeemed and cod_user_id:
         try:
-            redeem_credits(conn, cod_user_id, credits_redeemed, internal_order_id)
+            finalize_credit_redemption(conn, cod_user_id, credits_redeemed, internal_order_id)
         except Exception as e:
-            app.logger.warning(f"Failed to redeem credits for {internal_order_id}: {e}")
+            app.logger.warning(f"Failed to finalize redeemed credits for {internal_order_id}: {e}")
     conn.commit()
     try:
         customer_email = order_row_dict.get('consignee_email', '')
@@ -2083,15 +2199,15 @@ def verify_payment():
             'UPDATE order_shipping SET status=? WHERE internal_order_id=?',
             ('paid', internal_order_id)
         )
-        # Credits redeemed toward this order were already baked into
-        # total_amount at checkout_process time; the ledger debit only
-        # happens now, on confirmed payment.
+        # Credits redeemed toward this order were already reserved (held) at
+        # checkout_process time; finalize that hold into a real debit now
+        # that payment is actually confirmed.
         credits_redeemed = float(order_row_dict.get('credits_redeemed', 0) or 0)
         if credits_redeemed and order_row_dict.get('user_id'):
             try:
-                redeem_credits(conn, order_row_dict['user_id'], credits_redeemed, internal_order_id)
+                finalize_credit_redemption(conn, order_row_dict['user_id'], credits_redeemed, internal_order_id)
             except Exception as e:
-                app.logger.warning(f"Failed to redeem credits for {internal_order_id}: {e}")
+                app.logger.warning(f"Failed to finalize redeemed credits for {internal_order_id}: {e}")
         conn.commit()
 
         # Order confirmation + admin notification emails (best-effort, never

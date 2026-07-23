@@ -119,6 +119,8 @@
             {% set reason_labels = {
                 'cod_rounding': 'COD rounding bonus',
                 'redeemed_at_checkout': 'Redeemed at checkout',
+                'hold_for_order': 'Reserved for pending order',
+                'hold_expired': 'Hold released (order not completed)',
             } %}
             {% for tx in credit_history %}
             <div class="credit-tx-row">
