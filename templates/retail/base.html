@@ -172,7 +172,7 @@
             {% if categories and categories|length > 0 %}
             <div class="cat-dropdown">
                 <button type="button" class="cat-dropdown-btn" id="categories-toggle-btn"
-                        aria-expanded="false" aria-controls="categories-menu-panel"
+                        aria-haspopup="true" aria-expanded="false" aria-controls="categories-menu-panel"
                         aria-label="Browse categories" onclick="toggleCatDropdown(this)">Categories ▾</button>
                 <div class="cat-menu" id="categories-menu-panel">
                     {% for cat in categories %}<a href="/retail/category/{{ cat }}">{{ cat }}</a>{% endfor %}
@@ -188,7 +188,7 @@
             {% if logged_in_user %}
             <div class="cat-dropdown">
                 <button type="button" class="cat-dropdown-btn" id="profile-toggle-btn"
-                        aria-expanded="false" aria-controls="profile-menu-panel"
+                        aria-haspopup="true" aria-expanded="false" aria-controls="profile-menu-panel"
                         aria-label="Profile options" onclick="toggleCatDropdown(this)">Hi, {{ (logged_in_user.name or 'Account').split(' ')[0] }} ▾</button>
                 <div class="cat-menu" id="profile-menu-panel">
                     <a href="{{ url_for('profile') }}">My Profile</a>
