@@ -66,6 +66,17 @@
             color: #1d1d1f; font-weight: 700; font-size: 0.85rem; text-decoration: none; box-sizing: border-box;
         }
         .auth-google-btn:hover { background: #f9fafb; }
+        .auth-email-choice-btn {
+            display: flex; align-items: center; justify-content: center; gap: 8px; width: 100%;
+            background: #be185d; border: 1.5px solid #be185d; border-radius: 10px; padding: 10px;
+            color: white; font-weight: 700; font-size: 0.85rem; box-sizing: border-box; margin-top: 10px; cursor: pointer;
+        }
+        .auth-email-choice-btn:hover { background: #9f1239; }
+        .auth-back-btn {
+            background: none; border: none; cursor: pointer; color: #be185d; font-weight: 700;
+            font-size: 0.8rem; padding: 0; margin-bottom: 14px;
+        }
+        .auth-back-btn:hover { text-decoration: underline; }
         .auth-divider { display: flex; align-items: center; gap: 10px; margin: 16px 0; color: #9ca3af; font-size: 0.75rem; }
         .auth-divider::before, .auth-divider::after { content: ''; flex: 1; height: 1px; background: #e5e7eb; }
         .auth-form-error {
@@ -126,64 +137,78 @@
         </div>
 
         <div id="auth-tab-signin" role="tabpanel" aria-labelledby="auth-tab-btn-signin" tabindex="0">
-            <a class="auth-google-btn" href="{{ url_for('google_login') }}">
-                <svg width="18" height="18" viewBox="0 0 18 18" aria-hidden="true" focusable="false">
-                    <path fill="#4285F4" d="M17.64 9.2c0-.64-.06-1.25-.16-1.84H9v3.48h4.84c-.21 1.13-.84 2.09-1.79 2.73v2.27h2.9c1.7-1.56 2.69-3.87 2.69-6.64z"/>
-                    <path fill="#34A853" d="M9 18c2.43 0 4.47-.81 5.96-2.18l-2.9-2.27c-.8.54-1.84.86-3.06.86-2.35 0-4.34-1.59-5.05-3.72H.96v2.34C2.44 15.98 5.48 18 9 18z"/>
-                    <path fill="#FBBC05" d="M3.95 10.69A5.4 5.4 0 013.68 9c0-.59.1-1.16.27-1.69V4.97H.96A9 9 0 000 9c0 1.45.35 2.83.96 4.03l2.99-2.34z"/>
-                    <path fill="#EA4335" d="M9 3.58c1.32 0 2.51.45 3.44 1.35l2.58-2.58C13.46.89 11.43 0 9 0 5.48 0 2.44 2.02.96 4.97l2.99 2.34C4.66 5.17 6.65 3.58 9 3.58z"/>
-                </svg>
-                Continue with Google
-            </a>
-            <div class="auth-divider"><span>or</span></div>
-            <div id="auth-signin-error" class="auth-form-error" hidden></div>
-            <form id="auth-signin-form" onsubmit="return submitSignIn(event)">
-                <label for="asi-email">Email</label>
-                <input type="email" id="asi-email" name="email" required autocomplete="email">
-                <label for="asi-password">Password</label>
-                <div class="auth-password-wrap">
-                    <input type="password" id="asi-password" name="password" required autocomplete="current-password">
-                    <button type="button" class="auth-eye-btn" aria-label="Show password" aria-pressed="false"
-                            onclick="togglePasswordVisibility('asi-password', this)">👁</button>
-                </div>
-                <button type="submit" class="auth-submit-btn">Sign In</button>
-            </form>
+            <div id="auth-signin-choice">
+                <a class="auth-google-btn" href="{{ url_for('google_login') }}">
+                    <svg width="18" height="18" viewBox="0 0 18 18" aria-hidden="true" focusable="false">
+                        <path fill="#4285F4" d="M17.64 9.2c0-.64-.06-1.25-.16-1.84H9v3.48h4.84c-.21 1.13-.84 2.09-1.79 2.73v2.27h2.9c1.7-1.56 2.69-3.87 2.69-6.64z"/>
+                        <path fill="#34A853" d="M9 18c2.43 0 4.47-.81 5.96-2.18l-2.9-2.27c-.8.54-1.84.86-3.06.86-2.35 0-4.34-1.59-5.05-3.72H.96v2.34C2.44 15.98 5.48 18 9 18z"/>
+                        <path fill="#FBBC05" d="M3.95 10.69A5.4 5.4 0 013.68 9c0-.59.1-1.16.27-1.69V4.97H.96A9 9 0 000 9c0 1.45.35 2.83.96 4.03l2.99-2.34z"/>
+                        <path fill="#EA4335" d="M9 3.58c1.32 0 2.51.45 3.44 1.35l2.58-2.58C13.46.89 11.43 0 9 0 5.48 0 2.44 2.02.96 4.97l2.99 2.34C4.66 5.17 6.65 3.58 9 3.58z"/>
+                    </svg>
+                    Continue with Google
+                </a>
+                <button type="button" class="auth-email-choice-btn" onclick="showEmailForm('signin')">
+                    ✉️ Continue with Email
+                </button>
+            </div>
+            <div id="auth-signin-form-wrap" hidden>
+                <button type="button" class="auth-back-btn" onclick="backToChoice('signin')">← Back</button>
+                <div id="auth-signin-error" class="auth-form-error" hidden></div>
+                <form id="auth-signin-form" onsubmit="return submitSignIn(event)">
+                    <label for="asi-email">Email</label>
+                    <input type="email" id="asi-email" name="email" required autocomplete="email">
+                    <label for="asi-password">Password</label>
+                    <div class="auth-password-wrap">
+                        <input type="password" id="asi-password" name="password" required autocomplete="current-password">
+                        <button type="button" class="auth-eye-btn" aria-label="Show password" aria-pressed="false"
+                                onclick="togglePasswordVisibility('asi-password', this)">👁</button>
+                    </div>
+                    <button type="submit" class="auth-submit-btn">Sign In</button>
+                </form>
+            </div>
         </div>
 
         <div id="auth-tab-signup" role="tabpanel" aria-labelledby="auth-tab-btn-signup" tabindex="0" hidden>
-            <a class="auth-google-btn" href="{{ url_for('google_login') }}">
-                <svg width="18" height="18" viewBox="0 0 18 18" aria-hidden="true" focusable="false">
-                    <path fill="#4285F4" d="M17.64 9.2c0-.64-.06-1.25-.16-1.84H9v3.48h4.84c-.21 1.13-.84 2.09-1.79 2.73v2.27h2.9c1.7-1.56 2.69-3.87 2.69-6.64z"/>
-                    <path fill="#34A853" d="M9 18c2.43 0 4.47-.81 5.96-2.18l-2.9-2.27c-.8.54-1.84.86-3.06.86-2.35 0-4.34-1.59-5.05-3.72H.96v2.34C2.44 15.98 5.48 18 9 18z"/>
-                    <path fill="#FBBC05" d="M3.95 10.69A5.4 5.4 0 013.68 9c0-.59.1-1.16.27-1.69V4.97H.96A9 9 0 000 9c0 1.45.35 2.83.96 4.03l2.99-2.34z"/>
-                    <path fill="#EA4335" d="M9 3.58c1.32 0 2.51.45 3.44 1.35l2.58-2.58C13.46.89 11.43 0 9 0 5.48 0 2.44 2.02.96 4.97l2.99 2.34C4.66 5.17 6.65 3.58 9 3.58z"/>
-                </svg>
-                Continue with Google
-            </a>
-            <div class="auth-divider"><span>or</span></div>
-            <div id="auth-signup-error" class="auth-form-error" hidden></div>
-            <form id="auth-signup-form" onsubmit="return submitSignUp(event)">
-                <div class="auth-form-row">
-                    <div>
-                        <label for="asu-first">First Name</label>
-                        <input type="text" id="asu-first" name="first_name" required autocomplete="given-name">
+            <div id="auth-signup-choice">
+                <a class="auth-google-btn" href="{{ url_for('google_login') }}">
+                    <svg width="18" height="18" viewBox="0 0 18 18" aria-hidden="true" focusable="false">
+                        <path fill="#4285F4" d="M17.64 9.2c0-.64-.06-1.25-.16-1.84H9v3.48h4.84c-.21 1.13-.84 2.09-1.79 2.73v2.27h2.9c1.7-1.56 2.69-3.87 2.69-6.64z"/>
+                        <path fill="#34A853" d="M9 18c2.43 0 4.47-.81 5.96-2.18l-2.9-2.27c-.8.54-1.84.86-3.06.86-2.35 0-4.34-1.59-5.05-3.72H.96v2.34C2.44 15.98 5.48 18 9 18z"/>
+                        <path fill="#FBBC05" d="M3.95 10.69A5.4 5.4 0 013.68 9c0-.59.1-1.16.27-1.69V4.97H.96A9 9 0 000 9c0 1.45.35 2.83.96 4.03l2.99-2.34z"/>
+                        <path fill="#EA4335" d="M9 3.58c1.32 0 2.51.45 3.44 1.35l2.58-2.58C13.46.89 11.43 0 9 0 5.48 0 2.44 2.02.96 4.97l2.99 2.34C4.66 5.17 6.65 3.58 9 3.58z"/>
+                    </svg>
+                    Continue with Google
+                </a>
+                <button type="button" class="auth-email-choice-btn" onclick="showEmailForm('signup')">
+                    ✉️ Continue with Email
+                </button>
+            </div>
+            <div id="auth-signup-form-wrap" hidden>
+                <button type="button" class="auth-back-btn" onclick="backToChoice('signup')">← Back</button>
+                <div id="auth-signup-error" class="auth-form-error" hidden></div>
+                <form id="auth-signup-form" onsubmit="return submitSignUp(event)">
+                    <div class="auth-form-row">
+                        <div>
+                            <label for="asu-first">First Name</label>
+                            <input type="text" id="asu-first" name="first_name" required autocomplete="given-name">
+                        </div>
+                        <div>
+                            <label for="asu-last">Last Name</label>
+                            <input type="text" id="asu-last" name="last_name" required autocomplete="family-name">
+                        </div>
                     </div>
-                    <div>
-                        <label for="asu-last">Last Name</label>
-                        <input type="text" id="asu-last" name="last_name" required autocomplete="family-name">
+                    <label for="asu-email">Email</label>
+                    <input type="email" id="asu-email" name="email" required autocomplete="email">
+                    <label for="asu-password">Password</label>
+                    <div class="auth-password-wrap">
+                        <input type="password" id="asu-password" name="password" required minlength="8" autocomplete="new-password">
+                        <button type="button" class="auth-eye-btn" aria-label="Show password" aria-pressed="false"
+                                onclick="togglePasswordVisibility('asu-password', this)">👁</button>
                     </div>
-                </div>
-                <label for="asu-email">Email</label>
-                <input type="email" id="asu-email" name="email" required autocomplete="email">
-                <label for="asu-password">Password</label>
-                <div class="auth-password-wrap">
-                    <input type="password" id="asu-password" name="password" required minlength="8" autocomplete="new-password">
-                    <button type="button" class="auth-eye-btn" aria-label="Show password" aria-pressed="false"
-                            onclick="togglePasswordVisibility('asu-password', this)">👁</button>
-                </div>
-                <div class="auth-hint">At least 8 characters.</div>
-                <button type="submit" class="auth-submit-btn">Create Account</button>
-            </form>
+                    <div class="auth-hint">At least 8 characters.</div>
+                    <button type="submit" class="auth-submit-btn">Create Account</button>
+                </form>
+            </div>
         </div>
     </div>
 </div>
@@ -335,9 +360,26 @@ function showAuthTab(name) {
         btn.tabIndex = active ? 0 : -1;
         btn.classList.toggle('active', active);
         panel.hidden = !active;
+        backToChoice(t); // always land on the Google-vs-Email choice, never mid-form
     });
     const title = document.getElementById('auth-modal-title');
     if (title) title.textContent = name === 'signup' ? 'Create Account' : 'Sign In';
+}
+function showEmailForm(tabName) {
+    const choice = document.getElementById('auth-' + tabName + '-choice');
+    const formWrap = document.getElementById('auth-' + tabName + '-form-wrap');
+    if (!choice || !formWrap) return;
+    choice.hidden = true;
+    formWrap.hidden = false;
+    const firstInput = formWrap.querySelector('input');
+    if (firstInput) firstInput.focus();
+}
+function backToChoice(tabName) {
+    const choice = document.getElementById('auth-' + tabName + '-choice');
+    const formWrap = document.getElementById('auth-' + tabName + '-form-wrap');
+    if (!choice || !formWrap) return;
+    formWrap.hidden = true;
+    choice.hidden = false;
 }
 document.addEventListener('DOMContentLoaded', function () {
     document.querySelectorAll('.auth-modal-tabs [role="tab"]').forEach(function (tab, idx, arr) {
