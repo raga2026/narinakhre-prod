@@ -16,6 +16,7 @@ from email.mime.text import MIMEText
 from flask import Flask, g, jsonify, redirect, render_template, request, session, url_for, flash
 from werkzeug.routing import BuildError
 from werkzeug.middleware.proxy_fix import ProxyFix
+from werkzeug.security import generate_password_hash, check_password_hash
 from supabase import create_client, Client as SupabaseClient
 
 from utils.shipping_manager import get_shipping_provider
@@ -445,6 +446,11 @@ def initialize_database_if_needed():
         'ALTER TABLE order_shipping ADD COLUMN IF NOT EXISTS cod_credit_awarded NUMERIC DEFAULT 0',
         'ALTER TABLE order_shipping ADD COLUMN IF NOT EXISTS credits_redeemed NUMERIC DEFAULT 0',
         'ALTER TABLE products ADD COLUMN IF NOT EXISTS model_number TEXT UNIQUE',
+        'ALTER TABLE users ADD COLUMN IF NOT EXISTS password_hash TEXT',
+        # Best-effort -- non-fatal if pre-existing rows already have duplicate
+        # or blank emails (see the app-level check in email_signup as the
+        # real guard against duplicate accounts).
+        'ALTER TABLE users ADD CONSTRAINT users_email_unique UNIQUE (email)',
     ]
     for sql in alter_sql:
         try:
@@ -962,9 +968,12 @@ def terms():
 
 @app.context_processor
 def inject_logged_in_user():
+    ctx = {'recaptcha_site_key': RECAPTCHA_SITE_KEY}
     if not session.get('user_id'):
-        return {'logged_in_user': None}
-    return {'logged_in_user': {'name': session.get('user_name'), 'email': session.get('user_email')}}
+        ctx['logged_in_user'] = None
+    else:
+        ctx['logged_in_user'] = {'name': session.get('user_name'), 'email': session.get('user_email')}
+    return ctx
 
 def generate_referral_code(db_conn):
     """8-char, human-typeable, collision-checked referral code."""
@@ -1189,6 +1198,98 @@ def logout():
     session.pop('user_email', None)
     site_home = '/wholesale' if g.site_type == 'wholesale' else '/retail'
     return redirect(request.referrer or site_home)
+
+
+EMAIL_RE = re.compile(r'^[^@\s]+@[^@\s]+\.[^@\s]+$')
+
+
+def _log_in_user(db_conn, user_id):
+    user_row = db_conn.execute('SELECT id, name, email FROM users WHERE id=?', (user_id,)).fetchone()
+    session['user_id'] = user_row['id']
+    session['user_name'] = user_row['name']
+    session['user_email'] = user_row['email']
+
+
+@app.route('/auth/email/signup', methods=['POST'])
+def email_signup():
+    if g.site_type != 'retail':
+        return jsonify({'status': 'error', 'message': 'Email sign-in is not available here.'}), 400
+
+    data = request.get_json(silent=True) or request.form or {}
+    first_name = (data.get('first_name') or '').strip()
+    last_name = (data.get('last_name') or '').strip()
+    email = (data.get('email') or '').strip().lower()
+    password = data.get('password') or ''
+
+    if not verify_recaptcha(data.get('recaptcha_token'), remote_ip=request.remote_addr, expected_action='email_signup'):
+        return jsonify({'status': 'error', 'message': 'Verification failed. Please refresh and try again.'}), 400
+
+    if not (first_name and last_name and email and password):
+        return jsonify({'status': 'error', 'message': 'Please fill in all fields.'}), 400
+    if not EMAIL_RE.match(email):
+        return jsonify({'status': 'error', 'message': 'Please enter a valid email address.'}), 400
+    if len(password) < 8:
+        return jsonify({'status': 'error', 'message': 'Password must be at least 8 characters.'}), 400
+
+    db_conn = get_db()
+    existing = db_conn.execute('SELECT id, google_sub, password_hash FROM users WHERE LOWER(email)=?', (email,)).fetchone()
+    if existing:
+        if existing['password_hash']:
+            return jsonify({'status': 'error', 'message': 'An account with this email already exists. Please sign in instead.'}), 400
+        if existing['google_sub']:
+            return jsonify({'status': 'error', 'message': 'This email is registered via Google Sign-In. Please use "Continue with Google" instead.'}), 400
+
+    full_name = f'{first_name} {last_name}'.strip()
+    password_hash = generate_password_hash(password)
+
+    referred_by_id = None
+    pending_ref = session.pop('pending_referral_code', None)
+    if pending_ref:
+        referrer = db_conn.execute('SELECT id FROM users WHERE referral_code=?', (pending_ref,)).fetchone()
+        if referrer:
+            referred_by_id = referrer['id']
+    new_code = generate_referral_code(db_conn)
+
+    db_conn.execute(
+        'INSERT INTO users (name, email, password_hash, referral_code, referred_by) VALUES (?,?,?,?,?)',
+        (full_name, email, password_hash, new_code, referred_by_id),
+    )
+    db_conn.commit()
+    user_row = db_conn.execute('SELECT id FROM users WHERE LOWER(email)=?', (email,)).fetchone()
+    _log_in_user(db_conn, user_row['id'])
+
+    redirect_url = session.pop('post_login_redirect', None) or url_for('index')
+    return jsonify({'status': 'success', 'redirect': redirect_url})
+
+
+@app.route('/auth/email/login', methods=['POST'])
+def email_login():
+    if g.site_type != 'retail':
+        return jsonify({'status': 'error', 'message': 'Email sign-in is not available here.'}), 400
+
+    data = request.get_json(silent=True) or request.form or {}
+    email = (data.get('email') or '').strip().lower()
+    password = data.get('password') or ''
+
+    if not verify_recaptcha(data.get('recaptcha_token'), remote_ip=request.remote_addr, expected_action='email_login'):
+        return jsonify({'status': 'error', 'message': 'Verification failed. Please refresh and try again.'}), 400
+
+    if not (email and password):
+        return jsonify({'status': 'error', 'message': 'Please enter your email and password.'}), 400
+
+    db_conn = get_db()
+    user_row = db_conn.execute('SELECT id, password_hash, google_sub FROM users WHERE LOWER(email)=?', (email,)).fetchone()
+    if not user_row or not user_row['password_hash']:
+        if user_row and user_row['google_sub']:
+            return jsonify({'status': 'error', 'message': 'This email is registered via Google Sign-In. Please use "Continue with Google" instead.'}), 400
+        return jsonify({'status': 'error', 'message': 'Incorrect email or password.'}), 400
+    if not check_password_hash(user_row['password_hash'], password):
+        return jsonify({'status': 'error', 'message': 'Incorrect email or password.'}), 400
+
+    _log_in_user(db_conn, user_row['id'])
+    redirect_url = session.pop('post_login_redirect', None) or url_for('index')
+    return jsonify({'status': 'success', 'redirect': redirect_url})
+
 
 @app.route('/profile')
 def profile():

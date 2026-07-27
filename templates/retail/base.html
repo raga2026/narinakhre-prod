@@ -115,6 +115,8 @@
     @media (min-width: 768px) { .desktop-nav { display: flex; } }
     .desktop-nav a { color: #be185d; text-decoration: none; font-size: 0.9rem; font-weight: 700; padding: 6px 12px; border-radius: 999px; transition: background 0.15s; }
     .desktop-nav a:hover { background: #fff1f2; }
+    .desktop-nav button.nav-signin-btn { color: #be185d; background: none; border: none; cursor: pointer; font-size: 0.9rem; font-weight: 700; padding: 6px 12px; border-radius: 999px; transition: background 0.15s; font-family: inherit; }
+    .desktop-nav button.nav-signin-btn:hover { background: #fff1f2; }
     .cart-badge { position: relative; }
     .cart-count { background: #be185d; color: white; border-radius: 50%; padding: 1px 5px; font-size: 10px; position: absolute; top: -5px; right: -8px; }
 
@@ -133,6 +135,8 @@
     .mobile-nav.open { display: flex; }
     .mobile-nav > a { padding: 14px 20px; color: #be185d; font-weight: 700; font-size: 0.95rem; text-decoration: none; border-bottom: 1px solid #fff1f2; font-family: 'Playfair Display', serif; }
     .mobile-nav > a:hover { background: #fff1f2; }
+    .mobile-nav > button.nav-signin-btn { width: 100%; text-align: left; background: none; border: none; cursor: pointer; padding: 14px 20px; color: #be185d; font-weight: 700; font-size: 0.95rem; border-bottom: 1px solid #fff1f2; font-family: 'Playfair Display', serif; }
+    .mobile-nav > button.nav-signin-btn:hover { background: #fff1f2; }
     .mobile-cat-toggle { width: 100%; padding: 14px 20px; color: #be185d; font-weight: 700; font-size: 0.95rem; text-align: left; background: none; border: none; border-bottom: 1px solid #fff1f2; font-family: 'Playfair Display', serif; cursor: pointer; display: flex; justify-content: space-between; align-items: center; }
     .mobile-cat-list { display: none; flex-direction: column; background: #fff8fb; }
     .mobile-cat-list.open { display: flex; }
@@ -148,6 +152,62 @@
     .retail-footer .footer-links { display: flex; flex-wrap: wrap; gap: 12px; justify-content: center; margin-bottom: 12px; }
     .retail-footer .footer-links a { color: #be185d; font-weight: bold; text-decoration: none; font-size: 0.9rem; }
     .retail-footer .footer-copy { text-align: center; font-size: 0.75rem; color: #6b7280; line-height: 1.6; }
+
+    /* ── Sign-in / Create-account modal ── */
+    .auth-modal-overlay {
+        position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 10000;
+        display: flex; align-items: center; justify-content: center; padding: 16px;
+    }
+    .auth-modal {
+        background: white; border-radius: 20px; padding: 28px 24px; width: 100%; max-width: 380px;
+        max-height: 90vh; overflow-y: auto; position: relative; box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+    }
+    .auth-modal-close {
+        position: absolute; top: 14px; right: 14px; background: none; border: none; cursor: pointer;
+        font-size: 1.1rem; color: #9ca3af; width: 32px; height: 32px; border-radius: 50%;
+    }
+    .auth-modal-close:hover { background: #fff1f2; color: #be185d; }
+    .auth-modal-title { font-family: 'Playfair Display', serif; font-weight: 800; color: #881337; font-size: 1.3rem; margin: 0 0 16px; }
+    .auth-modal-tabs { display: flex; gap: 6px; border-bottom: 2px solid #fce7f3; margin-bottom: 18px; }
+    .auth-tab-btn {
+        background: none; border: none; cursor: pointer; padding: 8px 14px; font-weight: 700;
+        font-size: 0.85rem; color: #9ca3af; border-bottom: 2px solid transparent; margin-bottom: -2px;
+    }
+    .auth-tab-btn.active { color: #be185d; border-bottom-color: #be185d; }
+    .auth-google-btn {
+        display: flex; align-items: center; justify-content: center; gap: 8px; width: 100%;
+        background: white; border: 1.5px solid #d1d5db; border-radius: 10px; padding: 10px;
+        color: #1d1d1f; font-weight: 700; font-size: 0.85rem; text-decoration: none; box-sizing: border-box;
+    }
+    .auth-google-btn:hover { background: #f9fafb; }
+    .auth-divider { display: flex; align-items: center; gap: 10px; margin: 16px 0; color: #9ca3af; font-size: 0.75rem; }
+    .auth-divider::before, .auth-divider::after { content: ''; flex: 1; height: 1px; background: #e5e7eb; }
+    .auth-form-error {
+        background: #fef2f2; border: 1px solid #fecaca; color: #dc2626; border-radius: 10px;
+        padding: 10px 12px; font-size: 0.8rem; margin-bottom: 14px;
+    }
+    #auth-tab-signin label, #auth-tab-signup label {
+        display: block; font-size: 0.78rem; font-weight: 700; color: #881337; margin-bottom: 4px; margin-top: 12px;
+    }
+    #auth-tab-signin label:first-of-type, #auth-tab-signup label:first-of-type { margin-top: 0; }
+    #auth-tab-signin input, #auth-tab-signup input {
+        width: 100%; border: 1px solid #fbcfe8; border-radius: 10px; padding: 9px 12px;
+        font-size: 0.85rem; font-family: inherit; box-sizing: border-box;
+    }
+    .auth-form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    .auth-password-wrap { position: relative; }
+    .auth-password-wrap input { padding-right: 40px; }
+    .auth-eye-btn {
+        position: absolute; right: 4px; top: 50%; transform: translateY(-50%);
+        background: none; border: none; cursor: pointer; font-size: 1rem; padding: 6px; line-height: 1;
+    }
+    .auth-hint { font-size: 0.7rem; color: #9ca3af; margin-top: 4px; }
+    .auth-submit-btn {
+        width: 100%; background: #be185d; color: white; border: none; border-radius: 999px;
+        padding: 11px; font-weight: 700; font-size: 0.88rem; cursor: pointer; margin-top: 18px;
+    }
+    .auth-submit-btn:hover { background: #9f1239; }
+    .auth-submit-btn:disabled { opacity: 0.6; cursor: default; }
 </style>
 {% endblock %}
 
@@ -196,7 +256,7 @@
                 </div>
             </div>
             {% else %}
-            <a href="{{ url_for('google_login') }}">Sign in</a>
+            <button type="button" class="nav-signin-btn" onclick="openAuthModal('signin')">Sign in</button>
             {% endif %}
         </nav>
         <!-- Categories pill — visible on mobile beside cart -->
@@ -245,7 +305,7 @@
         <a href="{{ url_for('profile') }}">My Profile</a>
         <a href="{{ url_for('logout') }}">Sign Out</a>
         {% else %}
-        <a href="{{ url_for('google_login') }}">Sign in with Google</a>
+        <button type="button" class="nav-signin-btn" onclick="openAuthModal('signin')">Sign in</button>
         {% endif %}
     </nav>
     <div class="pincode-bar">
@@ -265,6 +325,67 @@
         </div>
     </div>
 </header>
+
+{% if not logged_in_user %}
+<div id="auth-modal-overlay" class="auth-modal-overlay" hidden>
+    <div class="auth-modal" role="dialog" aria-modal="true" aria-labelledby="auth-modal-title">
+        <button type="button" class="auth-modal-close" onclick="closeAuthModal()" aria-label="Close sign-in dialog">✕</button>
+        <h2 id="auth-modal-title" class="auth-modal-title">Sign In</h2>
+
+        <div role="tablist" aria-label="Sign in or create account" class="auth-modal-tabs">
+            <button type="button" role="tab" id="auth-tab-btn-signin" aria-selected="true" aria-controls="auth-tab-signin"
+                    tabindex="0" class="auth-tab-btn active" onclick="showAuthTab('signin')">Sign In</button>
+            <button type="button" role="tab" id="auth-tab-btn-signup" aria-selected="false" aria-controls="auth-tab-signup"
+                    tabindex="-1" class="auth-tab-btn" onclick="showAuthTab('signup')">Create Account</button>
+        </div>
+
+        <div id="auth-tab-signin" role="tabpanel" aria-labelledby="auth-tab-btn-signin" tabindex="0">
+            <a class="auth-google-btn" href="{{ url_for('google_login') }}">Continue with Google</a>
+            <div class="auth-divider"><span>or</span></div>
+            <div id="auth-signin-error" class="auth-form-error" hidden></div>
+            <form id="auth-signin-form" onsubmit="return submitSignIn(event)">
+                <label for="asi-email">Email</label>
+                <input type="email" id="asi-email" name="email" required autocomplete="email">
+                <label for="asi-password">Password</label>
+                <div class="auth-password-wrap">
+                    <input type="password" id="asi-password" name="password" required autocomplete="current-password">
+                    <button type="button" class="auth-eye-btn" aria-label="Show password" aria-pressed="false"
+                            onclick="togglePasswordVisibility('asi-password', this)">👁</button>
+                </div>
+                <button type="submit" class="auth-submit-btn">Sign In</button>
+            </form>
+        </div>
+
+        <div id="auth-tab-signup" role="tabpanel" aria-labelledby="auth-tab-btn-signup" tabindex="0" hidden>
+            <a class="auth-google-btn" href="{{ url_for('google_login') }}">Continue with Google</a>
+            <div class="auth-divider"><span>or</span></div>
+            <div id="auth-signup-error" class="auth-form-error" hidden></div>
+            <form id="auth-signup-form" onsubmit="return submitSignUp(event)">
+                <div class="auth-form-row">
+                    <div>
+                        <label for="asu-first">First Name</label>
+                        <input type="text" id="asu-first" name="first_name" required autocomplete="given-name">
+                    </div>
+                    <div>
+                        <label for="asu-last">Last Name</label>
+                        <input type="text" id="asu-last" name="last_name" required autocomplete="family-name">
+                    </div>
+                </div>
+                <label for="asu-email">Email</label>
+                <input type="email" id="asu-email" name="email" required autocomplete="email">
+                <label for="asu-password">Password</label>
+                <div class="auth-password-wrap">
+                    <input type="password" id="asu-password" name="password" required minlength="8" autocomplete="new-password">
+                    <button type="button" class="auth-eye-btn" aria-label="Show password" aria-pressed="false"
+                            onclick="togglePasswordVisibility('asu-password', this)">👁</button>
+                </div>
+                <div class="auth-hint">At least 8 characters.</div>
+                <button type="submit" class="auth-submit-btn">Create Account</button>
+            </form>
+        </div>
+    </div>
+</div>
+{% endif %}
 {% endblock %}
 
 {% block footer %}
@@ -288,6 +409,167 @@
 {% endblock %}
 
 {% block extra_scripts %}
+{% if recaptcha_site_key %}
+<script src="https://www.google.com/recaptcha/api.js?render={{ recaptcha_site_key }}"></script>
+{% endif %}
+<script>
+const RECAPTCHA_SITE_KEY = {{ (recaptcha_site_key or '')|tojson }};
+
+async function getRecaptchaToken(action) {
+    if (!RECAPTCHA_SITE_KEY || typeof grecaptcha === 'undefined') return '';
+    const withTimeout = (promise, ms) => Promise.race([
+        promise,
+        new Promise((resolve) => setTimeout(() => resolve(''), ms)),
+    ]);
+    try {
+        return await withTimeout(new Promise((resolve) => {
+            grecaptcha.ready(() => {
+                grecaptcha.execute(RECAPTCHA_SITE_KEY, {action: action}).then(resolve).catch(() => resolve(''));
+            });
+        }), 5000);
+    } catch (e) {
+        return '';
+    }
+}
+
+/* ── Sign-in / Create-account modal ── */
+let authModalLastFocused = null;
+
+function openAuthModal(mode) {
+    const overlay = document.getElementById('auth-modal-overlay');
+    if (!overlay) return;
+    authModalLastFocused = document.activeElement;
+    overlay.hidden = false;
+    showAuthTab(mode === 'signup' ? 'signup' : 'signin');
+    document.addEventListener('keydown', authModalKeydown);
+    const modal = overlay.querySelector('.auth-modal');
+    const focusable = modal.querySelectorAll('a[href], button:not([disabled]), input, select, textarea, [tabindex]:not([tabindex="-1"])');
+    if (focusable.length) focusable[0].focus();
+}
+function closeAuthModal() {
+    const overlay = document.getElementById('auth-modal-overlay');
+    if (!overlay) return;
+    overlay.hidden = true;
+    document.removeEventListener('keydown', authModalKeydown);
+    if (authModalLastFocused) authModalLastFocused.focus();
+}
+function authModalKeydown(e) {
+    if (e.key === 'Escape') { closeAuthModal(); return; }
+    if (e.key !== 'Tab') return;
+    const modal = document.querySelector('#auth-modal-overlay .auth-modal');
+    if (!modal) return;
+    const focusable = Array.from(modal.querySelectorAll('a[href], button:not([disabled]), input, select, textarea, [tabindex]:not([tabindex="-1"])'))
+        .filter(function (el) { return el.offsetParent !== null; });
+    if (!focusable.length) return;
+    const first = focusable[0], last = focusable[focusable.length - 1];
+    if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+    else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+}
+function showAuthTab(name) {
+    ['signin', 'signup'].forEach(function (t) {
+        const btn = document.getElementById('auth-tab-btn-' + t);
+        const panel = document.getElementById('auth-tab-' + t);
+        if (!btn || !panel) return;
+        const active = t === name;
+        btn.setAttribute('aria-selected', active ? 'true' : 'false');
+        btn.tabIndex = active ? 0 : -1;
+        btn.classList.toggle('active', active);
+        panel.hidden = !active;
+    });
+    const title = document.getElementById('auth-modal-title');
+    if (title) title.textContent = name === 'signup' ? 'Create Account' : 'Sign In';
+}
+document.addEventListener('DOMContentLoaded', function () {
+    document.querySelectorAll('.auth-modal-tabs [role="tab"]').forEach(function (tab, idx, arr) {
+        tab.addEventListener('keydown', function (e) {
+            let newIdx = null;
+            if (e.key === 'ArrowRight') newIdx = (idx + 1) % arr.length;
+            else if (e.key === 'ArrowLeft') newIdx = (idx - 1 + arr.length) % arr.length;
+            if (newIdx !== null) {
+                e.preventDefault();
+                const targetName = arr[newIdx].id.replace('auth-tab-btn-', '');
+                showAuthTab(targetName);
+                arr[newIdx].focus();
+            }
+        });
+    });
+});
+
+function togglePasswordVisibility(inputId, btn) {
+    const input = document.getElementById(inputId);
+    if (!input) return;
+    const showing = input.type === 'text';
+    input.type = showing ? 'password' : 'text';
+    btn.setAttribute('aria-pressed', showing ? 'false' : 'true');
+    btn.setAttribute('aria-label', showing ? 'Show password' : 'Hide password');
+    btn.textContent = showing ? '👁' : '🙈';
+}
+
+async function submitSignIn(e) {
+    e.preventDefault();
+    const errEl = document.getElementById('auth-signin-error');
+    errEl.hidden = true;
+    const email = document.getElementById('asi-email').value.trim();
+    const password = document.getElementById('asi-password').value;
+    const btn = document.querySelector('#auth-signin-form .auth-submit-btn');
+    btn.disabled = true;
+    const originalText = btn.textContent;
+    btn.textContent = 'Signing in…';
+    try {
+        const token = await getRecaptchaToken('email_login');
+        const r = await fetch('/auth/email/login', {
+            method: 'POST', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({email: email, password: password, recaptcha_token: token})
+        });
+        const d = await r.json();
+        if (d.status === 'success') { location.reload(); return false; }
+        errEl.textContent = d.message || 'Could not sign in.';
+        errEl.hidden = false;
+    } catch (err) {
+        errEl.textContent = 'Something went wrong. Please try again.';
+        errEl.hidden = false;
+    }
+    btn.disabled = false;
+    btn.textContent = originalText;
+    return false;
+}
+
+async function submitSignUp(e) {
+    e.preventDefault();
+    const errEl = document.getElementById('auth-signup-error');
+    errEl.hidden = true;
+    const first_name = document.getElementById('asu-first').value.trim();
+    const last_name = document.getElementById('asu-last').value.trim();
+    const email = document.getElementById('asu-email').value.trim();
+    const password = document.getElementById('asu-password').value;
+    if (password.length < 8) {
+        errEl.textContent = 'Password must be at least 8 characters.';
+        errEl.hidden = false;
+        return false;
+    }
+    const btn = document.querySelector('#auth-signup-form .auth-submit-btn');
+    btn.disabled = true;
+    const originalText = btn.textContent;
+    btn.textContent = 'Creating account…';
+    try {
+        const token = await getRecaptchaToken('email_signup');
+        const r = await fetch('/auth/email/signup', {
+            method: 'POST', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({first_name: first_name, last_name: last_name, email: email, password: password, recaptcha_token: token})
+        });
+        const d = await r.json();
+        if (d.status === 'success') { location.reload(); return false; }
+        errEl.textContent = d.message || 'Could not create account.';
+        errEl.hidden = false;
+    } catch (err) {
+        errEl.textContent = 'Something went wrong. Please try again.';
+        errEl.hidden = false;
+    }
+    btn.disabled = false;
+    btn.textContent = originalText;
+    return false;
+}
+</script>
 <script>
 /* ── Search ── */
 let _searchTimer = null;

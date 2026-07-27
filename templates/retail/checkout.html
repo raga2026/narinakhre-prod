@@ -352,13 +352,17 @@
         <div id="ck-signin-card" style="display:none;background:#fff7f8;border:1.5px solid #fda4af;border-radius:14px;padding:14px 16px;margin-bottom:16px;">
           <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;">
             <div style="font-size:0.82rem;color:#831843;line-height:1.4;">
-              <strong>Sign in with Google</strong> to autofill your name, phone and address.
+              <strong>Sign in</strong> to autofill your name, phone and address.
             </div>
-            <div style="display:flex;gap:8px;flex-shrink:0;">
+            <div style="display:flex;gap:8px;flex-wrap:wrap;flex-shrink:0;">
               <a href="{{ url_for('google_login') }}"
                  style="display:inline-flex;align-items:center;gap:6px;padding:8px 14px;border-radius:10px;background:#be185d;color:white;font-size:0.8rem;font-weight:700;text-decoration:none;white-space:nowrap;">
                 Sign in with Google
               </a>
+              <button type="button" onclick="openAuthModal('signin')"
+                      style="padding:8px 14px;border-radius:10px;border:1.5px solid #be185d;background:white;color:#be185d;font-size:0.8rem;font-weight:700;cursor:pointer;white-space:nowrap;">
+                Sign in with Email
+              </button>
               <button type="button" onclick="ckSkipSignin()"
                       style="padding:8px 12px;border-radius:10px;border:1.5px solid #d2d2d7;background:white;color:#6e6e73;font-size:0.8rem;font-weight:600;cursor:pointer;white-space:nowrap;">
                 Skip
@@ -519,29 +523,8 @@
 </div><!-- end .ck-page -->
 
 <script src="https://checkout.razorpay.com/v1/checkout.js"></script>
-{% if recaptcha_site_key %}
-<script src="https://www.google.com/recaptcha/api.js?render={{ recaptcha_site_key }}"></script>
-{% endif %}
-<script>
-const RECAPTCHA_SITE_KEY = {{ (recaptcha_site_key or '')|tojson }};
-
-async function getRecaptchaToken(action) {
-    if (!RECAPTCHA_SITE_KEY || typeof grecaptcha === 'undefined') return '';
-    const withTimeout = (promise, ms) => Promise.race([
-        promise,
-        new Promise((resolve) => setTimeout(() => resolve(''), ms)),
-    ]);
-    try {
-        return await withTimeout(new Promise((resolve) => {
-            grecaptcha.ready(() => {
-                grecaptcha.execute(RECAPTCHA_SITE_KEY, {action: action}).then(resolve).catch(() => resolve(''));
-            });
-        }), 5000);
-    } catch (e) {
-        return '';
-    }
-}
-</script>
+<!-- RECAPTCHA_SITE_KEY and getRecaptchaToken() now come from retail/base.html's
+     extra_scripts block, which loads on every page (needed for the sign-in modal). -->
 <script>
 const RZP_KEY = {{ config.get('RAZORPAY_KEY_ID', '')|tojson }};
 let ckServiceable = false, ckShip = 0, ckCodFee = 0;
