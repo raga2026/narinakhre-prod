@@ -8,7 +8,7 @@ import smtplib
 import requests
 import razorpay
 import pyotp
-from datetime import datetime
+from datetime import datetime, timedelta
 from functools import wraps
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
@@ -401,6 +401,12 @@ def initialize_database_if_needed():
             amount NUMERIC NOT NULL,
             reason TEXT NOT NULL,
             internal_order_id TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )''',
+        '''CREATE TABLE IF NOT EXISTS product_events (
+            id BIGSERIAL PRIMARY KEY,
+            sku TEXT NOT NULL,
+            event_type TEXT NOT NULL,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )''',
         '''CREATE TABLE IF NOT EXISTS user_addresses (
@@ -1547,6 +1553,19 @@ def is_bangle_product(p_dict):
     return False
 
 
+def log_product_event(db_conn, sku, event_type):
+    """Best-effort analytics ping -- must never break the page it's called from."""
+    if not sku:
+        return
+    try:
+        db_conn.execute(
+            'INSERT INTO product_events (sku, event_type) VALUES (?,?)', (sku, event_type)
+        )
+        db_conn.commit()
+    except Exception as e:
+        app.logger.warning(f'log_product_event failed for {sku}/{event_type}: {e}')
+
+
 def get_variant_sku(master_sku, size):
     return f"{master_sku}-{size.replace('.', '')}"
 
@@ -1753,6 +1772,7 @@ def product_detail(product_id):
     product = db.execute('SELECT * FROM products WHERE id = ?', (product_id,)).fetchone()
     if not product: return "Not Found", 404
     p_dict = dict(product)
+    log_product_event(db, p_dict.get('sku'), 'view')
     image_urls = get_product_images(p_dict)
     p_dict['tiers'] = get_product_tiers(p_dict)
     if is_bangle_product(p_dict):
@@ -1817,6 +1837,8 @@ def update_cart():
     cart_key = f"{sku}_{size}"
     if qty > 0:
         db = get_db()
+        if cart_key not in cart:
+            log_product_event(db, sku, 'add_to_cart')
         p = db.execute('SELECT name, category, sub_category FROM products WHERE sku = ?', (sku,)).fetchone()
         if p and is_bangle_product(dict(p)) and size:
             size_stock = get_bangle_size_stock(db, sku)
@@ -3219,6 +3241,114 @@ def admin_dashboard():
     products = db.execute('SELECT * FROM products ORDER BY id DESC').fetchall()
     quotes = db.execute('SELECT * FROM quotes ORDER BY id DESC').fetchall()
     return render_template('admin/admin.html', products=products, quotes=quotes)
+
+
+@app.route('/admin/analytics', methods=['GET'])
+@admin_required
+def admin_analytics():
+    db = get_db()
+    now = datetime.now()
+
+    def window_stats(days):
+        start = (now - timedelta(days=days)).strftime('%Y-%m-%d 00:00:00')
+        row = db.execute(
+            "SELECT COUNT(*) as cnt, COALESCE(SUM(total_amount),0) as revenue "
+            "FROM order_shipping WHERE created_at >= ? AND status != 'cancelled'",
+            (start,)
+        ).fetchone()
+        return {'label': f'Last {days} Day' + ('' if days == 1 else 's'),
+                'count': row['cnt'] if row else 0,
+                'revenue': float(row['revenue'] or 0) if row else 0.0}
+
+    stats_1d = window_stats(1)
+    stats_7d = window_stats(7)
+    stats_30d = window_stats(30)
+
+    # Custom range -- defaults to the same 7-day window so the page always
+    # has something sensible to show before an admin picks their own dates.
+    range_mode = request.args.get('range', 'preset')
+    from_date = request.args.get('from', '').strip()
+    to_date = request.args.get('to', '').strip()
+    if range_mode == 'custom' and from_date and to_date:
+        insight_start = from_date + ' 00:00:00'
+        insight_end = to_date + ' 23:59:59'
+    else:
+        range_mode = 'preset'
+        insight_start = (now - timedelta(days=7)).strftime('%Y-%m-%d 00:00:00')
+        insight_end = now.strftime('%Y-%m-%d 23:59:59')
+        from_date = (now - timedelta(days=7)).strftime('%Y-%m-%d')
+        to_date = now.strftime('%Y-%m-%d')
+
+    custom_stats = None
+    if range_mode == 'custom':
+        row = db.execute(
+            "SELECT COUNT(*) as cnt, COALESCE(SUM(total_amount),0) as revenue "
+            "FROM order_shipping WHERE created_at >= ? AND created_at <= ? AND status != 'cancelled'",
+            (insight_start, insight_end)
+        ).fetchone()
+        custom_stats = {'label': f'{from_date} to {to_date}',
+                         'count': row['cnt'] if row else 0,
+                         'revenue': float(row['revenue'] or 0) if row else 0.0}
+
+    # ── Customer insights: most-ordered, most-viewed, most-added-to-cart,
+    # all scoped to the same window as the custom/preset range picker above.
+    orders_in_range = db.execute(
+        "SELECT cart_items_json FROM order_shipping "
+        "WHERE created_at >= ? AND created_at <= ? AND status != 'cancelled'",
+        (insight_start, insight_end)
+    ).fetchall()
+    product_orders = {}
+    for o in orders_in_range:
+        try:
+            items = json.loads(o['cart_items_json'] or '[]')
+        except Exception:
+            items = []
+        seen_this_order = set()
+        for item in items:
+            sku = item.get('sku') or ''
+            if not sku:
+                continue
+            entry = product_orders.setdefault(sku, {'sku': sku, 'name': item.get('name', sku), 'units': 0, 'orders': 0})
+            entry['units'] += int(item.get('units', 1) or 1)
+            if sku not in seen_this_order:
+                entry['orders'] += 1
+                seen_this_order.add(sku)
+    top_ordered = sorted(product_orders.values(), key=lambda e: e['units'], reverse=True)[:10]
+
+    def top_events(event_type):
+        rows = db.execute(
+            "SELECT sku, COUNT(*) as cnt FROM product_events "
+            "WHERE event_type=? AND created_at >= ? AND created_at <= ? "
+            "GROUP BY sku ORDER BY cnt DESC LIMIT 10",
+            (event_type, insight_start, insight_end)
+        ).fetchall()
+        out = []
+        for r in rows:
+            p = db.execute('SELECT name FROM products WHERE sku=?', (r['sku'],)).fetchone()
+            out.append({'sku': r['sku'], 'name': p['name'] if p else r['sku'], 'count': r['cnt']})
+        return out
+
+    top_viewed = top_events('view')
+    top_cart_adds = top_events('add_to_cart')
+
+    # ── Sales insights: orders by state, colour-graded by volume (a data
+    # heat-map -- ranked/shaded by intensity -- rather than a geographic
+    # SVG map, which would need external map assets this app doesn't have).
+    state_rows = db.execute(
+        "SELECT COALESCE(NULLIF(consignee_state,''), 'Unknown') as state, "
+        "COUNT(*) as cnt, COALESCE(SUM(total_amount),0) as revenue "
+        "FROM order_shipping WHERE created_at >= ? AND created_at <= ? AND status != 'cancelled' "
+        "GROUP BY state ORDER BY cnt DESC",
+        (insight_start, insight_end)
+    ).fetchall()
+    state_data = [{'state': r['state'], 'count': r['cnt'], 'revenue': float(r['revenue'] or 0)} for r in state_rows]
+    max_state_count = max((s['count'] for s in state_data), default=0) or 1
+
+    return render_template('admin/admin_analytics.html',
+        stats_1d=stats_1d, stats_7d=stats_7d, stats_30d=stats_30d, custom_stats=custom_stats,
+        range_mode=range_mode, from_date=from_date, to_date=to_date,
+        top_ordered=top_ordered, top_viewed=top_viewed, top_cart_adds=top_cart_adds,
+        state_data=state_data, max_state_count=max_state_count)
 
 
 @app.route('/admin/manage-images', methods=['GET'])

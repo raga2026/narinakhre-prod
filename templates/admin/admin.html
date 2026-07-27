@@ -39,6 +39,7 @@
           Products <span class="tab-badge">{{ products|length }}</span>
         </button>
         <button class="tab-btn px-2 py-2 font-semibold" data-tab="orders" onclick="showTab('orders')">Orders &amp; Marketing</button>
+        <button class="tab-btn px-2 py-2 font-semibold" data-tab="analytics" onclick="showTab('analytics')">Analytics</button>
         <button class="tab-btn px-2 py-2 font-semibold" data-tab="reports" onclick="showTab('reports')">Reports</button>
         <button class="tab-btn px-2 py-2 font-semibold" data-tab="quotes" onclick="showTab('quotes')">
           Quotes / Inbox <span class="tab-badge">{{ quotes|length }}</span>
@@ -91,6 +92,19 @@
                class="w-full bg-rose-600 text-white py-2 rounded-lg font-semibold shadow hover:bg-rose-700 transition text-center"
                aria-label="Create and manage discount coupon codes">
               🎟️ Coupon Manager
+            </a>
+          </div>
+        </div>
+      </div>
+
+      <div id="tab-analytics" class="tab-panel mb-8">
+        <div class="bg-gray-50 rounded-lg p-6 shadow flex flex-col items-center">
+          <h3 class="text-lg font-semibold mb-4 text-gray-800">Analytics</h3>
+          <div class="flex flex-col space-y-3 w-full">
+            <a href="{{ url_for('admin_analytics') }}"
+               class="w-full bg-rose-600 text-white py-2 rounded-lg font-semibold shadow hover:bg-rose-700 transition text-center"
+               aria-label="Order volume, customer insights and sales-by-state analytics">
+              📊 View Analytics
             </a>
           </div>
         </div>

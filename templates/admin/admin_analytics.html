@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Analytics - Nari Nakhre Admin</title>
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+    <style>
+        .bg-rose-600 { background-color:#e11d48 !important; }
+        .bg-rose-600:hover, .hover\:bg-rose-700:hover { background-color:#be123c !important; }
+        .text-rose-600 { color:#e11d48 !important; }
+        .border-rose-600 { border-color:#e11d48 !important; }
+
+        .stat-card { background:white; border-radius:14px; padding:20px; box-shadow:0 1px 4px rgba(0,0,0,0.08); }
+        .stat-card .stat-label { font-size:0.75rem; font-weight:700; color:#6b7280; text-transform:uppercase; letter-spacing:0.04em; }
+        .stat-card .stat-count { font-size:2rem; font-weight:800; color:#111827; margin:6px 0 2px; }
+        .stat-card .stat-revenue { font-size:0.85rem; color:#e11d48; font-weight:700; }
+
+        .section-card { background:white; border-radius:14px; padding:22px; box-shadow:0 1px 4px rgba(0,0,0,0.08); margin-bottom:24px; }
+        .section-title { font-size:1.05rem; font-weight:800; color:#111827; margin-bottom:4px; }
+        .section-sub { font-size:0.78rem; color:#6b7280; margin-bottom:16px; }
+
+        .rank-row { display:flex; align-items:center; gap:10px; padding:8px 0; border-bottom:1px solid #f3f4f6; }
+        .rank-row:last-child { border-bottom:none; }
+        .rank-num { width:20px; font-size:0.75rem; font-weight:800; color:#9ca3af; flex-shrink:0; }
+        .rank-body { flex:1; min-width:0; }
+        .rank-name { font-size:0.82rem; font-weight:600; color:#1f2937; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+        .rank-bar-wrap { background:#f3f4f6; border-radius:999px; height:6px; margin-top:4px; overflow:hidden; }
+        .rank-bar { background:#e11d48; height:100%; border-radius:999px; }
+        .rank-count { font-size:0.8rem; font-weight:800; color:#111827; flex-shrink:0; min-width:34px; text-align:right; }
+
+        .state-row { display:flex; align-items:center; gap:10px; padding:7px 0; }
+        .state-name { width:150px; flex-shrink:0; font-size:0.8rem; font-weight:600; color:#1f2937; }
+        .state-heat-wrap { flex:1; background:#f3f4f6; border-radius:6px; height:20px; overflow:hidden; }
+        .state-heat { height:100%; border-radius:6px; }
+        .state-meta { width:130px; flex-shrink:0; text-align:right; font-size:0.75rem; color:#6b7280; }
+
+        .range-btn { padding:6px 14px; border-radius:999px; font-size:0.8rem; font-weight:700; border:1.5px solid #e5e7eb; color:#374151; background:white; }
+        .range-btn.active { background:#e11d48; border-color:#e11d48; color:white; }
+    </style>
+</head>
+<body class="bg-gray-100 min-h-screen">
+    <div class="max-w-6xl mx-auto p-6 md:p-8">
+        <div class="flex justify-between items-center mb-6">
+            <div>
+                <a href="{{ url_for('admin_dashboard') }}" class="text-rose-600 text-sm font-semibold hover:underline">&larr; Back to Dashboard</a>
+                <h1 class="text-2xl font-extrabold text-gray-900 mt-1">Analytics</h1>
+            </div>
+        </div>
+
+        <!-- ── Order Volume ── -->
+        <div class="section-card">
+            <div class="section-title">Order Volume</div>
+            <div class="section-sub">Confirmed orders (cancelled orders excluded) over fixed and custom windows.</div>
+
+            <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-5">
+                <div class="stat-card">
+                    <div class="stat-label">{{ stats_1d.label }}</div>
+                    <div class="stat-count">{{ stats_1d.count }}</div>
+                    <div class="stat-revenue">₹{{ '{:,.0f}'.format(stats_1d.revenue) }}</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">{{ stats_7d.label }}</div>
+                    <div class="stat-count">{{ stats_7d.count }}</div>
+                    <div class="stat-revenue">₹{{ '{:,.0f}'.format(stats_7d.revenue) }}</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">{{ stats_30d.label }}</div>
+                    <div class="stat-count">{{ stats_30d.count }}</div>
+                    <div class="stat-revenue">₹{{ '{:,.0f}'.format(stats_30d.revenue) }}</div>
+                </div>
+            </div>
+
+            <form method="GET" action="{{ url_for('admin_analytics') }}" class="flex flex-wrap items-end gap-3 border-t pt-4">
+                <input type="hidden" name="range" value="custom">
+                <div>
+                    <label class="block text-xs font-bold text-gray-600 mb-1">From</label>
+                    <input type="date" name="from" value="{{ from_date }}" class="border rounded-lg px-3 py-1.5 text-sm" required>
+                </div>
+                <div>
+                    <label class="block text-xs font-bold text-gray-600 mb-1">To</label>
+                    <input type="date" name="to" value="{{ to_date }}" class="border rounded-lg px-3 py-1.5 text-sm" required>
+                </div>
+                <button type="submit" class="bg-rose-600 text-white text-sm font-bold px-5 py-1.5 rounded-lg hover:bg-rose-700 transition">
+                    Apply Custom Range
+                </button>
+                <span class="text-xs text-gray-400">Also drives Customer &amp; Sales Insights below. Defaults to the last 7 days.</span>
+            </form>
+
+            {% if custom_stats %}
+            <div class="stat-card mt-4" style="max-width:260px;border:1.5px solid #e11d48;">
+                <div class="stat-label">Custom: {{ custom_stats.label }}</div>
+                <div class="stat-count">{{ custom_stats.count }}</div>
+                <div class="stat-revenue">₹{{ '{:,.0f}'.format(custom_stats.revenue) }}</div>
+            </div>
+            {% endif %}
+        </div>
+
+        <!-- ── Customer Insights ── -->
+        <div class="section-card">
+            <div class="section-title">Customer Insights</div>
+            <div class="section-sub">
+                Most popular products for {{ from_date }} to {{ to_date }} — ranked by units ordered, page views, and "add to cart" clicks.
+            </div>
+
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+                <div>
+                    <div class="text-xs font-extrabold text-gray-500 uppercase tracking-wide mb-2">Most Ordered</div>
+                    {% if top_ordered and top_ordered|length > 0 %}
+                        {% set max_units = top_ordered[0].units %}
+                        {% for p in top_ordered %}
+                        <div class="rank-row">
+                            <div class="rank-num">{{ loop.index }}</div>
+                            <div class="rank-body">
+                                <div class="rank-name">{{ p.name }}</div>
+                                <div class="rank-bar-wrap"><div class="rank-bar" style="width:{{ (p.units / max_units * 100)|round(0)|int if max_units else 0 }}%;"></div></div>
+                            </div>
+                            <div class="rank-count">{{ p.units }}</div>
+                        </div>
+                        {% endfor %}
+                    {% else %}
+                    <div class="text-xs text-gray-400 py-4">No orders in this range.</div>
+                    {% endif %}
+                </div>
+
+                <div>
+                    <div class="text-xs font-extrabold text-gray-500 uppercase tracking-wide mb-2">Most Viewed</div>
+                    {% if top_viewed and top_viewed|length > 0 %}
+                        {% set max_views = top_viewed[0].count %}
+                        {% for p in top_viewed %}
+                        <div class="rank-row">
+                            <div class="rank-num">{{ loop.index }}</div>
+                            <div class="rank-body">
+                                <div class="rank-name">{{ p.name }}</div>
+                                <div class="rank-bar-wrap"><div class="rank-bar" style="width:{{ (p.count / max_views * 100)|round(0)|int if max_views else 0 }}%;background:#2563eb;"></div></div>
+                            </div>
+                            <div class="rank-count">{{ p.count }}</div>
+                        </div>
+                        {% endfor %}
+                    {% else %}
+                    <div class="text-xs text-gray-400 py-4">No page views logged in this range yet.</div>
+                    {% endif %}
+                </div>
+
+                <div>
+                    <div class="text-xs font-extrabold text-gray-500 uppercase tracking-wide mb-2">Most Added to Cart</div>
+                    {% if top_cart_adds and top_cart_adds|length > 0 %}
+                        {% set max_clicks = top_cart_adds[0].count %}
+                        {% for p in top_cart_adds %}
+                        <div class="rank-row">
+                            <div class="rank-num">{{ loop.index }}</div>
+                            <div class="rank-body">
+                                <div class="rank-name">{{ p.name }}</div>
+                                <div class="rank-bar-wrap"><div class="rank-bar" style="width:{{ (p.count / max_clicks * 100)|round(0)|int if max_clicks else 0 }}%;background:#16a34a;"></div></div>
+                            </div>
+                            <div class="rank-count">{{ p.count }}</div>
+                        </div>
+                        {% endfor %}
+                    {% else %}
+                    <div class="text-xs text-gray-400 py-4">No "add to cart" clicks logged in this range yet.</div>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+
+        <!-- ── Sales Insights ── -->
+        <div class="section-card">
+            <div class="section-title">Sales Insights — Orders by State</div>
+            <div class="section-sub">
+                {{ from_date }} to {{ to_date }}. Shaded by order volume relative to the busiest state
+                (darker = more orders) — a data heat-map rather than a geographic one, since no India state-boundary
+                map asset is bundled with the app.
+            </div>
+
+            {% if state_data and state_data|length > 0 %}
+            {% for s in state_data %}
+            {% set intensity = (s.count / max_state_count) if max_state_count else 0 %}
+            <div class="state-row">
+                <div class="state-name">{{ s.state }}</div>
+                <div class="state-heat-wrap">
+                    <div class="state-heat" style="width:{{ (intensity * 100)|round(1) }}%;background:rgba(225,29,72,{{ (0.15 + intensity * 0.85)|round(2) }});"></div>
+                </div>
+                <div class="state-meta">{{ s.count }} orders · ₹{{ '{:,.0f}'.format(s.revenue) }}</div>
+            </div>
+            {% endfor %}
+            {% else %}
+            <div class="text-xs text-gray-400 py-4">No orders in this range.</div>
+            {% endif %}
+        </div>
+    </div>
+</body>
+</html>
