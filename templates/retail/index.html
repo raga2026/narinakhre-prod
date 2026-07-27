@@ -306,7 +306,7 @@
         </h2>
         <span style="font-size:0.72rem;color:#9f9f9f;">Refreshes every visit</span>
     </div>
-    <div class="prod-grid">
+    <div class="prod-grid" id="trending-grid">
     {% for product in trending %}
     {%- set img_src = product.images[0] if product.images and product.images|length > 0 else '/static/assets/products/default.jpg' -%}
     {%- set mrp = product.mrp_price or 0 -%}
@@ -561,6 +561,56 @@ document.addEventListener('DOMContentLoaded', function () {
             probe.src = url;
         });
     });
+
+    /* ── Trending shelf auto-scroll ──
+       Advances by one card every few seconds, loops back to the start at the
+       end. Pauses on hover/touch/keyboard-focus so it never fights a visitor
+       who's actively browsing, pauses off-screen so it doesn't run forever
+       in a background tab, and stays off entirely for prefers-reduced-motion. */
+    (function initTrendingAutoScroll() {
+        const grid = document.getElementById('trending-grid');
+        if (!grid) return;
+        if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+
+        let timer = null;
+        let paused = false;
+
+        function step() {
+            if (paused) return;
+            const card = grid.querySelector('.prod-card');
+            if (!card) return;
+            const style = getComputedStyle(grid);
+            const gap = parseFloat(style.columnGap || style.gap || '10') || 10;
+            const advance = card.getBoundingClientRect().width + gap;
+            const atEnd = grid.scrollLeft + grid.clientWidth >= grid.scrollWidth - 4;
+            grid.scrollTo({ left: atEnd ? 0 : grid.scrollLeft + advance, behavior: 'smooth' });
+        }
+        function start() {
+            if (timer) return;
+            timer = setInterval(step, 3000);
+        }
+        function stop() {
+            clearInterval(timer);
+            timer = null;
+        }
+
+        grid.addEventListener('pointerenter', function () { paused = true; });
+        grid.addEventListener('pointerleave', function () { paused = false; });
+        grid.addEventListener('touchstart', function () { paused = true; }, { passive: true });
+        grid.addEventListener('touchend', function () { setTimeout(function () { paused = false; }, 2000); });
+        grid.addEventListener('focusin', function () { paused = true; });
+        grid.addEventListener('focusout', function () { paused = false; });
+
+        if ('IntersectionObserver' in window) {
+            new IntersectionObserver(function (entries) {
+                entries.forEach(function (entry) {
+                    if (entry.isIntersecting) start(); else stop();
+                });
+            }, { threshold: 0.2 }).observe(grid);
+        } else {
+            start();
+        }
+    })();
 
     /* ── Cart logic ── */
     function getSize(container) {

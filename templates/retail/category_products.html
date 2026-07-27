@@ -22,7 +22,7 @@
             {% endif %}
         </a>
         <div class="mt-4 font-bold truncate">
-            <a href="/retail/product/{{ product.id }}" class="hover:underline text-rose-800">{{ product.name }}</a>
+            <a href="/retail/product/{{ product.id }}" class="hover:underline text-rose-800">{{ product.name }}{% if product.model_number %} <span style="font-size:0.85em;color:#9ca3af;font-weight:600;">({{ product.model_number }})</span>{% endif %}</a>
         </div>
         {%- set mrp = product.mrp_price or 0 -%}
         {%- set rp  = product.retail_price or product.price1 or 0 -%}

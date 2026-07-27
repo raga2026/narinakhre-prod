@@ -401,6 +401,21 @@ def initialize_database_if_needed():
             reason TEXT NOT NULL,
             internal_order_id TEXT,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )''',
+        '''CREATE TABLE IF NOT EXISTS user_addresses (
+            id BIGSERIAL PRIMARY KEY,
+            user_id BIGINT NOT NULL REFERENCES users(id),
+            nickname TEXT NOT NULL,
+            address_type TEXT NOT NULL DEFAULT 'Home',
+            recipient_name TEXT NOT NULL,
+            phone TEXT NOT NULL,
+            email TEXT,
+            address_line TEXT NOT NULL,
+            city TEXT NOT NULL,
+            state TEXT NOT NULL,
+            pincode TEXT NOT NULL,
+            is_default INTEGER DEFAULT 0,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )'''
     ]
     client = get_supabase()
@@ -1219,6 +1234,14 @@ def profile():
         (user_id,),
     ).fetchall()
 
+    addresses = db_conn.execute(
+        'SELECT * FROM user_addresses WHERE user_id=? ORDER BY is_default DESC, created_at DESC',
+        (user_id,),
+    ).fetchall()
+    active_tab = request.args.get('tab', 'orders')
+    if active_tab not in ('orders', 'addresses'):
+        active_tab = 'orders'
+
     return render_site(
         'profile.html',
         user=user_row,
@@ -1229,7 +1252,124 @@ def profile():
         referral_count=referral_count,
         credit_balance=credit_balance,
         credit_history=credit_history,
+        addresses=addresses,
+        active_tab=active_tab,
     )
+
+
+@app.route('/profile/addresses/add', methods=['POST'])
+def add_address():
+    if not session.get('user_id'):
+        return redirect(url_for('google_login'))
+    db_conn = get_db()
+    user_id = session['user_id']
+
+    nickname = (request.form.get('nickname') or '').strip()
+    address_type = (request.form.get('address_type') or 'Home').strip()
+    recipient_name = (request.form.get('recipient_name') or '').strip()
+    phone = (request.form.get('phone') or '').strip()
+    email = (request.form.get('email') or '').strip()
+    address_line = (request.form.get('address_line') or '').strip()
+    city = (request.form.get('city') or '').strip()
+    state = (request.form.get('state') or '').strip()
+    pincode = (request.form.get('pincode') or '').strip()
+    make_default = request.form.get('is_default') == 'on'
+
+    if not (nickname and recipient_name and phone and address_line and city and state and pincode):
+        flash('Please fill in all required address fields.')
+        return redirect(url_for('profile', tab='addresses'))
+
+    existing_count = db_conn.execute(
+        'SELECT COUNT(*) as c FROM user_addresses WHERE user_id=?', (user_id,)
+    ).fetchone()['c']
+    is_default = 1 if (make_default or existing_count == 0) else 0
+    if is_default:
+        db_conn.execute('UPDATE user_addresses SET is_default=0 WHERE user_id=?', (user_id,))
+
+    db_conn.execute(
+        '''INSERT INTO user_addresses
+           (user_id, nickname, address_type, recipient_name, phone, email,
+            address_line, city, state, pincode, is_default)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?)''',
+        (user_id, nickname, address_type, recipient_name, phone, email or None,
+         address_line, city, state, pincode, is_default)
+    )
+    db_conn.commit()
+    flash(f'Address "{nickname}" added.')
+    return redirect(url_for('profile', tab='addresses'))
+
+
+@app.route('/profile/addresses/<int:address_id>/edit', methods=['POST'])
+def edit_address(address_id):
+    if not session.get('user_id'):
+        return redirect(url_for('google_login'))
+    db_conn = get_db()
+    user_id = session['user_id']
+
+    owned = db_conn.execute(
+        'SELECT id FROM user_addresses WHERE id=? AND user_id=?', (address_id, user_id)
+    ).fetchone()
+    if not owned:
+        flash('Address not found.')
+        return redirect(url_for('profile', tab='addresses'))
+
+    nickname = (request.form.get('nickname') or '').strip()
+    address_type = (request.form.get('address_type') or 'Home').strip()
+    recipient_name = (request.form.get('recipient_name') or '').strip()
+    phone = (request.form.get('phone') or '').strip()
+    email = (request.form.get('email') or '').strip()
+    address_line = (request.form.get('address_line') or '').strip()
+    city = (request.form.get('city') or '').strip()
+    state = (request.form.get('state') or '').strip()
+    pincode = (request.form.get('pincode') or '').strip()
+    make_default = request.form.get('is_default') == 'on'
+
+    if not (nickname and recipient_name and phone and address_line and city and state and pincode):
+        flash('Please fill in all required address fields.')
+        return redirect(url_for('profile', tab='addresses'))
+
+    if make_default:
+        db_conn.execute('UPDATE user_addresses SET is_default=0 WHERE user_id=?', (user_id,))
+
+    db_conn.execute(
+        '''UPDATE user_addresses SET nickname=?, address_type=?, recipient_name=?, phone=?, email=?,
+           address_line=?, city=?, state=?, pincode=?, is_default=?
+           WHERE id=? AND user_id=?''',
+        (nickname, address_type, recipient_name, phone, email or None,
+         address_line, city, state, pincode, 1 if make_default else 0, address_id, user_id)
+    )
+    db_conn.commit()
+    flash(f'Address "{nickname}" updated.')
+    return redirect(url_for('profile', tab='addresses'))
+
+
+@app.route('/profile/addresses/<int:address_id>/delete', methods=['POST'])
+def delete_address(address_id):
+    if not session.get('user_id'):
+        return redirect(url_for('google_login'))
+    db_conn = get_db()
+    db_conn.execute(
+        'DELETE FROM user_addresses WHERE id=? AND user_id=?', (address_id, session['user_id'])
+    )
+    db_conn.commit()
+    flash('Address removed.')
+    return redirect(url_for('profile', tab='addresses'))
+
+
+@app.route('/profile/addresses/<int:address_id>/set-default', methods=['POST'])
+def set_default_address(address_id):
+    if not session.get('user_id'):
+        return redirect(url_for('google_login'))
+    db_conn = get_db()
+    user_id = session['user_id']
+    owned = db_conn.execute(
+        'SELECT id FROM user_addresses WHERE id=? AND user_id=?', (address_id, user_id)
+    ).fetchone()
+    if owned:
+        db_conn.execute('UPDATE user_addresses SET is_default=0 WHERE user_id=?', (user_id,))
+        db_conn.execute('UPDATE user_addresses SET is_default=1 WHERE id=?', (address_id,))
+        db_conn.commit()
+    return redirect(url_for('profile', tab='addresses'))
 
 @app.route('/my-orders')
 def my_orders():
@@ -1649,14 +1789,22 @@ def checkout():
     # Signed-in retail customers get their last shipping address prefilled
     # on checkout instead of retyping it — same source data as profile().
     saved_address = None
+    saved_addresses = []
     credit_balance = 0.0
     applied_credits_row = session.get('applied_credits')
     credits_applied = float(applied_credits_row.get('amount', 0)) if applied_credits_row else 0.0
     if g.site_type == 'retail' and session.get('user_id'):
-        saved_address = db.execute(
-            'SELECT * FROM order_shipping WHERE user_id=? ORDER BY created_at DESC LIMIT 1',
+        saved_addresses = [dict(a) for a in db.execute(
+            'SELECT * FROM user_addresses WHERE user_id=? ORDER BY is_default DESC, created_at DESC',
             (session['user_id'],),
-        ).fetchone()
+        ).fetchall()]
+        if not saved_addresses:
+            # No address book entries yet -- fall back to prefilling from the
+            # customer's last order, same as before the address book existed.
+            saved_address = db.execute(
+                'SELECT * FROM order_shipping WHERE user_id=? ORDER BY created_at DESC LIMIT 1',
+                (session['user_id'],),
+            ).fetchone()
         credit_balance = get_credit_balance(db, session['user_id'])
         if credits_applied > credit_balance:
             # Stale session value (balance changed elsewhere) — drop it rather
@@ -1670,8 +1818,8 @@ def checkout():
     return render_site('checkout.html', display_cart=display_cart, subtotal=subtotal, total_tax=0.0,
                         discount=discount, grand_total=grand_total, coupon_code=coupon_code,
                         out_of_stock_items=out_of_stock_items, recaptcha_site_key=RECAPTCHA_SITE_KEY,
-                        saved_address=saved_address, credit_balance=credit_balance,
-                        credits_applied=credits_applied)
+                        saved_address=saved_address, saved_addresses=saved_addresses,
+                        credit_balance=credit_balance, credits_applied=credits_applied)
 
 @app.route('/checkout/shipping', methods=['GET', 'POST'])
 @app.route('/retail/checkout/shipping', methods=['GET', 'POST'])
@@ -2637,7 +2785,7 @@ def search_page():
         like  = f'%{q_low}%'
 
         rows = conn.execute(
-            "SELECT id, sku, name, category, sub_category, description,"
+            "SELECT id, sku, model_number, name, category, sub_category, description,"
             " retail_price, mrp_price, image_field"
             " FROM products"
             " WHERE is_active = 1"

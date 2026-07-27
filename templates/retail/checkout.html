@@ -376,6 +376,26 @@
           }
         </script>
         {% endif %}
+        {% if saved_addresses and saved_addresses|length > 0 %}
+        <div class="ck-section-title">Choose a delivery address</div>
+        <div id="ck-addr-list" style="display:grid;gap:10px;margin-bottom:18px;">
+            {% for addr in saved_addresses %}
+            <label style="display:flex;gap:10px;align-items:flex-start;border:1.5px solid #e5e5e7;border-radius:12px;padding:12px 14px;cursor:pointer;">
+                <input type="radio" name="saved_address_choice" value="{{ addr.id }}" {{ 'checked' if loop.first }} onchange="selectSavedAddress('{{ addr.id }}')" style="margin-top:3px;">
+                <span>
+                    <span style="font-weight:700;color:#1d1d1f;">{{ addr.nickname }}</span>
+                    <span style="background:#fdf2f8;color:#be185d;border:1px solid #fbcfe8;font-size:0.65rem;font-weight:700;padding:2px 7px;border-radius:999px;text-transform:uppercase;margin-left:6px;">{{ addr.address_type }}</span>
+                    <br>
+                    <span style="font-size:0.78rem;color:#6e6e73;">{{ addr.recipient_name }}, {{ addr.address_line }}, {{ addr.city }} - {{ addr.pincode }}</span>
+                </span>
+            </label>
+            {% endfor %}
+            <label style="display:flex;gap:10px;align-items:center;border:1.5px solid #e5e5e7;border-radius:12px;padding:12px 14px;cursor:pointer;">
+                <input type="radio" name="saved_address_choice" value="new" onchange="selectSavedAddress('new')">
+                <span style="font-weight:700;color:#1d1d1f;">+ Use a different address</span>
+            </label>
+        </div>
+        {% endif %}
         <div class="ck-section-title">Shipping Address</div>
         <form id="ck-form">
           <div class="ck-form-row">
@@ -531,6 +551,35 @@ const subtotalBase = {{ subtotal|round(2) }};
 const gstBase = {{ total_tax|round(2) }};
 const discountBase = {{ discount|default(0)|round(2) }};
 const creditsApplied = {{ credits_applied|default(0)|round(2) }};
+const savedAddresses = {{ (saved_addresses or [])|tojson }};
+const fallbackEmail = {{ (logged_in_user.email if logged_in_user else '')|tojson }};
+
+/* ── Saved address picker ── */
+function selectSavedAddress(choice) {
+    const form = document.getElementById('ck-form');
+    if (choice === 'new') {
+        form.name.value = '';
+        form.phone.value = '';
+        form.email.value = fallbackEmail;
+        form.address.value = '';
+        document.getElementById('ck-pin').value = '';
+        document.getElementById('ck-city').value = '';
+        document.getElementById('ck-state').value = '';
+        ckServiceable = false;
+        ckSetPinStatus('', '');
+        return;
+    }
+    const addr = savedAddresses.find(function (a) { return String(a.id) === String(choice); });
+    if (!addr) return;
+    form.name.value = addr.recipient_name;
+    form.phone.value = addr.phone;
+    form.email.value = addr.email || fallbackEmail;
+    form.address.value = addr.address_line;
+    document.getElementById('ck-pin').value = addr.pincode;
+    document.getElementById('ck-city').value = addr.city;
+    document.getElementById('ck-state').value = addr.state;
+    ckCheckPin();
+}
 
 /* ── Payment method toggle ── */
 function setPayment(mode) {
@@ -726,9 +775,15 @@ function ckPayMode() {
     if (ckServiceable && /^\d{6}$/.test(pin)) ckFetchShipping(pin);
 }
 
-// Prefilled pincode (signed-in user's saved address) — verify it immediately
-// instead of waiting for the user to touch the field.
-if (document.getElementById('ck-pin').value.trim()) ckCheckPin();
+// Prefilled pincode — verify it immediately instead of waiting for the user
+// to touch the field. If the address book has entries, the first (default)
+// one drives the prefill; selectSavedAddress() calls ckCheckPin() itself.
+// Otherwise fall back to the old last-order prefill.
+if (savedAddresses.length > 0) {
+    selectSavedAddress(savedAddresses[0].id);
+} else if (document.getElementById('ck-pin').value.trim()) {
+    ckCheckPin();
+}
 
 /* ── Loading overlay ── */
 const ckLoadingMessages = ['Placing your order…', 'Talking to our courier partner…', 'Almost there…'];

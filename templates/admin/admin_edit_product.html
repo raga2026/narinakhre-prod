@@ -43,6 +43,7 @@
 
     <table style="width:100%; border-collapse: collapse; background: #1e293b; border: 1px solid #334155;">
         <tr style="background: #334155; text-align: left;">
+            <th style="padding: 12px;">Model No.</th>
             <th style="padding: 12px;">SKU</th>
             <th style="padding: 12px;">Name</th>
             <th style="padding: 12px;">Category</th>
@@ -52,6 +53,7 @@
         </tr>
         {% for product in products %}
         <tr style="border-bottom: 1px solid #334155;">
+            <td style="padding: 12px; color: #9ca3af; font-family: monospace;">{{ product.model_number or '—' }}</td>
             <td style="padding: 12px; color: #f472b6; font-weight: bold;">{{ product.sku }}</td>
             <td style="padding: 12px;">{{ product.name }}</td>
             <td style="padding: 12px;">{{ product.category }}</td>

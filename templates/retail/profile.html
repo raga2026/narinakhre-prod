@@ -54,6 +54,71 @@
 
     .section-title { font-weight: 800; color: #881337; font-size: 1.05rem; margin-bottom: 12px; }
 
+    .profile-tabs { display: flex; gap: 6px; border-bottom: 2px solid #fce7f3; margin-bottom: 20px; }
+    .profile-tab-btn {
+        background: none; border: none; cursor: pointer; padding: 10px 18px;
+        font-weight: 700; font-size: 0.88rem; color: #9ca3af;
+        border-bottom: 2px solid transparent; margin-bottom: -2px;
+    }
+    .profile-tab-btn.active { color: #be185d; border-bottom-color: #be185d; }
+    .profile-tab-btn:hover { color: #881337; }
+
+    .addr-list { display: grid; gap: 12px; margin-bottom: 16px; }
+    @media (min-width: 640px) { .addr-list { grid-template-columns: repeat(2, 1fr); } }
+    .addr-card {
+        background: #fff; border: 1px solid #fce7f3; border-radius: 16px;
+        padding: 16px 18px;
+    }
+    .addr-card.is-default { border-color: #be185d; box-shadow: 0 0 0 1px #be185d; }
+    .addr-card-top { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 6px; }
+    .addr-nickname { font-weight: 800; color: #881337; font-size: 0.95rem; }
+    .addr-type-badge {
+        background: #fdf2f8; color: #be185d; border: 1px solid #fbcfe8;
+        font-size: 0.68rem; font-weight: 700; padding: 2px 8px; border-radius: 999px;
+        text-transform: uppercase; letter-spacing: 0.02em;
+    }
+    .addr-default-badge {
+        background: #be185d; color: #fff; font-size: 0.68rem; font-weight: 700;
+        padding: 2px 8px; border-radius: 999px;
+    }
+    .addr-detail { font-size: 0.82rem; color: #4b5563; line-height: 1.5; }
+    .addr-actions { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
+    .addr-actions button {
+        background: #fff; border: 1.5px solid #be185d; color: #be185d;
+        font-weight: 700; font-size: 0.75rem; padding: 6px 12px; border-radius: 999px; cursor: pointer;
+    }
+    .addr-actions button:hover { background: #fff1f2; }
+    .addr-actions .addr-delete-btn { border-color: #dc2626; color: #dc2626; }
+    .addr-actions .addr-delete-btn:hover { background: #fef2f2; }
+
+    .addr-add-btn {
+        background: #be185d; color: #fff; border: none; border-radius: 999px;
+        padding: 10px 20px; font-weight: 700; font-size: 0.82rem; cursor: pointer; margin-bottom: 16px;
+    }
+    .addr-add-btn:hover { background: #9f1239; }
+
+    .addr-form {
+        background: #fdf2f8; border: 1px solid #fbcfe8; border-radius: 16px;
+        padding: 18px 20px; margin-bottom: 20px;
+    }
+    .addr-form-title { font-weight: 800; color: #881337; margin-bottom: 12px; }
+    .addr-form-row { display: grid; gap: 12px; grid-template-columns: 1fr; margin-bottom: 12px; }
+    @media (min-width: 640px) { .addr-form-row.two-col { grid-template-columns: 1fr 1fr; } }
+    .addr-form label { display: block; font-size: 0.78rem; font-weight: 700; color: #881337; margin-bottom: 4px; }
+    .addr-form input, .addr-form select, .addr-form textarea {
+        width: 100%; border: 1px solid #fbcfe8; border-radius: 10px; padding: 9px 12px;
+        font-size: 0.85rem; font-family: inherit; box-sizing: border-box;
+    }
+    .addr-form-actions { display: flex; gap: 10px; margin-top: 4px; }
+    .addr-form-actions button[type="submit"] {
+        background: #be185d; color: #fff; border: none; border-radius: 999px;
+        padding: 9px 20px; font-weight: 700; font-size: 0.82rem; cursor: pointer;
+    }
+    .addr-form-actions button[type="button"] {
+        background: #fff; border: 1.5px solid #9ca3af; color: #6b7280; border-radius: 999px;
+        padding: 9px 20px; font-weight: 700; font-size: 0.82rem; cursor: pointer;
+    }
+
     .credits-card {
         background: #fff; border: 1px solid #fce7f3; border-radius: 16px;
         padding: 18px 20px; margin-bottom: 28px;
@@ -148,6 +213,16 @@
         </div>
     </div>
 
+    <div role="tablist" aria-label="Profile sections" class="profile-tabs">
+        <button type="button" role="tab" id="tab-btn-orders" aria-selected="{{ 'true' if active_tab == 'orders' else 'false' }}"
+                aria-controls="tab-panel-orders" tabindex="{{ '0' if active_tab == 'orders' else '-1' }}"
+                class="profile-tab-btn{{ ' active' if active_tab == 'orders' else '' }}" onclick="showProfileTab('orders')">My Orders</button>
+        <button type="button" role="tab" id="tab-btn-addresses" aria-selected="{{ 'true' if active_tab == 'addresses' else 'false' }}"
+                aria-controls="tab-panel-addresses" tabindex="{{ '0' if active_tab == 'addresses' else '-1' }}"
+                class="profile-tab-btn{{ ' active' if active_tab == 'addresses' else '' }}" onclick="showProfileTab('addresses')">My Addresses</button>
+    </div>
+
+    <div id="tab-panel-orders" role="tabpanel" aria-labelledby="tab-btn-orders" tabindex="0"{{ ' hidden' if active_tab != 'orders' else '' }}>
     <div class="section-title">My Orders</div>
     {% if orders and orders|length > 0 %}
     <div class="overflow-x-auto">
@@ -204,9 +279,183 @@
         <a href="/retail" class="btn-retail-main inline-block px-8 py-3">Start Shopping</a>
     </div>
     {% endif %}
+    </div>
+
+    <div id="tab-panel-addresses" role="tabpanel" aria-labelledby="tab-btn-addresses" tabindex="0"{{ ' hidden' if active_tab != 'addresses' else '' }}>
+    <div class="section-title">My Addresses</div>
+
+    {% if addresses and addresses|length > 0 %}
+    <div class="addr-list">
+        {% for addr in addresses %}
+        <div class="addr-card{{ ' is-default' if addr.is_default else '' }}">
+            <div class="addr-card-top">
+                <span class="addr-nickname">{{ addr.nickname }}</span>
+                <span class="addr-type-badge">{{ addr.address_type }}</span>
+                {% if addr.is_default %}<span class="addr-default-badge">Default</span>{% endif %}
+            </div>
+            <div class="addr-detail">{{ addr.recipient_name }} · {{ addr.phone }}{% if addr.email %} · {{ addr.email }}{% endif %}</div>
+            <div class="addr-detail">{{ addr.address_line }}, {{ addr.city }}, {{ addr.state }} - {{ addr.pincode }}</div>
+            <div class="addr-actions">
+                <button type="button" onclick="editAddress({{ addr.id }})">Edit</button>
+                {% if not addr.is_default %}
+                <form method="POST" action="{{ url_for('set_default_address', address_id=addr.id) }}" style="display:inline;">
+                    <button type="submit">Set as Default</button>
+                </form>
+                {% endif %}
+                <form method="POST" action="{{ url_for('delete_address', address_id=addr.id) }}" style="display:inline;" onsubmit="return confirm('Remove the address \'{{ addr.nickname }}\'?');">
+                    <button type="submit" class="addr-delete-btn">Delete</button>
+                </form>
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+    {% else %}
+    <p style="font-size:0.85rem;color:#9ca3af;margin-bottom:16px;">No saved addresses yet.</p>
+    {% endif %}
+
+    <button type="button" class="addr-add-btn" id="addr-add-toggle-btn" aria-expanded="false" aria-controls="addr-form" onclick="openAddressForm()">+ Add New Address</button>
+
+    <form class="addr-form" id="addr-form" method="POST" action="{{ url_for('add_address') }}" hidden>
+        <div class="addr-form-title" id="addr-form-title">Add a new address</div>
+        <div class="addr-form-row two-col">
+            <div>
+                <label for="af-nickname">Nickname *</label>
+                <input type="text" id="af-nickname" name="nickname" required placeholder="e.g. Mom's House">
+            </div>
+            <div>
+                <label for="af-type">Type *</label>
+                <select id="af-type" name="address_type">
+                    <option value="Home">Home</option>
+                    <option value="Office">Office</option>
+                    <option value="Other">Other</option>
+                </select>
+            </div>
+        </div>
+        <div class="addr-form-row two-col">
+            <div>
+                <label for="af-recipient">Recipient Name *</label>
+                <input type="text" id="af-recipient" name="recipient_name" required>
+            </div>
+            <div>
+                <label for="af-phone">Mobile Number *</label>
+                <input type="tel" id="af-phone" name="phone" required pattern="[0-9]{10}" inputmode="numeric" placeholder="10-digit mobile">
+            </div>
+        </div>
+        <div class="addr-form-row">
+            <div>
+                <label for="af-email">Email address for this address (optional)</label>
+                <input type="email" id="af-email" name="email" placeholder="name@example.com">
+            </div>
+        </div>
+        <div class="addr-form-row">
+            <div>
+                <label for="af-address">Address *</label>
+                <textarea id="af-address" name="address_line" rows="2" required></textarea>
+            </div>
+        </div>
+        <div class="addr-form-row two-col">
+            <div>
+                <label for="af-city">City *</label>
+                <input type="text" id="af-city" name="city" required>
+            </div>
+            <div>
+                <label for="af-state">State *</label>
+                <input type="text" id="af-state" name="state" required>
+            </div>
+        </div>
+        <div class="addr-form-row two-col">
+            <div>
+                <label for="af-pincode">Pincode *</label>
+                <input type="text" id="af-pincode" name="pincode" required maxlength="6" pattern="[0-9]{6}" inputmode="numeric">
+            </div>
+            <div style="display:flex;align-items:flex-end;">
+                <label style="display:flex;align-items:center;gap:6px;font-weight:600;">
+                    <input type="checkbox" id="af-default" name="is_default" style="width:auto;">
+                    Set as default address
+                </label>
+            </div>
+        </div>
+        <div class="addr-form-actions">
+            <button type="submit" id="addr-form-submit-btn">Save Address</button>
+            <button type="button" onclick="closeAddressForm()">Cancel</button>
+        </div>
+    </form>
+    </div>
 </div>
 
 <script>
+const addressBook = {{ addresses|tojson }};
+
+function showProfileTab(name) {
+    ['orders', 'addresses'].forEach(function (t) {
+        const btn = document.getElementById('tab-btn-' + t);
+        const panel = document.getElementById('tab-panel-' + t);
+        const active = t === name;
+        btn.setAttribute('aria-selected', active ? 'true' : 'false');
+        btn.tabIndex = active ? 0 : -1;
+        btn.classList.toggle('active', active);
+        panel.hidden = !active;
+    });
+    history.replaceState(null, '', '?tab=' + name);
+}
+document.querySelectorAll('.profile-tabs [role="tab"]').forEach(function (tab, idx, arr) {
+    tab.addEventListener('keydown', function (e) {
+        let newIdx = null;
+        if (e.key === 'ArrowRight') newIdx = (idx + 1) % arr.length;
+        else if (e.key === 'ArrowLeft') newIdx = (idx - 1 + arr.length) % arr.length;
+        else if (e.key === 'Home') newIdx = 0;
+        else if (e.key === 'End') newIdx = arr.length - 1;
+        if (newIdx !== null) {
+            e.preventDefault();
+            const targetName = arr[newIdx].id.replace('tab-btn-', '');
+            showProfileTab(targetName);
+            arr[newIdx].focus();
+        }
+    });
+});
+
+function openAddressForm() {
+    const form = document.getElementById('addr-form');
+    form.reset();
+    form.action = {{ url_for('add_address')|tojson }};
+    document.getElementById('addr-form-title').textContent = 'Add a new address';
+    document.getElementById('addr-form-submit-btn').textContent = 'Save Address';
+    form.hidden = false;
+    document.getElementById('addr-add-toggle-btn').setAttribute('aria-expanded', 'true');
+    document.getElementById('af-nickname').focus();
+}
+function closeAddressForm() {
+    const form = document.getElementById('addr-form');
+    form.hidden = true;
+    document.getElementById('addr-add-toggle-btn').setAttribute('aria-expanded', 'false');
+    document.getElementById('addr-add-toggle-btn').focus();
+}
+function editAddress(id) {
+    const addr = addressBook.find(function (a) { return a.id === id; });
+    if (!addr) return;
+    const form = document.getElementById('addr-form');
+    form.action = '/profile/addresses/' + id + '/edit';
+    document.getElementById('addr-form-title').textContent = 'Edit "' + addr.nickname + '"';
+    document.getElementById('addr-form-submit-btn').textContent = 'Save Changes';
+    document.getElementById('af-nickname').value = addr.nickname || '';
+    document.getElementById('af-type').value = addr.address_type || 'Home';
+    document.getElementById('af-recipient').value = addr.recipient_name || '';
+    document.getElementById('af-phone').value = addr.phone || '';
+    document.getElementById('af-email').value = addr.email || '';
+    document.getElementById('af-address').value = addr.address_line || '';
+    document.getElementById('af-city').value = addr.city || '';
+    document.getElementById('af-state').value = addr.state || '';
+    document.getElementById('af-pincode').value = addr.pincode || '';
+    document.getElementById('af-default').checked = !!addr.is_default;
+    form.hidden = false;
+    document.getElementById('addr-add-toggle-btn').setAttribute('aria-expanded', 'true');
+    document.getElementById('af-nickname').focus();
+}
+
+{% if active_tab == 'addresses' %}
+document.addEventListener('DOMContentLoaded', function () { document.getElementById('tab-panel-addresses').focus(); });
+{% endif %}
+
 function copyReferralLink() {
     const field = document.getElementById('referral-link-field');
     field.select();
