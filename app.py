@@ -2695,7 +2695,7 @@ def api_search():
         like  = f'%{q_low}%'
 
         rows = conn.execute(
-            "SELECT id, sku, name, category, sub_category,"
+            "SELECT id, sku, model_number, name, category, sub_category,"
             " retail_price, mrp_price, image_field"
             " FROM products"
             " WHERE is_active = 1"
@@ -2704,6 +2704,7 @@ def api_search():
             f"   OR LOWER(category) LIKE '{like}'"
             f"   OR LOWER(sub_category) LIKE '{like}'"
             f"   OR LOWER(sku) LIKE '{like}'"
+            f"   OR LOWER(model_number) LIKE '{like}'"
             " )"
             " LIMIT 12",
             ()
@@ -2715,7 +2716,8 @@ def api_search():
         rows = sorted(rows, key=lambda r: (
             0 if (r['name'] or '').lower().startswith(q_lower) else
             1 if (r['sku'] or '').lower().startswith(q_lower) else
-            2 if q_lower in (r['category'] or '').lower() else 3
+            2 if (r['model_number'] or '').lower().startswith(q_lower) else
+            3 if q_lower in (r['category'] or '').lower() else 4
         ))[:8]
 
         for r in rows:
@@ -2728,14 +2730,15 @@ def api_search():
             rp  = float(r_dict.get('retail_price') or 0)
             disc = int((mrp - rp) / mrp * 100) if mrp and mrp > rp else 0
             results['products'].append({
-                'id':       r_dict['id'],
-                'sku':      r_dict['sku'] or '',
-                'name':     r_dict['name'] or '',
-                'category': r_dict['category'] or '',
-                'price':    rp,
-                'mrp':      mrp,
-                'discount': disc,
-                'image':    img,
+                'id':           r_dict['id'],
+                'sku':          r_dict['sku'] or '',
+                'model_number': r_dict['model_number'] or '',
+                'name':         r_dict['name'] or '',
+                'category':     r_dict['category'] or '',
+                'price':        rp,
+                'mrp':          mrp,
+                'discount':     disc,
+                'image':        img,
                 'url': f"/retail/product/{r_dict['id']}" if site == 'retail'
                        else f"/wholesale/product/{r_dict['id']}",
             })
@@ -2794,6 +2797,7 @@ def search_page():
             f" OR LOWER(category) LIKE '{like}'"
             f" OR LOWER(sub_category) LIKE '{like}'"
             f" OR LOWER(sku) LIKE '{like}'"
+            f" OR LOWER(model_number) LIKE '{like}'"
             f" OR LOWER(description) LIKE '{like}'"
             " )"
             " ORDER BY name LIMIT 40",
