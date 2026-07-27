@@ -93,7 +93,7 @@
             <a href="{{ url_for('my_quotes') }}" class="ws-nav-pill">📄 My Quotes</a>
             <a href="{{ url_for('logout') }}" class="ws-nav-pill">🚪 Sign Out</a>
             {% else %}
-            <a href="{{ url_for('google_login') }}" class="ws-nav-pill">🔐 Sign in</a>
+            <button type="button" class="ws-nav-pill" style="cursor:pointer;font-family:inherit;" onclick="openAuthModal('signin')">🔐 Sign in</button>
             {% endif %}
         </nav>
     </div>

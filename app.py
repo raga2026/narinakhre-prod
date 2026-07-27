@@ -1212,9 +1212,8 @@ def _log_in_user(db_conn, user_id):
 
 @app.route('/auth/email/signup', methods=['POST'])
 def email_signup():
-    if g.site_type != 'retail':
-        return jsonify({'status': 'error', 'message': 'Email sign-in is not available here.'}), 400
-
+    # Not restricted to retail -- Google sign-in already works on both
+    # storefronts against the same users table, so email sign-in matches it.
     data = request.get_json(silent=True) or request.form or {}
     first_name = (data.get('first_name') or '').strip()
     last_name = (data.get('last_name') or '').strip()
@@ -1264,9 +1263,6 @@ def email_signup():
 
 @app.route('/auth/email/login', methods=['POST'])
 def email_login():
-    if g.site_type != 'retail':
-        return jsonify({'status': 'error', 'message': 'Email sign-in is not available here.'}), 400
-
     data = request.get_json(silent=True) or request.form or {}
     email = (data.get('email') or '').strip().lower()
     password = data.get('password') or ''
