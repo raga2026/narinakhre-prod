@@ -180,7 +180,7 @@
 
     <!-- Info block -->
     <div class="mt-2 md:mt-0">
-      <h1 class="pd-title">{{ product.name }}</h1>
+      <h1 class="pd-title">{{ product.name }}{% if product.model_number %} <span class="pd-model-no" style="font-size:0.62em;font-weight:600;color:#9ca3af;">({{ product.model_number }})</span>{% endif %}</h1>
       {%- set mrp = product.mrp_price or 0 -%}
         {%- set rp  = product.retail_price or product.price1 or 0 -%}
       {%- set disc = ((mrp - rp) / mrp * 100)|round(0)|int if mrp and mrp > rp else 0 -%}

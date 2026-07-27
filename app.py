@@ -429,6 +429,7 @@ def initialize_database_if_needed():
         'ALTER TABLE order_shipping ADD COLUMN IF NOT EXISTS cod_collected_amount NUMERIC',
         'ALTER TABLE order_shipping ADD COLUMN IF NOT EXISTS cod_credit_awarded NUMERIC DEFAULT 0',
         'ALTER TABLE order_shipping ADD COLUMN IF NOT EXISTS credits_redeemed NUMERIC DEFAULT 0',
+        'ALTER TABLE products ADD COLUMN IF NOT EXISTS model_number TEXT UNIQUE',
     ]
     for sql in alter_sql:
         try:
@@ -961,6 +962,43 @@ def generate_referral_code(db_conn):
             return code
     # Astronomically unlikely, but never loop forever
     return ''.join(random.choices(alphabet, k=12))
+
+
+MODEL_NUMBER_PREFIX = 'N'
+
+
+def _next_model_number_suffix(suffix):
+    """'AA001' -> 'AA002' ... 'AA999' -> 'AB001' ... 'ZZ999' raises (space exhausted)."""
+    letters, digits = suffix[:2], suffix[2:]
+    num = int(digits) + 1
+    if num > 999:
+        num = 1
+        first, second = letters[0], letters[1]
+        if second == 'Z':
+            if first == 'Z':
+                raise ValueError('Model number space exhausted (ZZ999 reached)')
+            first, second = chr(ord(first) + 1), 'A'
+        else:
+            second = chr(ord(second) + 1)
+        letters = first + second
+    return f"{letters}{num:03d}"
+
+
+def generate_model_number(db_conn):
+    """Product-level identifier, one per product row, shared across all its
+    size variants (bangles' per-size rows live in product_variants under one
+    master sku, so this never needs to special-case sizes). Format NAA001:
+    'N' is a fixed prefix; the rest is a 2-letter + 3-digit counter, fixed
+    width, so plain string ordering already matches numeric order -- the
+    highest existing code is just MAX(model_number)."""
+    row = db_conn.execute(
+        "SELECT model_number FROM products WHERE model_number IS NOT NULL "
+        "ORDER BY model_number DESC LIMIT 1"
+    ).fetchone()
+    if not row or not row['model_number']:
+        return f"{MODEL_NUMBER_PREFIX}AA001"
+    suffix = _next_model_number_suffix(row['model_number'][len(MODEL_NUMBER_PREFIX):])
+    return f"{MODEL_NUMBER_PREFIX}{suffix}"
 
 
 # Nari Nakhre Credits -- an in-app store-credit wallet, redeemable at
@@ -3280,6 +3318,7 @@ def admin_add_product():
 
         new_status = 'published' if intent == 'publish' else 'draft'
         new_is_active = 1 if intent == 'publish' else 0
+        model_number = generate_model_number(db)
 
         db.execute(
             '''INSERT INTO products
@@ -3290,8 +3329,8 @@ def admin_add_product():
                 sets_count, min_wholesale_qty,
                 slug, price1, quantity1, price2, quantity2,
                 price3, quantity3, image_field, description, key_features,
-                status, is_active, updated_at)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,NOW())''',
+                status, is_active, model_number, updated_at)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,NOW())''',
             (sku, name, category, sub_category, collection,
              retail_price, mrp_price, wholesale_price,
              stock_total, material, size, hsn_code, gst_percent,
@@ -3299,7 +3338,7 @@ def admin_add_product():
              sets_count, min_wholesale_qty,
              slug, price1, quantity1, price2, quantity2,
              price3, quantity3, image_url, description, key_features,
-             new_status, new_is_active)
+             new_status, new_is_active, model_number)
         )
         db.commit()
 
@@ -3545,6 +3584,7 @@ def admin_upload_excel():
             )
 
             if is_new:
+                model_number = generate_model_number(conn)
                 conn.execute(
                     '''INSERT INTO products
                        (name, slug, category, sub_category, collection, size,
@@ -3554,9 +3594,9 @@ def admin_upload_excel():
                         purchase_cost, making_charges, weight_grams, material,
                         hsn_code, gst_percent, stock_total, box_packing_type,
                         vendor_id, status, is_active, is_featured,
-                        weight, length, breadth, height, sku)
-                       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',
-                    values + (row_sku,)
+                        weight, length, breadth, height, sku, model_number)
+                       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',
+                    values + (row_sku, model_number)
                 )
                 created_rows += 1
             else:

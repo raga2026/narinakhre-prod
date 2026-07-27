@@ -326,7 +326,7 @@
                  onerror="this.onerror=null;this.src='/static/assets/products/default.jpg';">
         </div>
         <div class="prod-info">
-            <div class="prod-name">{{ product.name }}</div>
+            <div class="prod-name">{{ product.name }}{% if product.model_number %} <span style="font-size:0.75em;color:#9ca3af;font-weight:600;">({{ product.model_number }})</span>{% endif %}</div>
             <div class="prod-price-wrap">
                 {% if mrp and mrp > rp %}
                 <span class="prod-mrp"><span style="font-size:0.6rem;font-weight:600;">MRP</span> ₹{{ mrp|round(0)|int }}</span>
@@ -386,7 +386,7 @@
                 </a>
 
                 <!-- Name -->
-                <div class="prod-name">{{ product.name }}</div>
+                <div class="prod-name">{{ product.name }}{% if product.model_number %} <span style="font-size:0.75em;color:#9ca3af;font-weight:600;">({{ product.model_number }})</span>{% endif %}</div>
 
                 <!-- Price -->
                 <div class="prod-price-wrap">
