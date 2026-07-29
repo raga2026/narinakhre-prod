@@ -29,6 +29,13 @@
     /* Categories pill — mobile header only */
     .mobile-cat-pill { display: flex; align-items: center; }
     @media (min-width: 768px) { .mobile-cat-pill { display: none; } }
+    /* Search toggle icon — mobile header only, opens the search overlay below the header */
+    .mobile-search-toggle {
+        display: flex; align-items: center; justify-content: center;
+        background: none; border: none; cursor: pointer; padding: 6px;
+        font-size: 1.15rem; line-height: 1; color: #be185d;
+    }
+    @media (min-width: 768px) { .mobile-search-toggle { display: none; } }
 
     /* ── Search ── */
     .search-wrap {
@@ -101,12 +108,16 @@
         text-decoration: none; border-top: 1px solid #f3f4f6;
     }
     .sd-all-link:hover { background: #fff7f8; border-radius: 0 0 16px 16px; }
-    /* Mobile search bar - full width below header */
+    /* Mobile search overlay — hidden until the search icon is tapped, so it
+       doesn't add permanent height to the header like the old always-on bar did */
     .mobile-search-bar {
-        display: block; padding: 8px 16px;
+        display: none; padding: 10px 16px;
         border-bottom: 1px solid #f3f4f6; background: white;
+        position: absolute; left: 0; right: 0; top: 100%; z-index: 55;
+        box-shadow: 0 8px 20px rgba(0,0,0,0.1);
     }
-    @media (min-width: 768px) { .mobile-search-bar { display: none; } }
+    .mobile-search-bar.open { display: block; }
+    @media (min-width: 768px) { .mobile-search-bar { display: none !important; } }
     .mobile-search-bar .search-input { max-width: 100%; }
     .mobile-search-bar .search-dropdown { position: fixed; left: 16px; right: 16px; top: 110px; }
 
@@ -220,6 +231,9 @@
                 {% endif %}
             </div>
         </div>
+        <button type="button" class="mobile-search-toggle" id="mobile-search-toggle-btn"
+                onclick="toggleMobileSearchBar()" aria-label="Search"
+                aria-expanded="false" aria-controls="mobile-search-bar">🔍</button>
         <a href="/retail/checkout" class="mobile-cart-icon" aria-label="Cart">
             <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#be185d" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                 <circle cx="9" cy="21" r="1"></circle><circle cx="20" cy="21" r="1"></circle>
@@ -257,8 +271,8 @@
         <button class="btn-black px-3 py-1 text-xs" onclick="verifyService()">Check Delivery</button>
         <span id="pincode-result" class="text-xs font-bold" aria-live="polite"></span>
     </div>
-    <!-- Mobile search bar — full width below all header rows -->
-    <div class="mobile-search-bar">
+    <!-- Mobile search overlay — opened via the search icon in the header row -->
+    <div class="mobile-search-bar" id="mobile-search-bar" role="search">
         <div style="position:relative;width:100%;" id="mobile-search-wrap">
             <span class="search-icon">🔍</span>
             <input type="text" class="search-input" id="mobile-search"
@@ -341,6 +355,34 @@ function clearSearch(prefix) {
 function closeDropdown(dropdown) {
     if (dropdown) { dropdown.innerHTML = ''; dropdown.classList.remove('open'); }
 }
+
+/* ── Mobile search overlay toggle ── */
+function toggleMobileSearchBar() {
+    const bar = document.getElementById('mobile-search-bar');
+    const btn = document.getElementById('mobile-search-toggle-btn');
+    if (!bar) return;
+    const isOpen = bar.classList.toggle('open');
+    btn.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
+    if (isOpen) {
+        const input = document.getElementById('mobile-search');
+        if (input) input.focus();
+    } else {
+        clearSearch('mobile');
+    }
+}
+document.addEventListener('click', function (e) {
+    const bar = document.getElementById('mobile-search-bar');
+    if (!bar || !bar.classList.contains('open')) return;
+    if (!e.target.closest('#mobile-search-bar') && !e.target.closest('#mobile-search-toggle-btn')) {
+        toggleMobileSearchBar();
+    }
+});
+document.addEventListener('keydown', function (e) {
+    const bar = document.getElementById('mobile-search-bar');
+    if (e.key === 'Escape' && bar && bar.classList.contains('open')) {
+        toggleMobileSearchBar();
+    }
+});
 
 async function runSearch(q, dropdown, prefix) {
     try {
