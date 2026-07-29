@@ -453,6 +453,8 @@ def initialize_database_if_needed():
         'ALTER TABLE order_shipping ADD COLUMN IF NOT EXISTS credits_redeemed NUMERIC DEFAULT 0',
         'ALTER TABLE products ADD COLUMN IF NOT EXISTS model_number TEXT UNIQUE',
         'ALTER TABLE users ADD COLUMN IF NOT EXISTS password_hash TEXT',
+        'ALTER TABLE coupons ADD COLUMN IF NOT EXISTS is_public INTEGER DEFAULT 1',
+        'ALTER TABLE coupons ADD COLUMN IF NOT EXISTS max_discount_amount NUMERIC',
         # Best-effort -- non-fatal if pre-existing rows already have duplicate
         # or blank emails (see the app-level check in email_signup as the
         # real guard against duplicate accounts).
@@ -1711,8 +1713,18 @@ def index():
         import random
         random.shuffle(trending)  # shuffle so it feels fresh each load
 
+        today_str = datetime.now().strftime('%Y-%m-%d')
+        public_coupons = db.execute(
+            "SELECT * FROM coupons WHERE is_active=1 AND is_public=1"
+            " AND (expiry_date IS NULL OR expiry_date >= ?)"
+            " AND (usage_limit IS NULL OR usage_limit=0 OR times_used < usage_limit)"
+            " ORDER BY discount_percent DESC, id DESC",
+            (today_str,)
+        ).fetchall()
+
         return render_site('index.html', grouped_products=grouped_products,
-                           trending=trending, hero_images=hero_images)
+                           trending=trending, hero_images=hero_images,
+                           public_coupons=public_coupons)
 
     products = db.execute('''
         SELECT p.*, c.name as category_name FROM products p
@@ -4283,6 +4295,8 @@ def admin_coupon_create():
     sub_category = (request.form.get('sub_category') or '').strip()
     expiry_date = (request.form.get('expiry_date') or '').strip() or None
     usage_limit = request.form.get('usage_limit', type=int) or 0
+    max_discount_amount = request.form.get('max_discount_amount', type=float) or None
+    is_public = 1 if (request.form.get('visibility') or 'public') == 'public' else 0
 
     if not code:
         flash('Coupon code is required.')
@@ -4293,8 +4307,8 @@ def admin_coupon_create():
 
     try:
         db.execute(
-            "INSERT INTO coupons (code, discount_percent, min_order_amount, category, sub_category, expiry_date, usage_limit, is_active) VALUES (?,?,?,?,?,?,?,1)",
-            (code, discount_percent, min_order_amount, category or None, sub_category or None, expiry_date, usage_limit)
+            "INSERT INTO coupons (code, discount_percent, min_order_amount, category, sub_category, expiry_date, usage_limit, max_discount_amount, is_public, is_active) VALUES (?,?,?,?,?,?,?,?,?,1)",
+            (code, discount_percent, min_order_amount, category or None, sub_category or None, expiry_date, usage_limit, max_discount_amount, is_public)
         )
         db.commit()
         flash('Coupon "' + code + '" created successfully.')
@@ -4338,14 +4352,16 @@ def admin_coupon_edit(coupon_id):
     sub_category = (request.form.get('sub_category') or '').strip()
     expiry_date = (request.form.get('expiry_date') or '').strip() or None
     usage_limit = request.form.get('usage_limit', type=int) or 0
+    max_discount_amount = request.form.get('max_discount_amount', type=float) or None
+    is_public = 1 if (request.form.get('visibility') or 'public') == 'public' else 0
 
     if discount_percent <= 0 or discount_percent > 100:
         flash('Discount percent must be between 1 and 100.')
         return redirect(url_for('admin_coupons'))
 
     db.execute(
-        "UPDATE coupons SET discount_percent=?, min_order_amount=?, category=?, sub_category=?, expiry_date=?, usage_limit=? WHERE id=?",
-        (discount_percent, min_order_amount, category or None, sub_category or None, expiry_date, usage_limit, coupon_id)
+        "UPDATE coupons SET discount_percent=?, min_order_amount=?, category=?, sub_category=?, expiry_date=?, usage_limit=?, max_discount_amount=?, is_public=? WHERE id=?",
+        (discount_percent, min_order_amount, category or None, sub_category or None, expiry_date, usage_limit, max_discount_amount, is_public, coupon_id)
     )
     db.commit()
     flash('Coupon updated.')
