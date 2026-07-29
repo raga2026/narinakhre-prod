@@ -66,41 +66,48 @@
     }
     .offer-product-slide { text-decoration: none; }
     .offer-product-card {
-        display: flex; flex-direction: column; align-items: center; text-align: center;
-        background: #fff; border-radius: 16px; padding: 10px 14px;
-        box-shadow: 0 4px 16px rgba(0,0,0,0.25);
-        width: 150px;
+        display: flex; align-items: center; gap: 12px;
+        background: linear-gradient(135deg, #fffbea 0%, #ffffff 65%);
+        border: 1px solid rgba(255,255,255,0.7);
+        border-radius: 18px; padding: 10px 16px;
+        box-shadow: 0 6px 20px rgba(0,0,0,0.3);
+        width: calc(100% - 32px); max-width: 460px;
     }
     .offer-product-img-wrap {
-        position: relative; width: 100%; height: 56px; margin-bottom: 6px;
+        position: relative; width: 52px; height: 52px; flex-shrink: 0;
+        border-radius: 12px; background: #fdf2f8;
         display: flex; align-items: center; justify-content: center;
     }
     .offer-product-img { max-width: 100%; max-height: 100%; object-fit: contain; }
     .offer-product-badge {
-        position: absolute; top: -6px; left: -2px;
+        position: absolute; top: -8px; left: -8px;
         background: linear-gradient(135deg, #e11d48, #9f1239); color: #fff;
         font-weight: 900; font-size: 0.6rem; padding: 2px 6px; border-radius: 8px;
         box-shadow: 0 1px 4px rgba(0,0,0,0.3); white-space: nowrap;
     }
-    .offer-product-title {
-        font-size: 0.7rem; font-weight: 600; color: #1f2937; line-height: 1.25;
-        display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
-        margin-bottom: 4px; min-height: 2.4em;
+    .offer-product-price {
+        display: flex; flex-direction: column; align-items: flex-start; flex-shrink: 0;
+        padding-right: 12px; border-right: 1.5px solid #fbcfe8;
     }
-    .offer-product-price-row { display: flex; align-items: baseline; gap: 5px; }
     .offer-product-mrp { font-size: 0.62rem; color: #9ca3af; text-decoration: line-through; }
-    .offer-product-current { font-size: 0.88rem; font-weight: 900; color: #9f1239; }
+    .offer-product-current { font-size: 0.95rem; font-weight: 900; color: #9f1239; line-height: 1.2; }
+    .offer-product-title {
+        flex: 1; min-width: 0; text-align: left;
+        font-size: 0.74rem; font-weight: 700; color: #1f2937; line-height: 1.3;
+        display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+    }
     @media (min-width: 768px) {
         .offers-carousel { min-height: 156px; }
         .offer-discount-big { font-size: 2.6rem; }
         .offer-discount-cap { font-size: 0.8rem; }
         .offer-code-label { font-size: 0.68rem; }
         .offer-code-inline { font-size: 0.85rem; padding: 3px 12px; }
-        .offer-product-card { width: 190px; padding: 14px 16px; }
-        .offer-product-img-wrap { height: 76px; }
+        .offer-product-card { max-width: 620px; padding: 16px 24px; gap: 18px; }
+        .offer-product-img-wrap { width: 76px; height: 76px; }
         .offer-product-badge { font-size: 0.7rem; padding: 3px 8px; }
-        .offer-product-title { font-size: 0.82rem; }
-        .offer-product-current { font-size: 1.05rem; }
+        .offer-product-price { padding-right: 18px; }
+        .offer-product-current { font-size: 1.2rem; }
+        .offer-product-title { font-size: 0.95rem; }
     }
 
     /* ── About / purpose ── */
@@ -334,11 +341,11 @@
                      onerror="this.onerror=null;this.src='/static/assets/products/default.jpg';">
                 <span class="offer-product-badge">{{ p.disc_pct }}% OFF</span>
             </div>
-            <div class="offer-product-title">{{ p.name }}</div>
-            <div class="offer-product-price-row">
+            <div class="offer-product-price">
                 <span class="offer-product-mrp">₹{{ p.mrp_price|round(0)|int }}</span>
                 <span class="offer-product-current">₹{{ p.current_price|round(0)|int }}</span>
             </div>
+            <div class="offer-product-title">{{ p.name }}</div>
         </div>
     </a>
     {% set ns.first = false %}
