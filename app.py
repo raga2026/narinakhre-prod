@@ -1727,18 +1727,18 @@ def index():
 
         public_coupons = get_public_coupons(db)
 
-        # Offers carousel also gets 2 random picks from the most recently added
-        # in-stock, discounted products -- a random sample of the newest arrivals,
-        # not a fixed "latest 2", so the carousel varies between visits.
-        recent_discounted = [
-            p for p in sorted(all_in_stock, key=lambda p: p['id'], reverse=True)[:12]
+        # Offers carousel also gets 3 random picks from the trending shelf --
+        # a random sample, not a fixed "top 3", so the carousel varies between visits.
+        discounted_trending = [
+            p for p in trending
             if p.get('mrp_price') and p['mrp_price'] > (p.get('retail_price') or p.get('price1') or 0)
         ]
-        carousel_products = random.sample(recent_discounted, min(2, len(recent_discounted)))
+        carousel_products = random.sample(discounted_trending, min(3, len(discounted_trending)))
         for p in carousel_products:
             mrp = float(p['mrp_price'])
             rp = float(p.get('retail_price') or p.get('price1') or 0)
             p['disc_pct'] = round((mrp - rp) / mrp * 100)
+            p['current_price'] = rp
             p['thumb'] = p['images'][0] if p.get('images') else '/static/assets/products/default.jpg'
 
         return render_site('index.html', grouped_products=grouped_products,
