@@ -33,55 +33,27 @@
         z-index: 1;
     }
 
-    /* ── Offers carousel ── */
-    .offers-section { background:#fff; padding: 20px 16px 8px; }
-    .offers-inner { max-width: 1000px; margin: 0 auto; }
-    .offers-header { display:flex; align-items:center; justify-content:space-between; margin-bottom:10px; }
-    .offers-title { font-family:'Playfair Display',serif; font-size:1.05rem; font-weight:800; color:#881337; margin:0; display:flex; align-items:center; gap:6px; }
-    .offers-view-all { background:none; border:none; font-size:0.75rem; font-weight:700; color:#be185d; cursor:pointer; padding:4px 2px; text-decoration:underline; }
-    .offers-grid { display:flex; gap:10px; overflow-x:auto; padding:2px 2px 10px; scroll-snap-type:x mandatory; -webkit-overflow-scrolling:touch; scrollbar-width:none; }
-    .offers-grid::-webkit-scrollbar { display:none; }
-    .offer-card {
-        flex:0 0 210px; width:210px; scroll-snap-align:start;
-        background: linear-gradient(135deg,#fff1f2,#ffe4e6);
-        border:1.5px dashed #fb7185; border-radius:16px;
-        padding:14px; display:flex; align-items:center; gap:10px;
+    /* ── Offers carousel (subtle, above hero, auto-rotating) ── */
+    .offers-carousel {
+        position: relative; background: #fdf2f8; border-bottom: 1px solid #fbcfe8;
+        padding: 8px 14px; height: 34px; overflow: hidden;
     }
-    .offer-icon { font-size:1.9rem; line-height:1; flex-shrink:0; }
-    .offer-body { min-width:0; }
-    .offer-discount { font-weight:900; font-size:1.05rem; color:#9f1239; line-height:1.15; }
-    .offer-cap { font-size:0.68rem; color:#be185d; font-weight:700; margin-bottom:3px; }
-    .offer-code {
-        display:inline-block; background:#fff; border:1px dashed #be185d; border-radius:6px;
-        padding:2px 6px; font-family:monospace; font-weight:800; font-size:0.72rem;
-        color:#881337; letter-spacing:0.3px; cursor:pointer;
+    .offers-slide {
+        position: absolute; inset: 0; display: flex; align-items: center;
+        justify-content: center; gap: 8px; padding: 0 40px;
+        text-align: center; font-size: 0.72rem; color: #881337;
+        opacity: 0; transition: opacity 0.5s ease; pointer-events: none;
     }
-    .offer-valid { font-size:0.62rem; color:#9f9f9f; margin-top:3px; }
+    .offers-slide.active { opacity: 1; pointer-events: auto; }
+    .offer-code-inline {
+        background: #fff; border: 1px solid #fbcfe8; border-radius: 5px;
+        padding: 1px 6px; font-family: monospace; font-weight: 800;
+        font-size: 0.7rem; color: #be185d; letter-spacing: 0.3px; cursor: pointer; flex-shrink: 0;
+    }
     @media (min-width: 768px) {
-        .offers-title { font-size:1.3rem; }
-        .offer-card { flex-basis:260px; width:260px; padding:18px; }
-        .offer-icon { font-size:2.4rem; }
-        .offer-discount { font-size:1.3rem; }
+        .offers-carousel { height: 38px; padding: 9px 14px; }
+        .offers-slide { font-size: 0.8rem; }
     }
-
-    /* ── Offers modal ── */
-    .offers-modal-overlay {
-        display:none; position:fixed; inset:0; background:rgba(76,5,25,0.55);
-        z-index:1000; align-items:center; justify-content:center; padding:16px;
-    }
-    .offers-modal-overlay.open { display:flex; }
-    .offers-modal-box {
-        background:#fff; border-radius:18px; max-width:480px; width:100%;
-        max-height:80vh; overflow-y:auto; padding:20px; position:relative;
-    }
-    .offers-modal-close {
-        position:absolute; top:12px; right:12px; background:#ffe4e6; border:none;
-        border-radius:50%; width:30px; height:30px; font-size:1rem; font-weight:800;
-        color:#be185d; cursor:pointer;
-    }
-    .offers-modal-title { font-family:'Playfair Display',serif; font-weight:800; color:#881337; font-size:1.1rem; margin-bottom:14px; }
-    .offers-modal-list { display:flex; flex-direction:column; gap:10px; }
-    .offers-modal-list .offer-card { width:100%; flex-basis:auto; }
 
     /* ── About / purpose ── */
     .about-section { background: #fff; padding: 40px 16px; border-bottom: 1px solid #fce7f3; }
@@ -284,6 +256,19 @@
     .qty-display { font-weight: bold; font-size: 0.85rem; color: #9f1239; }
 </style>
 
+{% if public_coupons and public_coupons|length > 0 %}
+<!-- ── OFFERS CAROUSEL (subtle, auto-rotating, above hero) ── -->
+<div class="offers-carousel" id="offers-carousel">
+    {% for c in public_coupons[:4] %}
+    <div class="offers-slide{% if loop.first %} active{% endif %}">
+        <button type="button" class="offer-code-inline" onclick="copyOfferCode('{{ c.code }}', this)"
+                aria-label="Coupon code {{ c.code }}, tap to copy">{{ c.code }}</button>
+        <span>{{ c.discount_percent|int }}% off{% if c.max_discount_amount %} up to ₹{{ c.max_discount_amount|round(0)|int }}{% endif %}{% if c.expiry_date %} · valid till {{ c.expiry_date }}{% endif %}</span>
+    </div>
+    {% endfor %}
+</div>
+{% endif %}
+
 <!-- ── HERO ── -->
 <section id="hero-section" class="hero-section">
     <div class="hero-content">
@@ -301,63 +286,6 @@
         </a>
     </div>
 </section>
-
-{% if public_coupons and public_coupons|length > 0 %}
-<!-- ── OFFERS CAROUSEL ── -->
-<section class="offers-section">
-    <div class="offers-inner">
-        <div class="offers-header">
-            <h2 class="offers-title">🏷️ Offers For You</h2>
-            {% if public_coupons|length > 2 %}
-            <button type="button" class="offers-view-all" onclick="openOffersModal()">View All</button>
-            {% endif %}
-        </div>
-        <div class="offers-grid">
-            {% for c in public_coupons[:2] %}
-            <div class="offer-card">
-                <span class="offer-icon" aria-hidden="true">🏷️</span>
-                <div class="offer-body">
-                    <div class="offer-discount">{{ c.discount_percent|int }}% OFF</div>
-                    {% if c.max_discount_amount %}
-                    <div class="offer-cap">Upto ₹{{ c.max_discount_amount|round(0)|int }}</div>
-                    {% endif %}
-                    <button type="button" class="offer-code" onclick="copyOfferCode('{{ c.code }}', this)"
-                            aria-label="Coupon code {{ c.code }}, tap to copy">{{ c.code }}</button>
-                    <div class="offer-valid">
-                        {% if c.expiry_date %}Valid till {{ c.expiry_date }}{% else %}No expiry{% endif %}
-                    </div>
-                </div>
-            </div>
-            {% endfor %}
-        </div>
-    </div>
-</section>
-
-<div class="offers-modal-overlay" id="offers-modal-overlay" role="dialog" aria-modal="true" aria-labelledby="offers-modal-title">
-    <div class="offers-modal-box">
-        <button type="button" class="offers-modal-close" onclick="closeOffersModal()" aria-label="Close offers list">✕</button>
-        <h3 class="offers-modal-title" id="offers-modal-title">All Offers</h3>
-        <div class="offers-modal-list">
-            {% for c in public_coupons %}
-            <div class="offer-card">
-                <span class="offer-icon" aria-hidden="true">🏷️</span>
-                <div class="offer-body">
-                    <div class="offer-discount">{{ c.discount_percent|int }}% OFF</div>
-                    {% if c.max_discount_amount %}
-                    <div class="offer-cap">Upto ₹{{ c.max_discount_amount|round(0)|int }}</div>
-                    {% endif %}
-                    <button type="button" class="offer-code" onclick="copyOfferCode('{{ c.code }}', this)"
-                            aria-label="Coupon code {{ c.code }}, tap to copy">{{ c.code }}</button>
-                    <div class="offer-valid">
-                        {% if c.expiry_date %}Valid till {{ c.expiry_date }}{% else %}No expiry{% endif %}
-                    </div>
-                </div>
-            </div>
-            {% endfor %}
-        </div>
-    </div>
-</div>
-{% endif %}
 
 <!-- ── ABOUT / PURPOSE ── -->
 <section class="about-section">
@@ -618,7 +546,7 @@ async function shareProduct(name, url, imageUrl) {
     window.open('https://wa.me/?text=' + msg, '_blank');
 }
 
-/* ── Offers carousel: copy code + "View All" modal ── */
+/* ── Offers carousel: tap to copy a code ── */
 function copyOfferCode(code, btn) {
     navigator.clipboard.writeText(code).then(function () {
         var original = btn.textContent;
@@ -626,31 +554,19 @@ function copyOfferCode(code, btn) {
         setTimeout(function () { btn.textContent = original; }, 1500);
     });
 }
-function openOffersModal() {
-    var overlay = document.getElementById('offers-modal-overlay');
-    if (!overlay) return;
-    overlay.classList.add('open');
-    var closeBtn = overlay.querySelector('.offers-modal-close');
-    if (closeBtn) closeBtn.focus();
-}
-function closeOffersModal() {
-    var overlay = document.getElementById('offers-modal-overlay');
-    if (overlay) overlay.classList.remove('open');
-}
 
 document.addEventListener('DOMContentLoaded', function () {
 
-    /* ── Offers modal: close on Escape or backdrop click ── */
-    var offersOverlay = document.getElementById('offers-modal-overlay');
-    if (offersOverlay) {
-        offersOverlay.addEventListener('click', function (e) {
-            if (e.target === offersOverlay) closeOffersModal();
-        });
-        document.addEventListener('keydown', function (e) {
-            if (e.key === 'Escape' && offersOverlay.classList.contains('open')) closeOffersModal();
-        });
+    /* ── Offers carousel: auto-rotate slides ── */
+    var offersSlides = document.querySelectorAll('#offers-carousel .offers-slide');
+    if (offersSlides.length > 1) {
+        var offersIdx = 0;
+        setInterval(function () {
+            offersSlides[offersIdx].classList.remove('active');
+            offersIdx = (offersIdx + 1) % offersSlides.length;
+            offersSlides[offersIdx].classList.add('active');
+        }, 4000);
     }
-
 
     /* ── Hero background from Supabase ── */
     var heroSec = document.getElementById('hero-section');

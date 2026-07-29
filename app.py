@@ -1602,6 +1602,18 @@ def get_bangle_size_stock(db, master_sku):
     return size_map
 
 
+def get_public_coupons(db):
+    """Active, non-expired, non-maxed-out coupons marked public — safe to surface to shoppers."""
+    today_str = datetime.now().strftime('%Y-%m-%d')
+    return db.execute(
+        "SELECT * FROM coupons WHERE is_active=1 AND is_public=1"
+        " AND (expiry_date IS NULL OR expiry_date >= ?)"
+        " AND (usage_limit IS NULL OR usage_limit=0 OR times_used < usage_limit)"
+        " ORDER BY discount_percent DESC, id DESC",
+        (today_str,)
+    ).fetchall()
+
+
 def get_random_hero_images(db, count=4):
     """Pick random product images from Supabase for hero banners."""
     rows = db.execute(
@@ -1713,14 +1725,7 @@ def index():
         import random
         random.shuffle(trending)  # shuffle so it feels fresh each load
 
-        today_str = datetime.now().strftime('%Y-%m-%d')
-        public_coupons = db.execute(
-            "SELECT * FROM coupons WHERE is_active=1 AND is_public=1"
-            " AND (expiry_date IS NULL OR expiry_date >= ?)"
-            " AND (usage_limit IS NULL OR usage_limit=0 OR times_used < usage_limit)"
-            " ORDER BY discount_percent DESC, id DESC",
-            (today_str,)
-        ).fetchall()
+        public_coupons = get_public_coupons(db)
 
         return render_site('index.html', grouped_products=grouped_products,
                            trending=trending, hero_images=hero_images,
@@ -1946,11 +1951,14 @@ def checkout():
 
     grand_total = max(subtotal - discount - credits_applied, 0)
 
+    public_coupons = get_public_coupons(db) if g.site_type == 'retail' else []
+
     return render_site('checkout.html', display_cart=display_cart, subtotal=subtotal, total_tax=0.0,
                         discount=discount, grand_total=grand_total, coupon_code=coupon_code,
                         out_of_stock_items=out_of_stock_items, recaptcha_site_key=RECAPTCHA_SITE_KEY,
                         saved_address=saved_address, saved_addresses=saved_addresses,
-                        credit_balance=credit_balance, credits_applied=credits_applied)
+                        credit_balance=credit_balance, credits_applied=credits_applied,
+                        public_coupons=public_coupons)
 
 @app.route('/checkout/shipping', methods=['GET', 'POST'])
 @app.route('/retail/checkout/shipping', methods=['GET', 'POST'])

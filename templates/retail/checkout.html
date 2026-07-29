@@ -128,6 +128,47 @@
 }
 .ck-coupon-btn:hover { opacity: 0.8; }
 .ck-coupon-msg { font-size: 0.75rem; margin-top: 6px; font-weight: 600; }
+.ck-coupon-suggestions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.ck-coupon-chip {
+  font-size: 0.72rem; font-weight: 600; color: #be185d;
+  background: #fdf2f8; border: 1px solid #fbcfe8; border-radius: 999px;
+  padding: 5px 10px; cursor: pointer; transition: background 0.15s;
+}
+.ck-coupon-chip:hover { background: #fce7f3; }
+.ck-view-all-coupons {
+  display: block; margin-top: 8px; background: none; border: none;
+  color: #be185d; font-size: 0.75rem; font-weight: 600;
+  text-decoration: underline; cursor: pointer; padding: 0;
+}
+
+/* ── Offers modal (opened via "View All Coupons") ── */
+.offers-modal-overlay {
+  display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.5);
+  z-index: 1000; align-items: center; justify-content: center; padding: 16px;
+}
+.offers-modal-overlay.open { display: flex; }
+.offers-modal-box {
+  background: #fff; border-radius: 18px; max-width: 420px; width: 100%;
+  max-height: 80vh; overflow-y: auto; padding: 20px; position: relative;
+}
+.offers-modal-close {
+  position: absolute; top: 12px; right: 12px; background: #f5f5f7; border: none;
+  border-radius: 50%; width: 30px; height: 30px; font-size: 1rem; font-weight: 800;
+  color: #be185d; cursor: pointer;
+}
+.offers-modal-title { font-weight: 700; color: #1d1d1f; font-size: 1.05rem; margin-bottom: 14px; }
+.offers-modal-list { display: flex; flex-direction: column; gap: 8px; }
+.offers-modal-row {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  background: #f9f9f9; border: 1px solid #e5e5e7; border-radius: 10px; padding: 9px 12px;
+}
+.offers-modal-row .offer-text { font-size: 0.8rem; color: #1d1d1f; }
+.offers-modal-row .offer-valid { font-size: 0.68rem; color: #9f9f9f; margin-top: 2px; }
+.offers-modal-row .offer-code-inline {
+  background: #fff; border: 1px dashed #be185d; border-radius: 6px; padding: 3px 8px;
+  font-family: monospace; font-weight: 800; font-size: 0.75rem; color: #881337;
+  cursor: pointer; flex-shrink: 0;
+}
 
 /* ── Order summary ── */
 .ck-sum-row {
@@ -324,6 +365,17 @@
           <span style="font-size:0.8rem;font-weight:600;color:#15803d;">✓ {{ coupon_code }} applied</span>
           <button onclick="removeCoupon()" style="background:none;border:none;color:#dc2626;font-size:0.75rem;font-weight:600;cursor:pointer;">Remove</button>
         </div>
+        {% elif public_coupons and public_coupons|length > 0 %}
+        <div class="ck-coupon-suggestions">
+          {% for c in public_coupons[:4] %}
+          <button type="button" class="ck-coupon-chip" onclick="applySuggestedCoupon('{{ c.code }}')">
+            {{ c.code }} — {{ c.discount_percent|int }}% off{% if c.max_discount_amount %} up to ₹{{ c.max_discount_amount|round(0)|int }}{% endif %}
+          </button>
+          {% endfor %}
+        </div>
+        {% endif %}
+        {% if public_coupons and public_coupons|length > 0 %}
+        <button type="button" class="ck-view-all-coupons" onclick="openOffersModal()">View All Coupons</button>
         {% endif %}
 
         <!-- Nari Nakhre Credits -->
@@ -522,6 +574,27 @@
   </div><!-- end .ck-container -->
 </div><!-- end .ck-page -->
 
+{% if public_coupons and public_coupons|length > 0 %}
+<div class="offers-modal-overlay" id="offers-modal-overlay" role="dialog" aria-modal="true" aria-labelledby="offers-modal-title">
+  <div class="offers-modal-box">
+    <button type="button" class="offers-modal-close" onclick="closeOffersModal()" aria-label="Close offers list">✕</button>
+    <h3 class="offers-modal-title" id="offers-modal-title">All Coupons</h3>
+    <div class="offers-modal-list">
+      {% for c in public_coupons %}
+      <div class="offers-modal-row">
+        <div class="offer-text">
+          {{ c.discount_percent|int }}% off{% if c.max_discount_amount %} up to ₹{{ c.max_discount_amount|round(0)|int }}{% endif %}
+          <div class="offer-valid">{% if c.expiry_date %}Valid till {{ c.expiry_date }}{% else %}No expiry{% endif %}</div>
+        </div>
+        <button type="button" class="offer-code-inline" onclick="applyCouponFromModal('{{ c.code }}')"
+                aria-label="Apply coupon code {{ c.code }}">{{ c.code }}</button>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+</div>
+{% endif %}
+
 <script src="https://checkout.razorpay.com/v1/checkout.js"></script>
 <!-- RECAPTCHA_SITE_KEY and getRecaptchaToken() now come from retail/base.html's
      extra_scripts block, which loads on every page (needed for the sign-in modal). -->
@@ -666,6 +739,36 @@ function applyCoupon() {
 function removeCoupon() {
     fetch('/remove_coupon', {method:'POST'}).then(()=>location.reload());
 }
+function applySuggestedCoupon(code) {
+    document.getElementById('ck-coupon').value = code;
+    applyCoupon();
+}
+function openOffersModal() {
+    const overlay = document.getElementById('offers-modal-overlay');
+    if (!overlay) return;
+    overlay.classList.add('open');
+    const closeBtn = overlay.querySelector('.offers-modal-close');
+    if (closeBtn) closeBtn.focus();
+}
+function closeOffersModal() {
+    const overlay = document.getElementById('offers-modal-overlay');
+    if (overlay) overlay.classList.remove('open');
+}
+function applyCouponFromModal(code) {
+    closeOffersModal();
+    applySuggestedCoupon(code);
+}
+document.addEventListener('DOMContentLoaded', function () {
+    const offersOverlay = document.getElementById('offers-modal-overlay');
+    if (offersOverlay) {
+        offersOverlay.addEventListener('click', function (e) {
+            if (e.target === offersOverlay) closeOffersModal();
+        });
+        document.addEventListener('keydown', function (e) {
+            if (e.key === 'Escape' && offersOverlay.classList.contains('open')) closeOffersModal();
+        });
+    }
+});
 
 /* ── Nari Nakhre Credits ── */
 function applyCredits() {
