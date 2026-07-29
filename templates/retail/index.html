@@ -60,12 +60,26 @@
         padding: 2px 9px; font-family: monospace; font-weight: 800;
         font-size: 0.72rem; color: #9f1239; letter-spacing: 0.4px; cursor: pointer;
     }
+    .offer-product-slide { text-decoration: none; }
+    .offer-product-img-wrap {
+        position: relative; width: 58px; height: 58px; border-radius: 12px;
+        background: #fff; box-shadow: 0 2px 8px rgba(0,0,0,0.18);
+    }
+    .offer-product-img { width: 100%; height: 100%; object-fit: contain; padding: 5px; border-radius: 12px; }
+    .offer-product-badge {
+        position: absolute; top: -6px; right: -8px;
+        background: #fff; color: #9f1239; font-weight: 900; font-size: 0.62rem;
+        padding: 2px 6px; border-radius: 20px; box-shadow: 0 1px 4px rgba(0,0,0,0.25);
+        white-space: nowrap;
+    }
     @media (min-width: 768px) {
         .offers-carousel { min-height: 112px; }
         .offer-discount-big { font-size: 2.4rem; }
         .offer-discount-cap { font-size: 0.78rem; }
         .offer-code-label { font-size: 0.68rem; }
         .offer-code-inline { font-size: 0.85rem; padding: 3px 12px; }
+        .offer-product-img-wrap { width: 76px; height: 76px; }
+        .offer-product-badge { font-size: 0.72rem; padding: 3px 8px; }
     }
 
     /* ── About / purpose ── */
@@ -269,11 +283,14 @@
     .qty-display { font-weight: bold; font-size: 0.85rem; color: #9f1239; }
 </style>
 
-{% if public_coupons and public_coupons|length > 0 %}
+{% set has_coupons = public_coupons and public_coupons|length > 0 %}
+{% set has_carousel_products = carousel_products and carousel_products|length > 0 %}
+{% if has_coupons or has_carousel_products %}
+{% set ns = namespace(first=true) %}
 <!-- ── OFFERS CAROUSEL (Amazon-style deal badge, auto-rotating, above hero) ── -->
 <div class="offers-carousel" id="offers-carousel">
     {% for c in public_coupons[:4] %}
-    <div class="offers-slide{% if loop.first %} active{% endif %}">
+    <div class="offers-slide{% if ns.first %} active{% endif %}">
         <div class="offer-discount-big">{{ c.discount_percent|int }}% OFF</div>
         {% if c.max_discount_amount %}
         <div class="offer-discount-cap">up to ₹{{ c.max_discount_amount|round(0)|int }}</div>
@@ -284,6 +301,19 @@
                     aria-label="Coupon code {{ c.code }}, tap to copy">{{ c.code }}</button>
         </div>
     </div>
+    {% set ns.first = false %}
+    {% endfor %}
+    {% for p in carousel_products %}
+    <a href="{{ url_for('product_detail', product_id=p.id) }}"
+       class="offers-slide offer-product-slide{% if ns.first %} active{% endif %}"
+       aria-label="{{ p.name }} — {{ p.disc_pct }}% off, view product">
+        <div class="offer-product-img-wrap">
+            <img src="{{ p.thumb }}" alt="" class="offer-product-img" loading="lazy"
+                 onerror="this.onerror=null;this.src='/static/assets/products/default.jpg';">
+            <span class="offer-product-badge">{{ p.disc_pct }}% OFF</span>
+        </div>
+    </a>
+    {% set ns.first = false %}
     {% endfor %}
 </div>
 {% endif %}
