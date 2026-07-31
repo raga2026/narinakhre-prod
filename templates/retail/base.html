@@ -159,6 +159,17 @@
     .pincode-bar input { border: 1px solid #fecdd3; border-radius: 6px; padding: 4px 8px; font-size: 0.8rem; width: 90px; }
     .pincode-check-group { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
     @media (max-width: 767px) { .pincode-bar { justify-content: space-between; } }
+    /* Check Delivery button doubles as the result indicator -- its own label
+       and color become "Deliverable"/"Not Deliverable" after a check, so
+       there's no separate result text widening the row and pushing the
+       categories pill onto a second line. */
+    .pincode-check-btn {
+        background: #1d1d1f; color: #fff; border: none; border-radius: 8px;
+        padding: 5px 12px; font-size: 0.75rem; font-weight: 700; cursor: pointer;
+        white-space: nowrap; transition: background-color 0.15s; font-family: inherit;
+    }
+    .pincode-check-btn.deliverable { background: #16a34a; }
+    .pincode-check-btn.not-deliverable { background: #dc2626; }
     /* Categories pill — sits on the pincode bar, mobile only */
     .mobile-cat-pill-btn {
         background: #fff; border: 1.5px solid #fda4af; color: #be185d;
@@ -260,9 +271,8 @@
     </nav>
     <div class="pincode-bar">
         <div class="pincode-check-group">
+            <button id="pincode-check-btn" class="pincode-check-btn" onclick="verifyService()" aria-live="polite">Check Delivery</button>
             <input id="pincode-input" type="text" placeholder="Enter Pincode">
-            <button class="btn-black px-3 py-1 text-xs" onclick="verifyService()">Check Delivery</button>
-            <span id="pincode-result" class="text-xs font-bold" aria-live="polite"></span>
         </div>
         <!-- Categories pill — visible on mobile only -->
         <div class="mobile-cat-pill" style="position:relative;">
@@ -539,12 +549,22 @@ function toggleMobileCats(btn) {
 }
 function verifyService() {
     const pin = document.getElementById('pincode-input').value;
-    const res = document.getElementById('pincode-result');
-    if (!pin) { res.innerText = 'Enter a pincode'; res.style.color = '#6b7280'; return; }
+    const btn = document.getElementById('pincode-check-btn');
+    if (!pin) { btn.textContent = 'Enter Pincode'; btn.className = 'pincode-check-btn'; return; }
+    btn.textContent = 'Checking…';
+    btn.className = 'pincode-check-btn';
     fetch('/api/delhivery/check/' + pin).then(r=>r.json()).then(d=>{
-        res.innerText = d.status ? 'Deliverable ✓' : 'Not Serviceable ✗';
-        res.style.color = d.status ? '#16a34a' : '#dc2626';
-    }).catch(()=>{ res.innerText = 'Check failed'; res.style.color = '#dc2626'; });
+        btn.textContent = d.status ? 'Deliverable ✓' : 'Not Deliverable ✗';
+        btn.className = 'pincode-check-btn ' + (d.status ? 'deliverable' : 'not-deliverable');
+    }).catch(()=>{
+        btn.textContent = 'Check failed';
+        btn.className = 'pincode-check-btn not-deliverable';
+    });
 }
+document.getElementById('pincode-input').addEventListener('input', function() {
+    const btn = document.getElementById('pincode-check-btn');
+    btn.textContent = 'Check Delivery';
+    btn.className = 'pincode-check-btn';
+});
 </script>
 {% endblock %}

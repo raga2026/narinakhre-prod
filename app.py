@@ -1602,6 +1602,111 @@ def get_bangle_size_stock(db, master_sku):
     return size_map
 
 
+def _tokenize_search_text(text):
+    return re.findall(r'[a-z0-9]+', (text or '').lower())
+
+
+def search_products(db, q, limit=None):
+    """Word-aware product search, ranked by relevance.
+
+    A plain `LIKE '%term%'` substring search (the old approach) makes a short
+    word like "red" match almost everything, since it also matches inside
+    unrelated words such as "embroidered" or "bordered". Here every query
+    word must appear as a whole word in the product's name/category/
+    description/key_features (or as a substring specifically within the SKU
+    or model number, where partial-code matches are actually useful), which
+    is what makes results for common words precise.
+    """
+    query_tokens = _tokenize_search_text(q)
+    if not query_tokens:
+        return []
+    q_low = q.strip().lower()
+
+    rows = db.execute(
+        "SELECT id, sku, model_number, name, category, sub_category, description,"
+        " key_features, retail_price, mrp_price, image_field, stock_total, size"
+        " FROM products WHERE is_active = 1"
+    ).fetchall()
+
+    scored = []
+    for r in rows:
+        p = dict(r)
+        name = (p.get('name') or '').lower()
+        sku = (p.get('sku') or '').lower()
+        model = (p.get('model_number') or '').lower()
+        category = (p.get('category') or '').lower()
+        sub_category = (p.get('sub_category') or '').lower()
+        description = (p.get('description') or '').lower()
+        key_features = (p.get('key_features') or '').lower()
+
+        name_tokens = set(_tokenize_search_text(name))
+        cat_tokens = set(_tokenize_search_text(category)) | set(_tokenize_search_text(sub_category))
+        other_tokens = set(_tokenize_search_text(description)) | set(_tokenize_search_text(key_features))
+        word_tokens = name_tokens | cat_tokens | other_tokens
+
+        matched = sum(1 for qt in query_tokens if qt in word_tokens or qt in sku or qt in model)
+        if matched < len(query_tokens):
+            continue
+
+        score = 0
+        if name == q_low:
+            score += 1000
+        elif name.startswith(q_low):
+            score += 500
+        score += sum(50 for qt in query_tokens if qt in name_tokens)
+        score += sum(20 for qt in query_tokens if qt in cat_tokens)
+        if q_low and q_low in sku:
+            score += 30
+        if q_low and q_low in model:
+            score += 30
+        score += sum(5 for qt in query_tokens if qt in other_tokens)
+        scored.append((score, p))
+
+    scored.sort(key=lambda item: -item[0])
+    results = [p for _, p in scored]
+    return results[:limit] if limit else results
+
+
+def apply_sort_and_filters(products, sort=None, size_filter=None, in_stock_only=False):
+    """Shared sort/filter logic for category and search result listings.
+
+    Handles both sizing schemes used across the catalogue: bangles carry
+    per-size stock in `size_stock` (from get_bangle_size_stock), while other
+    sized products use a plain comma-separated `size` column.
+    """
+    def eff_price(p):
+        return float(p.get('retail_price') or p.get('price1') or 0)
+
+    def product_sizes(p):
+        if p.get('size_stock'):
+            return set(p['size_stock'].keys())
+        if p.get('size'):
+            return {s.strip() for s in p['size'].split(',') if s.strip()}
+        return set()
+
+    def in_stock(p):
+        if p.get('size_stock'):
+            return any((v or 0) > 0 for v in p['size_stock'].values())
+        return bool(p.get('stock_total') and p['stock_total'] > 0)
+
+    all_sizes = sorted({s for p in products for s in product_sizes(p)})
+
+    filtered = products
+    if in_stock_only:
+        filtered = [p for p in filtered if in_stock(p)]
+    if size_filter:
+        filtered = [p for p in filtered if size_filter in product_sizes(p)]
+
+    if sort == 'name_asc':
+        filtered = sorted(filtered, key=lambda p: (p.get('name') or '').lower())
+    elif sort == 'price_asc':
+        filtered = sorted(filtered, key=eff_price)
+    elif sort == 'price_desc':
+        filtered = sorted(filtered, key=eff_price, reverse=True)
+
+    return filtered, all_sizes
+
+
 def get_public_coupons(db):
     """Active, non-expired, non-maxed-out coupons marked public — safe to surface to shoppers."""
     today_str = datetime.now().strftime('%Y-%m-%d')
@@ -1788,7 +1893,17 @@ def category_products(category):
         if is_bangle_product(p_dict):
             p_dict['size_stock'] = get_bangle_size_stock(db, p_dict['sku'])
         products.append(p_dict)
-    return render_site('category_products.html', category=category, products=products)
+
+    sort = request.args.get('sort') or ''
+    size_filter = (request.args.get('size') or '').strip()
+    in_stock_only = request.args.get('in_stock') == '1'
+    products, available_sizes = apply_sort_and_filters(
+        products, sort=sort, size_filter=size_filter, in_stock_only=in_stock_only
+    )
+
+    return render_site('category_products.html', category=category, products=products,
+                        sort=sort, size_filter=size_filter, in_stock_only=in_stock_only,
+                        available_sizes=available_sizes)
 
 @app.route('/product/<int:product_id>')
 @app.route('/retail/product/<int:product_id>')
@@ -2844,71 +2959,44 @@ def api_search():
     results = {'products': [], 'orders': [], 'query': q}
 
     try:
-        q_low = q.lower()
-        like  = f'%{q_low}%'
+        matches = search_products(conn, q, limit=8)
+        app.logger.info(f"Search '{q}' → {len(matches)} products")
 
-        rows = conn.execute(
-            "SELECT id, sku, model_number, name, category, sub_category,"
-            " retail_price, mrp_price, image_field"
-            " FROM products"
-            " WHERE is_active = 1"
-            " AND ("
-            f"   LOWER(name) LIKE '{like}'"
-            f"   OR LOWER(category) LIKE '{like}'"
-            f"   OR LOWER(sub_category) LIKE '{like}'"
-            f"   OR LOWER(sku) LIKE '{like}'"
-            f"   OR LOWER(model_number) LIKE '{like}'"
-            " )"
-            " LIMIT 12",
-            ()
-        ).fetchall()
-
-        app.logger.info(f"Search '{q}' → {len(rows)} products")
-
-        q_lower = q.lower()
-        rows = sorted(rows, key=lambda r: (
-            0 if (r['name'] or '').lower().startswith(q_lower) else
-            1 if (r['sku'] or '').lower().startswith(q_lower) else
-            2 if (r['model_number'] or '').lower().startswith(q_lower) else
-            3 if q_lower in (r['category'] or '').lower() else 4
-        ))[:8]
-
-        for r in rows:
-            r_dict = dict(r)
+        for p in matches:
             img = ''
-            if r_dict.get('image_field'):
-                parts = r_dict['image_field'].split(',')
+            if p.get('image_field'):
+                parts = p['image_field'].split(',')
                 img = parts[0].strip() if parts else ''
-            mrp = float(r_dict.get('mrp_price') or 0)
-            rp  = float(r_dict.get('retail_price') or 0)
+            mrp = float(p.get('mrp_price') or 0)
+            rp  = float(p.get('retail_price') or 0)
             disc = int((mrp - rp) / mrp * 100) if mrp and mrp > rp else 0
             results['products'].append({
-                'id':           r_dict['id'],
-                'sku':          r_dict['sku'] or '',
-                'model_number': r_dict['model_number'] or '',
-                'name':         r_dict['name'] or '',
-                'category':     r_dict['category'] or '',
+                'id':           p['id'],
+                'sku':          p.get('sku') or '',
+                'model_number': p.get('model_number') or '',
+                'name':         p.get('name') or '',
+                'category':     p.get('category') or '',
                 'price':        rp,
                 'mrp':          mrp,
                 'discount':     disc,
                 'image':        img,
-                'url': f"/retail/product/{r_dict['id']}" if site == 'retail'
-                       else f"/wholesale/product/{r_dict['id']}",
+                'url': f"/retail/product/{p['id']}" if site == 'retail'
+                       else f"/wholesale/product/{p['id']}",
             })
     except Exception as e:
         app.logger.error(f'Search error: {type(e).__name__}: {e}')
 
     if site == 'retail' and len(q) >= 6:
         try:
-            q_low = q.lower()
+            like = f'%{q.lower()}%'
             rows = conn.execute(
                 "SELECT internal_order_id, consignee_name, status,"
                 " total_amount, delhivery_waybill"
                 " FROM order_shipping"
-                f" WHERE LOWER(internal_order_id) LIKE '%{q_low}%'"
-                f" OR LOWER(delhivery_waybill) LIKE '%{q_low}%'"
+                " WHERE LOWER(internal_order_id) LIKE ?"
+                " OR LOWER(delhivery_waybill) LIKE ?"
                 " LIMIT 2",
-                ()
+                (like, like)
             ).fetchall()
             for o in rows:
                 o_dict = dict(o)
@@ -2935,41 +3023,36 @@ def search_page():
     if not q:
         return redirect('/' + site)
 
-    conn = get_db()
-    try:
-        q_low = q.lower()
-        like  = f'%{q_low}%'
+    sort = request.args.get('sort') or ''
+    size_filter = (request.args.get('size') or '').strip()
+    in_stock_only = request.args.get('in_stock') == '1'
 
-        rows = conn.execute(
-            "SELECT id, sku, model_number, name, category, sub_category, description,"
-            " retail_price, mrp_price, image_field"
-            " FROM products"
-            " WHERE is_active = 1"
-            " AND ("
-            f" LOWER(name) LIKE '{like}'"
-            f" OR LOWER(category) LIKE '{like}'"
-            f" OR LOWER(sub_category) LIKE '{like}'"
-            f" OR LOWER(sku) LIKE '{like}'"
-            f" OR LOWER(model_number) LIKE '{like}'"
-            f" OR LOWER(description) LIKE '{like}'"
-            " )"
-            " ORDER BY name LIMIT 40",
-            ()
-        ).fetchall()
-        products = []
-        for r in rows:
-            r_dict = dict(r)
-            imgs = (r_dict.get('image_field') or '').split(',')
-            r_dict['image'] = imgs[0].strip() if imgs else ''
-            mrp = float(r_dict.get('mrp_price') or 0)
-            rp  = float(r_dict.get('retail_price') or 0)
-            r_dict['discount'] = int((mrp - rp) / mrp * 100) if mrp and mrp > rp else 0
-            products.append(r_dict)
+    conn = get_db()
+    products = []
+    try:
+        matches = search_products(conn, q)
+        for p in matches:
+            p_dict = dict(p)
+            imgs = (p_dict.get('image_field') or '').split(',')
+            p_dict['image'] = imgs[0].strip() if imgs else ''
+            mrp = float(p_dict.get('mrp_price') or 0)
+            rp  = float(p_dict.get('retail_price') or 0)
+            p_dict['discount'] = int((mrp - rp) / mrp * 100) if mrp and mrp > rp else 0
+            if is_bangle_product(p_dict):
+                p_dict['size_stock'] = get_bangle_size_stock(conn, p_dict['sku'])
+            products.append(p_dict)
     except Exception as e:
         app.logger.error(f'Search page error: {e}')
         products = []
 
-    return render_site('search_results.html', products=products, query=q)
+    products, available_sizes = apply_sort_and_filters(
+        products, sort=sort, size_filter=size_filter, in_stock_only=in_stock_only
+    )
+    products = products[:40]
+
+    return render_site('search_results.html', products=products, query=q,
+                        sort=sort, size_filter=size_filter, in_stock_only=in_stock_only,
+                        available_sizes=available_sizes)
 
 @app.route('/clear_oos_items', methods=['POST'])
 def clear_oos_items():

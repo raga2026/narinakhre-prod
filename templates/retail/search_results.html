@@ -1,6 +1,21 @@
 {% extends "retail/base.html" %}
 {% block title %}Search: {{ query }} | Nari Nakhre{% endblock %}
 {% block content %}
+<style>
+    .sort-filter-bar {
+        display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
+        background: #fff; border: 1px solid #fce7f3; border-radius: 14px;
+        padding: 12px 18px; margin: 0 0 20px;
+    }
+    .sf-group { display: flex; align-items: center; gap: 6px; }
+    .sf-group label { font-size: 0.78rem; font-weight: 700; color: #881337; white-space: nowrap; }
+    .sf-group select {
+        border: 1.5px solid #fda4af; border-radius: 8px; padding: 6px 10px;
+        font-size: 0.85rem; color: #1d1d1f; background: #fff; cursor: pointer;
+    }
+    .sf-checkbox { display: flex; align-items: center; gap: 6px; font-size: 0.82rem; font-weight: 600; color: #881337; cursor: pointer; }
+    .sf-checkbox input { width: 16px; height: 16px; accent-color: #be185d; cursor: pointer; }
+</style>
 <div style="max-width:960px;margin:28px auto;padding:0 16px 60px;">
     <!-- Search bar on results page -->
     <form action="/search" method="GET" style="margin-bottom:24px;">
@@ -17,6 +32,37 @@
         {% else %}No results for{% endif %}
         "<span style="color:#be185d;">{{ query }}</span>"
     </h1>
+
+    {% if products or size_filter or in_stock_only %}
+    <form method="GET" class="sort-filter-bar" aria-label="Sort and filter results">
+        <input type="hidden" name="q" value="{{ query }}">
+        <div class="sf-group">
+            <label for="sf-sort">Sort by</label>
+            <select id="sf-sort" name="sort" onchange="this.form.submit()">
+                <option value="" {% if not sort %}selected{% endif %}>Relevance</option>
+                <option value="name_asc" {% if sort == 'name_asc' %}selected{% endif %}>Alphabetical (A–Z)</option>
+                <option value="price_asc" {% if sort == 'price_asc' %}selected{% endif %}>Price: Low to High</option>
+                <option value="price_desc" {% if sort == 'price_desc' %}selected{% endif %}>Price: High to Low</option>
+            </select>
+        </div>
+        {% if available_sizes and available_sizes|length > 0 %}
+        <div class="sf-group">
+            <label for="sf-size">Size</label>
+            <select id="sf-size" name="size" onchange="this.form.submit()">
+                <option value="">All Sizes</option>
+                {% for s in available_sizes %}
+                <option value="{{ s }}" {% if size_filter == s %}selected{% endif %}>{{ s }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        {% endif %}
+        <label class="sf-checkbox">
+            <input type="checkbox" name="in_stock" value="1" {% if in_stock_only %}checked{% endif %} onchange="this.form.submit()">
+            In Stock Only
+        </label>
+        <noscript><button type="submit" class="btn-retail-main px-4 py-1 text-sm">Apply</button></noscript>
+    </form>
+    {% endif %}
 
     {% if not products %}
     <div style="text-align:center;padding:48px 0;color:#9f9f9f;">
