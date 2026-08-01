@@ -12,6 +12,7 @@
         .badge-draft { background:#f1f5f9; color:#64748b; }
         .badge-sending { background:#fef3c7; color:#b45309; }
         .badge-sent { background:#dcfce7; color:#15803d; }
+        .badge-failed { background:#fee2e2; color:#b91c1c; }
         .stat-card { background:#fff; border-radius:14px; padding:16px 20px; box-shadow:0 1px 4px rgba(0,0,0,0.06); }
         .stat-value { font-size:1.5rem; font-weight:900; color:#881337; }
         .stat-label { font-size:0.75rem; color:#6b7280; font-weight:600; text-transform:uppercase; letter-spacing:0.04em; }
@@ -41,9 +42,15 @@
                 <div class="stat-label">Up to ₹{{ campaign.max_discount_amount|round(0)|int }}</div>
             </div>
             <div class="stat-card">
-                <div class="stat-value">{{ recipients|length }}</div>
+                <div class="stat-value">{{ sent_count }}</div>
                 <div class="stat-label">Emails Sent</div>
             </div>
+            {% if failed_count %}
+            <div class="stat-card">
+                <div class="stat-value" style="color:#b91c1c;">{{ failed_count }}</div>
+                <div class="stat-label">Failed to Send</div>
+            </div>
+            {% endif %}
             <div class="stat-card">
                 <div class="stat-value" style="font-size:1.05rem;">
                     {% if campaign.recipient_group == 'new' %}New users
@@ -54,11 +61,11 @@
                 <div class="stat-label">Sent {{ campaign.sent_at or campaign.created_at or '' }}</div>
             </div>
             <div class="stat-card">
-                <div class="stat-value">{{ used_count }} / {{ recipients|length }}</div>
+                <div class="stat-value">{{ used_count }} / {{ sent_count }}</div>
                 <div class="stat-label">Coupons Redeemed</div>
             </div>
             <div class="stat-card">
-                <div class="stat-value">{{ visited_count }} / {{ recipients|length }}</div>
+                <div class="stat-value">{{ visited_count }} / {{ sent_count }}</div>
                 <div class="stat-label">Visited Site After Email</div>
             </div>
         </div>
@@ -73,6 +80,7 @@
                         <tr>
                             <th class="py-3 px-4 text-left font-semibold text-gray-600">Name</th>
                             <th class="py-3 px-4 text-left font-semibold text-gray-600">Email</th>
+                            <th class="py-3 px-4 text-left font-semibold text-gray-600">Delivery</th>
                             <th class="py-3 px-4 text-left font-semibold text-gray-600">Coupon Code</th>
                             <th class="py-3 px-4 text-left font-semibold text-gray-600">Coupon Used</th>
                             <th class="py-3 px-4 text-left font-semibold text-gray-600">Visited Site</th>
@@ -84,6 +92,10 @@
                         <tr>
                             <td class="py-3 px-4">{{ r.name or '—' }}</td>
                             <td class="py-3 px-4 text-gray-600">{{ r.email }}</td>
+                            <td class="py-3 px-4">
+                                {% if r.status == 'failed' %}<span class="px-2 py-1 rounded-full text-xs font-bold badge-failed">Failed</span>
+                                {% else %}<span class="px-2 py-1 rounded-full text-xs font-bold badge-sent">Sent</span>{% endif %}
+                            </td>
                             <td class="py-3 px-4 font-bold text-rose-700 font-mono">{{ r.coupon_code }}</td>
                             <td class="py-3 px-4">
                                 {% if r.coupon_used %}<span class="px-2 py-1 rounded-full text-xs font-bold badge-sent">Used</span>
@@ -97,7 +109,7 @@
                         </tr>
                         {% else %}
                         <tr>
-                            <td colspan="6" class="py-8 text-center text-gray-400">
+                            <td colspan="7" class="py-8 text-center text-gray-400">
                                 {% if campaign.status == 'sending' %}Sending is in progress — recipients will appear here as emails go out.
                                 {% else %}This campaign hasn't been sent yet.{% endif %}
                             </td>

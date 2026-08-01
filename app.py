@@ -481,6 +481,7 @@ def initialize_database_if_needed():
         'ALTER TABLE users ADD COLUMN IF NOT EXISTS welcome_email_sent_at TIMESTAMP',
         'ALTER TABLE email_campaigns ADD COLUMN IF NOT EXISTS min_order_amount NUMERIC DEFAULT 0',
         'ALTER TABLE email_campaign_recipients ADD COLUMN IF NOT EXISTS clicked_at TIMESTAMP',
+        "ALTER TABLE email_campaign_recipients ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'sent'",
         # Best-effort -- non-fatal if pre-existing rows already have duplicate
         # or blank emails (see the app-level check in email_signup as the
         # real guard against duplicate accounts).
@@ -1149,13 +1150,22 @@ def generate_personal_coupon_code(db_conn, first_name, discount_percent):
     return code
 
 
-def send_welcome_email(db_conn, user_id, name, email):
+def send_welcome_email(db_conn, user_id, name, email, async_send=True):
     """Send a first-time welcome email with a private one-time 15% coupon.
     Used for both fresh signups and the admin-triggered backfill for
-    existing users; marks users.welcome_email_sent_at so it's never
-    sent twice to the same account."""
+    existing users; marks users.welcome_email_sent_at so it's never sent
+    twice to the same account.
+
+    async_send=True (the default, for live signups) fires the send in a
+    detached thread so the signup HTTP response isn't held up waiting on
+    Zeptomail -- welcome_email_sent_at is set immediately since we won't
+    know the real outcome in time anyway. async_send=False (used by the
+    backfill, which already runs in its own background thread) sends
+    synchronously and only marks the user as emailed if Zeptomail actually
+    confirms the send, so a rejected send can be retried on the next run
+    instead of being silently marked done."""
     if not email:
-        return
+        return False
     coupon = generate_welcome_coupon(db_conn, user_id)
     popular = get_popular_products(db_conn, limit=4)
     first_name = (name or 'there').strip().split(' ')[0] or 'there'
@@ -1167,12 +1177,17 @@ def send_welcome_email(db_conn, user_id, name, email):
         f"use code {coupon['code']} for 15% off (up to Rs.75) on orders above Rs.299.\n"
         f"Valid until {coupon['expiry_date']}.\n\nShop now: https://narinakhre.com\n"
     )
-    send_contact_email_async(
-        email, "Welcome to Nari Nakhre — here's 15% off your first order \U0001F381",
-        text, html_body=html
-    )
-    db_conn.execute('UPDATE users SET welcome_email_sent_at=CURRENT_TIMESTAMP WHERE id=?', (user_id,))
-    db_conn.commit()
+    subject = "Welcome to Nari Nakhre — here's 15% off your first order \U0001F381"
+    if async_send:
+        send_contact_email_async(email, subject, text, html_body=html)
+        ok = True
+    else:
+        ok = send_contact_email(email, subject, text, html_body=html)
+
+    if ok:
+        db_conn.execute('UPDATE users SET welcome_email_sent_at=CURRENT_TIMESTAMP WHERE id=?', (user_id,))
+        db_conn.commit()
+    return ok
 
 
 MODEL_NUMBER_PREFIX = 'N'
@@ -4696,8 +4711,11 @@ def _send_welcome_backfill_batch(user_rows):
         sent, failed = 0, 0
         for u in user_rows:
             try:
-                send_welcome_email(db, u['id'], u['name'], u['email'])
-                sent += 1
+                if send_welcome_email(db, u['id'], u['name'], u['email'], async_send=False):
+                    sent += 1
+                else:
+                    failed += 1
+                    app.logger.warning(f"Welcome backfill: Zeptomail rejected send to {u['email']}")
             except Exception as e:
                 failed += 1
                 app.logger.warning(f"Welcome backfill failed for user {u['id']} ({u['email']}): {e}")
@@ -4777,7 +4795,9 @@ def _send_campaign_batch(campaign_id, user_rows):
         max_discount_amount = campaign['max_discount_amount']
         min_order_amount = campaign.get('min_order_amount') or 0
         sent = 0
+        failed = 0
         for u in user_rows:
+            recipient_id = None
             try:
                 first_name = (u.get('name') or 'there').strip().split(' ')[0] or 'there'
                 code = generate_personal_coupon_code(db, first_name, discount_percent)
@@ -4791,7 +4811,8 @@ def _send_campaign_batch(campaign_id, user_rows):
                 db.commit()
 
                 # Insert the recipient row before rendering so the email's
-                # links can carry this row's id for click tracking.
+                # links can carry this row's id for click tracking. Removed
+                # below if the send turns out to have failed.
                 db.execute(
                     "INSERT INTO email_campaign_recipients (campaign_id, user_id, email, name, coupon_code)"
                     " VALUES (?,?,?,?,?)",
@@ -4816,12 +4837,30 @@ def _send_campaign_batch(campaign_id, user_rows):
                     f"on orders above Rs.{int(min_order_amount)}.\n"
                     f"Valid until {expiry_date}.\n\nShop now: https://narinakhre.com\n"
                 )
-                send_contact_email_async(
+                # Send synchronously: this function already runs in its own
+                # background thread (started from admin_campaign_send), so
+                # there's no HTTP response to avoid blocking here. Calling
+                # the async fire-and-forget wrapper from an already-backgrounded
+                # thread meant we recorded every recipient as "sent" without
+                # ever checking whether Zeptomail actually accepted the
+                # email -- a rejected send just vanished into an unwatched log line.
+                ok = send_contact_email(
                     u['email'], f"{campaign['name']} — {int(discount_percent)}% off just for you \U0001F381",
                     text, html_body=html
                 )
-                sent += 1
+                if ok:
+                    sent += 1
+                else:
+                    failed += 1
+                    if recipient_id:
+                        db.execute("UPDATE email_campaign_recipients SET status='failed' WHERE id=?", (recipient_id,))
+                        db.commit()
+                    app.logger.warning(f"Campaign {campaign_id}: Zeptomail rejected send to {u['email']}")
             except Exception as e:
+                failed += 1
+                if recipient_id:
+                    db.execute("UPDATE email_campaign_recipients SET status='failed' WHERE id=?", (recipient_id,))
+                    db.commit()
                 app.logger.warning(f"Campaign {campaign_id} send failed for user {u.get('id')}: {e}")
             _time.sleep(1)
 
@@ -4830,7 +4869,7 @@ def _send_campaign_batch(campaign_id, user_rows):
             (sent, campaign_id)
         )
         db.commit()
-        app.logger.info(f'Campaign {campaign_id} finished: {sent} sent.')
+        app.logger.info(f'Campaign {campaign_id} finished: {sent} sent, {failed} failed.')
 
 
 @app.route('/c/<int:recipient_id>')
@@ -4974,17 +5013,22 @@ def admin_campaign_detail(campaign_id):
 
     used_count = 0
     visited_count = 0
+    failed_count = 0
     for r in recipients:
         coupon = db.execute('SELECT times_used FROM coupons WHERE code=?', (r['coupon_code'],)).fetchone()
         r['coupon_used'] = bool(coupon and (coupon.get('times_used') or 0) > 0)
         r['visited'] = bool(r.get('clicked_at'))
+        if r.get('status') == 'failed':
+            failed_count += 1
         if r['coupon_used']:
             used_count += 1
         if r['visited']:
             visited_count += 1
 
+    sent_count = len(recipients) - failed_count
     return render_template('admin/admin_campaign_detail.html', campaign=campaign, recipients=recipients,
-                            used_count=used_count, visited_count=visited_count)
+                            used_count=used_count, visited_count=visited_count,
+                            failed_count=failed_count, sent_count=sent_count)
 
 
 @app.route('/admin/login', methods=['GET', 'POST'])
