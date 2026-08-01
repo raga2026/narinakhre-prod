@@ -48,6 +48,7 @@
         opacity: 0; transition: opacity 0.5s ease; pointer-events: none;
     }
     .offers-slide.active { opacity: 1; pointer-events: auto; }
+    .offer-discount-line { display: flex; align-items: baseline; gap: 6px; }
     .offer-discount-big {
         font-family: 'Playfair Display', serif; font-weight: 900;
         font-size: 2rem; color: #fff; line-height: 1.1;
@@ -319,10 +320,12 @@
 <div class="offers-carousel" id="offers-carousel">
     {% for c in public_coupons[:4] %}
     <div class="offers-slide{% if ns.first %} active{% endif %}">
-        <div class="offer-discount-big">{{ c.discount_percent|int }}% OFF</div>
-        {% if c.max_discount_amount %}
-        <div class="offer-discount-cap">up to ₹{{ c.max_discount_amount|round(0)|int }}</div>
-        {% endif %}
+        <div class="offer-discount-line">
+            <span class="offer-discount-big">{{ c.discount_percent|int }}% OFF</span>
+            {% if c.max_discount_amount %}
+            <span class="offer-discount-cap">up to ₹{{ c.max_discount_amount|round(0)|int }}</span>
+            {% endif %}
+        </div>
         <div class="offer-code-row">
             <span class="offer-code-label">Use code</span>
             <button type="button" class="offer-code-inline" onclick="copyOfferCode('{{ c.code }}', this)"

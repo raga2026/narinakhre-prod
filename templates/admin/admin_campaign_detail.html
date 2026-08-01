@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ campaign.name }} — Campaign Details - NariNakhre Admin</title>
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+    <style>
+        .bg-rose-600 { background-color:#e11d48 !important; }
+        .bg-rose-600:hover, .hover\:bg-rose-700:hover { background-color:#be123c !important; }
+        .text-rose-600 { color:#e11d48 !important; }
+        .badge-draft { background:#f1f5f9; color:#64748b; }
+        .badge-sending { background:#fef3c7; color:#b45309; }
+        .badge-sent { background:#dcfce7; color:#15803d; }
+        .stat-card { background:#fff; border-radius:14px; padding:16px 20px; box-shadow:0 1px 4px rgba(0,0,0,0.06); }
+        .stat-value { font-size:1.5rem; font-weight:900; color:#881337; }
+        .stat-label { font-size:0.75rem; color:#6b7280; font-weight:600; text-transform:uppercase; letter-spacing:0.04em; }
+    </style>
+</head>
+<body class="bg-gray-100 min-h-screen">
+    <div class="max-w-6xl mx-auto p-6">
+        <div class="flex justify-between items-center mb-6">
+            <div>
+                <h2 class="text-2xl font-extrabold text-gray-900">{{ campaign.name }}</h2>
+                <a href="{{ url_for('admin_campaigns') }}" class="text-sm text-rose-600 hover:underline">← Back to Campaigns</a>
+            </div>
+            <a href="{{ url_for('admin_logout') }}" class="px-4 py-2 rounded-lg font-bold shadow bg-rose-600 text-white hover:bg-rose-700 transition">Logout</a>
+        </div>
+
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
+            <div class="stat-card">
+                <div class="stat-value">
+                    {% if campaign.status == 'sent' %}<span class="px-2 py-1 rounded-full text-sm font-bold badge-sent">Sent</span>
+                    {% elif campaign.status == 'sending' %}<span class="px-2 py-1 rounded-full text-sm font-bold badge-sending">Sending…</span>
+                    {% else %}<span class="px-2 py-1 rounded-full text-sm font-bold badge-draft">Draft</span>{% endif %}
+                </div>
+                <div class="stat-label">Status</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value">{{ campaign.discount_percent|int }}% off</div>
+                <div class="stat-label">Up to ₹{{ campaign.max_discount_amount|round(0)|int }}</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value">{{ recipients|length }}</div>
+                <div class="stat-label">Emails Sent</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value" style="font-size:1.05rem;">
+                    {% if campaign.recipient_group == 'new' %}New users
+                    {% elif campaign.recipient_group == 'ordered' %}Existing / ordered
+                    {% elif campaign.recipient_group == 'all' %}All users
+                    {% else %}—{% endif %}
+                </div>
+                <div class="stat-label">Sent {{ campaign.sent_at or campaign.created_at or '' }}</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value">{{ used_count }} / {{ recipients|length }}</div>
+                <div class="stat-label">Coupons Redeemed</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value">{{ visited_count }} / {{ recipients|length }}</div>
+                <div class="stat-label">Visited Site After Email</div>
+            </div>
+        </div>
+
+        <div class="bg-white rounded-xl shadow overflow-hidden">
+            <div class="px-6 py-4 border-b border-gray-100">
+                <h3 class="text-lg font-bold text-gray-800">Recipients ({{ recipients|length }})</h3>
+            </div>
+            <div class="overflow-x-auto">
+                <table class="min-w-full text-sm">
+                    <thead class="bg-gray-50">
+                        <tr>
+                            <th class="py-3 px-4 text-left font-semibold text-gray-600">Name</th>
+                            <th class="py-3 px-4 text-left font-semibold text-gray-600">Email</th>
+                            <th class="py-3 px-4 text-left font-semibold text-gray-600">Coupon Code</th>
+                            <th class="py-3 px-4 text-left font-semibold text-gray-600">Coupon Used</th>
+                            <th class="py-3 px-4 text-left font-semibold text-gray-600">Visited Site</th>
+                            <th class="py-3 px-4 text-left font-semibold text-gray-600">Sent At</th>
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y divide-gray-100">
+                        {% for r in recipients %}
+                        <tr>
+                            <td class="py-3 px-4">{{ r.name or '—' }}</td>
+                            <td class="py-3 px-4 text-gray-600">{{ r.email }}</td>
+                            <td class="py-3 px-4 font-bold text-rose-700 font-mono">{{ r.coupon_code }}</td>
+                            <td class="py-3 px-4">
+                                {% if r.coupon_used %}<span class="px-2 py-1 rounded-full text-xs font-bold badge-sent">Used</span>
+                                {% else %}<span class="px-2 py-1 rounded-full text-xs font-bold badge-draft">Not used</span>{% endif %}
+                            </td>
+                            <td class="py-3 px-4">
+                                {% if r.visited %}<span class="px-2 py-1 rounded-full text-xs font-bold badge-sent">Visited{% if r.clicked_at %} — {{ r.clicked_at }}{% endif %}</span>
+                                {% else %}<span class="px-2 py-1 rounded-full text-xs font-bold badge-draft">No visit yet</span>{% endif %}
+                            </td>
+                            <td class="py-3 px-4 text-gray-500">{{ r.sent_at }}</td>
+                        </tr>
+                        {% else %}
+                        <tr>
+                            <td colspan="6" class="py-8 text-center text-gray-400">
+                                {% if campaign.status == 'sending' %}Sending is in progress — recipients will appear here as emails go out.
+                                {% else %}This campaign hasn't been sent yet.{% endif %}
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</body>
+</html>

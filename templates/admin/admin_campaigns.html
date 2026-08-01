@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Email Campaigns - NariNakhre Admin</title>
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+    <style>
+        .bg-rose-600 { background-color:#e11d48 !important; }
+        .bg-rose-600:hover, .hover\:bg-rose-700:hover { background-color:#be123c !important; }
+        .bg-rose-50 { background-color:#fff1f2 !important; }
+        .text-rose-600 { color:#e11d48 !important; }
+        .text-rose-700 { color:#be123c !important; }
+        .border-rose-300 { border-color:#fda4af !important; }
+        .focus\:border-rose-500:focus { border-color:#f43f5e !important; }
+        .focus\:ring-rose-500:focus { box-shadow:0 0 0 1px #f43f5e !important; }
+        .badge-draft { background:#f1f5f9; color:#64748b; }
+        .badge-sending { background:#fef3c7; color:#b45309; }
+        .badge-sent { background:#dcfce7; color:#15803d; }
+        #preview-frame { width:100%; height:720px; border:1px solid #f3f4f6; border-radius:12px; background:#fff; }
+        #preview-wrap { display:none; }
+    </style>
+</head>
+<body class="bg-gray-100 min-h-screen">
+    <div class="max-w-6xl mx-auto p-6">
+        <div class="flex justify-between items-center mb-6">
+            <div>
+                <h2 class="text-2xl font-extrabold text-gray-900">📧 Email Campaigns</h2>
+                <a href="{{ url_for('admin_dashboard') }}" class="text-sm text-rose-600 hover:underline">← Back to Dashboard</a>
+            </div>
+            <a href="{{ url_for('admin_logout') }}" class="px-4 py-2 rounded-lg font-bold shadow bg-rose-600 text-white hover:bg-rose-700 transition">Logout</a>
+        </div>
+
+        {% with messages = get_flashed_messages() %}
+          {% if messages %}
+            <div class="mb-4">
+              {% for message in messages %}
+                <div class="bg-rose-50 border border-rose-300 text-rose-700 px-4 py-2 rounded mb-2 font-medium">{{ message }}</div>
+              {% endfor %}
+            </div>
+          {% endif %}
+        {% endwith %}
+
+        <!-- Create Campaign -->
+        <div class="bg-white rounded-xl shadow p-6 mb-8">
+            <h3 class="text-lg font-bold text-gray-800 mb-4">Create Campaign</h3>
+            <div id="campaign-msg" class="mb-4 text-sm font-semibold" style="display:none;"></div>
+            <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-4">
+                <div>
+                    <label class="block text-xs font-bold text-gray-600 mb-1">Campaign Name *</label>
+                    <input type="text" id="cf-name" placeholder="Diwali Sale"
+                           class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:border-rose-500 focus:ring-1 focus:ring-rose-500 outline-none">
+                </div>
+                <div>
+                    <label class="block text-xs font-bold text-gray-600 mb-1">Discount (%) *</label>
+                    <input type="number" id="cf-discount" min="1" max="100" placeholder="15"
+                           class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:border-rose-500 focus:ring-1 focus:ring-rose-500 outline-none">
+                </div>
+                <div>
+                    <label class="block text-xs font-bold text-gray-600 mb-1">Max Discount Amount (₹) *</label>
+                    <input type="number" id="cf-max-amount" min="0" placeholder="75"
+                           class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:border-rose-500 focus:ring-1 focus:ring-rose-500 outline-none">
+                </div>
+                <div>
+                    <label class="block text-xs font-bold text-gray-600 mb-1">Min Order Amount (₹)</label>
+                    <input type="number" id="cf-min-order" min="0" placeholder="0 = no minimum"
+                           class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:border-rose-500 focus:ring-1 focus:ring-rose-500 outline-none">
+                </div>
+            </div>
+            <div class="flex justify-end mb-4">
+                <button type="button" id="btn-generate" onclick="generatePreview()"
+                        class="bg-rose-600 text-white px-8 py-2 rounded-lg font-bold shadow hover:bg-rose-700 transition">
+                    ✨ Generate Email
+                </button>
+            </div>
+
+            <div id="preview-wrap">
+                <div class="flex items-center justify-between mb-2">
+                    <h4 class="text-sm font-bold text-gray-700">Preview — this is what recipients will see (name and coupon code are personalized per recipient)</h4>
+                    <div class="flex gap-2">
+                        <button type="button" onclick="generatePreview()"
+                                class="bg-gray-200 text-gray-800 px-4 py-1.5 rounded-lg text-sm font-bold hover:bg-gray-300 transition">
+                            🔄 Regenerate
+                        </button>
+                        <button type="button" onclick="saveCampaign()"
+                                class="bg-emerald-600 text-white px-4 py-1.5 rounded-lg text-sm font-bold hover:bg-emerald-700 transition">
+                            💾 Save Campaign
+                        </button>
+                    </div>
+                </div>
+                <iframe id="preview-frame" title="Campaign email preview"></iframe>
+            </div>
+        </div>
+
+        <!-- All Campaigns -->
+        <div class="bg-white rounded-xl shadow overflow-hidden">
+            <div class="px-6 py-4 border-b border-gray-100">
+                <h3 class="text-lg font-bold text-gray-800">All Campaigns ({{ campaigns|length }})</h3>
+            </div>
+            <div class="overflow-x-auto">
+                <table class="min-w-full text-sm">
+                    <thead class="bg-gray-50">
+                        <tr>
+                            <th class="py-3 px-4 text-left font-semibold text-gray-600">Campaign</th>
+                            <th class="py-3 px-4 text-left font-semibold text-gray-600">Discount</th>
+                            <th class="py-3 px-4 text-left font-semibold text-gray-600">Status</th>
+                            <th class="py-3 px-4 text-left font-semibold text-gray-600">Sent To</th>
+                            <th class="py-3 px-4 text-left font-semibold text-gray-600">Recipients</th>
+                            <th class="py-3 px-4 text-left font-semibold text-gray-600">Date</th>
+                            <th class="py-3 px-4 text-left font-semibold text-gray-600">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y divide-gray-100">
+                        {% for c in campaigns %}
+                        <tr>
+                            <td class="py-3 px-4 font-bold text-gray-800">{{ c.name }}</td>
+                            <td class="py-3 px-4">
+                                {{ c.discount_percent|int }}% off, up to ₹{{ c.max_discount_amount|round(0)|int }}
+                                {% if c.min_order_amount %}<br><span class="text-xs text-gray-400">Min order ₹{{ c.min_order_amount|round(0)|int }}</span>{% endif %}
+                            </td>
+                            <td class="py-3 px-4">
+                                {% if c.status == 'sent' %}
+                                <span class="px-2 py-1 rounded-full text-xs font-bold badge-sent">Sent</span>
+                                {% elif c.status == 'sending' %}
+                                <span class="px-2 py-1 rounded-full text-xs font-bold badge-sending">Sending…</span>
+                                {% else %}
+                                <span class="px-2 py-1 rounded-full text-xs font-bold badge-draft">Draft</span>
+                                {% endif %}
+                            </td>
+                            <td class="py-3 px-4">
+                                {% if c.recipient_group == 'new' %}New users
+                                {% elif c.recipient_group == 'ordered' %}Existing / ordered users
+                                {% elif c.recipient_group == 'all' %}All users
+                                {% else %}—{% endif %}
+                            </td>
+                            <td class="py-3 px-4">{{ c.recipient_count or 0 }}</td>
+                            <td class="py-3 px-4 text-gray-500">{{ (c.sent_at or c.created_at) or '' }}</td>
+                            <td class="py-3 px-4">
+                                <div class="flex gap-2 flex-wrap items-center">
+                                    {% if c.status == 'draft' %}
+                                    <form method="POST" action="{{ url_for('admin_campaign_send', campaign_id=c.id) }}"
+                                          class="flex gap-1 items-center"
+                                          onsubmit="return confirm('Send ' + {{ c.name|tojson }} + ' to this group now? This emails real customers and cannot be undone.');">
+                                        <select name="recipient_group" class="border border-gray-300 rounded text-xs px-2 py-1">
+                                            <option value="all">All Users</option>
+                                            <option value="new">New Users (never ordered)</option>
+                                            <option value="ordered">Existing / Ordered Users</option>
+                                        </select>
+                                        <button type="submit" class="text-xs font-semibold text-rose-600 hover:underline">Send</button>
+                                    </form>
+                                    {% endif %}
+                                    <a href="{{ url_for('admin_campaign_detail', campaign_id=c.id) }}" class="text-xs font-semibold text-blue-600 hover:underline">View Details</a>
+                                </div>
+                            </td>
+                        </tr>
+                        {% else %}
+                        <tr>
+                            <td colspan="7" class="py-8 text-center text-gray-400">No campaigns yet. Create one above.</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let lastProductIds = [];
+
+        function showMsg(text, isError) {
+            const el = document.getElementById('campaign-msg');
+            el.style.display = 'block';
+            el.textContent = text;
+            el.style.color = isError ? '#dc2626' : '#15803d';
+        }
+
+        function generatePreview() {
+            const name = document.getElementById('cf-name').value.trim();
+            const discount = document.getElementById('cf-discount').value;
+            const maxAmount = document.getElementById('cf-max-amount').value;
+            const minOrder = document.getElementById('cf-min-order').value;
+
+            if (!name) { showMsg('Please enter a campaign name.', true); return; }
+            if (!discount || discount <= 0 || discount > 100) { showMsg('Please enter a discount percent between 1 and 100.', true); return; }
+            if (maxAmount === '') { showMsg('Please enter a max discount amount.', true); return; }
+
+            const btn = document.getElementById('btn-generate');
+            btn.disabled = true;
+            btn.textContent = 'Generating…';
+
+            fetch('{{ url_for("admin_campaign_preview") }}', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({name: name, discount_percent: discount, max_discount_amount: maxAmount, min_order_amount: minOrder || 0})
+            })
+            .then(r => r.json())
+            .then(d => {
+                btn.disabled = false;
+                btn.textContent = '✨ Generate Email';
+                if (d.status !== 'success') { showMsg(d.message || 'Could not generate the email.', true); return; }
+                document.getElementById('campaign-msg').style.display = 'none';
+                lastProductIds = d.product_ids;
+                document.getElementById('preview-wrap').style.display = 'block';
+                const frame = document.getElementById('preview-frame');
+                frame.srcdoc = d.html;
+            })
+            .catch(() => { btn.disabled = false; btn.textContent = '✨ Generate Email'; showMsg('Could not generate the email. Please try again.', true); });
+        }
+
+        function saveCampaign() {
+            if (!lastProductIds.length) { showMsg('Please generate the email first.', true); return; }
+            const form = document.createElement('form');
+            form.method = 'POST';
+            form.action = '{{ url_for("admin_campaign_save") }}';
+            const fields = {
+                name: document.getElementById('cf-name').value.trim(),
+                discount_percent: document.getElementById('cf-discount').value,
+                max_discount_amount: document.getElementById('cf-max-amount').value,
+                min_order_amount: document.getElementById('cf-min-order').value || 0,
+                product_ids: JSON.stringify(lastProductIds)
+            };
+            Object.keys(fields).forEach(function(key) {
+                const input = document.createElement('input');
+                input.type = 'hidden'; input.name = key; input.value = fields[key];
+                form.appendChild(input);
+            });
+            document.body.appendChild(form);
+            form.submit();
+        }
+    </script>
+</body>
+</html>

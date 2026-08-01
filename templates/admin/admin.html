@@ -85,6 +85,7 @@
         }
         .console-card-title { font-weight: 700; color: #111827; font-size: 0.9rem; margin-bottom: 2px; }
         .console-card-desc { font-size: 0.78rem; color: #6b7280; line-height: 1.4; }
+        .console-card-btn { width: 100%; font: inherit; cursor: pointer; }
 
         .console-upload-card {
             grid-column: 1 / -1; background: #fff; border: 1px solid #e5e7eb;
@@ -211,6 +212,23 @@
                             <div class="console-card-desc">Create and manage discount coupon codes.</div>
                         </div>
                     </a>
+                    <a href="{{ url_for('admin_campaigns') }}" class="console-card">
+                        <span class="console-card-icon" aria-hidden="true">📧</span>
+                        <div>
+                            <div class="console-card-title">Email Campaigns</div>
+                            <div class="console-card-desc">Build, save, and send promotional emails with personalized coupons.</div>
+                        </div>
+                    </a>
+                    <form method="POST" action="{{ url_for('admin_send_welcome_backfill') }}"
+                          onsubmit="return confirm('Send the welcome email + a private 15% coupon to every existing user who hasn\'t received one yet? This emails real customers and cannot be undone.');">
+                        <button type="submit" class="console-card console-card-btn">
+                            <span class="console-card-icon" aria-hidden="true">🎁</span>
+                            <div>
+                                <div class="console-card-title">Send Welcome Emails to Existing Users</div>
+                                <div class="console-card-desc">One-time: emails everyone who hasn't gotten a welcome coupon yet. Safe to click again — already-sent users are skipped.</div>
+                            </div>
+                        </button>
+                    </form>
                 </div>
             </section>
 

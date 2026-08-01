@@ -386,6 +386,27 @@ def initialize_database_if_needed():
             times_used INTEGER DEFAULT 0,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )''',
+        '''CREATE TABLE IF NOT EXISTS email_campaigns (
+            id BIGSERIAL PRIMARY KEY,
+            name TEXT NOT NULL,
+            discount_percent FLOAT DEFAULT 0.0,
+            max_discount_amount FLOAT DEFAULT 0.0,
+            product_ids TEXT,
+            status TEXT DEFAULT 'draft',
+            recipient_group TEXT,
+            recipient_count INTEGER DEFAULT 0,
+            sent_at TIMESTAMP,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )''',
+        '''CREATE TABLE IF NOT EXISTS email_campaign_recipients (
+            id BIGSERIAL PRIMARY KEY,
+            campaign_id BIGINT NOT NULL REFERENCES email_campaigns(id),
+            user_id BIGINT REFERENCES users(id),
+            email TEXT NOT NULL,
+            name TEXT,
+            coupon_code TEXT,
+            sent_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )''',
         '''CREATE TABLE IF NOT EXISTS product_variants (
             id BIGSERIAL PRIMARY KEY,
             master_sku TEXT NOT NULL,
@@ -455,6 +476,11 @@ def initialize_database_if_needed():
         'ALTER TABLE users ADD COLUMN IF NOT EXISTS password_hash TEXT',
         'ALTER TABLE coupons ADD COLUMN IF NOT EXISTS is_public INTEGER DEFAULT 1',
         'ALTER TABLE coupons ADD COLUMN IF NOT EXISTS max_discount_amount NUMERIC',
+        'ALTER TABLE coupons ADD COLUMN IF NOT EXISTS user_id BIGINT REFERENCES users(id)',
+        'ALTER TABLE coupons ADD COLUMN IF NOT EXISTS campaign_id BIGINT REFERENCES email_campaigns(id)',
+        'ALTER TABLE users ADD COLUMN IF NOT EXISTS welcome_email_sent_at TIMESTAMP',
+        'ALTER TABLE email_campaigns ADD COLUMN IF NOT EXISTS min_order_amount NUMERIC DEFAULT 0',
+        'ALTER TABLE email_campaign_recipients ADD COLUMN IF NOT EXISTS clicked_at TIMESTAMP',
         # Best-effort -- non-fatal if pre-existing rows already have duplicate
         # or blank emails (see the app-level check in email_signup as the
         # real guard against duplicate accounts).
@@ -996,6 +1022,159 @@ def generate_referral_code(db_conn):
     return ''.join(random.choices(alphabet, k=12))
 
 
+def generate_welcome_coupon(db_conn, user_id):
+    """Create a private, single-use 15%-off welcome coupon tied to one user.
+
+    Each recipient gets their own unique code (not one shared code), so
+    usage_limit=1 genuinely means "used once by this person" rather than
+    "the first of everyone who got the email".
+    """
+    import random
+    import string
+    alphabet = string.ascii_uppercase + string.digits
+    code = 'WELCOME' + ''.join(random.choices(alphabet, k=6))
+    for _ in range(10):
+        if not db_conn.execute('SELECT id FROM coupons WHERE code=?', (code,)).fetchone():
+            break
+        code = 'WELCOME' + ''.join(random.choices(alphabet, k=6))
+
+    expiry_date = (datetime.now() + timedelta(days=30)).strftime('%Y-%m-%d')
+    db_conn.execute(
+        "INSERT INTO coupons (code, discount_percent, min_order_amount, max_discount_amount,"
+        " expiry_date, usage_limit, is_public, is_active, user_id)"
+        " VALUES (?,?,?,?,?,?,0,1,?)",
+        (code, 15, 299, 75, expiry_date, 1, user_id)
+    )
+    db_conn.commit()
+    return {'code': code, 'expiry_date': expiry_date, 'discount_percent': 15,
+            'max_discount_amount': 75, 'min_order_amount': 299}
+
+
+def get_popular_products(db_conn, limit=4):
+    """Best-selling in-stock products by units ordered (all-time), for
+    marketing emails. Falls back to recently-added in-stock products if
+    there isn't enough order history yet, so the email is never empty."""
+    orders = db_conn.execute(
+        "SELECT cart_items_json FROM order_shipping WHERE status != 'cancelled'"
+    ).fetchall()
+    tally = {}
+    for o in orders:
+        try:
+            items = json.loads(o['cart_items_json'] or '[]')
+        except Exception:
+            items = []
+        for item in items:
+            sku = item.get('sku') or ''
+            if not sku:
+                continue
+            tally[sku] = tally.get(sku, 0) + int(item.get('units', 1) or 1)
+    top_skus = [sku for sku, _ in sorted(tally.items(), key=lambda kv: -kv[1])]
+
+    products = []
+    seen_skus = set()
+    for sku in top_skus:
+        p = db_conn.execute(
+            'SELECT id, sku, name, mrp_price, retail_price, price1, image_field, stock_total'
+            ' FROM products WHERE sku=? AND is_active=1', (sku,)
+        ).fetchone()
+        if p and (p.get('stock_total') or 0) > 0:
+            products.append(dict(p))
+            seen_skus.add(sku)
+        if len(products) >= limit:
+            break
+
+    if len(products) < limit:
+        fallback = db_conn.execute(
+            'SELECT id, sku, name, mrp_price, retail_price, price1, image_field, stock_total'
+            ' FROM products WHERE is_active=1 AND stock_total > 0 ORDER BY id DESC LIMIT 20'
+        ).fetchall()
+        for p in fallback:
+            if p['sku'] in seen_skus:
+                continue
+            products.append(dict(p))
+            seen_skus.add(p['sku'])
+            if len(products) >= limit:
+                break
+
+    for p in products:
+        imgs = get_product_images(p)
+        p['image'] = imgs[0] if imgs else ''
+    return products[:limit]
+
+
+def get_trending_products(db_conn, pool_size=8, limit=4):
+    """Trending in-stock products (discount % + recency, same scoring as the
+    homepage shelf), for use in marketing campaign emails. Returns a random
+    sample from the top pool each call, so "regenerate" in the campaign
+    builder gives a genuinely different picks rather than the same 4 every
+    time."""
+    import random
+    rows = db_conn.execute(
+        'SELECT id, sku, name, mrp_price, retail_price, price1, image_field, stock_total'
+        ' FROM products WHERE is_active=1 AND stock_total > 0'
+    ).fetchall()
+    products = [dict(r) for r in rows]
+    if not products:
+        return []
+
+    max_id = max((p['id'] for p in products), default=1) or 1
+
+    def trend_score(p):
+        mrp = float(p.get('mrp_price') or 0)
+        rp = float(p.get('retail_price') or p.get('price1') or 0)
+        disc_pct = ((mrp - rp) / mrp * 100) if mrp and mrp > rp else 0
+        recency = (p['id'] / max_id) * 100
+        return disc_pct * 0.6 + recency * 0.4
+
+    pool = sorted(products, key=trend_score, reverse=True)[:pool_size]
+    picks = random.sample(pool, min(limit, len(pool)))
+    for p in picks:
+        imgs = get_product_images(p)
+        p['image'] = imgs[0] if imgs else ''
+    return picks
+
+
+def generate_personal_coupon_code(db_conn, first_name, discount_percent):
+    """Per-recipient, human-readable coupon code for campaign emails, e.g.
+    "NNADITI15" for a 15%-off campaign sent to Aditi. Falls back to "USER"
+    if the name is blank, and appends a numeric suffix on the rare collision
+    (e.g. two "Aditi"s in the same campaign)."""
+    first = (first_name or '').strip().split(' ')[0] or 'USER'
+    base = 'NN' + re.sub(r'[^A-Za-z0-9]', '', first)[:5].upper() + str(int(discount_percent))
+    code = base
+    suffix = 2
+    while db_conn.execute('SELECT id FROM coupons WHERE code=?', (code,)).fetchone():
+        code = f'{base}{suffix}'
+        suffix += 1
+    return code
+
+
+def send_welcome_email(db_conn, user_id, name, email):
+    """Send a first-time welcome email with a private one-time 15% coupon.
+    Used for both fresh signups and the admin-triggered backfill for
+    existing users; marks users.welcome_email_sent_at so it's never
+    sent twice to the same account."""
+    if not email:
+        return
+    coupon = generate_welcome_coupon(db_conn, user_id)
+    popular = get_popular_products(db_conn, limit=4)
+    first_name = (name or 'there').strip().split(' ')[0] or 'there'
+
+    html = render_template('retail/email_welcome.html',
+                            first_name=first_name, coupon=coupon, products=popular)
+    text = (
+        f"Hi {first_name},\n\nWelcome to Nari Nakhre! Here's a gift for you: "
+        f"use code {coupon['code']} for 15% off (up to Rs.75) on orders above Rs.299.\n"
+        f"Valid until {coupon['expiry_date']}.\n\nShop now: https://narinakhre.com\n"
+    )
+    send_contact_email_async(
+        email, "Welcome to Nari Nakhre — here's 15% off your first order \U0001F381",
+        text, html_body=html
+    )
+    db_conn.execute('UPDATE users SET welcome_email_sent_at=CURRENT_TIMESTAMP WHERE id=?', (user_id,))
+    db_conn.commit()
+
+
 MODEL_NUMBER_PREFIX = 'N'
 
 
@@ -1197,6 +1376,12 @@ def google_callback():
     session['user_name'] = name
     session['user_email'] = email
 
+    if not existing:
+        try:
+            send_welcome_email(db_conn, user_row['id'], name, email)
+        except Exception as e:
+            app.logger.warning(f'Welcome email failed for {email}: {e}')
+
     return redirect(session.pop('post_login_redirect', '/'))
 
 @app.route('/auth/logout')
@@ -1264,6 +1449,11 @@ def email_signup():
     db_conn.commit()
     user_row = db_conn.execute('SELECT id FROM users WHERE LOWER(email)=?', (email,)).fetchone()
     _log_in_user(db_conn, user_row['id'])
+
+    try:
+        send_welcome_email(db_conn, user_row['id'], full_name, email)
+    except Exception as e:
+        app.logger.warning(f'Welcome email failed for {email}: {e}')
 
     redirect_url = session.pop('post_login_redirect', None) or url_for('index')
     return jsonify({'status': 'success', 'redirect': redirect_url})
@@ -2082,12 +2272,30 @@ def checkout():
 
     public_coupons = get_public_coupons(db) if g.site_type == 'retail' else []
 
+    # "Spend a bit more to unlock this coupon" nudge -- only relevant when no
+    # coupon is applied yet, and only for coupons the customer hasn't reached
+    # the minimum order amount for. Picks whichever public coupon needs the
+    # smallest top-up, so the nudge is always achievable.
+    next_coupon_gap = None
+    if not coupon_code and public_coupons:
+        candidates = [
+            c for c in public_coupons
+            if c.get('min_order_amount') and float(c['min_order_amount']) > subtotal
+        ]
+        if candidates:
+            closest = min(candidates, key=lambda c: float(c['min_order_amount']) - subtotal)
+            next_coupon_gap = {
+                'code': closest['code'],
+                'amount_needed': float(closest['min_order_amount']) - subtotal,
+                'discount_percent': closest['discount_percent'],
+            }
+
     return render_site('checkout.html', display_cart=display_cart, subtotal=subtotal, total_tax=0.0,
                         discount=discount, grand_total=grand_total, coupon_code=coupon_code,
                         out_of_stock_items=out_of_stock_items, recaptcha_site_key=RECAPTCHA_SITE_KEY,
                         saved_address=saved_address, saved_addresses=saved_addresses,
                         credit_balance=credit_balance, credits_applied=credits_applied,
-                        public_coupons=public_coupons)
+                        public_coupons=public_coupons, next_coupon_gap=next_coupon_gap)
 
 @app.route('/checkout/shipping', methods=['GET', 'POST'])
 @app.route('/retail/checkout/shipping', methods=['GET', 'POST'])
@@ -4471,6 +4679,312 @@ def admin_coupon_edit(coupon_id):
     db.commit()
     flash('Coupon updated.')
     return redirect(url_for('admin_coupons'))
+
+
+def _send_welcome_backfill_batch(user_rows):
+    """Runs in a background thread: sends the welcome email + private coupon
+    to a batch of existing users, one at a time with a short delay between
+    sends so Zeptomail doesn't see a burst. Each user is marked
+    welcome_email_sent_at as soon as their email is queued, so a re-run of
+    the backfill (e.g. after a crash) only picks up whoever's left.
+
+    Needs its own app context -- a background thread has no Flask request
+    context, and both get_db() (uses flask.g) and render_template() (used
+    inside send_welcome_email) require an active app context to work."""
+    with app.app_context():
+        db = get_db()
+        sent, failed = 0, 0
+        for u in user_rows:
+            try:
+                send_welcome_email(db, u['id'], u['name'], u['email'])
+                sent += 1
+            except Exception as e:
+                failed += 1
+                app.logger.warning(f"Welcome backfill failed for user {u['id']} ({u['email']}): {e}")
+            _time.sleep(1)
+        app.logger.info(f'Welcome email backfill finished: {sent} sent, {failed} failed.')
+
+
+@app.route('/admin/users/send-welcome-backfill', methods=['POST'])
+@admin_required
+def admin_send_welcome_backfill():
+    """One-time action: sends the welcome email + private 15% coupon to every
+    existing registered user who hasn't already received one. Safe to click
+    more than once -- already-sent users are skipped via welcome_email_sent_at."""
+    db = get_db()
+    users = db.execute(
+        "SELECT id, name, email FROM users"
+        " WHERE email IS NOT NULL AND email != '' AND welcome_email_sent_at IS NULL"
+    ).fetchall()
+    if not users:
+        flash('No users left to email — everyone with an account already has a welcome coupon.')
+        return redirect(url_for('admin_dashboard'))
+
+    t = threading.Thread(target=_send_welcome_backfill_batch, args=(list(users),), daemon=True)
+    t.start()
+    flash(f'Sending welcome emails to {len(users)} existing user(s) in the background — this will take a few minutes.')
+    return redirect(url_for('admin_dashboard'))
+
+
+# ── Email Campaigns ──────────────────────────────────────────────────────
+
+def _campaign_recipient_group(db, group):
+    """Resolve a recipient-group name to a list of {id, name, email} dicts."""
+    if group == 'new':
+        return db.execute(
+            "SELECT id, name, email FROM users WHERE email IS NOT NULL AND email != ''"
+            " AND id NOT IN (SELECT DISTINCT user_id FROM order_shipping"
+            "                WHERE user_id IS NOT NULL AND status != 'cancelled')"
+        ).fetchall()
+    if group == 'ordered':
+        return db.execute(
+            "SELECT id, name, email FROM users WHERE email IS NOT NULL AND email != ''"
+            " AND id IN (SELECT DISTINCT user_id FROM order_shipping"
+            "            WHERE user_id IS NOT NULL AND status != 'cancelled')"
+        ).fetchall()
+    return db.execute(
+        "SELECT id, name, email FROM users WHERE email IS NOT NULL AND email != ''"
+    ).fetchall()
+
+
+def _send_campaign_batch(campaign_id, user_rows):
+    """Runs in a background thread: generates a personal single-use coupon
+    and sends the campaign email to each recipient, one at a time. Needs its
+    own app context, same reasoning as _send_welcome_backfill_batch."""
+    with app.app_context():
+        db = get_db()
+        campaign = db.execute('SELECT * FROM email_campaigns WHERE id=?', (campaign_id,)).fetchone()
+        if not campaign:
+            return
+
+        try:
+            product_ids = json.loads(campaign.get('product_ids') or '[]')
+        except Exception:
+            product_ids = []
+        products = []
+        for pid in product_ids:
+            p = db.execute(
+                'SELECT id, sku, name, mrp_price, retail_price, price1, image_field'
+                ' FROM products WHERE id=?', (pid,)
+            ).fetchone()
+            if p:
+                p = dict(p)
+                imgs = get_product_images(p)
+                p['image'] = imgs[0] if imgs else ''
+                products.append(p)
+
+        discount_percent = campaign['discount_percent']
+        max_discount_amount = campaign['max_discount_amount']
+        min_order_amount = campaign.get('min_order_amount') or 0
+        sent = 0
+        for u in user_rows:
+            try:
+                first_name = (u.get('name') or 'there').strip().split(' ')[0] or 'there'
+                code = generate_personal_coupon_code(db, first_name, discount_percent)
+                expiry_date = (datetime.now() + timedelta(days=30)).strftime('%Y-%m-%d')
+                db.execute(
+                    "INSERT INTO coupons (code, discount_percent, min_order_amount, max_discount_amount,"
+                    " expiry_date, usage_limit, is_public, is_active, user_id, campaign_id)"
+                    " VALUES (?,?,?,?,?,?,0,1,?,?)",
+                    (code, discount_percent, min_order_amount, max_discount_amount, expiry_date, 1, u['id'], campaign_id)
+                )
+                db.commit()
+
+                # Insert the recipient row before rendering so the email's
+                # links can carry this row's id for click tracking.
+                db.execute(
+                    "INSERT INTO email_campaign_recipients (campaign_id, user_id, email, name, coupon_code)"
+                    " VALUES (?,?,?,?,?)",
+                    (campaign_id, u['id'], u['email'], u.get('name'), code)
+                )
+                db.commit()
+                recipient_row = db.execute(
+                    "SELECT id FROM email_campaign_recipients WHERE campaign_id=? AND coupon_code=?",
+                    (campaign_id, code)
+                ).fetchone()
+                recipient_id = recipient_row['id'] if recipient_row else None
+
+                coupon = {'code': code, 'discount_percent': discount_percent,
+                          'max_discount_amount': max_discount_amount,
+                          'min_order_amount': min_order_amount, 'expiry_date': expiry_date}
+                html = render_template('retail/email_campaign.html', campaign_name=campaign['name'],
+                                        first_name=first_name, coupon=coupon, products=products,
+                                        recipient_id=recipient_id)
+                text = (
+                    f"Hi {first_name},\n\nA special offer just for you: use code {code} for "
+                    f"{int(discount_percent)}% off (up to Rs.{int(max_discount_amount)}) "
+                    f"on orders above Rs.{int(min_order_amount)}.\n"
+                    f"Valid until {expiry_date}.\n\nShop now: https://narinakhre.com\n"
+                )
+                send_contact_email_async(
+                    u['email'], f"{campaign['name']} — {int(discount_percent)}% off just for you \U0001F381",
+                    text, html_body=html
+                )
+                sent += 1
+            except Exception as e:
+                app.logger.warning(f"Campaign {campaign_id} send failed for user {u.get('id')}: {e}")
+            _time.sleep(1)
+
+        db.execute(
+            "UPDATE email_campaigns SET status='sent', sent_at=CURRENT_TIMESTAMP, recipient_count=? WHERE id=?",
+            (sent, campaign_id)
+        )
+        db.commit()
+        app.logger.info(f'Campaign {campaign_id} finished: {sent} sent.')
+
+
+@app.route('/c/<int:recipient_id>')
+def campaign_click(recipient_id):
+    """Click-tracking redirect used by links inside campaign emails -- marks
+    this recipient as having visited the site after the email (first click
+    only), then forwards them on to the real destination. `to` must be a
+    site-relative path (never a full URL) so this can't be abused as an
+    open redirect."""
+    db = get_db()
+    row = db.execute(
+        'SELECT id, clicked_at FROM email_campaign_recipients WHERE id=?', (recipient_id,)
+    ).fetchone()
+    if row and not row.get('clicked_at'):
+        db.execute(
+            'UPDATE email_campaign_recipients SET clicked_at=CURRENT_TIMESTAMP WHERE id=?', (recipient_id,)
+        )
+        db.commit()
+
+    dest = request.args.get('to') or '/'
+    if not dest.startswith('/') or dest.startswith('//'):
+        dest = '/'
+    return redirect(dest)
+
+
+@app.route('/admin/campaigns', methods=['GET'])
+@admin_required
+def admin_campaigns():
+    db = get_db()
+    campaigns = db.execute('SELECT * FROM email_campaigns ORDER BY id DESC').fetchall()
+    return render_template('admin/admin_campaigns.html', campaigns=campaigns)
+
+
+@app.route('/admin/campaigns/preview', methods=['POST'])
+@admin_required
+def admin_campaign_preview():
+    """AJAX: renders a sample of the campaign email (placeholder name/code,
+    a fresh random pick of trending products) without saving anything --
+    used for both the initial "Generate Email" and "Regenerate"."""
+    db = get_db()
+    data = request.get_json(silent=True) or request.form
+    name = (data.get('name') or '').strip()
+    discount_percent = float(data.get('discount_percent') or 0)
+    max_discount_amount = float(data.get('max_discount_amount') or 0)
+    min_order_amount = float(data.get('min_order_amount') or 0)
+
+    if discount_percent <= 0 or discount_percent > 100:
+        return jsonify({'status': 'error', 'message': 'Discount percent must be between 1 and 100.'}), 400
+
+    products = get_trending_products(db, limit=4)
+    if not products:
+        return jsonify({'status': 'error', 'message': 'No trending products available to feature yet.'}), 400
+
+    expiry_date = (datetime.now() + timedelta(days=30)).strftime('%Y-%m-%d')
+    sample_coupon = {
+        'code': 'NNSAMPLE' + str(int(discount_percent)),
+        'discount_percent': discount_percent,
+        'max_discount_amount': max_discount_amount,
+        'min_order_amount': min_order_amount,
+        'expiry_date': expiry_date,
+    }
+    html = render_template('retail/email_campaign.html', campaign_name=name,
+                            first_name='Customer', coupon=sample_coupon, products=products)
+    return jsonify({'status': 'success', 'html': html, 'product_ids': [p['id'] for p in products]})
+
+
+@app.route('/admin/campaigns/save', methods=['POST'])
+@admin_required
+def admin_campaign_save():
+    db = get_db()
+    name = (request.form.get('name') or '').strip()
+    discount_percent = request.form.get('discount_percent', type=float) or 0.0
+    max_discount_amount = request.form.get('max_discount_amount', type=float) or 0.0
+    min_order_amount = request.form.get('min_order_amount', type=float) or 0.0
+    product_ids_raw = request.form.get('product_ids') or '[]'
+
+    if not name:
+        flash('Campaign name is required.')
+        return redirect(url_for('admin_campaigns'))
+    if discount_percent <= 0 or discount_percent > 100:
+        flash('Discount percent must be between 1 and 100.')
+        return redirect(url_for('admin_campaigns'))
+    try:
+        product_ids = json.loads(product_ids_raw)
+    except Exception:
+        product_ids = []
+    if not product_ids:
+        flash('Please generate the email before saving the campaign.')
+        return redirect(url_for('admin_campaigns'))
+
+    db.execute(
+        "INSERT INTO email_campaigns (name, discount_percent, max_discount_amount, min_order_amount, product_ids, status)"
+        " VALUES (?,?,?,?,?,'draft')",
+        (name, discount_percent, max_discount_amount, min_order_amount, json.dumps(product_ids))
+    )
+    db.commit()
+    flash(f'Campaign "{name}" saved as a draft.')
+    return redirect(url_for('admin_campaigns'))
+
+
+@app.route('/admin/campaigns/<int:campaign_id>/send', methods=['POST'])
+@admin_required
+def admin_campaign_send(campaign_id):
+    db = get_db()
+    campaign = db.execute('SELECT * FROM email_campaigns WHERE id=?', (campaign_id,)).fetchone()
+    if not campaign:
+        flash('Campaign not found.')
+        return redirect(url_for('admin_campaigns'))
+    if campaign['status'] != 'draft':
+        flash('This campaign has already been sent (or is currently sending).')
+        return redirect(url_for('admin_campaigns'))
+
+    group = request.form.get('recipient_group') or 'all'
+    if group not in ('all', 'new', 'ordered'):
+        group = 'all'
+    users = _campaign_recipient_group(db, group)
+    if not users:
+        flash('No users found in that group.')
+        return redirect(url_for('admin_campaigns'))
+
+    db.execute("UPDATE email_campaigns SET status='sending', recipient_group=? WHERE id=?", (group, campaign_id))
+    db.commit()
+
+    t = threading.Thread(target=_send_campaign_batch, args=(campaign_id, list(users)), daemon=True)
+    t.start()
+    flash(f'Sending "{campaign["name"]}" to {len(users)} user(s) in the background — this will take a few minutes.')
+    return redirect(url_for('admin_campaigns'))
+
+
+@app.route('/admin/campaigns/<int:campaign_id>', methods=['GET'])
+@admin_required
+def admin_campaign_detail(campaign_id):
+    db = get_db()
+    campaign = db.execute('SELECT * FROM email_campaigns WHERE id=?', (campaign_id,)).fetchone()
+    if not campaign:
+        flash('Campaign not found.')
+        return redirect(url_for('admin_campaigns'))
+    recipients = [dict(r) for r in db.execute(
+        'SELECT * FROM email_campaign_recipients WHERE campaign_id=? ORDER BY id', (campaign_id,)
+    ).fetchall()]
+
+    used_count = 0
+    visited_count = 0
+    for r in recipients:
+        coupon = db.execute('SELECT times_used FROM coupons WHERE code=?', (r['coupon_code'],)).fetchone()
+        r['coupon_used'] = bool(coupon and (coupon.get('times_used') or 0) > 0)
+        r['visited'] = bool(r.get('clicked_at'))
+        if r['coupon_used']:
+            used_count += 1
+        if r['visited']:
+            visited_count += 1
+
+    return render_template('admin/admin_campaign_detail.html', campaign=campaign, recipients=recipients,
+                            used_count=used_count, visited_count=visited_count)
 
 
 @app.route('/admin/login', methods=['GET', 'POST'])

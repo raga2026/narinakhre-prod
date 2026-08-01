@@ -564,6 +564,10 @@
           <span class="ck-sum-total-value" id="s-total">₹{{ grand_total|round(0)|int }}</span>
         </div>
 
+        <div id="coupon-nudge" style="{% if not next_coupon_gap %}display:none;{% endif %}font-size:0.78rem;color:#be185d;font-weight:600;margin-top:6px;">
+          {% if next_coupon_gap %}Add ₹{{ next_coupon_gap.amount_needed|round(0, 'ceil')|int }} more to avail code {{ next_coupon_gap.code }} ({{ next_coupon_gap.discount_percent|int }}% off){% endif %}
+        </div>
+
         <div style="margin-top:18px;padding:14px;background:#f9f9f9;border-radius:12px;font-size:0.75rem;color:#6e6e73;line-height:1.6;">
           🚚 <strong>Free shipping</strong> on all orders<br>
           🔒 Secure payment via Razorpay
@@ -609,6 +613,7 @@ const discountBase = {{ discount|default(0)|round(2) }};
 const creditsApplied = {{ credits_applied|default(0)|round(2) }};
 const savedAddresses = {{ (saved_addresses or [])|tojson }};
 const fallbackEmail = {{ (logged_in_user.email if logged_in_user else '')|tojson }};
+const publicCouponsForNudge = {{ (public_coupons or [])|tojson }};
 
 /* ── Saved address picker ── */
 function selectSavedAddress(choice) {
@@ -712,6 +717,26 @@ function ckRecalc() {
     if (appliedCoupon && sub < appliedCoupon.min_order) { disc = 0; }
     currentDiscount = disc;
     document.getElementById('s-total').textContent = '₹'+Math.max(sub-disc-creditsApplied,0).toFixed(0);
+    updateCouponNudge(sub);
+}
+function updateCouponNudge(sub) {
+    const el = document.getElementById('coupon-nudge');
+    if (!el) return;
+    if (appliedCoupon) { el.style.display = 'none'; return; }
+    let best = null;
+    publicCouponsForNudge.forEach(function(c) {
+        const minOrder = parseFloat(c.min_order_amount || 0);
+        if (minOrder > sub) {
+            const gap = minOrder - sub;
+            if (!best || gap < best.gap) best = { gap: gap, code: c.code, pct: c.discount_percent };
+        }
+    });
+    if (best) {
+        el.style.display = 'block';
+        el.textContent = 'Add ₹' + Math.ceil(best.gap) + ' more to avail code ' + best.code + ' (' + Math.round(best.pct) + '% off)';
+    } else {
+        el.style.display = 'none';
+    }
 }
 
 /* ── Coupon ── */
