@@ -92,9 +92,14 @@ WAREHOUSE_STATE = os.environ.get('WAREHOUSE_STATE', 'Madhya Pradesh')
 WAREHOUSE_ADDRESS = os.environ.get('WAREHOUSE_ADDRESS', '')
 WAREHOUSE_PHONE = os.environ.get('WAREHOUSE_PHONE', '')
 ADMIN_EMAIL = os.environ.get('ADMIN_EMAIL', 'mohinicosmetics.india@gmail.com')
-# Order-related emails (confirmation, tracking updates) use a different From
-# address than contact-form replies, per SMTP_FROM_ORDERS in Render env vars.
-ORDERS_FROM_EMAIL = os.environ.get('SMTP_FROM_ORDERS', 'order-noreply@narinakhre.com')
+# Order-related emails (confirmation, tracking updates) and general/info
+# emails (welcome, campaigns, contact-form replies) each go out through
+# their own Zeptomail Mail Agent, with its own verified sender identity and
+# its own API token -- see send_contact_email() for how the matching token
+# gets picked. SMTP_FROM_ORDERS/SMTP_FROM are the old var names, kept as a
+# fallback in case the new ones aren't set yet.
+ORDERS_FROM_EMAIL = os.environ.get('SMTP_ORDERS_FROM_EMAIL', os.environ.get('SMTP_FROM_ORDERS', 'orders-noreply@narinakhre.com'))
+INFO_FROM_EMAIL = os.environ.get('SMTP_INFO_FROM_EMAIL', os.environ.get('SMTP_FROM', 'info@narinakhre.com'))
 RAZORPAY_KEY_ID = os.environ.get('RAZORPAY_KEY_ID')
 RAZORPAY_KEY_SECRET = os.environ.get('RAZORPAY_KEY_SECRET')
 ADMIN_USERNAME = os.environ.get('ADMIN_USERNAME', '')
@@ -671,21 +676,29 @@ def send_contact_email(to_email, subject, body, html_body=None, from_email=None)
     either succeeds, fails, or times out in 10s. No other behavior change.
 
     Credentials from Render environment variables:
-        ZEPTOMAIL_API_URL  = https://api.zeptomail.in/v1.1/email  (default, .in region)
-        ZEPTOMAIL_API_KEY  = Zeptomail "Send Mail Token"
-    If ZEPTOMAIL_API_KEY isn't set, falls back to SMTP_PASS — Zeptomail's SMTP
-    password and the API send-token are typically the same generated value for
-    a Mail Agent, so this should work without adding a new env var. If sends
-    start failing after this deploy, generate a dedicated API key in Zeptomail
-    (Mail Agents -> API) and set ZEPTOMAIL_API_KEY explicitly.
+        ZEPTOMAIL_API_URL       = https://api.zeptomail.in/v1.1/email  (default, .in region)
+        SMTP_ORDERS_ZEPTO_PASSWORD = API token for the "orders" Mail Agent (orders-noreply@)
+        SMTP_INFO_ZEPTO_PASSWORD   = API token for the "info" Mail Agent (info@)
+    Each Zeptomail Mail Agent has its own verified sender identity and its
+    own API token -- a token from one agent can't send as the other
+    agent's From address, which is exactly why info@ sends were being
+    silently rejected while orders@ sends worked (only one shared token was
+    ever configured, and it belonged to the orders agent). The From address
+    picks which token gets used; both fall back to the older shared
+    ZEPTOMAIL_API_KEY/SMTP_PASS if the per-agent vars aren't set.
     The From address must be a verified sender in Zeptomail.
     """
     api_url = os.environ.get('ZEPTOMAIL_API_URL', 'https://api.zeptomail.in/v1.1/email')
-    api_key = os.environ.get('ZEPTOMAIL_API_KEY') or os.environ.get('SMTP_PASS', '')
-    FROM_EMAIL = from_email or os.environ.get('SMTP_FROM', 'info@narinakhre.com')
+    FROM_EMAIL = from_email or INFO_FROM_EMAIL
+
+    shared_fallback = os.environ.get('ZEPTOMAIL_API_KEY') or os.environ.get('SMTP_PASS', '')
+    if FROM_EMAIL == ORDERS_FROM_EMAIL:
+        api_key = os.environ.get('SMTP_ORDERS_ZEPTO_PASSWORD') or shared_fallback
+    else:
+        api_key = os.environ.get('SMTP_INFO_ZEPTO_PASSWORD') or shared_fallback
 
     if not api_key:
-        app.logger.warning('Email send skipped: ZEPTOMAIL_API_KEY (or SMTP_PASS fallback) not set in Render env vars')
+        app.logger.warning(f'Email send skipped: no Zeptomail API token configured for sender {FROM_EMAIL}')
         return False
 
     payload = {
@@ -4765,6 +4778,126 @@ def _campaign_recipient_group(db, group):
     ).fetchall()
 
 
+def _run_campaign_batch(db, campaign, campaign_id, user_rows):
+    """Does the actual per-recipient work for a campaign send: personal
+    coupon, personalized email, synchronous send, and bookkeeping. Raises on
+    any setup-level failure so the caller can mark the campaign as failed
+    instead of leaving it silently stuck on "sending"."""
+    try:
+        product_ids = json.loads(campaign.get('product_ids') or '[]')
+    except Exception:
+        product_ids = []
+    products = []
+    for pid in product_ids:
+        p = db.execute(
+            'SELECT id, sku, name, mrp_price, retail_price, price1, image_field'
+            ' FROM products WHERE id=?', (pid,)
+        ).fetchone()
+        if p:
+            p = dict(p)
+            imgs = get_product_images(p)
+            p['image'] = imgs[0] if imgs else ''
+            products.append(p)
+
+    discount_percent = campaign['discount_percent']
+    max_discount_amount = campaign['max_discount_amount']
+    min_order_amount = campaign.get('min_order_amount') or 0
+    sent = 0
+    failed = 0
+    for u in user_rows:
+        recipient_id = None
+        try:
+            # A campaign that previously failed partway through can be
+            # retried by sending it again -- skip anyone who already has a
+            # successful send recorded so they don't get a second coupon
+            # and a duplicate email.
+            already = db.execute(
+                "SELECT id FROM email_campaign_recipients WHERE campaign_id=? AND user_id=? AND status != 'failed'",
+                (campaign_id, u['id'])
+            ).fetchone()
+            if already:
+                continue
+
+            first_name = (u.get('name') or 'there').strip().split(' ')[0] or 'there'
+            code = generate_personal_coupon_code(db, first_name, discount_percent)
+            expiry_date = (datetime.now() + timedelta(days=30)).strftime('%Y-%m-%d')
+            db.execute(
+                "INSERT INTO coupons (code, discount_percent, min_order_amount, max_discount_amount,"
+                " expiry_date, usage_limit, is_public, is_active, user_id, campaign_id)"
+                " VALUES (?,?,?,?,?,?,0,1,?,?)",
+                (code, discount_percent, min_order_amount, max_discount_amount, expiry_date, 1, u['id'], campaign_id)
+            )
+            db.commit()
+
+            # Insert the recipient row before rendering so the email's
+            # links can carry this row's id for click tracking. Marked
+            # failed below if the send turns out to have failed.
+            db.execute(
+                "INSERT INTO email_campaign_recipients (campaign_id, user_id, email, name, coupon_code)"
+                " VALUES (?,?,?,?,?)",
+                (campaign_id, u['id'], u['email'], u.get('name'), code)
+            )
+            db.commit()
+            recipient_row = db.execute(
+                "SELECT id FROM email_campaign_recipients WHERE campaign_id=? AND coupon_code=?",
+                (campaign_id, code)
+            ).fetchone()
+            recipient_id = recipient_row['id'] if recipient_row else None
+
+            coupon = {'code': code, 'discount_percent': discount_percent,
+                      'max_discount_amount': max_discount_amount,
+                      'min_order_amount': min_order_amount, 'expiry_date': expiry_date}
+            html = render_template('retail/email_campaign.html', campaign_name=campaign['name'],
+                                    first_name=first_name, coupon=coupon, products=products,
+                                    recipient_id=recipient_id)
+            text = (
+                f"Hi {first_name},\n\nA special offer just for you: use code {code} for "
+                f"{int(discount_percent)}% off (up to Rs.{int(max_discount_amount)}) "
+                f"on orders above Rs.{int(min_order_amount)}.\n"
+                f"Valid until {expiry_date}.\n\nShop now: https://narinakhre.com\n"
+            )
+            # Send synchronously: this function already runs in its own
+            # background thread (started from admin_campaign_send), so
+            # there's no HTTP response to avoid blocking here. Calling the
+            # async fire-and-forget wrapper from an already-backgrounded
+            # thread meant we recorded every recipient as "sent" without
+            # ever checking whether Zeptomail actually accepted the email --
+            # a rejected send just vanished into an unwatched log line.
+            ok = send_contact_email(
+                u['email'], f"{campaign['name']} — {int(discount_percent)}% off just for you \U0001F381",
+                text, html_body=html
+            )
+            if ok:
+                sent += 1
+            else:
+                failed += 1
+                if recipient_id:
+                    db.execute("UPDATE email_campaign_recipients SET status='failed' WHERE id=?", (recipient_id,))
+                    db.commit()
+                app.logger.warning(f"Campaign {campaign_id}: Zeptomail rejected send to {u['email']}")
+        except Exception as e:
+            failed += 1
+            if recipient_id:
+                db.execute("UPDATE email_campaign_recipients SET status='failed' WHERE id=?", (recipient_id,))
+                db.commit()
+            app.logger.warning(f"Campaign {campaign_id} send failed for user {u.get('id')}: {e}")
+        _time.sleep(1)
+
+    # Count actual successful rows rather than this run's local `sent` tally,
+    # so a retry after a partial failure reports the true total across both
+    # attempts, not just what changed in this run.
+    total_ok = db.execute(
+        "SELECT COUNT(*) as cnt FROM email_campaign_recipients WHERE campaign_id=? AND status != 'failed'",
+        (campaign_id,)
+    ).fetchone()
+    db.execute(
+        "UPDATE email_campaigns SET status='sent', sent_at=CURRENT_TIMESTAMP, recipient_count=? WHERE id=?",
+        (total_ok['cnt'] if total_ok else sent, campaign_id)
+    )
+    db.commit()
+    app.logger.info(f'Campaign {campaign_id} finished: {sent} newly sent, {failed} failed.')
+
+
 def _send_campaign_batch(campaign_id, user_rows):
     """Runs in a background thread: generates a personal single-use coupon
     and sends the campaign email to each recipient, one at a time. Needs its
@@ -4776,100 +4909,22 @@ def _send_campaign_batch(campaign_id, user_rows):
             return
 
         try:
-            product_ids = json.loads(campaign.get('product_ids') or '[]')
-        except Exception:
-            product_ids = []
-        products = []
-        for pid in product_ids:
-            p = db.execute(
-                'SELECT id, sku, name, mrp_price, retail_price, price1, image_field'
-                ' FROM products WHERE id=?', (pid,)
+            _run_campaign_batch(db, campaign, campaign_id, user_rows)
+        except Exception as e:
+            # Any crash in _run_campaign_batch's setup (e.g. a bad products
+            # query) used to kill this thread silently, leaving the campaign
+            # stuck on "sending" forever with zero recorded recipients and
+            # no visible error. Surface it as a real, visible failure state.
+            app.logger.error(f"Campaign {campaign_id} aborted unexpectedly: {type(e).__name__}: {e}")
+            already_sent = db.execute(
+                "SELECT COUNT(*) as cnt FROM email_campaign_recipients WHERE campaign_id=? AND status != 'failed'",
+                (campaign_id,)
             ).fetchone()
-            if p:
-                p = dict(p)
-                imgs = get_product_images(p)
-                p['image'] = imgs[0] if imgs else ''
-                products.append(p)
-
-        discount_percent = campaign['discount_percent']
-        max_discount_amount = campaign['max_discount_amount']
-        min_order_amount = campaign.get('min_order_amount') or 0
-        sent = 0
-        failed = 0
-        for u in user_rows:
-            recipient_id = None
-            try:
-                first_name = (u.get('name') or 'there').strip().split(' ')[0] or 'there'
-                code = generate_personal_coupon_code(db, first_name, discount_percent)
-                expiry_date = (datetime.now() + timedelta(days=30)).strftime('%Y-%m-%d')
-                db.execute(
-                    "INSERT INTO coupons (code, discount_percent, min_order_amount, max_discount_amount,"
-                    " expiry_date, usage_limit, is_public, is_active, user_id, campaign_id)"
-                    " VALUES (?,?,?,?,?,?,0,1,?,?)",
-                    (code, discount_percent, min_order_amount, max_discount_amount, expiry_date, 1, u['id'], campaign_id)
-                )
-                db.commit()
-
-                # Insert the recipient row before rendering so the email's
-                # links can carry this row's id for click tracking. Removed
-                # below if the send turns out to have failed.
-                db.execute(
-                    "INSERT INTO email_campaign_recipients (campaign_id, user_id, email, name, coupon_code)"
-                    " VALUES (?,?,?,?,?)",
-                    (campaign_id, u['id'], u['email'], u.get('name'), code)
-                )
-                db.commit()
-                recipient_row = db.execute(
-                    "SELECT id FROM email_campaign_recipients WHERE campaign_id=? AND coupon_code=?",
-                    (campaign_id, code)
-                ).fetchone()
-                recipient_id = recipient_row['id'] if recipient_row else None
-
-                coupon = {'code': code, 'discount_percent': discount_percent,
-                          'max_discount_amount': max_discount_amount,
-                          'min_order_amount': min_order_amount, 'expiry_date': expiry_date}
-                html = render_template('retail/email_campaign.html', campaign_name=campaign['name'],
-                                        first_name=first_name, coupon=coupon, products=products,
-                                        recipient_id=recipient_id)
-                text = (
-                    f"Hi {first_name},\n\nA special offer just for you: use code {code} for "
-                    f"{int(discount_percent)}% off (up to Rs.{int(max_discount_amount)}) "
-                    f"on orders above Rs.{int(min_order_amount)}.\n"
-                    f"Valid until {expiry_date}.\n\nShop now: https://narinakhre.com\n"
-                )
-                # Send synchronously: this function already runs in its own
-                # background thread (started from admin_campaign_send), so
-                # there's no HTTP response to avoid blocking here. Calling
-                # the async fire-and-forget wrapper from an already-backgrounded
-                # thread meant we recorded every recipient as "sent" without
-                # ever checking whether Zeptomail actually accepted the
-                # email -- a rejected send just vanished into an unwatched log line.
-                ok = send_contact_email(
-                    u['email'], f"{campaign['name']} — {int(discount_percent)}% off just for you \U0001F381",
-                    text, html_body=html
-                )
-                if ok:
-                    sent += 1
-                else:
-                    failed += 1
-                    if recipient_id:
-                        db.execute("UPDATE email_campaign_recipients SET status='failed' WHERE id=?", (recipient_id,))
-                        db.commit()
-                    app.logger.warning(f"Campaign {campaign_id}: Zeptomail rejected send to {u['email']}")
-            except Exception as e:
-                failed += 1
-                if recipient_id:
-                    db.execute("UPDATE email_campaign_recipients SET status='failed' WHERE id=?", (recipient_id,))
-                    db.commit()
-                app.logger.warning(f"Campaign {campaign_id} send failed for user {u.get('id')}: {e}")
-            _time.sleep(1)
-
-        db.execute(
-            "UPDATE email_campaigns SET status='sent', sent_at=CURRENT_TIMESTAMP, recipient_count=? WHERE id=?",
-            (sent, campaign_id)
-        )
-        db.commit()
-        app.logger.info(f'Campaign {campaign_id} finished: {sent} sent, {failed} failed.')
+            db.execute(
+                "UPDATE email_campaigns SET status='failed', sent_at=CURRENT_TIMESTAMP, recipient_count=? WHERE id=?",
+                (already_sent['cnt'] if already_sent else 0, campaign_id)
+            )
+            db.commit()
 
 
 @app.route('/c/<int:recipient_id>')
@@ -4978,7 +5033,7 @@ def admin_campaign_send(campaign_id):
     if not campaign:
         flash('Campaign not found.')
         return redirect(url_for('admin_campaigns'))
-    if campaign['status'] != 'draft':
+    if campaign['status'] not in ('draft', 'failed'):
         flash('This campaign has already been sent (or is currently sending).')
         return redirect(url_for('admin_campaigns'))
 

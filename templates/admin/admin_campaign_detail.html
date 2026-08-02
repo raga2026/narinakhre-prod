@@ -33,6 +33,7 @@
                 <div class="stat-value">
                     {% if campaign.status == 'sent' %}<span class="px-2 py-1 rounded-full text-sm font-bold badge-sent">Sent</span>
                     {% elif campaign.status == 'sending' %}<span class="px-2 py-1 rounded-full text-sm font-bold badge-sending">Sending…</span>
+                    {% elif campaign.status == 'failed' %}<span class="px-2 py-1 rounded-full text-sm font-bold badge-failed">Failed</span>
                     {% else %}<span class="px-2 py-1 rounded-full text-sm font-bold badge-draft">Draft</span>{% endif %}
                 </div>
                 <div class="stat-label">Status</div>
@@ -111,6 +112,7 @@
                         <tr>
                             <td colspan="7" class="py-8 text-center text-gray-400">
                                 {% if campaign.status == 'sending' %}Sending is in progress — recipients will appear here as emails go out.
+                                {% elif campaign.status == 'failed' %}Sending failed before any emails went out. Check the count above and retry from the campaigns list.
                                 {% else %}This campaign hasn't been sent yet.{% endif %}
                             </td>
                         </tr>

@@ -17,6 +17,7 @@
         .badge-draft { background:#f1f5f9; color:#64748b; }
         .badge-sending { background:#fef3c7; color:#b45309; }
         .badge-sent { background:#dcfce7; color:#15803d; }
+        .badge-failed { background:#fee2e2; color:#b91c1c; }
         #preview-frame { width:100%; height:720px; border:1px solid #f3f4f6; border-radius:12px; background:#fff; }
         #preview-wrap { display:none; }
     </style>
@@ -123,6 +124,8 @@
                                 <span class="px-2 py-1 rounded-full text-xs font-bold badge-sent">Sent</span>
                                 {% elif c.status == 'sending' %}
                                 <span class="px-2 py-1 rounded-full text-xs font-bold badge-sending">Sending…</span>
+                                {% elif c.status == 'failed' %}
+                                <span class="px-2 py-1 rounded-full text-xs font-bold badge-failed">Failed</span>
                                 {% else %}
                                 <span class="px-2 py-1 rounded-full text-xs font-bold badge-draft">Draft</span>
                                 {% endif %}
@@ -137,7 +140,7 @@
                             <td class="py-3 px-4 text-gray-500">{{ (c.sent_at or c.created_at) or '' }}</td>
                             <td class="py-3 px-4">
                                 <div class="flex gap-2 flex-wrap items-center">
-                                    {% if c.status == 'draft' %}
+                                    {% if c.status in ('draft', 'failed') %}
                                     <form method="POST" action="{{ url_for('admin_campaign_send', campaign_id=c.id) }}"
                                           class="flex gap-1 items-center"
                                           onsubmit="return confirm('Send ' + {{ c.name|tojson }} + ' to this group now? This emails real customers and cannot be undone.');">
@@ -146,7 +149,7 @@
                                             <option value="new">New Users (never ordered)</option>
                                             <option value="ordered">Existing / Ordered Users</option>
                                         </select>
-                                        <button type="submit" class="text-xs font-semibold text-rose-600 hover:underline">Send</button>
+                                        <button type="submit" class="text-xs font-semibold text-rose-600 hover:underline">{% if c.status == 'failed' %}Retry{% else %}Send{% endif %}</button>
                                     </form>
                                     {% endif %}
                                     <a href="{{ url_for('admin_campaign_detail', campaign_id=c.id) }}" class="text-xs font-semibold text-blue-600 hover:underline">View Details</a>
