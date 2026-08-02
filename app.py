@@ -4645,6 +4645,329 @@ def download_products_excel():
         return redirect(url_for('admin_dashboard'))
 
 
+def resolve_gst_range(req):
+    """Date-range resolution for the GST report pages -- defaults to the
+    current calendar month (the common unit admins file GST for), unlike
+    resolve_insight_range()'s trailing-7-days default which suits day-to-day
+    analytics rather than monthly filing."""
+    now = datetime.now()
+    from_date = req.args.get('from', '').strip()
+    to_date = req.args.get('to', '').strip()
+    if not (from_date and to_date):
+        from_date = now.strftime('%Y-%m-01')
+        to_date = now.strftime('%Y-%m-%d')
+    return from_date, to_date, from_date + ' 00:00:00', to_date + ' 23:59:59'
+
+
+def _compute_order_gst_lines(db, order):
+    """Parse an order_shipping row's cart_items_json and return per-line GST
+    detail (hsn_code, gst_percent, qty, taxable_value, cgst, sgst, igst)
+    using each SKU's live products.hsn_code/gst_percent, plus whether the
+    order is inter-state (IGST) vs intra-state (CGST+SGST) based on
+    consignee_state vs WAREHOUSE_STATE.
+
+    The invoice.html template hardcodes HSN 7117 / GST 3% for every line and
+    always reports a 50/50 CGST+SGST split regardless of state -- fine for a
+    quick on-screen invoice, but not accurate enough for GST filing, so GST
+    reports recompute properly from the real per-product HSN/GST% here."""
+    try:
+        items = json.loads(order['cart_items_json'] or '[]')
+    except Exception:
+        items = []
+    is_interstate = (order['consignee_state'] or '').strip().lower() != WAREHOUSE_STATE.strip().lower()
+    lines = []
+    for item in items:
+        sku = item.get('sku') or ''
+        qty = int(item.get('units') or item.get('qty') or 1)
+        price = float(item.get('price') or 0)
+        line_total = price * qty
+        if line_total <= 0:
+            continue
+        hsn_code = ''
+        gst_percent = 3.0
+        if sku:
+            prod = db.execute('SELECT hsn_code, gst_percent FROM products WHERE sku=?', (sku,)).fetchone()
+            if prod:
+                hsn_code = prod['hsn_code'] or ''
+                if prod['gst_percent']:
+                    gst_percent = float(prod['gst_percent'])
+        taxable_value = round(line_total / (1 + gst_percent / 100.0), 2)
+        line_gst = round(line_total - taxable_value, 2)
+        cgst = sgst = igst = 0.0
+        if is_interstate:
+            igst = line_gst
+        else:
+            cgst = round(line_gst / 2, 2)
+            sgst = round(line_gst - cgst, 2)
+        lines.append({
+            'sku': sku, 'name': item.get('name', ''), 'hsn_code': hsn_code, 'gst_percent': gst_percent,
+            'qty': qty, 'line_total': line_total, 'taxable_value': taxable_value,
+            'cgst': cgst, 'sgst': sgst, 'igst': igst,
+        })
+    return lines, is_interstate
+
+
+@app.route('/admin/reports/gst', methods=['GET'])
+@admin_required
+def admin_gst_reports():
+    from_date, to_date, range_start, range_end = resolve_gst_range(request)
+    db = get_db()
+    row = db.execute(
+        "SELECT COUNT(*) as cnt, COALESCE(SUM(total_amount),0) as revenue FROM order_shipping "
+        "WHERE created_at >= ? AND created_at <= ? AND status != 'cancelled'",
+        (range_start, range_end)
+    ).fetchone()
+    return render_template('admin/admin_gst_reports.html',
+        from_date=from_date, to_date=to_date,
+        order_count=row['cnt'] if row else 0,
+        revenue=float(row['revenue'] or 0) if row else 0.0)
+
+
+@app.route('/admin/reports/gst/invoices-pdf', methods=['GET'])
+@admin_required
+def admin_gst_invoices_pdf():
+    from flask import send_file
+    from_date, to_date, range_start, range_end = resolve_gst_range(request)
+    db = get_db()
+    orders = db.execute(
+        "SELECT * FROM order_shipping WHERE created_at >= ? AND created_at <= ? AND status != 'cancelled' ORDER BY created_at",
+        (range_start, range_end)
+    ).fetchall()
+
+    if not orders:
+        flash(f'No orders found between {from_date} and {to_date}.')
+        return redirect(url_for('admin_gst_reports', **{'from': from_date, 'to': to_date}))
+
+    MAX_INVOICES = 300
+    if len(orders) > MAX_INVOICES:
+        flash(f'That range has {len(orders)} orders -- please narrow it to {MAX_INVOICES} or fewer for a single PDF.')
+        return redirect(url_for('admin_gst_reports', **{'from': from_date, 'to': to_date}))
+
+    try:
+        from reportlab.lib.pagesizes import A4
+        from reportlab.lib.units import mm
+        from reportlab.lib import colors
+        from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+        from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, PageBreak
+
+        buf = io.BytesIO()
+        doc = SimpleDocTemplate(buf, pagesize=A4, topMargin=15 * mm, bottomMargin=15 * mm,
+                                 leftMargin=15 * mm, rightMargin=15 * mm)
+        styles = getSampleStyleSheet()
+        rose = colors.HexColor('#be185d')
+        gray = colors.HexColor('#6b7280')
+        normal_style = ParagraphStyle('Normal2', parent=styles['Normal'], fontSize=9, leading=13)
+        small_style = ParagraphStyle('Small', parent=styles['Normal'], fontSize=8, textColor=gray, leading=11)
+
+        elements = []
+        for idx, order in enumerate(orders):
+            lines, is_interstate = _compute_order_gst_lines(db, order)
+
+            header_data = [[
+                Paragraph('<b>Nari Nakhre&trade;</b><br/>by Mohini Cosmetics' +
+                          (f'<br/><font color="#1d4ed8">GSTIN: {DELHIVERY_SELLER_GST}</font>' if DELHIVERY_SELLER_GST else ''),
+                          normal_style),
+                Paragraph(f'<para align="right"><b><font color="#be185d" size=15>TAX INVOICE</font></b><br/>'
+                          f'Invoice No: {order["internal_order_id"]}<br/>'
+                          f'Date: {str(order["created_at"])[:10] if order["created_at"] else "N/A"}</para>', normal_style),
+            ]]
+            header_table = Table(header_data, colWidths=[90 * mm, 90 * mm])
+            header_table.setStyle(TableStyle([
+                ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+                ('LINEBELOW', (0, 0), (-1, -1), 1.2, rose),
+                ('BOTTOMPADDING', (0, 0), (-1, -1), 10),
+            ]))
+            elements.append(header_table)
+            elements.append(Spacer(1, 10))
+
+            seller_text = ('<b>SOLD BY</b><br/><b>Mohini Cosmetics</b> (Trading as: Nari Nakhre)<br/>' +
+                            (WAREHOUSE_ADDRESS or 'Jabalpur, Madhya Pradesh - 482001') +
+                            '<br/>Email: info@narinakhre.com' +
+                            (f'<br/>GSTIN: {DELHIVERY_SELLER_GST}' if DELHIVERY_SELLER_GST else ''))
+            buyer_text = (f"<b>BILLED &amp; SHIPPED TO</b><br/><b>{order['consignee_name']}</b><br/>"
+                          f"{order['consignee_address']}<br/>"
+                          f"{order['consignee_city']}, {order['consignee_state']} - {order['consignee_pincode']}<br/>"
+                          f"Phone: {order['consignee_phone']}" +
+                          (f"<br/>Email: {order['consignee_email']}" if order['consignee_email'] else ''))
+            parties_table = Table([[Paragraph(seller_text, normal_style), Paragraph(buyer_text, normal_style)]],
+                                   colWidths=[90 * mm, 90 * mm])
+            parties_table.setStyle(TableStyle([('VALIGN', (0, 0), (-1, -1), 'TOP')]))
+            elements.append(parties_table)
+            elements.append(Spacer(1, 14))
+
+            item_rows = [['#', 'Description', 'HSN', 'GST%', 'Taxable', 'GST Amt', 'Total']]
+            for i, line in enumerate(lines, start=1):
+                item_rows.append([
+                    str(i),
+                    Paragraph(f"{line['name']}<br/><font size=7 color='#9f9f9f'>SKU: {line['sku']} | Qty: {line['qty']}</font>", small_style),
+                    line['hsn_code'] or '-',
+                    f"{line['gst_percent']:.1f}%",
+                    f"Rs.{line['taxable_value']:.2f}",
+                    f"Rs.{(line['cgst'] + line['sgst'] + line['igst']):.2f}",
+                    f"Rs.{line['line_total']:.2f}",
+                ])
+            if not lines:
+                item_rows.append(['1', order['internal_order_id'], '-', '-', '-', '-',
+                                   f"Rs.{float(order['total_amount'] or 0):.2f}"])
+
+            items_table = Table(item_rows, colWidths=[8 * mm, 72 * mm, 16 * mm, 14 * mm, 24 * mm, 24 * mm, 24 * mm])
+            items_table.setStyle(TableStyle([
+                ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#fdf2f8')),
+                ('TEXTCOLOR', (0, 0), (-1, 0), colors.HexColor('#881337')),
+                ('FONTSIZE', (0, 0), (-1, -1), 8),
+                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                ('ALIGN', (2, 0), (-1, -1), 'RIGHT'),
+                ('GRID', (0, 0), (-1, -1), 0.4, colors.HexColor('#e5e7eb')),
+                ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+                ('TOPPADDING', (0, 0), (-1, -1), 5),
+                ('BOTTOMPADDING', (0, 0), (-1, -1), 5),
+            ]))
+            elements.append(items_table)
+            elements.append(Spacer(1, 12))
+
+            total_taxable = sum(l['taxable_value'] for l in lines)
+            total_cgst = sum(l['cgst'] for l in lines)
+            total_sgst = sum(l['sgst'] for l in lines)
+            total_igst = sum(l['igst'] for l in lines)
+            gst_label = 'Inter-State Supply (IGST)' if is_interstate else 'Intra-State Supply (CGST + SGST)'
+            if is_interstate:
+                gst_rows = [['Taxable Value', 'IGST', 'Total GST'],
+                            [f"Rs.{total_taxable:.2f}", f"Rs.{total_igst:.2f}", f"Rs.{total_igst:.2f}"]]
+            else:
+                gst_rows = [['Taxable Value', 'CGST', 'SGST', 'Total GST'],
+                            [f"Rs.{total_taxable:.2f}", f"Rs.{total_cgst:.2f}", f"Rs.{total_sgst:.2f}",
+                             f"Rs.{(total_cgst + total_sgst):.2f}"]]
+            gst_table = Table(gst_rows)
+            gst_table.setStyle(TableStyle([
+                ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#f8fafc')),
+                ('GRID', (0, 0), (-1, -1), 0.4, colors.HexColor('#e5e7eb')),
+                ('FONTSIZE', (0, 0), (-1, -1), 8),
+                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+            ]))
+            elements.append(Paragraph(f"<b>{gst_label}</b>", small_style))
+            elements.append(Spacer(1, 4))
+            elements.append(gst_table)
+            elements.append(Spacer(1, 12))
+
+            elements.append(Paragraph(
+                f"<b>Payment Mode:</b> {'Cash on Delivery' if order['payment_mode'] == 'COD' else 'Prepaid (Online)'}"
+                f"&nbsp;&nbsp;&nbsp; <b>Status:</b> {(order['status'] or '').title()}", small_style))
+            elements.append(Spacer(1, 4))
+            elements.append(Paragraph(
+                f"<para align='right'><b><font size=13 color='#be185d'>Amount Paid: Rs.{float(order['total_amount'] or 0):.2f}</font></b></para>",
+                normal_style))
+
+            if idx < len(orders) - 1:
+                elements.append(PageBreak())
+
+        doc.build(elements)
+        buf.seek(0)
+        filename = f"NariNakhre_Invoices_{from_date}_to_{to_date}.pdf"
+        return send_file(buf, mimetype='application/pdf', as_attachment=True, download_name=filename)
+    except Exception as e:
+        app.logger.error(f'Bulk invoice PDF export failed: {e}')
+        flash(f'Invoice PDF export failed: {e}')
+        return redirect(url_for('admin_gst_reports', **{'from': from_date, 'to': to_date}))
+
+
+@app.route('/admin/reports/gst/excel', methods=['GET'])
+@admin_required
+def admin_gst_report_excel():
+    import openpyxl
+    from openpyxl.styles import Font
+    from flask import send_file
+    from_date, to_date, range_start, range_end = resolve_gst_range(request)
+    db = get_db()
+    orders = db.execute(
+        "SELECT * FROM order_shipping WHERE created_at >= ? AND created_at <= ? AND status != 'cancelled' ORDER BY created_at",
+        (range_start, range_end)
+    ).fetchall()
+
+    if not orders:
+        flash(f'No orders found between {from_date} and {to_date}.')
+        return redirect(url_for('admin_gst_reports', **{'from': from_date, 'to': to_date}))
+
+    try:
+        hsn_summary = {}   # (hsn_code, gst_percent) -> totals
+        state_summary = {}  # consignee_state -> totals
+        sales_rows = []
+
+        for order in orders:
+            lines, is_interstate = _compute_order_gst_lines(db, order)
+            order_taxable = sum(l['taxable_value'] for l in lines)
+            order_cgst = sum(l['cgst'] for l in lines)
+            order_sgst = sum(l['sgst'] for l in lines)
+            order_igst = sum(l['igst'] for l in lines)
+
+            sales_rows.append([
+                str(order['created_at'])[:10] if order['created_at'] else '',
+                order['internal_order_id'], order['consignee_name'], order['consignee_state'],
+                order['consignee_pincode'], order['payment_mode'],
+                'Inter-State (IGST)' if is_interstate else 'Intra-State (CGST+SGST)',
+                round(order_taxable, 2), round(order_cgst, 2), round(order_sgst, 2), round(order_igst, 2),
+                round(order_cgst + order_sgst + order_igst, 2), float(order['total_amount'] or 0),
+            ])
+
+            for line in lines:
+                key = (line['hsn_code'] or 'N/A', line['gst_percent'])
+                h = hsn_summary.setdefault(key, {'qty': 0, 'taxable': 0.0, 'cgst': 0.0, 'sgst': 0.0, 'igst': 0.0})
+                h['qty'] += line['qty']
+                h['taxable'] += line['taxable_value']
+                h['cgst'] += line['cgst']
+                h['sgst'] += line['sgst']
+                h['igst'] += line['igst']
+
+            state_key = order['consignee_state'] or 'Unknown'
+            s = state_summary.setdefault(state_key, {'orders': 0, 'taxable': 0.0, 'cgst': 0.0, 'sgst': 0.0, 'igst': 0.0, 'total': 0.0})
+            s['orders'] += 1
+            s['taxable'] += order_taxable
+            s['cgst'] += order_cgst
+            s['sgst'] += order_sgst
+            s['igst'] += order_igst
+            s['total'] += float(order['total_amount'] or 0)
+
+        wb = openpyxl.Workbook()
+
+        ws1 = wb.active
+        ws1.title = 'Sales Register'
+        ws1.append(['Date', 'Invoice No', 'Customer', 'State', 'Pincode', 'Payment Mode', 'Supply Type',
+                    'Taxable Value', 'CGST', 'SGST', 'IGST', 'Total GST', 'Total Amount'])
+        for cell in ws1[1]:
+            cell.font = Font(bold=True)
+        for row in sales_rows:
+            ws1.append(row)
+
+        ws2 = wb.create_sheet('HSN Summary')
+        ws2.append(['HSN Code', 'GST %', 'Total Quantity', 'Taxable Value', 'CGST', 'SGST', 'IGST', 'Total Tax', 'Total Value'])
+        for cell in ws2[1]:
+            cell.font = Font(bold=True)
+        for (hsn_code, gst_percent), h in sorted(hsn_summary.items()):
+            total_tax = h['cgst'] + h['sgst'] + h['igst']
+            ws2.append([hsn_code, gst_percent, h['qty'], round(h['taxable'], 2), round(h['cgst'], 2),
+                        round(h['sgst'], 2), round(h['igst'], 2), round(total_tax, 2), round(h['taxable'] + total_tax, 2)])
+
+        ws3 = wb.create_sheet('State Summary')
+        ws3.append(['State', 'Orders', 'Taxable Value', 'CGST', 'SGST', 'IGST', 'Total Tax', 'Total Value'])
+        for cell in ws3[1]:
+            cell.font = Font(bold=True)
+        for state, s in sorted(state_summary.items(), key=lambda kv: -kv[1]['total']):
+            total_tax = s['cgst'] + s['sgst'] + s['igst']
+            ws3.append([state, s['orders'], round(s['taxable'], 2), round(s['cgst'], 2), round(s['sgst'], 2),
+                        round(s['igst'], 2), round(total_tax, 2), round(s['total'], 2)])
+
+        output = io.BytesIO()
+        wb.save(output)
+        output.seek(0)
+        filename = f"NariNakhre_GST_Report_{from_date}_to_{to_date}.xlsx"
+        return send_file(output, mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                         as_attachment=True, download_name=filename)
+    except Exception as e:
+        app.logger.error(f'GST excel report failed: {e}')
+        flash(f'GST report export failed: {e}')
+        return redirect(url_for('admin_gst_reports', **{'from': from_date, 'to': to_date}))
+
+
 @app.route('/admin/upload-excel', methods=['POST'])
 @admin_required
 def admin_upload_excel():

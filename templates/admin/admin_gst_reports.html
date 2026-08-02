@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GST Reports - Nari Nakhre Admin</title>
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+    <style>
+        .bg-rose-600 { background-color:#e11d48 !important; }
+        .bg-rose-600:hover, .hover\:bg-rose-700:hover { background-color:#be123c !important; }
+        .text-rose-600 { color:#e11d48 !important; }
+
+        .section-card { background:white; border-radius:14px; padding:22px; box-shadow:0 1px 4px rgba(0,0,0,0.08); margin-bottom:20px; }
+        .section-title { font-size:1rem; font-weight:800; color:#111827; margin-bottom:4px; }
+        .section-desc { font-size:0.82rem; color:#6b7280; margin-bottom:16px; }
+
+        .field label { display:block; font-size:0.72rem; font-weight:700; color:#6b7280; margin-bottom:3px; }
+        .field input { width:100%; border:1.5px solid #e5e7eb; border-radius:8px; padding:8px 10px; font-size:0.85rem; }
+
+        .stat-row { display:flex; gap:16px; flex-wrap:wrap; margin-bottom:16px; }
+        .stat-box { flex:1; min-width:140px; background:#fdf2f8; border-radius:10px; padding:12px 16px; }
+        .stat-box .label { font-size:0.7rem; font-weight:700; color:#be185d; text-transform:uppercase; }
+        .stat-box .value { font-size:1.3rem; font-weight:800; color:#111827; margin-top:2px; }
+
+        .report-card {
+            display:flex; align-items:center; gap:16px; padding:18px; border:1.5px solid #e5e7eb;
+            border-radius:12px; margin-bottom:14px; text-decoration:none;
+        }
+        .report-card:hover { border-color:#e11d48; background:#fff7f8; }
+        .report-icon { font-size:1.8rem; flex-shrink:0; }
+        .report-title { font-size:0.95rem; font-weight:800; color:#111827; }
+        .report-desc { font-size:0.8rem; color:#6b7280; margin-top:2px; }
+        .report-btn {
+            margin-left:auto; flex-shrink:0; font-size:0.8rem; font-weight:700; color:white;
+            background:#e11d48; border-radius:8px; padding:8px 16px;
+        }
+    </style>
+</head>
+<body class="bg-gray-100 min-h-screen">
+    <div class="max-w-3xl mx-auto p-6 md:p-8">
+        <div class="mb-6">
+            <a href="{{ url_for('admin_dashboard') }}" class="text-rose-600 text-sm font-semibold hover:underline">&larr; Back to Dashboard</a>
+            <h1 class="text-2xl font-extrabold text-gray-900 mt-1">🧾 GST Reports</h1>
+        </div>
+
+        {% with messages = get_flashed_messages() %}
+          {% if messages %}
+            <div class="mb-4">
+              {% for message in messages %}
+                <div class="bg-rose-50 border border-rose-300 text-rose-700 px-4 py-2 rounded mb-2 font-medium">{{ message }}</div>
+              {% endfor %}
+            </div>
+          {% endif %}
+        {% endwith %}
+
+        <div class="section-card">
+            <div class="section-title">Select Date Range</div>
+            <div class="section-desc">Reports below use this range. Defaults to the current month.</div>
+            <form method="get" action="{{ url_for('admin_gst_reports') }}" class="grid grid-cols-1 md:grid-cols-3 gap-3 items-end">
+                <div class="field"><label>From</label><input type="date" name="from" value="{{ from_date }}"></div>
+                <div class="field"><label>To</label><input type="date" name="to" value="{{ to_date }}"></div>
+                <button type="submit" class="bg-rose-600 text-white font-bold rounded-lg px-4 py-2 text-sm hover:bg-rose-700">Apply Range</button>
+            </form>
+
+            <div class="stat-row mt-5">
+                <div class="stat-box">
+                    <div class="label">Orders in Range</div>
+                    <div class="value">{{ order_count }}</div>
+                </div>
+                <div class="stat-box">
+                    <div class="label">Revenue in Range</div>
+                    <div class="value">₹{{ "%.0f"|format(revenue) }}</div>
+                </div>
+            </div>
+        </div>
+
+        <a href="{{ url_for('admin_gst_invoices_pdf', **{'from': from_date, 'to': to_date}) }}" class="report-card">
+            <span class="report-icon">📄</span>
+            <div>
+                <div class="report-title">Bulk Invoices (PDF)</div>
+                <div class="report-desc">Every invoice in this range, combined into a single downloadable PDF (up to 300 orders per download).</div>
+            </div>
+            <span class="report-btn">Download</span>
+        </a>
+
+        <a href="{{ url_for('admin_gst_report_excel', **{'from': from_date, 'to': to_date}) }}" class="report-card">
+            <span class="report-icon">📊</span>
+            <div>
+                <div class="report-title">GST Report (Excel)</div>
+                <div class="report-desc">Sales register, HSN-wise summary and state-wise summary — ready for monthly GST filing.</div>
+            </div>
+            <span class="report-btn">Download</span>
+        </a>
+    </div>
+</body>
+</html>
