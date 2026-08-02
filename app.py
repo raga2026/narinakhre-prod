@@ -13,7 +13,7 @@ from functools import wraps
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 
-from flask import Flask, g, jsonify, redirect, render_template, request, session, url_for, flash
+from flask import Flask, g, jsonify, redirect, render_template, request, session, url_for, flash, has_request_context
 from werkzeug.routing import BuildError
 from werkzeug.middleware.proxy_fix import ProxyFix
 from werkzeug.security import generate_password_hash, check_password_hash
@@ -1028,8 +1028,15 @@ def terms():
 
 @app.context_processor
 def inject_logged_in_user():
+    # This context processor runs for every render_template() call in the
+    # app, including ones fired from a background thread (campaign sends,
+    # welcome-email backfill) that only has an app context pushed via
+    # `with app.app_context():`, not a real request context. `session` is
+    # request-context-bound, so touching it without checking first raises
+    # "RuntimeError: Working outside of request context" -- there's no
+    # logged-in visitor to report in that case anyway, so None is correct.
     ctx = {'recaptcha_site_key': RECAPTCHA_SITE_KEY}
-    if not session.get('user_id'):
+    if not has_request_context() or not session.get('user_id'):
         ctx['logged_in_user'] = None
     else:
         ctx['logged_in_user'] = {'name': session.get('user_name'), 'email': session.get('user_email')}
