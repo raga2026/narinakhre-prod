@@ -450,6 +450,15 @@ def initialize_database_if_needed():
             user_id BIGINT REFERENCES users(id),
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )''',
+        '''CREATE TABLE IF NOT EXISTS admin_events (
+            id BIGSERIAL PRIMARY KEY,
+            event_type TEXT NOT NULL,
+            title TEXT NOT NULL,
+            detail TEXT,
+            related_id TEXT,
+            is_read INTEGER DEFAULT 0,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )''',
         '''CREATE TABLE IF NOT EXISTS user_addresses (
             id BIGSERIAL PRIMARY KEY,
             user_id BIGINT NOT NULL REFERENCES users(id),
@@ -1550,6 +1559,7 @@ def google_callback():
             send_welcome_email(db_conn, user_row['id'], name, email)
         except Exception as e:
             app.logger.warning(f'Welcome email failed for {email}: {e}')
+        notify_admin_new_user(db_conn, name, email, 'Google')
 
     return redirect(session.pop('post_login_redirect', '/'))
 
@@ -1623,6 +1633,7 @@ def email_signup():
         send_welcome_email(db_conn, user_row['id'], full_name, email)
     except Exception as e:
         app.logger.warning(f'Welcome email failed for {email}: {e}')
+    notify_admin_new_user(db_conn, full_name, email, 'Email')
 
     redirect_url = session.pop('post_login_redirect', None) or url_for('index')
     return jsonify({'status': 'success', 'redirect': redirect_url})
@@ -1932,6 +1943,40 @@ def log_product_event(db_conn, sku, event_type, visitor_id=None, source=None):
         app.logger.warning(f'log_product_event failed for {sku}/{event_type}: {e}')
 
 
+def log_admin_event(db_conn, event_type, title, detail=None, related_id=None):
+    """Best-effort admin Inbox notification -- must never break the page or
+    background job that triggered it. Feeds /admin/events (new user
+    registrations, new orders, orders stuck unaccepted past a threshold,
+    deliveries)."""
+    try:
+        db_conn.execute(
+            'INSERT INTO admin_events (event_type, title, detail, related_id) VALUES (?,?,?,?)',
+            (event_type, title, detail, str(related_id) if related_id is not None else None)
+        )
+        db_conn.commit()
+    except Exception as e:
+        app.logger.warning(f'log_admin_event failed for {event_type}: {e}')
+
+
+def notify_admin_new_user(db_conn, name, email, method):
+    """Logs an admin Inbox event AND emails the admin whenever someone new
+    registers (both explicitly requested) -- separate try/excepts so a
+    failure in one never blocks the other, and neither ever blocks login."""
+    try:
+        log_admin_event(db_conn, 'new_user', f'New user registered: {name or email}',
+                         detail=f'{email} — signed up via {method}')
+    except Exception as e:
+        app.logger.warning(f'notify_admin_new_user event log failed: {e}')
+    try:
+        send_contact_email_async(
+            ADMIN_EMAIL, f'New user registered: {name or email}',
+            f'A new user just created an account on Nari Nakhre.\n\n'
+            f'Name: {name}\nEmail: {email}\nSign-up method: {method}\n'
+        )
+    except Exception as e:
+        app.logger.warning(f'Admin new-user email failed: {e}')
+
+
 def get_variant_sku(master_sku, size):
     return f"{master_sku}-{size.replace('.', '')}"
 
@@ -2122,6 +2167,112 @@ def _supabase_keepalive():
 if os.environ.get('SERVER_SOFTWARE', '').startswith('gunicorn') or True:
     _t = threading.Thread(target=_supabase_keepalive, daemon=True)
     _t.start()
+
+
+# --- ORDER WATCHDOG: notify admin when orders sit unaccepted too long, and
+# detect delivery. There's no Delhivery webhook wired up (confirmed -- see
+# api_track_shipment, which only fetches live status on demand), so polling
+# is the only way this app finds out an order has shipped/delivered. ---
+ORDER_UNACCEPTED_THRESHOLDS_HOURS = [2, 6, 12, 24]
+ORDER_WATCHDOG_INTERVAL_SECONDS = 15 * 60  # 15 minutes
+
+
+def _parse_db_timestamp(value):
+    if not value:
+        return None
+    if isinstance(value, datetime):
+        return value.replace(tzinfo=None)
+    try:
+        return datetime.fromisoformat(str(value).replace('Z', '+00:00')).replace(tzinfo=None)
+    except Exception:
+        return None
+
+
+def _check_unaccepted_orders(db):
+    """Fires an admin Inbox event (once per order per threshold, checked via
+    a prior admin_events row) for any order that's been sitting unaccepted
+    longer than each of the 2h/6h/12h/24h thresholds."""
+    now = datetime.now()
+    unaccepted = db.execute(
+        "SELECT internal_order_id, consignee_name, total_amount, created_at FROM order_shipping "
+        "WHERE status IN ('pending', 'paid', 'cod_confirmed')"
+    ).fetchall()
+    for order in unaccepted:
+        created_at = _parse_db_timestamp(order.get('created_at'))
+        if not created_at:
+            continue
+        age_hours = (now - created_at).total_seconds() / 3600
+        for threshold in ORDER_UNACCEPTED_THRESHOLDS_HOURS:
+            if age_hours < threshold:
+                continue
+            event_type = f'order_not_accepted_{threshold}h'
+            already = db.execute(
+                'SELECT id FROM admin_events WHERE event_type=? AND related_id=?',
+                (event_type, order['internal_order_id'])
+            ).fetchone()
+            if already:
+                continue
+            log_admin_event(
+                db, event_type,
+                f"Order {order['internal_order_id']} not accepted for {threshold}+ hours",
+                detail=f"{order.get('consignee_name') or ''} — ₹{float(order.get('total_amount') or 0):.0f}",
+                related_id=order['internal_order_id']
+            )
+
+
+def _check_delivered_orders(db):
+    """Polls Delhivery for any order with a waybill that isn't already
+    marked delivered/cancelled, and fires an admin Inbox event + updates
+    status the moment Delhivery reports it delivered."""
+    provider = get_shipping_provider(
+        app.config.get('SHIPPING_PROVIDER', 'mock'),
+        api_token=app.config.get('DELHIVERY_API_KEY', '')
+    )
+    in_transit = db.execute(
+        "SELECT internal_order_id, consignee_name, delhivery_waybill FROM order_shipping "
+        "WHERE delhivery_waybill IS NOT NULL AND delhivery_waybill != '' "
+        "AND status NOT IN ('delivered', 'cancelled')"
+    ).fetchall()
+    for order in in_transit:
+        waybill = order.get('delhivery_waybill')
+        if not waybill:
+            continue
+        try:
+            result = provider.track_shipment(waybill)
+        except Exception as e:
+            app.logger.warning(f'Order watchdog: tracking fetch failed for {waybill}: {e}')
+            continue
+        if not result or not result.get('status'):
+            continue
+        current_status = (result.get('current_status') or '').lower()
+        status_type = (result.get('status_type') or '').upper()
+        if 'deliver' in current_status or status_type == 'DL':
+            db.execute("UPDATE order_shipping SET status='delivered' WHERE internal_order_id=?",
+                       (order['internal_order_id'],))
+            db.commit()
+            log_admin_event(
+                db, 'order_delivered', f"Order delivered: {order['internal_order_id']}",
+                detail=order.get('consignee_name') or '', related_id=order['internal_order_id']
+            )
+
+
+def _order_watchdog():
+    """Background thread: periodically checks for orders stuck unaccepted
+    past 2/6/12/24 hours, and polls Delhivery for delivery confirmation."""
+    _time.sleep(60)  # let the app finish starting up first
+    while True:
+        try:
+            with app.app_context():
+                db = get_db()
+                _check_unaccepted_orders(db)
+                _check_delivered_orders(db)
+        except Exception as e:
+            app.logger.warning(f'Order watchdog run failed: {e}')
+        _time.sleep(ORDER_WATCHDOG_INTERVAL_SECONDS)
+
+
+_watchdog_thread = threading.Thread(target=_order_watchdog, daemon=True)
+_watchdog_thread.start()
 
 
 # --- ROUTES: HOME & CATEGORY ---
@@ -2604,6 +2755,12 @@ def checkout_process():
     )
     conn.commit()
     session.pop('applied_credits', None)
+
+    log_admin_event(
+        conn, 'new_order', f'New order: {internal_order_id}',
+        detail=f'{cleaned_name} — ₹{total_amount:.0f} ({payment_mode})',
+        related_id=internal_order_id
+    )
 
     # Delhivery shipment created AFTER payment — not here
     waybill = None
@@ -3277,6 +3434,8 @@ def place_order():
         (order_id, name, phone, f"{address_line1}, {address_line2}", city, state, pincode, waybill)
     )
     conn.commit()
+    log_admin_event(conn, 'new_order', f'New order: {order_id}',
+                     detail=f'{name} — ₹{amount:.0f} ({payment_mode})', related_id=order_id)
 
     # Finalize coupon usage if one was applied to this order
     applied_coupon = session.get('applied_coupon')
@@ -3756,7 +3915,56 @@ def admin_dashboard():
     db = get_db()
     products = db.execute('SELECT * FROM products ORDER BY id DESC').fetchall()
     quotes = db.execute('SELECT * FROM quotes ORDER BY id DESC').fetchall()
-    return render_template('admin/admin.html', products=products, quotes=quotes)
+    unread_row = db.execute('SELECT COUNT(*) as cnt FROM admin_events WHERE is_read=0').fetchone()
+    unread_events = unread_row['cnt'] if unread_row else 0
+    return render_template('admin/admin.html', products=products, quotes=quotes, unread_events=unread_events)
+
+
+EVENT_TYPE_LABELS = {
+    'new_user': ('👤', 'New User', '#2563eb'),
+    'new_order': ('🛒', 'New Order', '#16a34a'),
+    'order_delivered': ('📦', 'Delivered', '#9333ea'),
+    'order_not_accepted_2h': ('⏰', 'Not Accepted 2h+', '#f59e0b'),
+    'order_not_accepted_6h': ('⏰', 'Not Accepted 6h+', '#f97316'),
+    'order_not_accepted_12h': ('⏰', 'Not Accepted 12h+', '#ea580c'),
+    'order_not_accepted_24h': ('🚨', 'Not Accepted 24h+', '#dc2626'),
+}
+
+
+@app.route('/admin/events', methods=['GET'])
+@admin_required
+def admin_events():
+    db = get_db()
+    type_filter = (request.args.get('type') or '').strip()
+    if type_filter:
+        rows = db.execute(
+            'SELECT * FROM admin_events WHERE event_type=? ORDER BY id DESC LIMIT 200', (type_filter,)
+        ).fetchall()
+    else:
+        rows = db.execute('SELECT * FROM admin_events ORDER BY id DESC LIMIT 200').fetchall()
+
+    events = []
+    for r in rows:
+        icon, label, color = EVENT_TYPE_LABELS.get(r['event_type'], ('🔔', r['event_type'], '#6b7280'))
+        e = dict(r)
+        e['icon'], e['label'], e['color'] = icon, label, color
+        events.append(e)
+
+    unread_row = db.execute('SELECT COUNT(*) as cnt FROM admin_events WHERE is_read=0').fetchone()
+    unread_count = unread_row['cnt'] if unread_row else 0
+
+    return render_template('admin/admin_events.html', events=events, unread_count=unread_count,
+                            type_filter=type_filter, event_type_labels=EVENT_TYPE_LABELS)
+
+
+@app.route('/admin/events/mark-read', methods=['POST'])
+@admin_required
+def admin_events_mark_read():
+    db = get_db()
+    db.execute('UPDATE admin_events SET is_read=1 WHERE is_read=0')
+    db.commit()
+    flash('All notifications marked as read.')
+    return redirect(url_for('admin_events'))
 
 
 def resolve_insight_range(req):

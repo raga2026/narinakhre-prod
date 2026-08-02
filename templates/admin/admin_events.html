@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Inbox - Nari Nakhre Admin</title>
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+    <style>
+        .bg-rose-600 { background-color:#e11d48 !important; }
+        .bg-rose-600:hover, .hover\:bg-rose-700:hover { background-color:#be123c !important; }
+        .text-rose-600 { color:#e11d48 !important; }
+
+        .section-card { background:white; border-radius:14px; padding:22px; box-shadow:0 1px 4px rgba(0,0,0,0.08); }
+        .event-row {
+            display:flex; align-items:flex-start; gap:12px; padding:14px 12px;
+            border-bottom:1px solid #f3f4f6; border-left:4px solid transparent;
+        }
+        .event-row:last-child { border-bottom:none; }
+        .event-row.unread { background:#fff7f8; border-left-color:#e11d48; }
+        .event-icon {
+            width:36px; height:36px; border-radius:10px; background:#f3f4f6;
+            display:flex; align-items:center; justify-content:center; font-size:1.1rem; flex-shrink:0;
+        }
+        .event-body { flex:1; min-width:0; }
+        .event-title { font-size:0.88rem; font-weight:700; color:#111827; }
+        .event-detail { font-size:0.78rem; color:#6b7280; margin-top:2px; }
+        .event-meta { display:flex; align-items:center; gap:8px; margin-top:4px; }
+        .event-label {
+            font-size:0.65rem; font-weight:800; text-transform:uppercase; letter-spacing:0.04em;
+            padding:2px 8px; border-radius:999px; color:#fff;
+        }
+        .event-time { font-size:0.7rem; color:#9ca3af; }
+        .filter-chip {
+            font-size:0.75rem; font-weight:700; color:#374151; background:white;
+            border:1.5px solid #e5e7eb; border-radius:999px; padding:5px 12px; text-decoration:none;
+        }
+        .filter-chip.active { background:#e11d48; border-color:#e11d48; color:white; }
+    </style>
+</head>
+<body class="bg-gray-100 min-h-screen">
+    <div class="max-w-4xl mx-auto p-6 md:p-8">
+        <div class="flex justify-between items-center mb-6">
+            <div>
+                <a href="{{ url_for('admin_dashboard') }}" class="text-rose-600 text-sm font-semibold hover:underline">&larr; Back to Dashboard</a>
+                <h1 class="text-2xl font-extrabold text-gray-900 mt-1">
+                    Inbox
+                    {% if unread_count > 0 %}<span class="text-base font-bold text-rose-600">({{ unread_count }} unread)</span>{% endif %}
+                </h1>
+            </div>
+            {% if unread_count > 0 %}
+            <form method="POST" action="{{ url_for('admin_events_mark_read') }}">
+                <button type="submit" class="bg-rose-600 text-white text-sm font-bold px-4 py-2 rounded-lg hover:bg-rose-700 transition">
+                    Mark All Read
+                </button>
+            </form>
+            {% endif %}
+        </div>
+
+        {% with messages = get_flashed_messages() %}
+          {% if messages %}
+            <div class="mb-4">
+              {% for message in messages %}
+                <div class="bg-rose-50 border border-rose-300 text-rose-700 px-4 py-2 rounded mb-2 font-medium">{{ message }}</div>
+              {% endfor %}
+            </div>
+          {% endif %}
+        {% endwith %}
+
+        <div class="flex flex-wrap gap-2 mb-4">
+            <a href="{{ url_for('admin_events') }}" class="filter-chip {% if not type_filter %}active{% endif %}">All</a>
+            {% for etype, info in event_type_labels.items() %}
+            <a href="{{ url_for('admin_events', type=etype) }}" class="filter-chip {% if type_filter == etype %}active{% endif %}">{{ info[0] }} {{ info[1] }}</a>
+            {% endfor %}
+        </div>
+
+        <div class="section-card" style="padding:8px 14px;">
+            {% if events and events|length > 0 %}
+            {% for e in events %}
+            <div class="event-row {% if not e.is_read %}unread{% endif %}">
+                <div class="event-icon">{{ e.icon }}</div>
+                <div class="event-body">
+                    <div class="event-title">{{ e.title }}</div>
+                    {% if e.detail %}<div class="event-detail">{{ e.detail }}</div>{% endif %}
+                    <div class="event-meta">
+                        <span class="event-label" style="background:{{ e.color }};">{{ e.label }}</span>
+                        <span class="event-time">{{ e.created_at }}</span>
+                    </div>
+                </div>
+            </div>
+            {% endfor %}
+            {% else %}
+            <div class="text-sm text-gray-400 py-10 text-center">No notifications yet.</div>
+            {% endif %}
+        </div>
+    </div>
+</body>
+</html>

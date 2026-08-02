@@ -44,6 +44,7 @@
             padding: 1px 7px; border-radius: 999px; flex-shrink: 0;
         }
         .console-nav-item.active .console-nav-badge { background: #fecdd3; color: #9f1239; }
+        .console-nav-badge.unread { background: #e11d48; color: #fff; }
         .console-sidebar-footer {
             padding: 10px; border-top: 1px solid #f3f4f6;
             display: flex; flex-direction: column; gap: 2px;
@@ -108,6 +109,11 @@
         <aside class="console-sidebar">
             <div class="console-brand">Nari Nakhre<span>™</span> Admin</div>
             <nav class="console-nav" aria-label="Admin sections">
+                <a href="{{ url_for('admin_events') }}" class="console-nav-item">
+                    <span class="console-nav-icon" aria-hidden="true">🔔</span>
+                    <span class="console-nav-label">Notifications</span>
+                    {% if unread_events and unread_events > 0 %}<span class="console-nav-badge unread">{{ unread_events }}</span>{% endif %}
+                </a>
                 <button type="button" class="console-nav-item active" data-section="products" onclick="showSection('products')" aria-current="page">
                     <span class="console-nav-icon" aria-hidden="true">📦</span>
                     <span class="console-nav-label">Products</span>
