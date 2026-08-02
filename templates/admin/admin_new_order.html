@@ -1,0 +1,472 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>New Order - Nari Nakhre Admin</title>
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+    <style>
+        .bg-rose-600 { background-color:#e11d48 !important; }
+        .bg-rose-600:hover, .hover\:bg-rose-700:hover { background-color:#be123c !important; }
+        .text-rose-600 { color:#e11d48 !important; }
+
+        .section-card { background:white; border-radius:14px; padding:20px; box-shadow:0 1px 4px rgba(0,0,0,0.08); margin-bottom:20px; }
+        .section-title { font-size:1rem; font-weight:800; color:#111827; margin-bottom:12px; }
+
+        .step-indicator { display:flex; gap:8px; margin-bottom:20px; }
+        .step-dot {
+            flex:1; text-align:center; padding:10px 8px; border-radius:10px; font-size:0.8rem;
+            font-weight:700; color:#9ca3af; background:#f3f4f6;
+        }
+        .step-dot.active { background:#fff1f2; color:#e11d48; }
+        .step-dot.done { background:#dcfce7; color:#15803d; }
+
+        .field label { display:block; font-size:0.72rem; font-weight:700; color:#6b7280; margin-bottom:3px; }
+        .field input, .field textarea, .field select {
+            width:100%; border:1.5px solid #e5e7eb; border-radius:8px; padding:7px 10px; font-size:0.85rem;
+        }
+        .field input:read-only { background:#f9fafb; color:#6b7280; }
+
+        .mode-btn {
+            font-size:0.78rem; font-weight:700; padding:6px 14px; border-radius:999px;
+            border:1.5px solid #e5e7eb; background:white; color:#374151; cursor:pointer;
+        }
+        .mode-btn.active { background:#e11d48; border-color:#e11d48; color:white; }
+
+        .search-result-row {
+            display:flex; align-items:center; justify-content:space-between; gap:10px;
+            padding:8px 10px; border-bottom:1px solid #f3f4f6;
+        }
+        .search-result-row:last-child { border-bottom:none; }
+        .btn-add-mini {
+            font-size:0.72rem; font-weight:700; color:white; background:#e11d48;
+            border:none; border-radius:8px; padding:5px 12px; cursor:pointer; flex-shrink:0;
+        }
+        .btn-add-mini:hover { background:#be123c; }
+
+        table.items-table { width:100%; font-size:0.85rem; border-collapse:collapse; }
+        table.items-table th { text-align:left; font-size:0.7rem; font-weight:700; color:#6b7280; text-transform:uppercase; padding:6px 8px; border-bottom:2px solid #f3f4f6; }
+        table.items-table td { padding:8px; border-bottom:1px solid #f3f4f6; }
+
+        .nav-btn { font-size:0.85rem; font-weight:700; padding:10px 22px; border-radius:10px; cursor:pointer; border:none; }
+        .nav-btn.primary { background:#e11d48; color:white; }
+        .nav-btn.primary:hover { background:#be123c; }
+        .nav-btn.primary:disabled { background:#fca5a5; cursor:not-allowed; }
+        .nav-btn.secondary { background:#f3f4f6; color:#374151; }
+    </style>
+</head>
+<body class="bg-gray-100 min-h-screen">
+    <div class="max-w-4xl mx-auto p-6 md:p-8">
+        <div class="flex justify-between items-center mb-6">
+            <div>
+                <a href="{{ url_for('admin_orders') }}" class="text-rose-600 text-sm font-semibold hover:underline">&larr; Back to Orders</a>
+                <h1 class="text-2xl font-extrabold text-gray-900 mt-1">🧾 New Order</h1>
+            </div>
+        </div>
+
+        <div class="step-indicator">
+            <div class="step-dot active" id="step-dot-1">1. Items</div>
+            <div class="step-dot" id="step-dot-2">2. Customer</div>
+            <div class="step-dot" id="step-dot-3">3. Review</div>
+        </div>
+
+        <!-- ══ STEP 1: ITEMS ══ -->
+        <div id="step-1">
+            <div class="section-card">
+                <div class="section-title">Search Existing Products</div>
+                <input type="text" id="product-search-input" placeholder="Search by name or SKU…"
+                       class="w-full border-1.5 border-gray-200 rounded-lg px-3 py-2 text-sm" style="border:1.5px solid #e5e7eb;">
+                <div id="product-search-results" class="mt-2"></div>
+            </div>
+
+            <div class="section-card">
+                <div class="flex items-center justify-between">
+                    <div class="section-title" style="margin-bottom:0;">Or Add a New Item</div>
+                    <button type="button" class="mode-btn" onclick="toggleNewItemForm()" id="new-item-toggle">+ New Item</button>
+                </div>
+                <div id="new-item-form" hidden class="mt-4">
+                    <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
+                        <div class="field" style="grid-column:span 2;"><label>Item Name *</label><input type="text" id="ni-name"></div>
+                        <div class="field"><label>MRP (₹)</label><input type="number" min="0" step="0.01" id="ni-mrp"></div>
+                        <div class="field"><label>Selling Price (₹) *</label><input type="number" min="0" step="0.01" id="ni-selling"></div>
+                        <div class="field"><label>Cost Price (₹)</label><input type="number" min="0" step="0.01" id="ni-cost"></div>
+                        <div class="field"><label>Wholesale Price (₹)</label><input type="number" min="0" step="0.01" id="ni-wholesale"></div>
+                        <div class="field"><label>Quantity (stock)</label><input type="number" min="0" id="ni-qty"></div>
+                        <div class="field"><label>GST Percentage</label><input type="number" min="0" max="100" step="0.01" id="ni-gst" value="3"></div>
+                        <div class="field"><label>HSN Code</label><input type="text" id="ni-hsn"></div>
+                    </div>
+                    <button type="button" class="nav-btn primary mt-3" onclick="addNewItemToOrder()">+ Add to Order</button>
+                    <p class="text-xs text-gray-400 mt-2">This creates a real product in your catalogue (published, in-stock at the quantity above) — not just a one-off line item.</p>
+                </div>
+            </div>
+
+            <div class="section-card">
+                <div class="section-title">Items in This Order</div>
+                <table class="items-table">
+                    <thead>
+                        <tr><th>Item</th><th>Price</th><th>Qty</th><th>Line Total</th><th></th></tr>
+                    </thead>
+                    <tbody id="order-items-body">
+                        <tr><td colspan="5" class="text-center text-gray-400 py-4">No items added yet.</td></tr>
+                    </tbody>
+                </table>
+                <div class="text-right font-bold mt-3">Subtotal: <span id="order-subtotal">₹0</span></div>
+            </div>
+
+            <div class="flex justify-end">
+                <button type="button" class="nav-btn primary" id="next-to-customer" disabled onclick="goToStep(2)">Next: Customer &rarr;</button>
+            </div>
+        </div>
+
+        <!-- ══ STEP 2: CUSTOMER ══ -->
+        <div id="step-2" hidden>
+            <div class="section-card">
+                <div class="flex gap-2 mb-4">
+                    <button type="button" class="mode-btn active" id="mode-btn-search" onclick="setCustomerMode('search')">Search Existing Customer</button>
+                    <button type="button" class="mode-btn" id="mode-btn-new" onclick="setCustomerMode('new')">+ New Customer</button>
+                </div>
+
+                <div id="customer-search-panel">
+                    <input type="text" id="user-search-input" placeholder="Search by name or email…"
+                           class="w-full rounded-lg px-3 py-2 text-sm" style="border:1.5px solid #e5e7eb;">
+                    <div id="user-search-results" class="mt-2"></div>
+                </div>
+
+                <div id="customer-details-panel" hidden class="mt-4 pt-4" style="border-top:1px solid #f3f4f6;">
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+                        <div class="field"><label>Name *</label><input type="text" id="cust-name"></div>
+                        <div class="field"><label>Email *</label><input type="email" id="cust-email"></div>
+                        <div class="field"><label>Mobile *</label><input type="text" id="cust-phone"></div>
+                        <div class="field"><label>Pincode *</label><input type="text" id="cust-pincode" maxlength="6"></div>
+                    </div>
+                    <div class="field mt-3"><label>Address *</label><textarea id="cust-address" rows="2"></textarea></div>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-3 mt-3">
+                        <div class="field"><label>City *</label><input type="text" id="cust-city"></div>
+                        <div class="field"><label>State *</label><input type="text" id="cust-state"></div>
+                    </div>
+                    <div id="pincode-resolve-status" class="text-xs text-gray-400 mt-2"></div>
+                    <p class="text-xs text-gray-400 mt-2" id="default-password-note">New accounts get the default password <strong>narinakhre</strong> — the customer can sign in and change it any time.</p>
+                </div>
+            </div>
+
+            <div class="flex justify-between">
+                <button type="button" class="nav-btn secondary" onclick="goToStep(1)">&larr; Back</button>
+                <button type="button" class="nav-btn primary" id="next-to-review" disabled onclick="goToStep(3)">Next: Review &rarr;</button>
+            </div>
+        </div>
+
+        <!-- ══ STEP 3: REVIEW ══ -->
+        <div id="step-3" hidden>
+            <div class="section-card">
+                <div class="section-title">Items</div>
+                <div id="review-items"></div>
+                <div class="text-right font-bold mt-2">Subtotal: <span id="review-subtotal">₹0</span></div>
+            </div>
+            <div class="section-card">
+                <div class="section-title">Ship To</div>
+                <div id="review-customer" class="text-sm text-gray-700"></div>
+            </div>
+            <div class="section-card">
+                <div class="section-title">Payment Mode</div>
+                <select id="payment-mode" class="field" style="border:1.5px solid #e5e7eb;border-radius:8px;padding:8px 12px;font-size:0.85rem;">
+                    <option value="COD">Cash on Delivery (COD)</option>
+                    <option value="Prepaid">Prepaid</option>
+                </select>
+            </div>
+
+            <div id="submit-error" hidden class="bg-rose-50 border border-rose-300 text-rose-700 px-4 py-2 rounded mb-3 text-sm font-medium"></div>
+
+            <div class="flex justify-between">
+                <button type="button" class="nav-btn secondary" onclick="goToStep(2)">&larr; Back</button>
+                <button type="button" class="nav-btn primary" id="create-order-btn" onclick="submitOrder()">Create Order</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        var orderItems = [];
+        var lastProductResults = [];
+        var lastUserResults = [];
+        var customerMode = 'search';
+        var selectedExistingUserId = null;
+        var productSearchTimer = null;
+        var userSearchTimer = null;
+
+        function escapeHtml(str) {
+            return String(str == null ? '' : str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+        }
+
+        /* ── Step navigation ── */
+        function goToStep(n) {
+            [1,2,3].forEach(function (i) {
+                document.getElementById('step-' + i).hidden = (i !== n);
+                var dot = document.getElementById('step-dot-' + i);
+                dot.classList.toggle('active', i === n);
+                dot.classList.toggle('done', i < n);
+            });
+            if (n === 3) renderReview();
+            window.scrollTo({top: 0, behavior: 'smooth'});
+        }
+
+        /* ── Product search ── */
+        document.getElementById('product-search-input').addEventListener('input', function () {
+            clearTimeout(productSearchTimer);
+            var q = this.value.trim();
+            if (q.length < 2) { document.getElementById('product-search-results').innerHTML = ''; return; }
+            productSearchTimer = setTimeout(function () { runProductSearch(q); }, 250);
+        });
+        function runProductSearch(q) {
+            fetch('/admin/api/product-search?q=' + encodeURIComponent(q))
+                .then(function (r) { return r.json(); })
+                .then(function (d) { renderProductResults(d.products || []); });
+        }
+        function renderProductResults(products) {
+            lastProductResults = products;
+            var el = document.getElementById('product-search-results');
+            if (!products.length) { el.innerHTML = '<div class="text-xs text-gray-400 py-2">No matches.</div>'; return; }
+            el.innerHTML = products.map(function (p, i) {
+                return '<div class="search-result-row">' +
+                    '<div><div class="font-bold text-sm">' + escapeHtml(p.name) + '</div>' +
+                    '<div class="text-xs text-gray-500">' + escapeHtml(p.sku) + ' &middot; ₹' + p.retail_price + ' &middot; Stock: ' + p.stock_total + '</div></div>' +
+                    '<button type="button" class="btn-add-mini" onclick="addExistingItem(' + i + ')">+ Add</button>' +
+                    '</div>';
+            }).join('');
+        }
+        function addExistingItem(idx) {
+            var p = lastProductResults[idx];
+            if (!p) return;
+            var existing = null;
+            for (var i = 0; i < orderItems.length; i++) {
+                if (!orderItems[i].is_new && orderItems[i].id === p.id) { existing = orderItems[i]; break; }
+            }
+            if (existing) { existing.units += 1; }
+            else { orderItems.push({id: p.id, sku: p.sku, name: p.name, price: p.retail_price, units: 1, is_new: false}); }
+            renderOrderItems();
+        }
+
+        /* ── New item form ── */
+        function toggleNewItemForm() {
+            var form = document.getElementById('new-item-form');
+            form.hidden = !form.hidden;
+        }
+        function addNewItemToOrder() {
+            var name = document.getElementById('ni-name').value.trim();
+            var retail_price = parseFloat(document.getElementById('ni-selling').value) || 0;
+            if (!name) { alert('Please enter an item name.'); return; }
+            if (!retail_price) { alert('Please enter a selling price.'); return; }
+            orderItems.push({
+                is_new: true, name: name,
+                mrp_price: parseFloat(document.getElementById('ni-mrp').value) || 0,
+                price: retail_price,
+                purchase_cost: parseFloat(document.getElementById('ni-cost').value) || 0,
+                wholesale_price: parseFloat(document.getElementById('ni-wholesale').value) || 0,
+                stock_total: parseInt(document.getElementById('ni-qty').value) || 0,
+                gst_percent: parseFloat(document.getElementById('ni-gst').value) || 3,
+                hsn_code: document.getElementById('ni-hsn').value.trim(),
+                units: 1
+            });
+            ['ni-name','ni-mrp','ni-selling','ni-cost','ni-wholesale','ni-qty','ni-hsn'].forEach(function (id) {
+                document.getElementById(id).value = '';
+            });
+            document.getElementById('ni-gst').value = '3';
+            document.getElementById('new-item-form').hidden = true;
+            renderOrderItems();
+        }
+
+        /* ── Order items table ── */
+        function renderOrderItems() {
+            var tbody = document.getElementById('order-items-body');
+            if (!orderItems.length) {
+                tbody.innerHTML = '<tr><td colspan="5" class="text-center text-gray-400 py-4">No items added yet.</td></tr>';
+            } else {
+                tbody.innerHTML = orderItems.map(function (item, i) {
+                    return '<tr>' +
+                        '<td>' + escapeHtml(item.name) + (item.is_new ? ' <span class="text-xs font-bold" style="color:#2563eb;">(New)</span>' : '') + '</td>' +
+                        '<td>₹' + item.price.toFixed(0) + '</td>' +
+                        '<td><input type="number" min="1" value="' + item.units + '" onchange="updateItemQty(' + i + ', this.value)" style="width:60px;border:1.5px solid #e5e7eb;border-radius:6px;padding:3px 6px;font-size:0.82rem;"></td>' +
+                        '<td>₹' + (item.price * item.units).toFixed(0) + '</td>' +
+                        '<td><button type="button" onclick="removeItem(' + i + ')" style="color:#dc2626;font-size:0.72rem;font-weight:700;">Remove</button></td>' +
+                        '</tr>';
+                }).join('');
+            }
+            var subtotal = orderItems.reduce(function (sum, item) { return sum + item.price * item.units; }, 0);
+            document.getElementById('order-subtotal').textContent = '₹' + subtotal.toFixed(0);
+            document.getElementById('next-to-customer').disabled = orderItems.length === 0;
+        }
+        function updateItemQty(i, val) {
+            var qty = parseInt(val) || 1;
+            orderItems[i].units = Math.max(qty, 1);
+            renderOrderItems();
+        }
+        function removeItem(i) {
+            orderItems.splice(i, 1);
+            renderOrderItems();
+        }
+
+        /* ── Customer mode + search ── */
+        function setCustomerMode(mode) {
+            customerMode = mode;
+            document.getElementById('mode-btn-search').classList.toggle('active', mode === 'search');
+            document.getElementById('mode-btn-new').classList.toggle('active', mode === 'new');
+            document.getElementById('customer-search-panel').hidden = (mode !== 'search');
+            if (mode === 'new') {
+                selectedExistingUserId = null;
+                ['cust-name','cust-email','cust-phone','cust-address','cust-city','cust-state','cust-pincode'].forEach(function (id) {
+                    document.getElementById(id).value = '';
+                });
+                document.getElementById('cust-name').readOnly = false;
+                document.getElementById('cust-email').readOnly = false;
+                document.getElementById('customer-details-panel').hidden = false;
+            } else {
+                document.getElementById('customer-details-panel').hidden = true;
+            }
+            updateNextToReviewState();
+        }
+        document.getElementById('user-search-input').addEventListener('input', function () {
+            clearTimeout(userSearchTimer);
+            var q = this.value.trim();
+            if (q.length < 2) { document.getElementById('user-search-results').innerHTML = ''; return; }
+            userSearchTimer = setTimeout(function () { runUserSearch(q); }, 250);
+        });
+        function runUserSearch(q) {
+            fetch('/admin/api/user-search?q=' + encodeURIComponent(q))
+                .then(function (r) { return r.json(); })
+                .then(function (d) { renderUserResults(d.users || []); });
+        }
+        function renderUserResults(users) {
+            lastUserResults = users;
+            var el = document.getElementById('user-search-results');
+            if (!users.length) { el.innerHTML = '<div class="text-xs text-gray-400 py-2">No matches.</div>'; return; }
+            el.innerHTML = users.map(function (u, i) {
+                return '<div class="search-result-row">' +
+                    '<div><div class="font-bold text-sm">' + escapeHtml(u.name) + '</div><div class="text-xs text-gray-500">' + escapeHtml(u.email) + '</div></div>' +
+                    '<button type="button" class="btn-add-mini" onclick="selectExistingUser(' + i + ')">Select</button>' +
+                    '</div>';
+            }).join('');
+        }
+        function selectExistingUser(idx) {
+            var u = lastUserResults[idx];
+            if (!u) return;
+            selectedExistingUserId = u.id;
+            var addr = u.address || {};
+            document.getElementById('cust-name').value = addr.name || u.name || '';
+            document.getElementById('cust-email').value = u.email || '';
+            document.getElementById('cust-name').readOnly = true;
+            document.getElementById('cust-email').readOnly = true;
+            document.getElementById('cust-phone').value = addr.phone || '';
+            document.getElementById('cust-address').value = addr.address_line || '';
+            document.getElementById('cust-city').value = addr.city || '';
+            document.getElementById('cust-state').value = addr.state || '';
+            document.getElementById('cust-pincode').value = addr.pincode || '';
+            document.getElementById('pincode-resolve-status').textContent = addr.address_line
+                ? 'Using this customer’s saved address — edit any field if needed.'
+                : 'No saved address on file — please fill in shipping details below.';
+            document.getElementById('default-password-note').hidden = true;
+            document.getElementById('customer-details-panel').hidden = false;
+            updateNextToReviewState();
+        }
+
+        /* ── Pincode → city/state ── */
+        function resolvePincode() {
+            var pin = document.getElementById('cust-pincode').value.trim();
+            var statusEl = document.getElementById('pincode-resolve-status');
+            if (!/^\d{6}$/.test(pin)) return;
+            statusEl.textContent = 'Looking up city/state…';
+            fetch('/api/delhivery/check/' + pin)
+                .then(function (r) { return r.json(); })
+                .then(function (d) {
+                    if (d.city) document.getElementById('cust-city').value = d.city;
+                    if (d.state) document.getElementById('cust-state').value = d.state;
+                    statusEl.textContent = d.city ? ('Resolved: ' + d.city + ', ' + d.state) : 'Could not auto-resolve — please enter city/state manually.';
+                    updateNextToReviewState();
+                })
+                .catch(function () { statusEl.textContent = 'Could not auto-resolve — please enter city/state manually.'; });
+        }
+        document.getElementById('cust-pincode').addEventListener('blur', resolvePincode);
+
+        function updateNextToReviewState() {
+            var ids = ['cust-name','cust-phone','cust-address','cust-city','cust-state','cust-pincode'];
+            var ready = ids.every(function (id) { return document.getElementById(id).value.trim().length > 0; });
+            document.getElementById('next-to-review').disabled = !ready;
+        }
+        ['cust-name','cust-email','cust-phone','cust-address','cust-city','cust-state','cust-pincode'].forEach(function (id) {
+            document.getElementById(id).addEventListener('input', updateNextToReviewState);
+        });
+
+        /* ── Review + submit ── */
+        function renderReview() {
+            document.getElementById('review-items').innerHTML = orderItems.map(function (item) {
+                return '<div class="flex justify-between text-sm py-1"><span>' + escapeHtml(item.name) + ' &times; ' + item.units + '</span><span>₹' + (item.price * item.units).toFixed(0) + '</span></div>';
+            }).join('');
+            var subtotal = orderItems.reduce(function (sum, item) { return sum + item.price * item.units; }, 0);
+            document.getElementById('review-subtotal').textContent = '₹' + subtotal.toFixed(0);
+
+            document.getElementById('review-customer').innerHTML =
+                '<div class="font-bold">' + escapeHtml(document.getElementById('cust-name').value) + '</div>' +
+                '<div>' + escapeHtml(document.getElementById('cust-phone').value) + ' &middot; ' + escapeHtml(document.getElementById('cust-email').value) + '</div>' +
+                '<div>' + escapeHtml(document.getElementById('cust-address').value) + ', ' +
+                escapeHtml(document.getElementById('cust-city').value) + ', ' + escapeHtml(document.getElementById('cust-state').value) +
+                ' - ' + escapeHtml(document.getElementById('cust-pincode').value) + '</div>';
+        }
+
+        function submitOrder() {
+            var btn = document.getElementById('create-order-btn');
+            btn.disabled = true;
+            btn.textContent = 'Creating…';
+            document.getElementById('submit-error').hidden = true;
+
+            var customerPayload = {
+                name: document.getElementById('cust-name').value.trim(),
+                email: document.getElementById('cust-email').value.trim(),
+                phone: document.getElementById('cust-phone').value.trim(),
+                address: document.getElementById('cust-address').value.trim(),
+                city: document.getElementById('cust-city').value.trim(),
+                state: document.getElementById('cust-state').value.trim(),
+                pincode: document.getElementById('cust-pincode').value.trim()
+            };
+            if (selectedExistingUserId) { customerPayload.existing_user_id = selectedExistingUserId; }
+
+            var payload = {
+                items: orderItems.map(function (item) {
+                    if (item.is_new) {
+                        return {
+                            is_new: true, name: item.name, mrp_price: item.mrp_price, retail_price: item.price,
+                            purchase_cost: item.purchase_cost, wholesale_price: item.wholesale_price,
+                            stock_total: item.stock_total, gst_percent: item.gst_percent, hsn_code: item.hsn_code,
+                            units: item.units
+                        };
+                    }
+                    return {id: item.id, price: item.price, units: item.units};
+                }),
+                customer: customerPayload,
+                payment_mode: document.getElementById('payment-mode').value
+            };
+
+            fetch('/admin/orders/create', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify(payload)
+            })
+            .then(function (r) { return r.json(); })
+            .then(function (d) {
+                if (d.status === 'success') {
+                    window.location.href = d.redirect_url;
+                } else {
+                    btn.disabled = false;
+                    btn.textContent = 'Create Order';
+                    var errEl = document.getElementById('submit-error');
+                    errEl.textContent = d.message || 'Could not create the order.';
+                    errEl.hidden = false;
+                }
+            })
+            .catch(function () {
+                btn.disabled = false;
+                btn.textContent = 'Create Order';
+                var errEl = document.getElementById('submit-error');
+                errEl.textContent = 'Network error, please try again.';
+                errEl.hidden = false;
+            });
+        }
+    </script>
+</body>
+</html>

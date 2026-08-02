@@ -4974,6 +4974,242 @@ def admin_orders():
     return render_template('admin/admin_orders.html', orders=orders, stats=stats, current_status=current_status)
 
 
+@app.route('/admin/api/product-search')
+@admin_required
+def admin_api_product_search():
+    q = (request.args.get('q') or '').strip()
+    if len(q) < 2:
+        return jsonify({'products': []})
+    db = get_db()
+    like = f'%{q.lower()}%'
+    rows = db.execute(
+        "SELECT id, sku, name, mrp_price, retail_price, gst_percent, hsn_code, stock_total "
+        "FROM products WHERE is_active=1 AND (LOWER(name) LIKE ? OR LOWER(sku) LIKE ?) "
+        "ORDER BY name LIMIT 15",
+        (like, like)
+    ).fetchall()
+    products = [{
+        'id': r['id'], 'sku': r['sku'], 'name': r['name'],
+        'mrp_price': float(r['mrp_price'] or 0), 'retail_price': float(r['retail_price'] or 0),
+        'gst_percent': float(r['gst_percent'] or 0), 'hsn_code': r['hsn_code'] or '',
+        'stock_total': r['stock_total'] or 0,
+    } for r in rows]
+    return jsonify({'products': products})
+
+
+@app.route('/admin/api/user-search')
+@admin_required
+def admin_api_user_search():
+    q = (request.args.get('q') or '').strip()
+    if len(q) < 2:
+        return jsonify({'users': []})
+    db = get_db()
+    like = f'%{q.lower()}%'
+    rows = db.execute(
+        "SELECT id, name, email FROM users WHERE LOWER(COALESCE(name,'')) LIKE ? OR LOWER(COALESCE(email,'')) LIKE ? "
+        "ORDER BY name LIMIT 15",
+        (like, like)
+    ).fetchall()
+    users = []
+    for r in rows:
+        addr = db.execute(
+            'SELECT recipient_name, phone, address_line, city, state, pincode FROM user_addresses '
+            'WHERE user_id=? ORDER BY is_default DESC, created_at DESC LIMIT 1', (r['id'],)
+        ).fetchone()
+        users.append({
+            'id': r['id'], 'name': r['name'] or '', 'email': r['email'] or '',
+            'address': {
+                'name': addr['recipient_name'] or '', 'phone': addr['phone'] or '',
+                'address_line': addr['address_line'] or '', 'city': addr['city'] or '',
+                'state': addr['state'] or '', 'pincode': addr['pincode'] or ''
+            } if addr else None
+        })
+    return jsonify({'users': users})
+
+
+@app.route('/admin/orders/new')
+@admin_required
+def admin_new_order():
+    return render_template('admin/admin_new_order.html')
+
+
+@app.route('/admin/orders/create', methods=['POST'])
+@admin_required
+def admin_create_order():
+    """Manual order entry for admin -- phone/in-person orders. Mirrors
+    checkout_process()'s order_shipping insert exactly (same columns), but
+    is driven by an explicit item list + customer payload instead of
+    session['cart'], since there's no shopping-session context here."""
+    db = get_db()
+    data = request.get_json(silent=True) or {}
+    items = data.get('items') or []
+    customer = data.get('customer') or {}
+    payment_mode = (data.get('payment_mode') or 'COD').strip()
+    if payment_mode not in ('COD', 'Prepaid'):
+        payment_mode = 'COD'
+
+    if not items:
+        return jsonify({'status': 'error', 'message': 'Add at least one item to the order.'}), 400
+
+    # ── Resolve items: existing products by id, or create a new product
+    # record on the fly for inline "new item" entries. ──
+    display_cart = []
+    for item in items:
+        if item.get('is_new'):
+            name = (item.get('name') or '').strip()
+            if not name:
+                return jsonify({'status': 'error', 'message': 'New item is missing a name.'}), 400
+            mrp_price = float(item.get('mrp_price') or 0)
+            retail_price = float(item.get('retail_price') or 0)
+            purchase_cost = float(item.get('purchase_cost') or 0)
+            wholesale_price = float(item.get('wholesale_price') or 0)
+            stock_total = int(item.get('stock_total') or 0)
+            gst_percent = float(item.get('gst_percent') or 3)
+            hsn_code = (item.get('hsn_code') or '').strip()
+
+            sku = None
+            for _ in range(5):
+                candidate = 'QA' + datetime.now().strftime('%y%m%d%H%M%S%f')[:12]
+                if not db.execute('SELECT id FROM products WHERE sku=?', (candidate,)).fetchone():
+                    sku = candidate
+                    break
+            if not sku:
+                return jsonify({'status': 'error', 'message': 'Could not generate a unique SKU, please try again.'}), 500
+
+            slug = re.sub(r'[^a-z0-9]+', '-', name.lower()).strip('-')
+            model_number = generate_model_number(db)
+
+            db.execute(
+                '''INSERT INTO products
+                   (sku, name, category, retail_price, mrp_price, wholesale_price,
+                    purchase_cost, stock_total, hsn_code, gst_percent, slug,
+                    status, is_active, model_number, updated_at)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,NOW())''',
+                (sku, name, 'Uncategorized', retail_price, mrp_price, wholesale_price,
+                 purchase_cost, stock_total, hsn_code, gst_percent, slug,
+                 'published', 1, model_number)
+            )
+            db.commit()
+            units = max(int(item.get('units') or 1), 1)
+            display_cart.append({'sku': sku, 'name': name, 'price': retail_price, 'units': units, 'size': ''})
+        else:
+            prod = db.execute('SELECT sku, name, retail_price FROM products WHERE id=?', (item.get('id'),)).fetchone()
+            if not prod:
+                return jsonify({'status': 'error', 'message': 'One of the selected items could not be found.'}), 400
+            units = max(int(item.get('units') or 1), 1)
+            price = float(item.get('price')) if item.get('price') is not None else float(prod['retail_price'] or 0)
+            display_cart.append({'sku': prod['sku'], 'name': prod['name'], 'price': price, 'units': units, 'size': ''})
+
+    # ── Resolve the customer: existing user (with their saved address, or
+    # address fields supplied inline if they have none saved), or a brand
+    # new account created with the "narinakhre" default password. ──
+    user_id = None
+    if customer.get('existing_user_id'):
+        user_row = db.execute('SELECT id, name, email FROM users WHERE id=?', (customer['existing_user_id'],)).fetchone()
+        if not user_row:
+            return jsonify({'status': 'error', 'message': 'Selected customer not found.'}), 400
+        user_id = user_row['id']
+        consignee_name = (customer.get('name') or user_row['name'] or '').strip()
+        consignee_email = (customer.get('email') or user_row['email'] or '').strip()
+        consignee_phone = (customer.get('phone') or '').strip()
+        consignee_address = (customer.get('address') or '').strip()
+        consignee_city = (customer.get('city') or '').strip()
+        consignee_state = (customer.get('state') or '').strip()
+        consignee_pincode = (customer.get('pincode') or '').strip()
+    else:
+        name = (customer.get('name') or '').strip()
+        email = (customer.get('email') or '').strip().lower()
+        phone = (customer.get('phone') or '').strip()
+        address = (customer.get('address') or '').strip()
+        city = (customer.get('city') or '').strip()
+        state = (customer.get('state') or '').strip()
+        pincode = (customer.get('pincode') or '').strip()
+        if not (name and email and phone and address and pincode and city and state):
+            return jsonify({'status': 'error',
+                             'message': 'Please fill in all new-customer fields (name, email, mobile, address, pincode) and let the city/state resolve from the pincode.'}), 400
+
+        existing_user = db.execute('SELECT id FROM users WHERE LOWER(email)=?', (email,)).fetchone()
+        if existing_user:
+            user_id = existing_user['id']
+        else:
+            password_hash = generate_password_hash('narinakhre')
+            new_code = generate_referral_code(db)
+            db.execute(
+                'INSERT INTO users (name, email, password_hash, referral_code) VALUES (?,?,?,?)',
+                (name, email, password_hash, new_code)
+            )
+            db.commit()
+            new_user_row = db.execute('SELECT id FROM users WHERE LOWER(email)=?', (email,)).fetchone()
+            user_id = new_user_row['id']
+            notify_admin_new_user(db, name, email, 'Admin (manual order)')
+
+            try:
+                db.execute(
+                    'INSERT INTO user_addresses (user_id, nickname, recipient_name, phone, email, address_line, city, state, pincode, is_default) '
+                    'VALUES (?,?,?,?,?,?,?,?,?,1)',
+                    (user_id, 'Home', name, phone, email, address, city, state, pincode)
+                )
+                db.commit()
+            except Exception as e:
+                app.logger.warning(f'Could not save address for manually created user {user_id}: {e}')
+
+        consignee_name, consignee_email, consignee_phone = name, email, phone
+        consignee_address, consignee_city, consignee_state, consignee_pincode = address, city, state, pincode
+
+    if not (consignee_name and consignee_phone and consignee_address and consignee_city and consignee_state and consignee_pincode):
+        return jsonify({'status': 'error',
+                         'message': 'Missing shipping details for this customer -- address, city, state and pincode are all required.'}), 400
+
+    def sanitize_for_delhivery(value):
+        cleaned = value or ''
+        for char in ['#', '&', '%', ';']:
+            cleaned = cleaned.replace(char, ' ')
+        return ' '.join(cleaned.split())
+
+    cleaned_name = sanitize_for_delhivery(consignee_name)
+    cleaned_address = sanitize_for_delhivery(consignee_address)
+
+    internal_order_id = f"NN-SHP-{datetime.now().strftime('%Y%m%d%H%M%S')}-{(consignee_phone or '0000')[-4:]}"
+    subtotal_amount = sum(item['price'] * item['units'] for item in display_cart)
+    gst_breakdown = calculate_inclusive_gst(display_cart, 0.0, subtotal_amount)
+    total_amount = subtotal_amount
+    cart_items_json = json.dumps(display_cart)
+
+    db.execute(
+        '''INSERT INTO order_shipping
+           (user_id, consignee_name, consignee_phone, consignee_email,
+            consignee_address, consignee_city, consignee_state, consignee_pincode,
+            internal_order_id, status, payment_mode,
+            subtotal_amount, gst_amount, cgst_amount, sgst_amount,
+            discount_amount, actual_shipping_cost, total_amount,
+            coupon_code, cart_items_json, credits_redeemed)
+           VALUES (?,?,?,?,?,?,?,?,?,'pending',?,?,?,?,?,?,?,?,?,?,?)''',
+        (user_id, cleaned_name, consignee_phone, consignee_email,
+         cleaned_address, consignee_city, consignee_state, consignee_pincode,
+         internal_order_id, payment_mode,
+         subtotal_amount, gst_breakdown['total_gst'], gst_breakdown['cgst'], gst_breakdown['sgst'],
+         0.0, 0.0, total_amount,
+         None, cart_items_json, 0.0)
+    )
+    db.commit()
+
+    log_admin_event(
+        db, 'new_order', f'New order (manual): {internal_order_id}',
+        detail=f'{cleaned_name} — ₹{total_amount:.0f} ({payment_mode})',
+        related_id=internal_order_id
+    )
+
+    verify = db.execute('SELECT id FROM order_shipping WHERE internal_order_id=?', (internal_order_id,)).fetchone()
+    if not verify:
+        return jsonify({'status': 'error', 'message': 'Order could not be saved. Please try again.'}), 500
+
+    return jsonify({
+        'status': 'success',
+        'internal_order_id': internal_order_id,
+        'redirect_url': url_for('admin_orders')
+    })
+
+
 @app.route('/admin/orders/<int:order_id>/invoice')
 @admin_required
 def admin_order_invoice(order_id):
