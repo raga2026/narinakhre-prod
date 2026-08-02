@@ -37,6 +37,10 @@
 
         .range-btn { padding:6px 14px; border-radius:999px; font-size:0.8rem; font-weight:700; border:1.5px solid #e5e7eb; color:#374151; background:white; }
         .range-btn.active { background:#e11d48; border-color:#e11d48; color:white; }
+        .nav-link { font-size:0.82rem; font-weight:700; color:#6b7280; padding:6px 12px; border-radius:999px; }
+        .nav-link.active { background:#fff1f2; color:#e11d48; }
+        .view-all-link { font-size:0.75rem; font-weight:700; color:#e11d48; text-decoration:none; }
+        .view-all-link:hover { text-decoration:underline; }
     </style>
 </head>
 <body class="bg-gray-100 min-h-screen">
@@ -46,6 +50,12 @@
                 <a href="{{ url_for('admin_dashboard') }}" class="text-rose-600 text-sm font-semibold hover:underline">&larr; Back to Dashboard</a>
                 <h1 class="text-2xl font-extrabold text-gray-900 mt-1">Analytics</h1>
             </div>
+        </div>
+
+        <div class="flex gap-2 mb-6">
+            <a href="{{ url_for('admin_analytics') }}" class="nav-link active">Overview</a>
+            <a href="{{ url_for('admin_visitors', range=range_mode, **({'from': from_date, 'to': to_date} if range_mode == 'custom' else {})) }}" class="nav-link">Visitors</a>
+            <a href="{{ url_for('admin_product_visits', range=range_mode, **({'from': from_date, 'to': to_date} if range_mode == 'custom' else {})) }}" class="nav-link">Product Visits</a>
         </div>
 
         <!-- ── Order Volume ── -->
@@ -124,7 +134,10 @@
                 </div>
 
                 <div>
-                    <div class="text-xs font-extrabold text-gray-500 uppercase tracking-wide mb-2">Most Viewed</div>
+                    <div class="flex items-center justify-between mb-2">
+                        <div class="text-xs font-extrabold text-gray-500 uppercase tracking-wide">Most Viewed</div>
+                        <a href="{{ url_for('admin_product_visits', range=range_mode, **({'from': from_date, 'to': to_date} if range_mode == 'custom' else {})) }}" class="view-all-link">View All &rarr;</a>
+                    </div>
                     {% if top_viewed and top_viewed|length > 0 %}
                         {% set max_views = top_viewed[0].count %}
                         {% for p in top_viewed %}

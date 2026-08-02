@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Product Visits - Nari Nakhre Admin</title>
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+    <style>
+        .bg-rose-600 { background-color:#e11d48 !important; }
+        .bg-rose-600:hover, .hover\:bg-rose-700:hover { background-color:#be123c !important; }
+        .text-rose-600 { color:#e11d48 !important; }
+
+        .section-card { background:white; border-radius:14px; padding:22px; box-shadow:0 1px 4px rgba(0,0,0,0.08); margin-bottom:24px; }
+        .section-title { font-size:1.05rem; font-weight:800; color:#111827; margin-bottom:4px; }
+        .section-sub { font-size:0.78rem; color:#6b7280; margin-bottom:16px; }
+
+        .rank-row { display:flex; align-items:center; gap:10px; padding:10px 0; border-bottom:1px solid #f3f4f6; }
+        .rank-row:last-child { border-bottom:none; }
+        .rank-num { width:24px; font-size:0.75rem; font-weight:800; color:#9ca3af; flex-shrink:0; }
+        .rank-body { flex:1; min-width:0; }
+        .rank-name { font-size:0.85rem; font-weight:700; color:#1f2937; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+        .rank-bar-wrap { background:#f3f4f6; border-radius:999px; height:6px; margin-top:5px; overflow:hidden; }
+        .rank-bar { background:#2563eb; height:100%; border-radius:999px; }
+        .rank-sources { margin-top:6px; display:flex; flex-wrap:wrap; gap:5px; }
+        .source-badge { font-size:0.66rem; font-weight:700; color:#4b5563; background:#f3f4f6; border-radius:999px; padding:2px 8px; }
+        .rank-counts { flex-shrink:0; text-align:right; min-width:110px; }
+        .rank-views { font-size:0.85rem; font-weight:800; color:#111827; }
+        .rank-unique { font-size:0.7rem; color:#6b7280; }
+
+        .nav-link { font-size:0.82rem; font-weight:700; color:#6b7280; padding:6px 12px; border-radius:999px; }
+        .nav-link.active { background:#fff1f2; color:#e11d48; }
+    </style>
+</head>
+<body class="bg-gray-100 min-h-screen">
+    <div class="max-w-4xl mx-auto p-6 md:p-8">
+        <div class="flex justify-between items-center mb-6">
+            <div>
+                <a href="{{ url_for('admin_dashboard') }}" class="text-rose-600 text-sm font-semibold hover:underline">&larr; Back to Dashboard</a>
+                <h1 class="text-2xl font-extrabold text-gray-900 mt-1">Product Visits</h1>
+            </div>
+        </div>
+
+        <div class="flex gap-2 mb-6">
+            <a href="{{ url_for('admin_analytics', range=range_mode, **({'from': from_date, 'to': to_date} if range_mode == 'custom' else {})) }}" class="nav-link">Overview</a>
+            <a href="{{ url_for('admin_visitors', range=range_mode, **({'from': from_date, 'to': to_date} if range_mode == 'custom' else {})) }}" class="nav-link">Visitors</a>
+            <a href="{{ url_for('admin_product_visits') }}" class="nav-link active">Product Visits</a>
+        </div>
+
+        <div class="section-card">
+            <div class="section-title">All Products — Page Views</div>
+            <div class="section-sub">
+                {{ from_date }} to {{ to_date }}. Every product with at least one view, ranked by total views,
+                with unique visitors and where the traffic came from.
+            </div>
+
+            <form method="GET" class="flex flex-wrap items-end gap-3 border-t pt-4 mb-4">
+                <input type="hidden" name="range" value="custom">
+                <div>
+                    <label class="block text-xs font-bold text-gray-600 mb-1">From</label>
+                    <input type="date" name="from" value="{{ from_date }}" class="border rounded-lg px-3 py-1.5 text-sm" required>
+                </div>
+                <div>
+                    <label class="block text-xs font-bold text-gray-600 mb-1">To</label>
+                    <input type="date" name="to" value="{{ to_date }}" class="border rounded-lg px-3 py-1.5 text-sm" required>
+                </div>
+                <button type="submit" class="bg-rose-600 text-white text-sm font-bold px-5 py-1.5 rounded-lg hover:bg-rose-700 transition">
+                    Apply Custom Range
+                </button>
+            </form>
+
+            {% if products and products|length > 0 %}
+            {% for p in products %}
+            <div class="rank-row">
+                <div class="rank-num">{{ loop.index }}</div>
+                <div class="rank-body">
+                    <div class="rank-name">
+                        {% if p.id %}<a href="/retail/product/{{ p.id }}" target="_blank" class="hover:underline">{{ p.name }}</a>{% else %}{{ p.name }}{% endif %}
+                    </div>
+                    <div class="rank-bar-wrap"><div class="rank-bar" style="width:{{ (p.views / max_views * 100)|round(0)|int if max_views else 0 }}%;"></div></div>
+                    {% if p.sources and p.sources|length > 0 %}
+                    <div class="rank-sources">
+                        {% for s in p.sources[:5] %}
+                        <span class="source-badge">{{ s.source }}: {{ s.count }}</span>
+                        {% endfor %}
+                    </div>
+                    {% endif %}
+                </div>
+                <div class="rank-counts">
+                    <div class="rank-views">{{ p.views }} view{{ 's' if p.views != 1 }}</div>
+                    <div class="rank-unique">{{ p.unique_views }} unique visitor{{ 's' if p.unique_views != 1 }}</div>
+                </div>
+            </div>
+            {% endfor %}
+            {% else %}
+            <div class="text-xs text-gray-400 py-4">No page views logged in this range yet.</div>
+            {% endif %}
+        </div>
+    </div>
+</body>
+</html>

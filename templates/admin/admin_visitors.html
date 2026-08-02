@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Visitors - Nari Nakhre Admin</title>
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+    <style>
+        .bg-rose-600 { background-color:#e11d48 !important; }
+        .bg-rose-600:hover, .hover\:bg-rose-700:hover { background-color:#be123c !important; }
+        .text-rose-600 { color:#e11d48 !important; }
+
+        .stat-card { background:white; border-radius:14px; padding:20px; box-shadow:0 1px 4px rgba(0,0,0,0.08); }
+        .stat-card .stat-label { font-size:0.75rem; font-weight:700; color:#6b7280; text-transform:uppercase; letter-spacing:0.04em; }
+        .stat-card .stat-count { font-size:2rem; font-weight:800; color:#111827; margin:6px 0 2px; }
+        .stat-card .stat-sub { font-size:0.78rem; color:#e11d48; font-weight:700; }
+
+        .section-card { background:white; border-radius:14px; padding:22px; box-shadow:0 1px 4px rgba(0,0,0,0.08); margin-bottom:24px; }
+        .section-title { font-size:1.05rem; font-weight:800; color:#111827; margin-bottom:4px; }
+        .section-sub { font-size:0.78rem; color:#6b7280; margin-bottom:16px; }
+
+        .rank-row { display:flex; align-items:center; gap:10px; padding:8px 0; border-bottom:1px solid #f3f4f6; }
+        .rank-row:last-child { border-bottom:none; }
+        .rank-num { width:20px; font-size:0.75rem; font-weight:800; color:#9ca3af; flex-shrink:0; }
+        .rank-body { flex:1; min-width:0; }
+        .rank-name { font-size:0.82rem; font-weight:600; color:#1f2937; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+        .rank-bar-wrap { background:#f3f4f6; border-radius:999px; height:6px; margin-top:4px; overflow:hidden; }
+        .rank-bar { background:#e11d48; height:100%; border-radius:999px; }
+        .rank-count { font-size:0.8rem; font-weight:800; color:#111827; flex-shrink:0; min-width:110px; text-align:right; }
+        .rank-count .sub { font-size:0.68rem; color:#6b7280; font-weight:600; display:block; }
+
+        .nav-link { font-size:0.82rem; font-weight:700; color:#6b7280; padding:6px 12px; border-radius:999px; }
+        .nav-link.active { background:#fff1f2; color:#e11d48; }
+
+        .hour-chart { display:flex; align-items:flex-end; gap:2px; height:90px; }
+        .hour-bar-wrap { flex:1; display:flex; flex-direction:column; align-items:center; justify-content:flex-end; height:100%; }
+        .hour-bar { width:100%; background:#2563eb; border-radius:3px 3px 0 0; min-height:2px; }
+        .hour-labels { display:flex; gap:2px; margin-top:4px; }
+        .hour-label { flex:1; text-align:center; font-size:0.55rem; color:#9ca3af; }
+    </style>
+</head>
+<body class="bg-gray-100 min-h-screen">
+    <div class="max-w-6xl mx-auto p-6 md:p-8">
+        <div class="flex justify-between items-center mb-6">
+            <div>
+                <a href="{{ url_for('admin_dashboard') }}" class="text-rose-600 text-sm font-semibold hover:underline">&larr; Back to Dashboard</a>
+                <h1 class="text-2xl font-extrabold text-gray-900 mt-1">Visitors</h1>
+            </div>
+        </div>
+
+        <div class="flex gap-2 mb-6">
+            <a href="{{ url_for('admin_analytics', range=range_mode, **({'from': from_date, 'to': to_date} if range_mode == 'custom' else {})) }}" class="nav-link">Overview</a>
+            <a href="{{ url_for('admin_visitors') }}" class="nav-link active">Visitors</a>
+            <a href="{{ url_for('admin_product_visits', range=range_mode, **({'from': from_date, 'to': to_date} if range_mode == 'custom' else {})) }}" class="nav-link">Product Visits</a>
+        </div>
+
+        <div class="section-card">
+            <div class="section-title">Traffic Overview</div>
+            <div class="section-sub">{{ from_date }} to {{ to_date }}. Counted from real page loads (storefront pages only, not admin or AJAX calls).</div>
+
+            <div class="grid grid-cols-1 sm:grid-cols-4 gap-4 mb-5">
+                <div class="stat-card">
+                    <div class="stat-label">Unique Visitors</div>
+                    <div class="stat-count">{{ totals.visitors }}</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Total Page Views</div>
+                    <div class="stat-count">{{ totals.views }}</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Busiest Day</div>
+                    <div class="stat-count" style="font-size:1.3rem;">{{ peak_day.day if peak_day else '—' }}</div>
+                    {% if peak_day %}<div class="stat-sub">{{ peak_day.visitors }} visitor{{ 's' if peak_day.visitors != 1 }}</div>{% endif %}
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Busiest Hour</div>
+                    <div class="stat-count" style="font-size:1.3rem;">{{ '%02d:00'|format(peak_hour.hour) if peak_hour else '—' }}</div>
+                    {% if peak_hour %}<div class="stat-sub">{{ peak_hour.views }} view{{ 's' if peak_hour.views != 1 }}</div>{% endif %}
+                </div>
+            </div>
+
+            <form method="GET" class="flex flex-wrap items-end gap-3 border-t pt-4">
+                <input type="hidden" name="range" value="custom">
+                <div>
+                    <label class="block text-xs font-bold text-gray-600 mb-1">From</label>
+                    <input type="date" name="from" value="{{ from_date }}" class="border rounded-lg px-3 py-1.5 text-sm" required>
+                </div>
+                <div>
+                    <label class="block text-xs font-bold text-gray-600 mb-1">To</label>
+                    <input type="date" name="to" value="{{ to_date }}" class="border rounded-lg px-3 py-1.5 text-sm" required>
+                </div>
+                <button type="submit" class="bg-rose-600 text-white text-sm font-bold px-5 py-1.5 rounded-lg hover:bg-rose-700 transition">
+                    Apply Custom Range
+                </button>
+            </form>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <!-- ── Daily trend ── -->
+            <div class="section-card">
+                <div class="section-title">Visitors by Day</div>
+                <div class="section-sub">Which date had the most unique visitors.</div>
+                {% if daily_data and daily_data|length > 0 %}
+                {% for d in daily_data %}
+                <div class="rank-row">
+                    <div class="rank-body">
+                        <div class="rank-name">{{ d.day }}{% if peak_day and d.day == peak_day.day %} 🔥{% endif %}</div>
+                        <div class="rank-bar-wrap"><div class="rank-bar" style="width:{{ (d.visitors / max_daily_visitors * 100)|round(0)|int if max_daily_visitors else 0 }}%;"></div></div>
+                    </div>
+                    <div class="rank-count">{{ d.visitors }} visitors<span class="sub">{{ d.views }} views</span></div>
+                </div>
+                {% endfor %}
+                {% else %}
+                <div class="text-xs text-gray-400 py-4">No visits logged in this range yet.</div>
+                {% endif %}
+            </div>
+
+            <!-- ── Hourly breakdown ── -->
+            <div class="section-card">
+                <div class="section-title">Views by Hour of Day</div>
+                <div class="section-sub">What time of day tends to be busiest, summed across the whole range.</div>
+                {% if hourly_data and hourly_data|length > 0 %}
+                <div class="hour-chart">
+                    {% for h in hourly_data %}
+                    <div class="hour-bar-wrap" title="{{ '%02d:00'|format(h.hour) }} — {{ h.views }} views">
+                        <div class="hour-bar" style="height:{{ (h.views / max_hourly_views * 100)|round(0)|int if max_hourly_views else 0 }}%;"></div>
+                    </div>
+                    {% endfor %}
+                </div>
+                <div class="hour-labels">
+                    {% for h in hourly_data %}
+                    <div class="hour-label">{{ h.hour if h.hour % 3 == 0 else '' }}</div>
+                    {% endfor %}
+                </div>
+                {% else %}
+                <div class="text-xs text-gray-400 py-4">No visits logged in this range yet.</div>
+                {% endif %}
+            </div>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <!-- ── Traffic sources ── -->
+            <div class="section-card">
+                <div class="section-title">Where Visitors Came From</div>
+                <div class="section-sub">
+                    Based on the browser's Referer header. Note: WhatsApp and some in-app
+                    browsers often don't send one at all, so genuine WhatsApp taps can show
+                    up as "Direct / Unknown" — this is a browser privacy limitation, not a
+                    tracking gap.
+                </div>
+                {% if source_data and source_data|length > 0 %}
+                {% for s in source_data %}
+                <div class="rank-row">
+                    <div class="rank-body">
+                        <div class="rank-name">{{ s.source }}</div>
+                        <div class="rank-bar-wrap"><div class="rank-bar" style="width:{{ (s.views / max_source_views * 100)|round(0)|int if max_source_views else 0 }}%;background:#16a34a;"></div></div>
+                    </div>
+                    <div class="rank-count">{{ s.views }} views<span class="sub">{{ s.visitors }} unique</span></div>
+                </div>
+                {% endfor %}
+                {% else %}
+                <div class="text-xs text-gray-400 py-4">No visits logged in this range yet.</div>
+                {% endif %}
+            </div>
+
+            <!-- ── Top pages ── -->
+            <div class="section-card">
+                <div class="section-title">Most Visited Pages</div>
+                <div class="section-sub">Top 10 pages by views in this range.</div>
+                {% if top_pages and top_pages|length > 0 %}
+                {% for pg in top_pages %}
+                <div class="rank-row">
+                    <div class="rank-num">{{ loop.index }}</div>
+                    <div class="rank-body">
+                        <div class="rank-name">{{ pg.path }}</div>
+                        <div class="rank-bar-wrap"><div class="rank-bar" style="width:{{ (pg.views / max_page_views * 100)|round(0)|int if max_page_views else 0 }}%;background:#9333ea;"></div></div>
+                    </div>
+                    <div class="rank-count">{{ pg.views }} views<span class="sub">{{ pg.visitors }} unique</span></div>
+                </div>
+                {% endfor %}
+                {% else %}
+                <div class="text-xs text-gray-400 py-4">No visits logged in this range yet.</div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</body>
+</html>

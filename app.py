@@ -4,6 +4,7 @@ import re
 import time
 import json
 import hmac
+import uuid
 import smtplib
 import requests
 import razorpay
@@ -12,6 +13,7 @@ from datetime import datetime, timedelta
 from functools import wraps
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
+from urllib.parse import urlparse
 
 from flask import Flask, g, jsonify, redirect, render_template, request, session, url_for, flash, has_request_context
 from werkzeug.routing import BuildError
@@ -438,6 +440,16 @@ def initialize_database_if_needed():
             event_type TEXT NOT NULL,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )''',
+        '''CREATE TABLE IF NOT EXISTS page_views (
+            id BIGSERIAL PRIMARY KEY,
+            visitor_id TEXT,
+            path TEXT,
+            site_type TEXT,
+            referrer TEXT,
+            source TEXT,
+            user_id BIGINT REFERENCES users(id),
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )''',
         '''CREATE TABLE IF NOT EXISTS user_addresses (
             id BIGSERIAL PRIMARY KEY,
             user_id BIGINT NOT NULL REFERENCES users(id),
@@ -491,6 +503,8 @@ def initialize_database_if_needed():
         'ALTER TABLE email_campaign_recipients ADD COLUMN IF NOT EXISTS clicked_at TIMESTAMP',
         "ALTER TABLE email_campaign_recipients ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'sent'",
         'ALTER TABLE email_campaign_recipients ADD COLUMN IF NOT EXISTS error_detail TEXT',
+        'ALTER TABLE product_events ADD COLUMN IF NOT EXISTS visitor_id TEXT',
+        'ALTER TABLE product_events ADD COLUMN IF NOT EXISTS source TEXT',
         # Best-effort -- non-fatal if pre-existing rows already have duplicate
         # or blank emails (see the app-level check in email_signup as the
         # real guard against duplicate accounts).
@@ -1002,6 +1016,93 @@ def detect_site_type():
         g.site_type = 'wholesale'
     else:
         g.site_type = 'retail'  # default to retail for shared paths like /admin, /track
+
+
+VISITOR_COOKIE_NAME = 'nn_vid'
+VISITOR_COOKIE_MAX_AGE = 365 * 24 * 60 * 60  # 1 year
+
+
+def classify_traffic_source(referrer):
+    """Best-effort traffic source label from an HTTP Referer header.
+    Many in-app browsers (notably WhatsApp, and often Instagram) simply
+    don't send a Referer at all for privacy reasons -- those show up as
+    "Direct / Unknown" here, which is a real limitation of referrer-based
+    tracking, not a bug: there's no reliable way to distinguish "typed the
+    URL in" from "tapped a WhatsApp link" once the browser withholds it."""
+    if not referrer:
+        return 'Direct / Unknown'
+    try:
+        netloc = urlparse(referrer).netloc.lower()
+    except Exception:
+        return 'Direct / Unknown'
+    if not netloc:
+        return 'Direct / Unknown'
+    if 'narinakhre.com' in netloc:
+        return 'Internal'
+    if any(d in netloc for d in ('google.', 'bing.', 'yahoo.', 'duckduckgo.')):
+        return 'Search Engine'
+    if 'instagram.com' in netloc:
+        return 'Instagram'
+    if 'facebook.com' in netloc or netloc.endswith('fb.com'):
+        return 'Facebook'
+    if 'wa.me' in netloc or 'whatsapp.com' in netloc:
+        return 'WhatsApp'
+    if 'youtube.com' in netloc or 'youtu.be' in netloc:
+        return 'YouTube'
+    if 'twitter.com' in netloc or netloc == 'x.com' or 't.co' in netloc:
+        return 'Twitter / X'
+    return netloc
+
+
+@app.before_request
+def track_page_view():
+    """Best-effort site-visit logging for the admin Visitors dashboard --
+    never allowed to break the actual page. Skips admin/static/API paths
+    and non-GET requests so it only counts real storefront page loads, not
+    every AJAX call. Assigns a long-lived anonymous visitor cookie (read
+    here, actually set on the response in stamp_visitor_cookie below) so
+    repeat visits can be counted as the same person."""
+    try:
+        if request.method != 'GET':
+            return
+        path = request.path
+        skip_prefixes = ('/static', '/admin', '/api', '/update-cart', '/apply_coupon', '/remove_coupon', '/c/')
+        skip_exact = ('/favicon.ico', '/robots.txt', '/sitemap.xml')
+        if path in skip_exact or any(path.startswith(p) for p in skip_prefixes):
+            return
+
+        vid = request.cookies.get(VISITOR_COOKIE_NAME)
+        g._nn_new_visitor = not vid
+        if not vid:
+            vid = str(uuid.uuid4())
+        g.visitor_id = vid
+
+        referrer = (request.referrer or '')[:500]
+        source = classify_traffic_source(referrer)
+        g.traffic_source = source
+
+        db = get_db()
+        db.execute(
+            'INSERT INTO page_views (visitor_id, path, site_type, referrer, source, user_id) VALUES (?,?,?,?,?,?)',
+            (vid, path[:255], getattr(g, 'site_type', None), referrer, source, session.get('user_id'))
+        )
+        db.commit()
+    except Exception as e:
+        app.logger.warning(f'track_page_view failed: {e}')
+
+
+@app.after_request
+def stamp_visitor_cookie(response):
+    try:
+        if getattr(g, '_nn_new_visitor', False) and getattr(g, 'visitor_id', None):
+            response.set_cookie(
+                VISITOR_COOKIE_NAME, g.visitor_id, max_age=VISITOR_COOKIE_MAX_AGE,
+                httponly=True, samesite='Lax'
+            )
+    except Exception as e:
+        app.logger.warning(f'stamp_visitor_cookie failed: {e}')
+    return response
+
 
 def render_site(template_name, **kwargs):
     site_type = getattr(g, 'site_type', 'retail')
@@ -1813,13 +1914,18 @@ def is_bangle_product(p_dict):
     return False
 
 
-def log_product_event(db_conn, sku, event_type):
-    """Best-effort analytics ping -- must never break the page it's called from."""
+def log_product_event(db_conn, sku, event_type, visitor_id=None, source=None):
+    """Best-effort analytics ping -- must never break the page it's called from.
+    visitor_id/source default to None for backward compatibility, but call
+    sites on a real request should pass g.visitor_id/g.traffic_source
+    (set by the track_page_view before_request hook) so the admin Product
+    Visits page can report unique visitors and traffic sources per SKU."""
     if not sku:
         return
     try:
         db_conn.execute(
-            'INSERT INTO product_events (sku, event_type) VALUES (?,?)', (sku, event_type)
+            'INSERT INTO product_events (sku, event_type, visitor_id, source) VALUES (?,?,?,?)',
+            (sku, event_type, visitor_id, source)
         )
         db_conn.commit()
     except Exception as e:
@@ -2179,7 +2285,7 @@ def product_detail(product_id):
     product = db.execute('SELECT * FROM products WHERE id = ?', (product_id,)).fetchone()
     if not product: return "Not Found", 404
     p_dict = dict(product)
-    log_product_event(db, p_dict.get('sku'), 'view')
+    log_product_event(db, p_dict.get('sku'), 'view', visitor_id=getattr(g, 'visitor_id', None), source=getattr(g, 'traffic_source', None))
     image_urls = get_product_images(p_dict)
     p_dict['tiers'] = get_product_tiers(p_dict)
     if is_bangle_product(p_dict):
@@ -2249,7 +2355,14 @@ def update_cart():
     if qty > 0:
         db = get_db()
         if cart_key not in cart:
-            log_product_event(db, sku, 'add_to_cart')
+            # This is a POST/AJAX call, not a page navigation, so
+            # track_page_view() never ran for it -- read the visitor
+            # cookie directly rather than relying on g.visitor_id.
+            log_product_event(
+                db, sku, 'add_to_cart',
+                visitor_id=request.cookies.get(VISITOR_COOKIE_NAME),
+                source=classify_traffic_source(request.referrer)
+            )
         p = db.execute('SELECT name, category, sub_category FROM products WHERE sku = ?', (sku,)).fetchone()
         if p and is_bangle_product(dict(p)) and size:
             size_stock = get_bangle_size_stock(db, sku)
@@ -3333,9 +3446,12 @@ def search_page():
     )
     products = products[:40]
 
+    public_coupons, carousel_products = get_offers_carousel_data(conn) if site == 'retail' else ([], [])
+
     return render_site('search_results.html', products=products, query=q,
                         sort=sort, size_filter=size_filter, in_stock_only=in_stock_only,
-                        available_sizes=available_sizes)
+                        available_sizes=available_sizes,
+                        public_coupons=public_coupons, carousel_products=carousel_products)
 
 @app.route('/clear_oos_items', methods=['POST'])
 def clear_oos_items():
@@ -3643,6 +3759,28 @@ def admin_dashboard():
     return render_template('admin/admin.html', products=products, quotes=quotes)
 
 
+def resolve_insight_range(req):
+    """Shared date-range resolution for the analytics pages (Overview,
+    Visitors, Product Visits) -- defaults to the last 7 days so every page
+    has something sensible to show before an admin picks custom dates, and
+    a custom range picked on one page carries over cleanly if reused via
+    the same range/from/to query params."""
+    now = datetime.now()
+    range_mode = req.args.get('range', 'preset')
+    from_date = req.args.get('from', '').strip()
+    to_date = req.args.get('to', '').strip()
+    if range_mode == 'custom' and from_date and to_date:
+        insight_start = from_date + ' 00:00:00'
+        insight_end = to_date + ' 23:59:59'
+    else:
+        range_mode = 'preset'
+        insight_start = (now - timedelta(days=7)).strftime('%Y-%m-%d 00:00:00')
+        insight_end = now.strftime('%Y-%m-%d 23:59:59')
+        from_date = (now - timedelta(days=7)).strftime('%Y-%m-%d')
+        to_date = now.strftime('%Y-%m-%d')
+    return range_mode, from_date, to_date, insight_start, insight_end
+
+
 @app.route('/admin/analytics', methods=['GET'])
 @admin_required
 def admin_analytics():
@@ -3664,20 +3802,7 @@ def admin_analytics():
     stats_7d = window_stats(7)
     stats_30d = window_stats(30)
 
-    # Custom range -- defaults to the same 7-day window so the page always
-    # has something sensible to show before an admin picks their own dates.
-    range_mode = request.args.get('range', 'preset')
-    from_date = request.args.get('from', '').strip()
-    to_date = request.args.get('to', '').strip()
-    if range_mode == 'custom' and from_date and to_date:
-        insight_start = from_date + ' 00:00:00'
-        insight_end = to_date + ' 23:59:59'
-    else:
-        range_mode = 'preset'
-        insight_start = (now - timedelta(days=7)).strftime('%Y-%m-%d 00:00:00')
-        insight_end = now.strftime('%Y-%m-%d 23:59:59')
-        from_date = (now - timedelta(days=7)).strftime('%Y-%m-%d')
-        to_date = now.strftime('%Y-%m-%d')
+    range_mode, from_date, to_date, insight_start, insight_end = resolve_insight_range(request)
 
     custom_stats = None
     if range_mode == 'custom':
@@ -3749,6 +3874,118 @@ def admin_analytics():
         range_mode=range_mode, from_date=from_date, to_date=to_date,
         top_ordered=top_ordered, top_viewed=top_viewed, top_cart_adds=top_cart_adds,
         state_data=state_data, max_state_count=max_state_count)
+
+
+@app.route('/admin/analytics/product-visits', methods=['GET'])
+@admin_required
+def admin_product_visits():
+    """Full "View All" drill-down for product page views: every product
+    that had at least one view in range, with unique-visitor counts and a
+    traffic-source breakdown per product (not just the top-10 shown on the
+    main Analytics overview)."""
+    db = get_db()
+    range_mode, from_date, to_date, insight_start, insight_end = resolve_insight_range(request)
+
+    view_rows = db.execute(
+        "SELECT sku, COUNT(*) as views, COUNT(DISTINCT visitor_id) as unique_views "
+        "FROM product_events WHERE event_type='view' AND created_at >= ? AND created_at <= ? "
+        "GROUP BY sku ORDER BY views DESC",
+        (insight_start, insight_end)
+    ).fetchall()
+
+    source_rows = db.execute(
+        "SELECT sku, source, COUNT(*) as cnt FROM product_events "
+        "WHERE event_type='view' AND created_at >= ? AND created_at <= ? AND source IS NOT NULL "
+        "GROUP BY sku, source",
+        (insight_start, insight_end)
+    ).fetchall()
+    sources_by_sku = {}
+    for r in source_rows:
+        sources_by_sku.setdefault(r['sku'], []).append({'source': r['source'], 'count': r['cnt']})
+
+    products = []
+    max_views = view_rows[0]['views'] if view_rows else 0
+    for r in view_rows:
+        p = db.execute('SELECT id, name FROM products WHERE sku=?', (r['sku'],)).fetchone()
+        srcs = sorted(sources_by_sku.get(r['sku'], []), key=lambda s: -s['count'])
+        products.append({
+            'sku': r['sku'],
+            'id': p['id'] if p else None,
+            'name': p['name'] if p else r['sku'],
+            'views': r['views'],
+            'unique_views': r['unique_views'],
+            'sources': srcs,
+        })
+
+    return render_template('admin/admin_product_visits.html',
+                            products=products, max_views=max_views or 1,
+                            range_mode=range_mode, from_date=from_date, to_date=to_date)
+
+
+@app.route('/admin/analytics/visitors', methods=['GET'])
+@admin_required
+def admin_visitors():
+    """Site-wide visitor analytics: how many people visited, when traffic
+    peaked (which day, which hour of day), and where they came from
+    (search engine, Instagram, WhatsApp, direct, etc.) -- built on the
+    page_views table logged by the track_page_view before_request hook."""
+    db = get_db()
+    range_mode, from_date, to_date, insight_start, insight_end = resolve_insight_range(request)
+
+    totals_row = db.execute(
+        "SELECT COUNT(*) as views, COUNT(DISTINCT visitor_id) as visitors "
+        "FROM page_views WHERE created_at >= ? AND created_at <= ?",
+        (insight_start, insight_end)
+    ).fetchone()
+    totals = {'views': totals_row['views'] if totals_row else 0,
+              'visitors': totals_row['visitors'] if totals_row else 0}
+
+    daily_rows = db.execute(
+        "SELECT DATE(created_at) as day, COUNT(*) as views, COUNT(DISTINCT visitor_id) as visitors "
+        "FROM page_views WHERE created_at >= ? AND created_at <= ? "
+        "GROUP BY DATE(created_at) ORDER BY day",
+        (insight_start, insight_end)
+    ).fetchall()
+    daily_data = [{'day': str(r['day']), 'views': r['views'], 'visitors': r['visitors']} for r in daily_rows]
+    peak_day = max(daily_data, key=lambda d: d['visitors'], default=None)
+    max_daily_visitors = max((d['visitors'] for d in daily_data), default=0) or 1
+
+    hourly_rows = db.execute(
+        "SELECT EXTRACT(HOUR FROM created_at)::int as hr, COUNT(*) as views "
+        "FROM page_views WHERE created_at >= ? AND created_at <= ? "
+        "GROUP BY hr ORDER BY hr",
+        (insight_start, insight_end)
+    ).fetchall()
+    hourly_by_hour = {int(r['hr']): r['views'] for r in hourly_rows}
+    hourly_data = [{'hour': h, 'views': hourly_by_hour.get(h, 0)} for h in range(24)]
+    peak_hour = max(hourly_data, key=lambda h: h['views'], default=None)
+    max_hourly_views = max((h['views'] for h in hourly_data), default=0) or 1
+
+    source_rows = db.execute(
+        "SELECT COALESCE(source, 'Direct / Unknown') as source, COUNT(*) as views, "
+        "COUNT(DISTINCT visitor_id) as visitors "
+        "FROM page_views WHERE created_at >= ? AND created_at <= ? "
+        "GROUP BY source ORDER BY views DESC",
+        (insight_start, insight_end)
+    ).fetchall()
+    source_data = [{'source': r['source'], 'views': r['views'], 'visitors': r['visitors']} for r in source_rows]
+    max_source_views = max((s['views'] for s in source_data), default=0) or 1
+
+    top_pages_rows = db.execute(
+        "SELECT path, COUNT(*) as views, COUNT(DISTINCT visitor_id) as visitors "
+        "FROM page_views WHERE created_at >= ? AND created_at <= ? "
+        "GROUP BY path ORDER BY views DESC LIMIT 10",
+        (insight_start, insight_end)
+    ).fetchall()
+    top_pages = [{'path': r['path'], 'views': r['views'], 'visitors': r['visitors']} for r in top_pages_rows]
+    max_page_views = top_pages[0]['views'] if top_pages else 1
+
+    return render_template('admin/admin_visitors.html',
+                            range_mode=range_mode, from_date=from_date, to_date=to_date,
+                            totals=totals, daily_data=daily_data, peak_day=peak_day, max_daily_visitors=max_daily_visitors,
+                            hourly_data=hourly_data, peak_hour=peak_hour, max_hourly_views=max_hourly_views,
+                            source_data=source_data, max_source_views=max_source_views,
+                            top_pages=top_pages, max_page_views=max_page_views)
 
 
 @app.route('/admin/manage-images', methods=['GET'])
