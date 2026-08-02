@@ -644,6 +644,14 @@ function copyOfferCode(code, btn) {
 
 document.addEventListener('DOMContentLoaded', function () {
 
+    /* ── Auto-open sign-in prompt for guests, once ever per browser ── */
+    {% if not logged_in_user %}
+    if (!localStorage.getItem('nn_home_signin_prompted') && typeof openAuthModal === 'function') {
+        openAuthModal('signin');
+        localStorage.setItem('nn_home_signin_prompted', '1');
+    }
+    {% endif %}
+
     /* ── Offers carousel: auto-rotate slides ── */
     var offersSlides = document.querySelectorAll('#offers-carousel .offers-slide');
     if (offersSlides.length > 1) {

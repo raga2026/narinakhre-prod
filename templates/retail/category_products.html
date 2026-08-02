@@ -15,7 +15,73 @@
     .sf-checkbox { display: flex; align-items: center; gap: 6px; font-size: 0.82rem; font-weight: 600; color: #881337; cursor: pointer; }
     .sf-checkbox input { width: 16px; height: 16px; accent-color: #be185d; cursor: pointer; }
     .sf-count { font-size: 0.78rem; color: #9ca3af; margin-left: auto; }
+
+    /* ── Offers carousel (compact — half the homepage version) ── */
+    .offers-carousel-mini {
+        position: relative; overflow: hidden; min-height: 60px;
+        background: linear-gradient(135deg, #881337 0%, #be185d 55%, #f43f5e 100%);
+        border-radius: 12px; margin: 16px auto 0; max-width: 1000px;
+    }
+    .offers-carousel-mini::before {
+        content: ""; position: absolute; inset: 0; pointer-events: none;
+        background-image: repeating-linear-gradient(135deg, rgba(255,255,255,0.06) 0 3px, transparent 3px 14px);
+    }
+    .offers-slide-mini {
+        position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+        gap: 8px; padding: 8px 14px; opacity: 0; transition: opacity 0.5s ease; pointer-events: none;
+    }
+    .offers-slide-mini.active { opacity: 1; pointer-events: auto; }
+    .offer-mini-discount { font-family: 'Playfair Display', serif; font-weight: 900; font-size: 0.95rem; color: #fff; white-space: nowrap; }
+    .offer-mini-cap { font-size: 0.62rem; color: #ffe4e6; font-weight: 700; white-space: nowrap; }
+    .offer-mini-code-btn {
+        background: #fff; border: none; border-radius: 6px; padding: 2px 8px;
+        font-family: monospace; font-weight: 800; font-size: 0.66rem; color: #9f1239; cursor: pointer; white-space: nowrap;
+    }
+    .offer-mini-product { display: flex; align-items: center; gap: 8px; text-decoration: none; max-width: 100%; }
+    .offer-mini-product-img { width: 34px; height: 34px; border-radius: 8px; object-fit: contain; background: #fff; flex-shrink: 0; }
+    .offer-mini-product-name { font-size: 0.7rem; font-weight: 700; color: #fff; max-width: 130px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .offer-mini-product-mrp { font-size: 0.6rem; color: #ffe4e6; text-decoration: line-through; white-space: nowrap; }
+    .offer-mini-product-price { font-size: 0.7rem; font-weight: 900; color: #fff; white-space: nowrap; }
+    .offer-mini-product-badge { background: #fff; color: #9f1239; font-weight: 900; font-size: 0.58rem; padding: 1px 5px; border-radius: 6px; white-space: nowrap; }
+    @media (min-width: 768px) {
+        .offers-carousel-mini { min-height: 70px; }
+        .offer-mini-discount { font-size: 1.1rem; }
+        .offer-mini-code-btn { font-size: 0.75rem; padding: 3px 10px; }
+        .offer-mini-product-img { width: 44px; height: 44px; }
+        .offer-mini-product-name { max-width: 200px; font-size: 0.78rem; }
+    }
 </style>
+
+{% set has_coupons_mini = public_coupons and public_coupons|length > 0 %}
+{% set has_products_mini = carousel_products and carousel_products|length > 0 %}
+{% if has_coupons_mini or has_products_mini %}
+{% set ns_mini = namespace(first=true) %}
+<div class="offers-carousel-mini" id="offers-carousel-mini">
+    {% for c in public_coupons[:4] %}
+    <div class="offers-slide-mini{% if ns_mini.first %} active{% endif %}">
+        <span class="offer-mini-discount">{{ c.discount_percent|int }}% OFF</span>
+        {% if c.max_discount_amount %}<span class="offer-mini-cap">up to ₹{{ c.max_discount_amount|round(0)|int }}</span>{% endif %}
+        <button type="button" class="offer-mini-code-btn" onclick="copyOfferCodeMini('{{ c.code }}', this)"
+                aria-label="Coupon code {{ c.code }}, tap to copy">{{ c.code }}</button>
+    </div>
+    {% set ns_mini.first = false %}
+    {% endfor %}
+    {% for p in carousel_products %}
+    <a href="{{ url_for('product_detail', product_id=p.id) }}"
+       class="offers-slide-mini offer-mini-product{% if ns_mini.first %} active{% endif %}"
+       aria-label="{{ p.name }} — {{ p.disc_pct }}% off, now ₹{{ p.current_price|round(0)|int }}, view product">
+        <img src="{{ p.thumb }}" alt="" class="offer-mini-product-img" loading="lazy"
+             onerror="this.onerror=null;this.src='/static/assets/products/default.jpg';">
+        <span class="offer-mini-product-name">{{ p.name }}</span>
+        <span class="offer-mini-product-mrp">₹{{ p.mrp_price|round(0)|int }}</span>
+        <span class="offer-mini-product-price">₹{{ p.current_price|round(0)|int }}</span>
+        <span class="offer-mini-product-badge">{{ p.disc_pct }}% OFF</span>
+    </a>
+    {% set ns_mini.first = false %}
+    {% endfor %}
+</div>
+{% endif %}
+
 <div class="container mx-auto py-10 text-center">
     <h1 class="text-4xl font-serif font-black rose-accent">{{ category }}</h1>
 </div>
@@ -190,8 +256,28 @@ async function shareProduct(name, url, imageUrl) {
     }
 }
 
+/* ── Offers carousel (compact): tap to copy a code ── */
+function copyOfferCodeMini(code, btn) {
+    navigator.clipboard.writeText(code).then(function () {
+        var original = btn.textContent;
+        btn.textContent = 'Copied!';
+        setTimeout(function () { btn.textContent = original; }, 1500);
+    });
+}
+
 // Auto-advancing product image carousel (matches retail homepage and wholesale logic)
 document.addEventListener('DOMContentLoaded', function() {
+    /* ── Offers carousel (compact): auto-rotate slides ── */
+    var offersSlidesMini = document.querySelectorAll('#offers-carousel-mini .offers-slide-mini');
+    if (offersSlidesMini.length > 1) {
+        var offersIdxMini = 0;
+        setInterval(function () {
+            offersSlidesMini[offersIdxMini].classList.remove('active');
+            offersIdxMini = (offersIdxMini + 1) % offersSlidesMini.length;
+            offersSlidesMini[offersIdxMini].classList.add('active');
+        }, 4000);
+    }
+
     document.querySelectorAll('.carousel-img[data-images]').forEach(function(imgEl) {
         var imagesRaw = imgEl.getAttribute('data-images');
         var images = [];

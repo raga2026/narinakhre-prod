@@ -53,7 +53,14 @@
             font-size: 1.1rem; color: #9ca3af; width: 32px; height: 32px; border-radius: 50%;
         }
         .auth-modal-close:hover { background: #fff1f2; color: #be185d; }
-        .auth-modal-title { font-family: 'Playfair Display', serif; font-weight: 800; color: #881337; font-size: 1.3rem; margin: 0 0 16px; }
+        .auth-modal-title { font-family: 'Playfair Display', serif; font-weight: 800; color: #881337; font-size: 1.3rem; margin: 0 0 4px; }
+        .auth-modal-subtitle { font-size: 0.82rem; color: #6b7280; margin: 0 0 16px; line-height: 1.4; }
+        .auth-modal-later-link {
+            display: block; width: 100%; text-align: center; background: none; border: none;
+            cursor: pointer; color: #9ca3af; font-size: 0.78rem; font-weight: 600;
+            margin-top: 16px; text-decoration: underline;
+        }
+        .auth-modal-later-link:hover { color: #be185d; }
         .auth-modal-tabs { display: flex; gap: 6px; border-bottom: 2px solid #fce7f3; margin-bottom: 18px; }
         .auth-tab-btn {
             background: none; border: none; cursor: pointer; padding: 8px 14px; font-weight: 700;
@@ -128,6 +135,7 @@
     <div class="auth-modal" role="dialog" aria-modal="true" aria-labelledby="auth-modal-title">
         <button type="button" class="auth-modal-close" onclick="closeAuthModal()" aria-label="Close sign-in dialog">✕</button>
         <h2 id="auth-modal-title" class="auth-modal-title">Sign In</h2>
+        <p class="auth-modal-subtitle">To enjoy coupons and Nari Nakhre Credits, log in.</p>
 
         <div role="tablist" aria-label="Sign in or create account" class="auth-modal-tabs">
             <button type="button" role="tab" id="auth-tab-btn-signin" aria-selected="true" aria-controls="auth-tab-signin"
@@ -210,6 +218,7 @@
                 </form>
             </div>
         </div>
+        <button type="button" class="auth-modal-later-link" onclick="closeAuthModal()">Sign in later</button>
     </div>
 </div>
 {% endif %}

@@ -1167,6 +1167,27 @@ def get_trending_products(db_conn, pool_size=8, limit=4):
     return picks
 
 
+def get_offers_carousel_data(db):
+    """Public coupons + a random sample of 3 discounted trending products --
+    the same content shown in the homepage offers carousel, reused for the
+    compact version on category and product-detail pages."""
+    import random
+    public_coupons = get_public_coupons(db)
+    pool = get_trending_products(db, pool_size=8, limit=8)
+    discounted = [
+        p for p in pool
+        if p.get('mrp_price') and p['mrp_price'] > (p.get('retail_price') or p.get('price1') or 0)
+    ]
+    carousel_products = random.sample(discounted, min(3, len(discounted)))
+    for p in carousel_products:
+        mrp = float(p['mrp_price'])
+        rp = float(p.get('retail_price') or p.get('price1') or 0)
+        p['disc_pct'] = round((mrp - rp) / mrp * 100)
+        p['current_price'] = rp
+        p['thumb'] = p.get('image') or '/static/assets/products/default.jpg'
+    return public_coupons, carousel_products
+
+
 def generate_personal_coupon_code(db_conn, first_name, discount_percent):
     """Per-recipient, human-readable coupon code for campaign emails, e.g.
     "NNADITI15" for a 15%-off campaign sent to Aditi. Falls back to "USER"
@@ -2138,9 +2159,12 @@ def category_products(category):
         products, sort=sort, size_filter=size_filter, in_stock_only=in_stock_only
     )
 
+    public_coupons, carousel_products = get_offers_carousel_data(db) if g.site_type == 'retail' else ([], [])
+
     return render_site('category_products.html', category=category, products=products,
                         sort=sort, size_filter=size_filter, in_stock_only=in_stock_only,
-                        available_sizes=available_sizes)
+                        available_sizes=available_sizes,
+                        public_coupons=public_coupons, carousel_products=carousel_products)
 
 @app.route('/product/<int:product_id>')
 @app.route('/retail/product/<int:product_id>')
@@ -2172,7 +2196,11 @@ def product_detail(product_id):
         if is_bangle_product(r_dict):
             r_dict['size_stock'] = get_bangle_size_stock(db, r_dict['sku'])
         related_products.append(r_dict)
-    return render_site('product_detail.html', product=p_dict, image_urls=image_urls, related_products=related_products)
+
+    public_coupons, carousel_products = get_offers_carousel_data(db) if g.site_type == 'retail' else ([], [])
+
+    return render_site('product_detail.html', product=p_dict, image_urls=image_urls, related_products=related_products,
+                        public_coupons=public_coupons, carousel_products=carousel_products)
 
 @app.route('/favicon.ico')
 def favicon():
