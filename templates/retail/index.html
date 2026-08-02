@@ -644,25 +644,6 @@ function copyOfferCode(code, btn) {
 
 document.addEventListener('DOMContentLoaded', function () {
 
-    /* ── Auto-open sign-in prompt for guests, every few days rather than
-       once-ever (so it keeps nudging signups) or every visit (which would
-       be annoying). A short delay before it appears means it doesn't
-       interrupt the instant the page loads. ── */
-    {% if not logged_in_user %}
-    (function () {
-        var STORAGE_KEY = 'nn_home_signin_last_shown';
-        var COOLDOWN_MS = 3 * 24 * 60 * 60 * 1000; // 3 days
-        var lastShown = parseInt(localStorage.getItem(STORAGE_KEY) || '0', 10);
-        var dueForPrompt = !lastShown || (Date.now() - lastShown) > COOLDOWN_MS;
-        if (dueForPrompt && typeof openAuthModal === 'function') {
-            setTimeout(function () {
-                openAuthModal('signin');
-                localStorage.setItem(STORAGE_KEY, String(Date.now()));
-            }, 2500);
-        }
-    })();
-    {% endif %}
-
     /* ── Offers carousel: auto-rotate slides ── */
     var offersSlides = document.querySelectorAll('#offers-carousel .offers-slide');
     if (offersSlides.length > 1) {

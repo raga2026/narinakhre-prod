@@ -26,6 +26,9 @@
     .mobile-cart-icon { position: relative; display: flex; align-items: center; justify-content: center; padding: 6px; }
     @media (min-width: 768px) { .mobile-cart-icon { display: none; } }
     .mobile-cart-icon .cart-count { position: absolute; top: 0; right: 0; }
+    /* Home icon — mobile only; on desktop the "Home" link in desktop-nav covers this */
+    .mobile-home-icon { display: flex; align-items: center; justify-content: center; padding: 6px; }
+    @media (min-width: 768px) { .mobile-home-icon { display: none; } }
     /* Categories pill — mobile header only */
     .mobile-cat-pill { display: flex; align-items: center; }
     @media (min-width: 768px) { .mobile-cat-pill { display: none; } }
@@ -193,6 +196,12 @@
             <img src="https://eopqwvssznmxfxrfzqbx.supabase.co/storage/v1/object/public/products/site/logo.png" alt="Nari Nakhre">
             <span>Nari Nakhre</span>
         </a>
+        <a href="/retail" class="mobile-home-icon" aria-label="Home">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#be185d" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path>
+                <polyline points="9 22 9 12 15 12 15 22"></polyline>
+            </svg>
+        </a>
         <!-- Desktop search bar -->
     <div class="search-wrap" id="desktop-search-wrap">
         <span class="search-icon">🔍</span>
@@ -203,7 +212,7 @@
         <div class="search-dropdown" id="desktop-search-dropdown"></div>
     </div>
     <nav class="desktop-nav">
-            <a href="/retail">Home</a>
+            <a href="/retail">🏠 Home</a>
             {% if categories and categories|length > 0 %}
             <div class="cat-dropdown">
                 <button type="button" class="cat-dropdown-btn" id="categories-toggle-btn"
@@ -249,7 +258,7 @@
         </button>
     </div>
     <nav class="mobile-nav" id="mobile-nav">
-        <a href="/retail">Home</a>
+        <a href="/retail">🏠 Home</a>
         <button class="mobile-cat-toggle" onclick="toggleMobileCats(this)">Categories <span>▾</span></button>
         <div class="mobile-cat-list" id="mobile-cat-list">
             {% if categories and categories|length > 0 %}
