@@ -490,6 +490,7 @@ def initialize_database_if_needed():
         'ALTER TABLE email_campaigns ADD COLUMN IF NOT EXISTS min_order_amount NUMERIC DEFAULT 0',
         'ALTER TABLE email_campaign_recipients ADD COLUMN IF NOT EXISTS clicked_at TIMESTAMP',
         "ALTER TABLE email_campaign_recipients ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'sent'",
+        'ALTER TABLE email_campaign_recipients ADD COLUMN IF NOT EXISTS error_detail TEXT',
         # Best-effort -- non-fatal if pre-existing rows already have duplicate
         # or blank emails (see the app-level check in email_signup as the
         # real guard against duplicate accounts).
@@ -669,7 +670,7 @@ def create_delhivery_shipment(order_row, cart_items, cod_amount_override=None):
         return None, str(e)
 
 
-def send_contact_email(to_email, subject, body, html_body=None, from_email=None):
+def send_contact_email(to_email, subject, body, html_body=None, from_email=None, capture_detail=False):
     """
     Send email via Zeptomail's HTTP API (NOT SMTP).
     This replaces the old smtplib-based sender: a raw SMTP socket can wedge
@@ -687,7 +688,17 @@ def send_contact_email(to_email, subject, body, html_body=None, from_email=None)
     From address, which is exactly why sends from the old info@ address were
     being silently rejected. The From address picks which token gets used.
     The From address must be a verified sender in Zeptomail.
+
+    Returns a plain bool by default (True/False), matching every existing
+    call site. Pass capture_detail=True to instead get back (ok, detail) --
+    detail is None on success, or Zeptomail's actual rejection reason (HTTP
+    status + response body) on failure, so a caller that needs to show WHY a
+    send failed (e.g. the campaign sender) doesn't have to go digging
+    through server logs for it.
     """
+    def result(ok, detail=None):
+        return (ok, detail) if capture_detail else ok
+
     api_url = os.environ.get('ZEPTOMAIL_API_URL', 'https://api.zeptomail.in/v1.1/email')
     FROM_EMAIL = from_email or SUPPORT_FROM_EMAIL
 
@@ -697,8 +708,9 @@ def send_contact_email(to_email, subject, body, html_body=None, from_email=None)
         api_key = os.environ.get('SMTP_SUPPORT_EMAIL_PASSWORD', '')
 
     if not api_key:
-        app.logger.warning(f'Email send skipped: no Zeptomail API token configured for sender {FROM_EMAIL}')
-        return False
+        msg = f'no Zeptomail API token configured for sender {FROM_EMAIL}'
+        app.logger.warning(f'Email send skipped: {msg}')
+        return result(False, msg)
 
     payload = {
         'from': {'address': FROM_EMAIL, 'name': 'Nari Nakhre'},
@@ -719,15 +731,16 @@ def send_contact_email(to_email, subject, body, html_body=None, from_email=None)
         resp = requests.post(api_url, json=payload, headers=headers, timeout=10)
         if resp.status_code in (200, 201):
             app.logger.info(f'Email sent to {to_email}: {subject}')
-            return True
+            return result(True)
+        detail = f'HTTP {resp.status_code}: {resp.text[:800]}'
         app.logger.error(f'Zeptomail API error ({resp.status_code}) sending to {to_email}: {resp.text[:500]}')
-        return False
+        return result(False, detail)
     except requests.exceptions.Timeout:
         app.logger.error(f'Zeptomail API call timed out (10s) sending to {to_email}')
-        return False
+        return result(False, 'Request to Zeptomail timed out after 10s')
     except Exception as e:
         app.logger.error(f'Email send failed to {to_email}: {type(e).__name__}: {e}')
-        return False
+        return result(False, f'{type(e).__name__}: {e}')
 
 
 def send_contact_email_async(*args, **kwargs):
@@ -4936,22 +4949,28 @@ def _run_campaign_batch(db, campaign, campaign_id, user_rows):
             # thread meant we recorded every recipient as "sent" without
             # ever checking whether Zeptomail actually accepted the email --
             # a rejected send just vanished into an unwatched log line.
-            ok = send_contact_email(
+            ok, detail = send_contact_email(
                 u['email'], f"{campaign['name']} — {int(discount_percent)}% off just for you \U0001F381",
-                text, html_body=html
+                text, html_body=html, capture_detail=True
             )
             if ok:
                 sent += 1
             else:
                 failed += 1
                 if recipient_id:
-                    db.execute("UPDATE email_campaign_recipients SET status='failed' WHERE id=?", (recipient_id,))
+                    db.execute(
+                        "UPDATE email_campaign_recipients SET status='failed', error_detail=? WHERE id=?",
+                        (detail, recipient_id)
+                    )
                     db.commit()
-                app.logger.warning(f"Campaign {campaign_id}: Zeptomail rejected send to {u['email']}")
+                app.logger.warning(f"Campaign {campaign_id}: Zeptomail rejected send to {u['email']}: {detail}")
         except Exception as e:
             failed += 1
             if recipient_id:
-                db.execute("UPDATE email_campaign_recipients SET status='failed' WHERE id=?", (recipient_id,))
+                db.execute(
+                    "UPDATE email_campaign_recipients SET status='failed', error_detail=? WHERE id=?",
+                    (f'{type(e).__name__}: {e}', recipient_id)
+                )
                 db.commit()
             app.logger.warning(f"Campaign {campaign_id} send failed for user {u.get('id')}: {e}")
         _time.sleep(1)

@@ -94,7 +94,11 @@
                             <td class="py-3 px-4">{{ r.name or '—' }}</td>
                             <td class="py-3 px-4 text-gray-600">{{ r.email }}</td>
                             <td class="py-3 px-4">
-                                {% if r.status == 'failed' %}<span class="px-2 py-1 rounded-full text-xs font-bold badge-failed">Failed</span>
+                                {% if r.status == 'failed' %}
+                                <span class="px-2 py-1 rounded-full text-xs font-bold badge-failed">Failed</span>
+                                {% if r.error_detail %}
+                                <div class="text-xs text-red-600 mt-1 max-w-xs" style="white-space:normal;word-break:break-word;" title="{{ r.error_detail }}">{{ r.error_detail[:120] }}{% if r.error_detail|length > 120 %}…{% endif %}</div>
+                                {% endif %}
                                 {% else %}<span class="px-2 py-1 rounded-full text-xs font-bold badge-sent">Sent</span>{% endif %}
                             </td>
                             <td class="py-3 px-4 font-bold text-rose-700 font-mono">{{ r.coupon_code }}</td>
