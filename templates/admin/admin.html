@@ -219,6 +219,13 @@
                             <div class="console-card-desc">Build, save, and send promotional emails with personalized coupons.</div>
                         </div>
                     </a>
+                    <a href="{{ url_for('admin_email_diagnostics') }}" class="console-card">
+                        <span class="console-card-icon" aria-hidden="true">📡</span>
+                        <div>
+                            <div class="console-card-title">Email Diagnostics</div>
+                            <div class="console-card-desc">Check which Zeptomail credentials are configured and send a real test email.</div>
+                        </div>
+                    </a>
                     <form method="POST" action="{{ url_for('admin_send_welcome_backfill') }}"
                           onsubmit="return confirm('Send the welcome email + a private 15% coupon to every existing user who hasn\'t received one yet? This emails real customers and cannot be undone.');">
                         <button type="submit" class="console-card console-card-btn">

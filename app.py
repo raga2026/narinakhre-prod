@@ -92,14 +92,17 @@ WAREHOUSE_STATE = os.environ.get('WAREHOUSE_STATE', 'Madhya Pradesh')
 WAREHOUSE_ADDRESS = os.environ.get('WAREHOUSE_ADDRESS', '')
 WAREHOUSE_PHONE = os.environ.get('WAREHOUSE_PHONE', '')
 ADMIN_EMAIL = os.environ.get('ADMIN_EMAIL', 'mohinicosmetics.india@gmail.com')
-# Order-related emails (confirmation, tracking updates) and general/info
+# Order-related emails (confirmation, tracking updates) and general/support
 # emails (welcome, campaigns, contact-form replies) each go out through
 # their own Zeptomail Mail Agent, with its own verified sender identity and
 # its own API token -- see send_contact_email() for how the matching token
-# gets picked. SMTP_FROM_ORDERS/SMTP_FROM are the old var names, kept as a
-# fallback in case the new ones aren't set yet.
-ORDERS_FROM_EMAIL = os.environ.get('SMTP_ORDERS_FROM_EMAIL', os.environ.get('SMTP_FROM_ORDERS', 'orders-noreply@narinakhre.com'))
-INFO_FROM_EMAIL = os.environ.get('SMTP_INFO_FROM_EMAIL', os.environ.get('SMTP_FROM', 'info@narinakhre.com'))
+# gets picked.
+# Note the inherited casing on the "support" FROM var (lowercase "support"
+# in SMTP_support_EMAIL_FROM but uppercase in the two SUPPORT_EMAIL_*
+# credential vars below) -- that's exactly how these are named in Render,
+# kept as-is here since env var names are case-sensitive.
+ORDERS_FROM_EMAIL = os.environ.get('SMTP_ORDERS_FROM_EMAIL', 'orders-noreply@narinakhre.com')
+SUPPORT_FROM_EMAIL = os.environ.get('SMTP_support_EMAIL_FROM', 'support-noreply@narinakhre.com')
 RAZORPAY_KEY_ID = os.environ.get('RAZORPAY_KEY_ID')
 RAZORPAY_KEY_SECRET = os.environ.get('RAZORPAY_KEY_SECRET')
 ADMIN_USERNAME = os.environ.get('ADMIN_USERNAME', '')
@@ -676,26 +679,22 @@ def send_contact_email(to_email, subject, body, html_body=None, from_email=None)
     either succeeds, fails, or times out in 10s. No other behavior change.
 
     Credentials from Render environment variables:
-        ZEPTOMAIL_API_URL       = https://api.zeptomail.in/v1.1/email  (default, .in region)
+        ZEPTOMAIL_API_URL          = https://api.zeptomail.in/v1.1/email  (default, .in region)
         SMTP_ORDERS_ZEPTO_PASSWORD = API token for the "orders" Mail Agent (orders-noreply@)
-        SMTP_INFO_ZEPTO_PASSWORD   = API token for the "info" Mail Agent (info@)
+        SMTP_SUPPORT_EMAIL_PASSWORD = API token for the "support" Mail Agent (support-noreply@)
     Each Zeptomail Mail Agent has its own verified sender identity and its
-    own API token -- a token from one agent can't send as the other
-    agent's From address, which is exactly why info@ sends were being
-    silently rejected while orders@ sends worked (only one shared token was
-    ever configured, and it belonged to the orders agent). The From address
-    picks which token gets used; both fall back to the older shared
-    ZEPTOMAIL_API_KEY/SMTP_PASS if the per-agent vars aren't set.
+    own API token -- a token from one agent can't send as the other agent's
+    From address, which is exactly why sends from the old info@ address were
+    being silently rejected. The From address picks which token gets used.
     The From address must be a verified sender in Zeptomail.
     """
     api_url = os.environ.get('ZEPTOMAIL_API_URL', 'https://api.zeptomail.in/v1.1/email')
-    FROM_EMAIL = from_email or INFO_FROM_EMAIL
+    FROM_EMAIL = from_email or SUPPORT_FROM_EMAIL
 
-    shared_fallback = os.environ.get('ZEPTOMAIL_API_KEY') or os.environ.get('SMTP_PASS', '')
     if FROM_EMAIL == ORDERS_FROM_EMAIL:
-        api_key = os.environ.get('SMTP_ORDERS_ZEPTO_PASSWORD') or shared_fallback
+        api_key = os.environ.get('SMTP_ORDERS_ZEPTO_PASSWORD', '')
     else:
-        api_key = os.environ.get('SMTP_INFO_ZEPTO_PASSWORD') or shared_fallback
+        api_key = os.environ.get('SMTP_SUPPORT_EMAIL_PASSWORD', '')
 
     if not api_key:
         app.logger.warning(f'Email send skipped: no Zeptomail API token configured for sender {FROM_EMAIL}')
@@ -4755,6 +4754,80 @@ def admin_send_welcome_backfill():
     t.start()
     flash(f'Sending welcome emails to {len(users)} existing user(s) in the background — this will take a few minutes.')
     return redirect(url_for('admin_dashboard'))
+
+
+@app.route('/admin/email-diagnostics', methods=['GET', 'POST'])
+@admin_required
+def admin_email_diagnostics():
+    """Shows which Zeptomail env vars are actually set on this server
+    (masked, never the real secret) and which one send_contact_email()
+    would pick for each sender identity -- and lets you fire a real test
+    send and see Zeptomail's raw response right here, since Render log
+    access isn't always available."""
+    def mask(val):
+        if not val:
+            return None
+        if len(val) <= 6:
+            return '•' * len(val)
+        return val[:3] + '•' * max(len(val) - 6, 3) + val[-3:]
+
+    env_status = {
+        'SMTP_SUPPORT_EMAIL_PASSWORD': mask(os.environ.get('SMTP_SUPPORT_EMAIL_PASSWORD')),
+        'SMTP_ORDERS_ZEPTO_PASSWORD': mask(os.environ.get('SMTP_ORDERS_ZEPTO_PASSWORD')),
+        'SMTP_support_EMAIL_FROM': os.environ.get('SMTP_support_EMAIL_FROM'),
+        'SMTP_ORDERS_FROM_EMAIL': os.environ.get('SMTP_ORDERS_FROM_EMAIL'),
+        'ZEPTOMAIL_API_URL': os.environ.get('ZEPTOMAIL_API_URL') or '(unset — defaults to https://api.zeptomail.in/v1.1/email)',
+    }
+
+    support_key_source = 'SMTP_SUPPORT_EMAIL_PASSWORD' if os.environ.get('SMTP_SUPPORT_EMAIL_PASSWORD') else 'NONE SET — send will fail'
+    orders_key_source = 'SMTP_ORDERS_ZEPTO_PASSWORD' if os.environ.get('SMTP_ORDERS_ZEPTO_PASSWORD') else 'NONE SET — send will fail'
+
+    test_result = None
+    if request.method == 'POST':
+        test_to = (request.form.get('test_email') or '').strip()
+        identity = request.form.get('identity') or 'support'
+        if not test_to:
+            flash('Enter a test recipient email address.')
+        else:
+            from_email = ORDERS_FROM_EMAIL if identity == 'orders' else SUPPORT_FROM_EMAIL
+            api_url = os.environ.get('ZEPTOMAIL_API_URL', 'https://api.zeptomail.in/v1.1/email')
+            api_key = (os.environ.get('SMTP_ORDERS_ZEPTO_PASSWORD') if from_email == ORDERS_FROM_EMAIL
+                       else os.environ.get('SMTP_SUPPORT_EMAIL_PASSWORD', ''))
+
+            if not api_key:
+                test_result = {'ok': False, 'from_email': from_email,
+                                'detail': f'No API token available for sender {from_email} -- '
+                                          f'the matching env var is empty or unset.'}
+            else:
+                payload = {
+                    'from': {'address': from_email, 'name': 'Nari Nakhre'},
+                    'to': [{'email_address': {'address': test_to, 'name': test_to}}],
+                    'subject': 'Nari Nakhre — test email from admin diagnostics',
+                    'textbody': f'This is a test send from the "{identity}" identity ({from_email}), '
+                                f'triggered from the admin Email Diagnostics page.',
+                }
+                headers = {
+                    'Authorization': f'Zoho-enczapikey {api_key}',
+                    'Content-Type': 'application/json',
+                    'Accept': 'application/json',
+                }
+                try:
+                    resp = requests.post(api_url, json=payload, headers=headers, timeout=10)
+                    test_result = {
+                        'ok': resp.status_code in (200, 201),
+                        'status_code': resp.status_code,
+                        'detail': resp.text[:1500],
+                        'from_email': from_email,
+                    }
+                except requests.exceptions.Timeout:
+                    test_result = {'ok': False, 'from_email': from_email, 'detail': 'Request to Zeptomail timed out after 10s.'}
+                except Exception as e:
+                    test_result = {'ok': False, 'from_email': from_email, 'detail': f'{type(e).__name__}: {e}'}
+
+    return render_template('admin/admin_email_diagnostics.html',
+                            env_status=env_status, support_from=SUPPORT_FROM_EMAIL, orders_from=ORDERS_FROM_EMAIL,
+                            support_key_source=support_key_source, orders_key_source=orders_key_source,
+                            test_result=test_result)
 
 
 # ── Email Campaigns ──────────────────────────────────────────────────────
