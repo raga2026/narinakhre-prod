@@ -455,6 +455,28 @@
                 {% endif %}
                 <span class="prod-price">₹{{ rp|round(0)|int }}</span>
             </div>
+            <!-- Size select for bangles / sized products -->
+            {% set is_bangle = 'bangle' in (product.category|lower if product.category else '') or 'bangle' in (product.sub_category|lower if product.sub_category else '') or 'bangle' in (product.name|lower if product.name else '') %}
+            {% if is_bangle %}
+            <div style="display:flex;align-items:center;gap:4px;margin-bottom:2px;">
+                <label style="font-size:0.65rem;font-weight:600;color:#9f9f9f;white-space:nowrap;">Size</label>
+                <select class="input-field size-select" id="size-trending-{{ product.sku }}" style="margin-bottom:0;flex:1;">
+                    {% for bsize in ['2.4', '2.6', '2.8'] %}
+                    {%- set bstock = product.size_stock.get(bsize, 0) if product.size_stock else None -%}
+                    <option value="{{ bsize }}" {% if bstock is not none and bstock <= 0 %}disabled{% endif %}>{{ bsize }}{% if bstock is not none and bstock <= 0 %} (Out of stock){% endif %}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            {% elif product.size %}
+            <div style="display:flex;align-items:center;gap:4px;margin-bottom:2px;">
+                <label style="font-size:0.65rem;font-weight:600;color:#9f9f9f;white-space:nowrap;">Size</label>
+                <select class="input-field size-select" id="size-trending-{{ product.sku }}" style="margin-bottom:0;flex:1;">
+                    {% for s in product.size.split(',') %}
+                    <option value="{{ s|trim }}">{{ s|trim }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            {% endif %}
             {% if product.stock_total and product.stock_total > 0 %}
             <button class="add-to-cart-btn btn-add-cart"
                     data-sku="{{ product.sku }}"

@@ -102,7 +102,7 @@ function insertUnitControls(btn, productId, tier, price, units, size) {
     // Use the unique wrapper for this product
     let container = document.getElementById('quote-action-' + productId);
     if (!container) {
-        container = btn.closest('.product-card') || btn.closest('.product-container') || btn.parentElement;
+        container = btn.closest('.product-card') || btn.closest('.product-container') || btn.closest('.prod-card') || btn.parentElement;
     }
     let existingControls = container.querySelector('.qty-controls');
     if (existingControls) existingControls.remove();
