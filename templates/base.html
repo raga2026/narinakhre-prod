@@ -98,7 +98,6 @@
             width: 100%; border: 1px solid #fbcfe8; border-radius: 10px; padding: 9px 12px;
             font-size: 0.85rem; font-family: inherit; box-sizing: border-box;
         }
-        .auth-form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
         .auth-password-wrap { position: relative; }
         .auth-password-wrap input { padding-right: 40px; }
         .auth-eye-btn {
@@ -195,16 +194,11 @@
                 <button type="button" class="auth-back-btn" onclick="backToChoice('signup')">← Back</button>
                 <div id="auth-signup-error" class="auth-form-error" hidden></div>
                 <form id="auth-signup-form" onsubmit="return submitSignUp(event)">
-                    <div class="auth-form-row">
-                        <div>
-                            <label for="asu-first">First Name</label>
-                            <input type="text" id="asu-first" name="first_name" required autocomplete="given-name">
-                        </div>
-                        <div>
-                            <label for="asu-last">Last Name</label>
-                            <input type="text" id="asu-last" name="last_name" required autocomplete="family-name">
-                        </div>
-                    </div>
+                    <label for="asu-name">Full Name</label>
+                    <input type="text" id="asu-name" name="full_name" required autocomplete="name">
+                    <label for="asu-phone">Mobile Number</label>
+                    <input type="tel" id="asu-phone" name="phone" required autocomplete="tel"
+                           inputmode="numeric" pattern="[0-9]{10}" maxlength="10" placeholder="10-digit mobile number">
                     <label for="asu-email">Email</label>
                     <input type="email" id="asu-email" name="email" required autocomplete="email">
                     <label for="asu-password">Password</label>
@@ -449,10 +443,15 @@ async function submitSignUp(e) {
     e.preventDefault();
     const errEl = document.getElementById('auth-signup-error');
     errEl.hidden = true;
-    const first_name = document.getElementById('asu-first').value.trim();
-    const last_name = document.getElementById('asu-last').value.trim();
+    const full_name = document.getElementById('asu-name').value.trim();
+    const phone = document.getElementById('asu-phone').value.trim();
     const email = document.getElementById('asu-email').value.trim();
     const password = document.getElementById('asu-password').value;
+    if (!/^[0-9]{10}$/.test(phone)) {
+        errEl.textContent = 'Please enter a valid 10-digit mobile number.';
+        errEl.hidden = false;
+        return false;
+    }
     if (password.length < 8) {
         errEl.textContent = 'Password must be at least 8 characters.';
         errEl.hidden = false;
@@ -466,7 +465,7 @@ async function submitSignUp(e) {
         const token = await getRecaptchaToken('email_signup');
         const r = await fetch('/auth/email/signup', {
             method: 'POST', headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({first_name: first_name, last_name: last_name, email: email, password: password, recaptcha_token: token})
+            body: JSON.stringify({full_name: full_name, phone: phone, email: email, password: password, recaptcha_token: token})
         });
         const d = await r.json();
         if (d.status === 'success') { location.reload(); return false; }

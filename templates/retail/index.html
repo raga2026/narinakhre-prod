@@ -32,6 +32,19 @@
         position: relative;
         z-index: 1;
     }
+    .hero-auth-cta {
+        margin-top: 18px; display: flex; align-items: center; justify-content: center;
+        gap: 10px; flex-wrap: wrap; font-size: 0.85rem; color: #831843;
+    }
+    .hero-auth-cta-sep { font-size: 0.78rem; color: #9f9f9f; }
+    .hero-auth-btn {
+        border-radius: 999px; padding: 8px 20px; font-size: 0.85rem; font-weight: 700;
+        cursor: pointer; font-family: inherit; border: 1.5px solid #be185d; transition: all 0.15s;
+    }
+    .hero-auth-btn-primary { background: #be185d; color: #fff; }
+    .hero-auth-btn-primary:hover { background: #9f1239; border-color: #9f1239; }
+    .hero-auth-btn-secondary { background: #fff; color: #be185d; }
+    .hero-auth-btn-secondary:hover { background: #fff1f2; }
 
     /* ── Offers carousel (deal banner, above hero, auto-rotating) ── */
     .offers-carousel {
@@ -371,6 +384,13 @@
            onclick="document.getElementById('shop-section').scrollIntoView({behavior:'smooth'}); return false;">
             Shop Now
         </a>
+        {% if not logged_in_user %}
+        <div class="hero-auth-cta">
+            <button type="button" class="hero-auth-btn hero-auth-btn-primary" onclick="openAuthModal('signup')">Create Account</button>
+            <span class="hero-auth-cta-sep">or</span>
+            <button type="button" class="hero-auth-btn hero-auth-btn-secondary" onclick="openAuthModal('signin')">Sign In</button>
+        </div>
+        {% endif %}
     </div>
 </section>
 

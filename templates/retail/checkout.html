@@ -402,24 +402,26 @@
       <div class="ck-section">
         {% if not logged_in_user %}
         <div id="ck-signin-card" style="display:none;background:#fff7f8;border:1.5px solid #fda4af;border-radius:14px;padding:14px 16px;margin-bottom:16px;">
-          <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;">
-            <div style="font-size:0.82rem;color:#831843;line-height:1.4;">
-              <strong>Sign in</strong> to autofill your name, phone and address.
-            </div>
-            <div style="display:flex;gap:8px;flex-wrap:wrap;flex-shrink:0;">
-              <a href="{{ url_for('google_login') }}"
-                 style="display:inline-flex;align-items:center;gap:6px;padding:8px 14px;border-radius:10px;background:#be185d;color:white;font-size:0.8rem;font-weight:700;text-decoration:none;white-space:nowrap;">
-                Sign in with Google
-              </a>
-              <button type="button" onclick="openAuthModal('signin')"
-                      style="padding:8px 14px;border-radius:10px;border:1.5px solid #be185d;background:white;color:#be185d;font-size:0.8rem;font-weight:700;cursor:pointer;white-space:nowrap;">
-                Sign in with Email
-              </button>
-              <button type="button" onclick="ckSkipSignin()"
-                      style="padding:8px 12px;border-radius:10px;border:1.5px solid #d2d2d7;background:white;color:#6e6e73;font-size:0.8rem;font-weight:600;cursor:pointer;white-space:nowrap;">
-                Skip
-              </button>
-            </div>
+          <div style="font-size:0.82rem;color:#831843;line-height:1.4;margin-bottom:10px;">
+            <strong>Create an account</strong> to autofill your name, phone and address, and track your orders.
+          </div>
+          <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+            <a href="{{ url_for('google_login') }}"
+               style="display:inline-flex;align-items:center;gap:6px;padding:8px 14px;border-radius:10px;background:#be185d;color:white;font-size:0.8rem;font-weight:700;text-decoration:none;white-space:nowrap;">
+              Continue with Google
+            </a>
+            <button type="button" onclick="openAuthModal('signup')"
+                    style="padding:8px 14px;border-radius:10px;border:1.5px solid #be185d;background:white;color:#be185d;font-size:0.8rem;font-weight:700;cursor:pointer;white-space:nowrap;">
+              Create Account
+            </button>
+            <button type="button" onclick="openAuthModal('signin')"
+                    style="padding:8px 4px;border:none;background:none;color:#831843;font-size:0.78rem;font-weight:600;cursor:pointer;text-decoration:underline;white-space:nowrap;">
+              Already have an account? Sign In
+            </button>
+            <button type="button" onclick="ckSkipSignin()"
+                    style="padding:8px 12px;border-radius:10px;border:1.5px solid #d2d2d7;background:white;color:#6e6e73;font-size:0.8rem;font-weight:600;cursor:pointer;white-space:nowrap;margin-left:auto;">
+              Skip
+            </button>
           </div>
         </div>
         <script>
@@ -613,6 +615,7 @@ const discountBase = {{ discount|default(0)|round(2) }};
 const creditsApplied = {{ credits_applied|default(0)|round(2) }};
 const savedAddresses = {{ (saved_addresses or [])|tojson }};
 const fallbackEmail = {{ (logged_in_user.email if logged_in_user else '')|tojson }};
+const IS_LOGGED_IN = {{ 'true' if logged_in_user else 'false' }};
 const publicCouponsForNudge = {{ (public_coupons or [])|tojson }};
 
 /* ── Saved address picker ── */
@@ -918,11 +921,45 @@ function ckHideLoading() {
     document.getElementById('ck-loading-overlay').classList.remove('active');
 }
 
+/* ── Sign-in required before placing an order ── */
+function ckSaveAddressDraft() {
+    const form = document.getElementById('ck-form');
+    try {
+        sessionStorage.setItem('nn_checkout_draft', JSON.stringify({
+            name: form.name.value, phone: form.phone.value, email: form.email.value,
+            address: form.address.value, pincode: form.pincode.value
+        }));
+    } catch (e) {}
+}
+(function restoreAddressDraft() {
+    let raw;
+    try { raw = sessionStorage.getItem('nn_checkout_draft'); sessionStorage.removeItem('nn_checkout_draft'); } catch (e) { return; }
+    if (!raw) return;
+    try {
+        const draft = JSON.parse(raw);
+        const form = document.getElementById('ck-form');
+        if (draft.name) form.name.value = draft.name;
+        if (draft.phone) form.phone.value = draft.phone;
+        if (draft.email) form.email.value = draft.email;
+        if (draft.address) form.address.value = draft.address;
+        if (draft.pincode) { form.pincode.value = draft.pincode; ckCheckPin(); }
+    } catch (e) {}
+})();
+
 /* ── Form submit ── */
 document.getElementById('ck-form').addEventListener('submit', async function(e){
     e.preventDefault();
     const form = e.target;
     const submitBtn = document.getElementById('ck-submit-btn');
+
+    if (!IS_LOGGED_IN) {
+        ckSaveAddressDraft();
+        const card = document.getElementById('ck-signin-card');
+        if (card) { card.style.display = 'block'; card.scrollIntoView({behavior:'smooth', block:'center'}); }
+        if (typeof openAuthModal === 'function') openAuthModal('signup');
+        return;
+    }
+
     const name  = form.name.value.trim();
     const phone = form.phone.value.trim();
     const email = form.email.value.trim();
@@ -968,6 +1005,15 @@ document.getElementById('ck-form').addEventListener('submit', async function(e){
     try {
         const r1 = await fetch('/retail/checkout/process', {method:'POST', body:fd});
         const d1 = await r1.json().catch(()=>({}));
+        if (d1.require_login) {
+            ckHideLoading();
+            ckSaveAddressDraft();
+            const card = document.getElementById('ck-signin-card');
+            if (card) { card.style.display = 'block'; card.scrollIntoView({behavior:'smooth', block:'center'}); }
+            if (typeof openAuthModal === 'function') openAuthModal('signup');
+            submitBtn.disabled = false; submitBtn.textContent = 'Place Order';
+            return;
+        }
         if (!r1.ok || d1.status === 'error') throw new Error(d1.message || 'Could not create order');
 
         if (mode === 'COD') {

@@ -514,6 +514,7 @@ def initialize_database_if_needed():
         'ALTER TABLE email_campaign_recipients ADD COLUMN IF NOT EXISTS error_detail TEXT',
         'ALTER TABLE product_events ADD COLUMN IF NOT EXISTS visitor_id TEXT',
         'ALTER TABLE product_events ADD COLUMN IF NOT EXISTS source TEXT',
+        'ALTER TABLE users ADD COLUMN IF NOT EXISTS phone TEXT',
         # Best-effort -- non-fatal if pre-existing rows already have duplicate
         # or blank emails (see the app-level check in email_signup as the
         # real guard against duplicate accounts).
@@ -1587,15 +1588,15 @@ def email_signup():
     # Not restricted to retail -- Google sign-in already works on both
     # storefronts against the same users table, so email sign-in matches it.
     data = request.get_json(silent=True) or request.form or {}
-    first_name = (data.get('first_name') or '').strip()
-    last_name = (data.get('last_name') or '').strip()
+    full_name = (data.get('full_name') or '').strip()
+    phone = (data.get('phone') or '').strip()
     email = (data.get('email') or '').strip().lower()
     password = data.get('password') or ''
 
     if not verify_recaptcha(data.get('recaptcha_token'), remote_ip=request.remote_addr, expected_action='email_signup'):
         return jsonify({'status': 'error', 'message': 'Verification failed. Please refresh and try again.'}), 400
 
-    if not (first_name and last_name and email and password):
+    if not (full_name and phone and email and password):
         return jsonify({'status': 'error', 'message': 'Please fill in all fields.'}), 400
     if not EMAIL_RE.match(email):
         return jsonify({'status': 'error', 'message': 'Please enter a valid email address.'}), 400
@@ -1610,7 +1611,6 @@ def email_signup():
         if existing['google_sub']:
             return jsonify({'status': 'error', 'message': 'This email is registered via Google Sign-In. Please use "Continue with Google" instead.'}), 400
 
-    full_name = f'{first_name} {last_name}'.strip()
     password_hash = generate_password_hash(password)
 
     referred_by_id = None
@@ -1622,8 +1622,8 @@ def email_signup():
     new_code = generate_referral_code(db_conn)
 
     db_conn.execute(
-        'INSERT INTO users (name, email, password_hash, referral_code, referred_by) VALUES (?,?,?,?,?)',
-        (full_name, email, password_hash, new_code, referred_by_id),
+        'INSERT INTO users (name, phone, email, password_hash, referral_code, referred_by) VALUES (?,?,?,?,?,?)',
+        (full_name, phone, email, password_hash, new_code, referred_by_id),
     )
     db_conn.commit()
     user_row = db_conn.execute('SELECT id FROM users WHERE LOWER(email)=?', (email,)).fetchone()
@@ -2650,6 +2650,8 @@ def checkout_shipping():
 @app.route('/retail/checkout/process', methods=['POST'])
 def checkout_process():
     g.site_type = 'retail'
+    if not session.get('user_id'):
+        return jsonify({'status': 'error', 'message': 'Please sign in to place your order.', 'require_login': True}), 401
     consignee_name = (request.form.get('consignee_name') or '').strip()
     consignee_phone = (request.form.get('consignee_phone') or '').strip()
     consignee_address = (request.form.get('consignee_address') or '').strip()
