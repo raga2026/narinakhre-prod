@@ -10,9 +10,15 @@ function getSiteMode() {
 
 // 2. Update the Navbar Cart Counter
 function updateCartUI(newTotal) {
-    const navCart = document.getElementById('nav-cart-count');
-    if (navCart) navCart.innerText = newTotal;
-    
+    if (typeof syncCartCount === 'function') {
+        syncCartCount(newTotal);
+    } else {
+        ['cart-count', 'cart-count-mobile', 'cart-count-icon'].forEach(id => {
+            const el = document.getElementById(id);
+            if (el) el.innerText = newTotal;
+        });
+    }
+
     const ariaLive = document.getElementById('aria-live-quote');
     const msg = getSiteMode() === 'retail' ? 'Added to Cart.' : 'Added to Quote.';
     if (ariaLive) ariaLive.innerText = `${msg} Total items: ${newTotal}.`;
@@ -43,6 +49,13 @@ function addToCart(btn) {
         if (sizeEl) {
             size = sizeEl.value;
         }
+    } else {
+        // Products without a dedicated size selector (e.g. the Trending shelf)
+        // still need a non-empty size value for /update-cart, so fall back to
+        // any sibling .size-select in the card, or 'Standard' when there isn't one.
+        const card = btn.closest('.product-card') || btn.closest('.cart-container') || btn.closest('.prod-card');
+        const sizeSelect = card ? card.querySelector('.size-select') : null;
+        size = sizeSelect ? sizeSelect.value : 'Standard';
     }
 
     // Get Quantity (Check for PDP input first, then button attribute, else 1)
@@ -53,8 +66,8 @@ function addToCart(btn) {
         qty = parseInt(btn.getAttribute('data-qty'));
     }
 
-    if (!productId || !size) {
-        alert('Please select a size.');
+    if (!productId) {
+        alert('Something went wrong. Please refresh and try again.');
         return;
     }
 
@@ -136,7 +149,6 @@ function updateUnits(productId, tier, units, parent, btn, price, size) {
 
 // Ensure updateUnits is globally accessible for dynamic controls
 window.updateUnits = updateUnits;
-}
 
 // 5. Global Event Listener
 document.addEventListener('click', function(e) {
