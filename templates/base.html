@@ -111,6 +111,14 @@
         }
         .auth-submit-btn:hover { background: #9f1239; }
         .auth-submit-btn:disabled { opacity: 0.6; cursor: default; }
+        .auth-switch-link {
+            text-align: center; font-size: 0.8rem; color: #6b7280; margin: 14px 0 0;
+        }
+        .auth-switch-link button {
+            background: none; border: none; cursor: pointer; padding: 0; margin: 0;
+            font-family: inherit; font-size: 0.8rem; font-weight: 700; color: #be185d; text-decoration: underline;
+        }
+        .auth-switch-link button:hover { color: #9f1239; }
     </style>
     {% block extra_styles %}{% endblock %}
 </head>
@@ -172,6 +180,7 @@
                     </div>
                     <button type="submit" class="auth-submit-btn">Sign In</button>
                 </form>
+                <p class="auth-switch-link">Don't have an account? <button type="button" onclick="goToAuthEmailForm('signup')">Sign Up</button></p>
             </div>
         </div>
 
@@ -210,6 +219,7 @@
                     <div class="auth-hint">At least 8 characters.</div>
                     <button type="submit" class="auth-submit-btn">Create Account</button>
                 </form>
+                <p class="auth-switch-link">Already have an account? <button type="button" onclick="goToAuthEmailForm('signin')">Sign In</button></p>
             </div>
         </div>
         <button type="button" class="auth-modal-later-link" onclick="closeAuthModal()">Sign in later</button>
@@ -383,6 +393,10 @@ function backToChoice(tabName) {
     if (!choice || !formWrap) return;
     formWrap.hidden = true;
     choice.hidden = false;
+}
+function goToAuthEmailForm(tabName) {
+    showAuthTab(tabName);
+    showEmailForm(tabName);
 }
 document.addEventListener('DOMContentLoaded', function () {
     document.querySelectorAll('.auth-modal-tabs [role="tab"]').forEach(function (tab, idx, arr) {
