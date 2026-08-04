@@ -152,7 +152,7 @@
                  onerror="this.src='{{ url_for('static', filename='assets/logo.png') }}'"
                  style="width:100%;aspect-ratio:1;object-fit:contain;background:#fdf2f8;padding:8px;">
             <div style="padding:10px 12px 14px;">
-                <div style="font-size:0.82rem;font-weight:600;color:#1d1d1f;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-bottom:4px;">{{ p.name }}{% if p.model_number %} <span style="color:#9f9f9f;font-weight:600;">({{ p.model_number }})</span>{% endif %}</div>
+                <div style="font-size:0.82rem;font-weight:600;color:#1d1d1f;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-bottom:4px;">{% if p.brand_name %}{{ p.brand_name }} {% endif %}{{ p.name }}{% if p.pack_unit and p.pack_count %} <span style="color:#9f9f9f;font-weight:700;">&#8211; {{ p.pack_unit }} Of {{ p.pack_count }}</span>{% endif %}{% if p.model_number %} <span style="color:#9f9f9f;font-weight:600;">({{ p.model_number }})</span>{% endif %}</div>
                 <div style="font-size:0.72rem;color:#9f9f9f;margin-bottom:6px;">{{ p.category or '' }}</div>
                 <div style="display:flex;align-items:center;gap:5px;flex-wrap:wrap;">
                     {% if mrp and mrp > rp %}

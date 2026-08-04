@@ -4,7 +4,10 @@
 <div style="margin-bottom: 20px; padding: 20px; display:flex; gap:12px;">
     <a href="{{ url_for('admin_dashboard') }}" style="background:#be185d; color:white; padding:8px 18px; border-radius:8px; font-weight:bold; text-decoration:none;">Back to Admin</a>
     <a href="{{ url_for('admin_edit_product_search') }}" style="background:#334155; color:white; padding:8px 18px; border-radius:8px; font-weight:bold; text-decoration:none;">Back to Search</a>
+    <a href="/retail/product/{{ product.id }}" target="_blank" style="background:#0369a1; color:white; padding:8px 18px; border-radius:8px; font-weight:bold; text-decoration:none;">Preview (Retail) →</a>
+    <a href="/wholesale/product/{{ product.id }}" target="_blank" style="background:#0369a1; color:white; padding:8px 18px; border-radius:8px; font-weight:bold; text-decoration:none;">Preview (Wholesale) →</a>
 </div>
+<div style="padding:0 20px; margin-top:-12px; margin-bottom:12px; font-size:0.78rem; color:#64748b;">Preview always shows the last saved version — save as draft first to preview your latest changes.</div>
 
 <style>
     body { background-color: #0f172a; color: white; font-family: sans-serif; }
@@ -49,6 +52,11 @@
                 <span class="hint">⚠️ Changing this will re-link any size variants. You'll be asked to confirm.</span>
             </div>
             <div class="form-group">
+                <label for="brand_name">Brand Name</label>
+                <input type="text" id="brand_name" name="brand_name" value="{{ product.brand_name or '' }}" placeholder="e.g. Nari Nakhre">
+                <span class="hint">Shown automatically in front of the product name on listings — don't repeat it below.</span>
+            </div>
+            <div class="form-group">
                 <label for="name">Product Name <span style="color:#f43f5e">*</span></label>
                 <input type="text" id="name" name="name" required value="{{ product.name or '' }}">
             </div>
@@ -77,6 +85,23 @@
             <div class="form-group">
                 <label for="material">Material</label>
                 <input type="text" id="material" name="material" value="{{ product.material or '' }}">
+            </div>
+            <div class="form-group">
+                <label for="pack_unit">Pack Unit</label>
+                <input type="text" id="pack_unit" name="pack_unit" list="pack-unit-options" value="{{ product.pack_unit or '' }}" placeholder="e.g. Pack, Set, Box">
+                <datalist id="pack-unit-options">
+                    <option value="Set"></option>
+                    <option value="Pack"></option>
+                    <option value="Box"></option>
+                    <option value="Piece"></option>
+                    <option value="Pair"></option>
+                    <option value="Dozen"></option>
+                </datalist>
+            </div>
+            <div class="form-group">
+                <label for="pack_count">Pack Count</label>
+                <input type="number" min="0" id="pack_count" name="pack_count" value="{{ product.pack_count or '' }}" placeholder="e.g. 6">
+                <span class="hint">Both optional. Together they show on listings as e.g. "&#8211; Pack Of 6".</span>
             </div>
         </div>
 

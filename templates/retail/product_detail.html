@@ -186,6 +186,12 @@
 
 <div class="pd-wrap">
 
+{% if product.status != 'published' %}
+<div style="background:#fef3c7;border:1.5px solid #f59e0b;color:#92400e;font-weight:700;font-size:0.82rem;padding:10px 14px;border-radius:10px;margin-bottom:14px;text-align:center;">
+    👁️ Preview only — this listing is a draft and isn't visible to customers yet.
+</div>
+{% endif %}
+
 {% set has_coupons_mini = public_coupons and public_coupons|length > 0 %}
 {% set has_products_mini = carousel_products and carousel_products|length > 0 %}
 {% if has_coupons_mini or has_products_mini %}
@@ -245,7 +251,7 @@
 
     <!-- Info block -->
     <div class="mt-2 md:mt-0">
-      <h1 class="pd-title">{{ product.name }}{% if product.model_number %} <span class="pd-model-no" style="font-size:0.62em;font-weight:600;color:#9ca3af;">({{ product.model_number }})</span>{% endif %}</h1>
+      <h1 class="pd-title">{% if product.brand_name %}{{ product.brand_name }} {% endif %}{{ product.name }}{% if product.pack_unit and product.pack_count %} <span style="font-size:0.7em;font-weight:700;color:#9f9f9f;">&#8211; {{ product.pack_unit }} Of {{ product.pack_count }}</span>{% endif %}{% if product.model_number %} <span class="pd-model-no" style="font-size:0.62em;font-weight:600;color:#9ca3af;">({{ product.model_number }})</span>{% endif %}</h1>
       {%- set mrp = product.mrp_price or 0 -%}
         {%- set rp  = product.retail_price or product.price1 or 0 -%}
       {%- set disc = ((mrp - rp) / mrp * 100)|round(0)|int if mrp and mrp > rp else 0 -%}

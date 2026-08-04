@@ -340,6 +340,9 @@ def initialize_database_if_needed():
             making_charges FLOAT DEFAULT 0.0,
             weight_grams FLOAT DEFAULT 0.0,
             material TEXT,
+            brand_name TEXT,
+            pack_unit TEXT,
+            pack_count INTEGER DEFAULT 0,
             hsn_code TEXT,
             gst_percent FLOAT DEFAULT 0.0,
             stock_total INTEGER DEFAULT 0,
@@ -515,6 +518,9 @@ def initialize_database_if_needed():
         'ALTER TABLE product_events ADD COLUMN IF NOT EXISTS visitor_id TEXT',
         'ALTER TABLE product_events ADD COLUMN IF NOT EXISTS source TEXT',
         'ALTER TABLE users ADD COLUMN IF NOT EXISTS phone TEXT',
+        'ALTER TABLE products ADD COLUMN IF NOT EXISTS pack_unit TEXT',
+        'ALTER TABLE products ADD COLUMN IF NOT EXISTS pack_count INTEGER DEFAULT 0',
+        'ALTER TABLE products ADD COLUMN IF NOT EXISTS brand_name TEXT',
         # Best-effort -- non-fatal if pre-existing rows already have duplicate
         # or blank emails (see the app-level check in email_signup as the
         # real guard against duplicate accounts).
@@ -2393,12 +2399,12 @@ def category_products(category):
     db = get_db()
     # For retail, filter by the 'category' column
     if request.path.startswith('/retail'):
-        raw_products = db.execute('SELECT * FROM products WHERE category = ?', (category,)).fetchall()
+        raw_products = db.execute('SELECT * FROM products WHERE category = ? AND is_active = 1', (category,)).fetchall()
     else:
         raw_products = db.execute('''
             SELECT p.* FROM products p
             JOIN categories c ON p.category_id = c.id
-            WHERE c.name = ?
+            WHERE c.name = ? AND p.is_active = 1
         ''', (category,)).fetchall()
     products = []
     for p in raw_products:
@@ -2443,7 +2449,7 @@ def product_detail(product_id):
         p_dict['size_stock'] = get_bangle_size_stock(db, p_dict['sku'])
 
     related = db.execute(
-        'SELECT * FROM products WHERE id != ? ORDER BY RANDOM() LIMIT 4',
+        'SELECT * FROM products WHERE id != ? AND is_active = 1 ORDER BY RANDOM() LIMIT 4',
         (product_id,)
     ).fetchall()
     related_products = []
@@ -4326,6 +4332,9 @@ def admin_edit_product_form(id):
         wholesale_price = float(request.form.get('wholesale_price', 0) or 0)
         stock_total = int(request.form.get('stock_total', 0) or 0)
         material = request.form.get('material', '').strip()
+        brand_name = request.form.get('brand_name', '').strip()
+        pack_unit = request.form.get('pack_unit', '').strip()
+        pack_count = int(request.form.get('pack_count', 0) or 0)
         size = request.form.get('size', '').strip()
         hsn_code = request.form.get('hsn_code', '').strip()
         gst_percent = float(request.form.get('gst_percent', 3) or 3)
@@ -4384,7 +4393,7 @@ def admin_edit_product_form(id):
             '''UPDATE products SET
                  sku=?, name=?, category=?, sub_category=?, collection=?,
                  retail_price=?, mrp_price=?, wholesale_price=?, stock_total=?,
-                 material=?, size=?, hsn_code=?, gst_percent=?,
+                 material=?, brand_name=?, pack_unit=?, pack_count=?, size=?, hsn_code=?, gst_percent=?,
                  weight_grams=?, length=?, breadth=?, height=?,
                  sets_count=?, min_wholesale_qty=?, slug=?,
                  price1=?, quantity1=?, price2=?, quantity2=?, price3=?, quantity3=?,
@@ -4392,7 +4401,7 @@ def admin_edit_product_form(id):
                WHERE id=?''',
             (new_sku, name, category, sub_category, collection,
              retail_price, mrp_price, wholesale_price, stock_total,
-             material, size, hsn_code, gst_percent,
+             material, brand_name, pack_unit, pack_count, size, hsn_code, gst_percent,
              weight_grams, length, breadth, height,
              sets_count, min_wholesale_qty, slug,
              price1, quantity1, price2, quantity2, price3, quantity3,
@@ -4492,6 +4501,9 @@ def admin_add_product():
         wholesale_price = float(request.form.get('wholesale_price', 0) or 0)
         stock_total = int(request.form.get('stock_total', 0) or 0)
         material = request.form.get('material', '').strip()
+        brand_name = request.form.get('brand_name', '').strip()
+        pack_unit = request.form.get('pack_unit', '').strip()
+        pack_count = int(request.form.get('pack_count', 0) or 0)
         size = request.form.get('size', '').strip()
         hsn_code = request.form.get('hsn_code', '').strip()
         gst_percent = float(request.form.get('gst_percent', 3) or 3)
@@ -4524,6 +4536,9 @@ def admin_add_product():
         image_files = [f for f in request.files.getlist('images') if f and f.filename][:5]
 
         if intent == 'publish':
+            if len(name) > 48:
+                flash('Product name must be 48 characters or fewer (excluding brand name), or save as draft.')
+                return redirect(url_for('admin_add_product'))
             if len(key_features_list) < 4:
                 flash('Please add at least 4 key features (one per line), or save as draft.')
                 return redirect(url_for('admin_add_product'))
@@ -4550,16 +4565,16 @@ def admin_add_product():
             '''INSERT INTO products
                (sku, name, category, sub_category, collection,
                 retail_price, mrp_price, wholesale_price,
-                stock_total, material, size, hsn_code, gst_percent,
+                stock_total, material, brand_name, pack_unit, pack_count, size, hsn_code, gst_percent,
                 weight_grams, length, breadth, height,
                 sets_count, min_wholesale_qty,
                 slug, price1, quantity1, price2, quantity2,
                 price3, quantity3, image_field, description, key_features,
                 status, is_active, model_number, updated_at)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,NOW())''',
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,NOW())''',
             (sku, name, category, sub_category, collection,
              retail_price, mrp_price, wholesale_price,
-             stock_total, material, size, hsn_code, gst_percent,
+             stock_total, material, brand_name, pack_unit, pack_count, size, hsn_code, gst_percent,
              weight_grams, length, breadth, height,
              sets_count, min_wholesale_qty,
              slug, price1, quantity1, price2, quantity2,

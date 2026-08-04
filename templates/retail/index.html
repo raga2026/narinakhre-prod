@@ -22,10 +22,19 @@
         text-align: center;
     }
     .hero-section::before {
+        /* The photo behind this sits randomly (see setHero() below) and is
+           rarely centered on its own subject, which reads as lopsided once
+           cropped edge-to-edge. A radial vignette — always symmetric no
+           matter which photo loads — keeps the framing around the
+           heading/button balanced regardless. */
         content: "";
         position: absolute;
         inset: 0;
-        background: rgba(255, 241, 242, 0.82);
+        background: radial-gradient(ellipse at center,
+            rgba(255, 241, 242, 0.55) 0%,
+            rgba(255, 241, 242, 0.8) 45%,
+            rgba(255, 241, 242, 0.96) 80%,
+            rgba(255, 241, 242, 0.98) 100%);
         z-index: 0;
     }
     .hero-content {
@@ -467,7 +476,7 @@
                  onerror="this.onerror=null;this.src='/static/assets/products/default.jpg';">
         </div>
         <div class="prod-info">
-            <div class="prod-name">{{ product.name }}{% if product.model_number %} <span style="font-size:0.75em;color:#9ca3af;font-weight:600;">({{ product.model_number }})</span>{% endif %}</div>
+            <div class="prod-name">{% if product.brand_name %}{{ product.brand_name }} {% endif %}{{ product.name }}{% if product.pack_unit and product.pack_count %} <span style="font-size:0.85em;color:#9f9f9f;font-weight:700;">&#8211; {{ product.pack_unit }} Of {{ product.pack_count }}</span>{% endif %}{% if product.model_number %} <span style="font-size:0.75em;color:#9ca3af;font-weight:600;">({{ product.model_number }})</span>{% endif %}</div>
             <div class="prod-price-wrap">
                 {% if mrp and mrp > rp %}
                 <span class="prod-mrp"><span style="font-size:0.6rem;font-weight:600;">MRP</span> ₹{{ mrp|round(0)|int }}</span>
@@ -549,7 +558,7 @@
                 </a>
 
                 <!-- Name -->
-                <div class="prod-name">{{ product.name }}{% if product.model_number %} <span style="font-size:0.75em;color:#9ca3af;font-weight:600;">({{ product.model_number }})</span>{% endif %}</div>
+                <div class="prod-name">{% if product.brand_name %}{{ product.brand_name }} {% endif %}{{ product.name }}{% if product.pack_unit and product.pack_count %} <span style="font-size:0.85em;color:#9f9f9f;font-weight:700;">&#8211; {{ product.pack_unit }} Of {{ product.pack_count }}</span>{% endif %}{% if product.model_number %} <span style="font-size:0.75em;color:#9ca3af;font-weight:600;">({{ product.model_number }})</span>{% endif %}</div>
 
                 <!-- Price -->
                 <div class="prod-price-wrap">

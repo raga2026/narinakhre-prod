@@ -51,8 +51,15 @@
                 <input type="text" id="sku" name="sku" required placeholder="e.g. 012025BNGRE014">
             </div>
             <div class="form-group">
+                <label for="brand_name">Brand Name</label>
+                <input type="text" id="brand_name" name="brand_name" value="Nari Nakhre&#8482;" placeholder="e.g. Nari Nakhre&#8482;">
+                <span class="hint">Shown automatically in front of the product name on listings — don't repeat it below.</span>
+            </div>
+            <div class="form-group">
                 <label for="name">Product Name <span style="color:#f43f5e">*</span></label>
-                <input type="text" id="name" name="name" required placeholder="Full product name">
+                <input type="text" id="name" name="name" required maxlength="48" placeholder="e.g. Green Bangles Set">
+                <span class="hint">Don't include the brand name here — it's added automatically from Brand Name above. Max 48 characters, standardized so titles display fully on listings.</span>
+                <span id="name-count" class="hint"></span>
             </div>
             <div class="form-group">
                 <label for="slug">Slug (URL)</label>
@@ -79,6 +86,23 @@
             <div class="form-group">
                 <label for="material">Material</label>
                 <input type="text" id="material" name="material" placeholder="e.g. Brass, Silk Thread">
+            </div>
+            <div class="form-group">
+                <label for="pack_unit">Pack Unit</label>
+                <input type="text" id="pack_unit" name="pack_unit" list="pack-unit-options" placeholder="e.g. Pack, Set, Box">
+                <datalist id="pack-unit-options">
+                    <option value="Set"></option>
+                    <option value="Pack"></option>
+                    <option value="Box"></option>
+                    <option value="Piece"></option>
+                    <option value="Pair"></option>
+                    <option value="Dozen"></option>
+                </datalist>
+            </div>
+            <div class="form-group">
+                <label for="pack_count">Pack Count</label>
+                <input type="number" min="0" id="pack_count" name="pack_count" placeholder="e.g. 6">
+                <span class="hint">Both optional. Together they show on listings as e.g. "&#8211; Pack Of 6". Leave blank if not applicable.</span>
             </div>
         </div>
 
@@ -217,7 +241,11 @@
             <td style="padding:10px; color:#f472b6;">{{ d.sku }}</td>
             <td style="padding:10px;">{{ d.name or '(unnamed)' }}</td>
             <td style="padding:10px; font-size:0.8rem; color:#94a3b8;">{{ d.updated_at }}</td>
-            <td style="padding:10px;"><a href="{{ url_for('admin_edit_product_form', id=d.id) }}" style="color:#4ade80;">Resume editing →</a></td>
+            <td style="padding:10px; display:flex; gap:14px; flex-wrap:wrap;">
+                <a href="{{ url_for('admin_edit_product_form', id=d.id) }}" style="color:#4ade80;">Resume editing →</a>
+                <a href="/retail/product/{{ d.id }}" target="_blank" style="color:#38bdf8;">Preview (Retail) →</a>
+                <a href="/wholesale/product/{{ d.id }}" target="_blank" style="color:#38bdf8;">Preview (Wholesale) →</a>
+            </td>
         </tr>
         {% endfor %}
     </table>
@@ -225,6 +253,18 @@
 </div>
 
 <script>
+    (function() {
+        var nameField = document.getElementById('name');
+        var nameCount = document.getElementById('name-count');
+        function updateNameCount() {
+            var n = nameField.value.length;
+            nameCount.textContent = n + ' / 48 characters';
+            nameCount.style.color = n >= 48 ? '#f43f5e' : '#64748b';
+        }
+        nameField.addEventListener('input', updateNameCount);
+        updateNameCount();
+    })();
+
     (function() {
         var kfField = document.getElementById('key_features');
         var kfCount = document.getElementById('kf-count');

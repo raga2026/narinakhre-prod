@@ -65,6 +65,11 @@
             <a href="/" class="back-link">← Back to Collection</a>
         </nav>
 
+        {% if product.status != 'published' %}
+        <div style="background:#fef3c7;border:1.5px solid #f59e0b;color:#92400e;font-weight:700;font-size:0.92rem;padding:10px 16px;border-radius:10px;margin-bottom:18px;text-align:center;">
+            👁️ Preview only — this listing is a draft and isn't visible to buyers yet.
+        </div>
+        {% endif %}
 
         {% set pdp_main_image = image_urls[0] if image_urls and image_urls|length > 0 else '' %}
         {% set pdp_main_src = pdp_main_image if pdp_main_image and (pdp_main_image.startswith('http://') or pdp_main_image.startswith('https://') or pdp_main_image.startswith('/static/')) else (url_for('static', filename=pdp_main_image) if pdp_main_image else url_for('static', filename='assets/products/default.jpg')) %}
@@ -83,7 +88,7 @@
             </div>
             <!-- Info Right -->
             <div class="product-card pdp-info-card" style="flex:1; min-width:320px;">
-                <h1 class="pdp-title">{{ product['name'] }}</h1>
+                <h1 class="pdp-title">{% if product.brand_name %}{{ product.brand_name }} {% endif %}{{ product['name'] }}{% if product.pack_unit and product.pack_count %} <span style="font-size:0.7em;font-weight:700;color:#9f9f9f;">&#8211; {{ product.pack_unit }} Of {{ product.pack_count }}</span>{% endif %}</h1>
                 <div class="pdp-price">
                     {% if product['tiers'] and product['tiers']|length > 0 %}
                         {% set min_tier = (product['tiers'] | sort(attribute='price'))[0] %}

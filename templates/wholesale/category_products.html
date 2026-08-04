@@ -126,7 +126,7 @@
                   onerror="this.src='{{ url_for('static', filename='assets/products/default.jpg') }}'" />
         </a>
         <a href="{{ url_for('product_detail', product_id=product.id) }}" class="mt-2 w-full block text-center font-semibold text-slate-800 product-title whitespace-normal overflow-hidden text-ellipsis" style="font-family:'Playfair Display',serif; font-size:1.08rem; max-height:2.7em; line-height:1.35; min-height:2.7em;">
-            {{ product.name }}
+            {% if product.brand_name %}{{ product.brand_name }} {% endif %}{{ product.name }}{% if product.pack_unit and product.pack_count %} <span style="font-size:0.75em;color:#9f9f9f;font-weight:700;">&#8211; {{ product.pack_unit }} Of {{ product.pack_count }}</span>{% endif %}
         </a>
         <div class="w-full text-center product-price mb-1">
             {% if product.tiers and product.tiers|length > 0 %}

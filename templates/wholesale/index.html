@@ -27,10 +27,18 @@
         .hero-premium-bg { min-height: 420px; }
     }
     .hero-premium-bg::before {
+        /* Same fix as retail/index.html: the photo behind this rotates
+           randomly and is rarely centered on its own subject, so a flat
+           tint let it read as lopsided. A radial vignette is always
+           symmetric regardless of which photo loads. */
         content: "";
         position: absolute;
         inset: 0;
-        background: rgba(255, 241, 242, 0.85);
+        background: radial-gradient(ellipse at center,
+            rgba(255, 241, 242, 0.55) 0%,
+            rgba(255, 241, 242, 0.8) 45%,
+            rgba(255, 241, 242, 0.96) 80%,
+            rgba(255, 241, 242, 0.98) 100%);
         z-index: 0;
     }
     .hero-content-wrapper {
@@ -268,7 +276,7 @@
                 <!-- Product name -->
                 <a href="{{ url_for('product_detail', product_id=product.id) }}"
                    class="product-title mt-2 w-full">
-                    {{ product.name }}
+                    {% if product.brand_name %}{{ product.brand_name }} {% endif %}{{ product.name }}{% if product.pack_unit and product.pack_count %} <span style="font-size:0.75em;color:#9f9f9f;font-weight:700;">&#8211; {{ product.pack_unit }} Of {{ product.pack_count }}</span>{% endif %}
                 </a>
 
                 <!-- Price -->
