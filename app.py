@@ -790,6 +790,22 @@ def get_enabled_couriers():
     return [(row['name'], _build_courier_provider(db, row)) for row in rows]
 
 
+def get_configured_courier_names():
+    """Returns partner names with credentials saved, regardless of
+    is_enabled. is_enabled gates live customer-checkout rate-shopping; the
+    admin's manual order tool is a deliberate one-off action and shouldn't
+    be limited to whatever's currently live -- an admin may want to test or
+    use a courier there before ever flipping it on for real traffic."""
+    db = get_db()
+    rows = db.execute(
+        '''SELECT dp.name FROM delivery_partners dp
+           JOIN delivery_partner_credentials dpc ON dpc.partner_id = dp.id
+           WHERE dpc.encrypted_credentials IS NOT NULL AND dpc.encrypted_credentials != ''
+           ORDER BY dp.id'''
+    ).fetchall()
+    return [row['name'] for row in rows]
+
+
 def get_best_courier_quote(o_pin, d_pin, weight, mode="Prepaid"):
     """
     Rate-shops across every currently enabled courier and returns the
@@ -3887,16 +3903,18 @@ def api_track_shipment(waybill):
         return jsonify({'status': False, 'msg': 'Tracking not available'}), 403
     db = get_db()
     order = db.execute(
-        'SELECT courier_partner FROM order_shipping WHERE delhivery_waybill=? LIMIT 1', (waybill,)
+        'SELECT internal_order_id, courier_partner FROM order_shipping WHERE delhivery_waybill=? LIMIT 1', (waybill,)
     ).fetchone()
     partner_name = (order.get('courier_partner') if order else None) or 'delhivery'
     _partner, provider = get_courier(partner_name)
     try:
         result = provider.track_shipment(waybill)
+        result['courier_partner'] = partner_name
+        result['internal_order_id'] = order.get('internal_order_id') if order else None
         return jsonify(result)
     except Exception as e:
         app.logger.error(f'Tracking error: {e}')
-        return jsonify({"status": False, "msg": "Could not fetch tracking info"}), 200
+        return jsonify({"status": False, "msg": "Could not fetch tracking info", "courier_partner": partner_name}), 200
 
 
 @app.route('/track/<waybill>')
@@ -5774,7 +5792,7 @@ def admin_api_user_search():
 @app.route('/admin/orders/new')
 @admin_required
 def admin_new_order():
-    enabled_couriers = [name for name, _provider in get_enabled_couriers()]
+    enabled_couriers = get_configured_courier_names()
     return render_template('admin/admin_new_order.html', enabled_couriers=enabled_couriers)
 
 

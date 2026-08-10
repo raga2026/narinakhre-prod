@@ -44,7 +44,10 @@
   </h1>
 
   <div class="tk-card">
-    <div class="tk-waybill">Waybill: {{ waybill }}</div>
+    {% if order and order.internal_order_id %}
+    <div class="tk-waybill" style="font-weight:700;color:#881337;">Order: {{ order.internal_order_id }}</div>
+    {% endif %}
+    <div class="tk-waybill">Waybill: {{ waybill }}{% if order and order.courier_partner %} &middot; via {{ order.courier_partner|capitalize }}{% endif %}</div>
     <div id="tk-content">
       <div class="tk-loading">Fetching latest status…</div>
     </div>
