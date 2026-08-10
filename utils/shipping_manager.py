@@ -364,7 +364,9 @@ class ShiprocketProvider(BaseShippingProvider):
         cheapest = min(couriers, key=lambda c: c.get('rate', float('inf')))
         total = cheapest.get('rate', 0)
         cod_charge = cheapest.get('cod_charges', 0) if is_cod else 0
-        return {"rate": total, "shipping_charge": total, "cod_fee": cod_charge}
+        # etd ("estimated time of delivery") comes back as a date string like
+        # "Aug 15, 2026" from Shiprocket -- passed through as-is, no parsing.
+        return {"rate": total, "shipping_charge": total, "cod_fee": cod_charge, "eta": cheapest.get('etd')}
 
     def create_shipment(self, order_data):
         """order_data must already be shaped as a Shiprocket adhoc order payload

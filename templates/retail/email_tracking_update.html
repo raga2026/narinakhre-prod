@@ -27,6 +27,9 @@
         <div class="order-id">Order ID: <strong>{{ order_id }}</strong></div>
 
         <div class="awb-box">AWB / Tracking ID: {{ waybill }}</div>
+        {% if courier_partner %}
+        <p style="color:#757575;font-size:0.9em;">Shipped via <strong>{{ courier_partner|capitalize }}</strong>{% if courier_eta %} &middot; Estimated delivery: <strong>{{ courier_eta }}</strong>{% endif %}</p>
+        {% endif %}
 
         <a href="{{ tracking_url }}" class="track-btn">&#128230; Track Your Order</a>
 

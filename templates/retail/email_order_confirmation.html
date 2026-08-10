@@ -85,6 +85,12 @@
             {{ address_city }}, {{ address_state }} - {{ address_pincode }}
         </div>
 
+        {% if courier_partner %}
+        <p style="text-align:center;color:#4b5563;font-size:0.88em;margin:0 0 16px;">
+            &#128666; Shipped via <strong>{{ courier_partner|capitalize }}</strong>{% if courier_eta %} &middot; Estimated delivery: <strong>{{ courier_eta }}</strong>{% endif %}
+        </p>
+        {% endif %}
+
         {% if tracking_url and waybill %}
         <div style="text-align:center;">
             <a href="{{ tracking_url }}" class="track-btn">&#128230; Track Your Order &mdash; AWB {{ waybill }}</a>

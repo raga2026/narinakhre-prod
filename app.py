@@ -530,6 +530,11 @@ def initialize_database_if_needed():
         # needed so cancel/track actions call the right courier's API.
         # Existing rows predate multi-courier support and were all Delhivery.
         "ALTER TABLE order_shipping ADD COLUMN IF NOT EXISTS courier_partner TEXT DEFAULT 'delhivery'",
+        # ETA text quoted to the customer at checkout time (e.g. Shiprocket's
+        # "Aug 15, 2026") -- stored so the confirmation page/emails show the
+        # exact estimate that was quoted, not a possibly-different refetch.
+        # NULL for couriers/quotes that didn't supply one (Delhivery today).
+        'ALTER TABLE order_shipping ADD COLUMN IF NOT EXISTS courier_eta TEXT',
         'ALTER TABLE order_shipping ADD COLUMN IF NOT EXISTS cod_credit_awarded NUMERIC DEFAULT 0',
         'ALTER TABLE order_shipping ADD COLUMN IF NOT EXISTS credits_redeemed NUMERIC DEFAULT 0',
         'ALTER TABLE products ADD COLUMN IF NOT EXISTS model_number TEXT UNIQUE',
@@ -722,11 +727,19 @@ def get_courier(partner_name=None):
             return fallback_name, get_shipping_provider(fallback_name if fallback_name != 'shiprocket' else 'mock', api_token=token)
         return fallback_name, get_shipping_provider('mock')
 
+    return row['name'], _build_courier_provider(db, row)
+
+
+def _build_courier_provider(db, row):
+    """Constructs a provider instance from a delivery_partners + credentials
+    row, decrypting credentials and persisting a refreshed Shiprocket token
+    back to the DB when one gets issued. Shared by get_courier() (single
+    partner) and get_enabled_couriers() (all enabled partners, for
+    rate-shopping) so the token-refresh logic lives in exactly one place."""
     creds = decrypt_credentials(row['encrypted_credentials'])
 
     if row['name'] == 'delhivery':
-        provider = get_shipping_provider('delhivery', api_token=creds.get('api_token', ''))
-        return 'delhivery', provider
+        return get_shipping_provider('delhivery', api_token=creds.get('api_token', ''))
 
     if row['name'] == 'shiprocket':
         token_expires_at = None
@@ -748,17 +761,83 @@ def get_courier(partner_name=None):
                 (provider.token, provider.token_expires_at.isoformat(), row['id'])
             )
             db.commit()
-        return 'shiprocket', provider
+        return provider
 
-    # Unknown partner name shouldn't happen given the CHECK constraint, but
-    # don't leave shipping completely broken if it does.
-    provider_name = app.config.get('SHIPPING_PROVIDER', 'mock')
-    return provider_name, get_shipping_provider(provider_name)
+    # Unknown partner name shouldn't happen given the CHECK constraint.
+    return get_shipping_provider('mock')
 
 
 def get_active_courier():
     """Whichever courier is currently enabled -- see get_courier()."""
     return get_courier()
+
+
+def get_enabled_couriers():
+    """Returns [(partner_name, provider), ...] for every currently enabled,
+    credentialed partner -- used for rate-shopping. Empty list if none are
+    enabled (caller should fall back to get_active_courier() in that case,
+    which covers the legacy env-var behavior)."""
+    db = get_db()
+    rows = db.execute(
+        '''SELECT dp.id, dp.name, dpc.environment, dpc.encrypted_credentials,
+                  dpc.token_cache, dpc.token_expires_at
+           FROM delivery_partners dp
+           JOIN delivery_partner_credentials dpc ON dpc.partner_id = dp.id
+           WHERE dp.is_enabled = 1 AND dpc.encrypted_credentials IS NOT NULL
+                 AND dpc.encrypted_credentials != ''
+           ORDER BY dp.id'''
+    ).fetchall()
+    return [(row['name'], _build_courier_provider(db, row)) for row in rows]
+
+
+def get_best_courier_quote(o_pin, d_pin, weight, mode="Prepaid"):
+    """
+    Rate-shops across every currently enabled courier and returns the
+    cheapest working quote as (partner_name, provider, rate_info) --
+    rate_info is whatever that provider's get_rates() returned (rate,
+    shipping_charge, cod_fee, and 'eta' when the courier supplies one;
+    Delhivery's rate API doesn't return an ETA today, so rate_info['eta']
+    will be None for Delhivery quotes).
+
+    With only one partner enabled, skips comparison and just uses it. With
+    none enabled, falls back to get_active_courier()'s legacy behavior. A
+    courier whose rate call fails/errors is skipped, not fatal -- if every
+    enabled courier fails, falls back to whichever get_active_courier()
+    would have picked anyway, so checkout never hard-fails just because one
+    courier's API had a bad moment.
+    """
+    couriers = get_enabled_couriers()
+    if not couriers:
+        partner_name, provider = get_active_courier()
+        couriers = [(partner_name, provider)]
+
+    quotes = []
+    for partner_name, provider in couriers:
+        try:
+            rate_info = provider.get_rates(o_pin, d_pin, weight, mode=mode)
+            # Both providers only include 'msg' on a failed quote -- never
+            # on success -- so its absence is a reliable success check.
+            if 'msg' not in rate_info:
+                quotes.append((partner_name, provider, rate_info))
+        except Exception as e:
+            app.logger.warning(f'Rate-shop: {partner_name} quote failed: {e}')
+
+    if not quotes:
+        # Every enabled courier failed to quote -- fall back to whichever
+        # one get_active_courier() would pick, so checkout degrades instead
+        # of breaking outright.
+        partner_name, provider = get_active_courier()
+        try:
+            rate_info = provider.get_rates(o_pin, d_pin, weight, mode=mode)
+        except Exception:
+            rate_info = {"rate": 0, "shipping_charge": 0, "cod_fee": 0, "eta": None}
+        return partner_name, provider, rate_info
+
+    def _rate_of(q):
+        info = q[2]
+        return float(info.get('rate') if info.get('rate') is not None else info.get('shipping_charge') or 0)
+
+    return min(quotes, key=_rate_of)
 
 
 def create_shiprocket_shipment(order_row, cart_items, cod_amount_override=None, provider=None):
@@ -861,11 +940,21 @@ def create_shiprocket_shipment(order_row, cart_items, cod_amount_override=None, 
 
 
 def create_courier_shipment(order_row, cart_items, cod_amount_override=None):
-    """Dispatches shipment creation to whichever courier is currently active,
-    so callers don't need to know which one is in use. Returns
+    """Dispatches shipment creation to whichever courier the order was
+    already quoted with at checkout time (order_row['courier_partner'],
+    set by the rate-shopping in checkout_process) -- so what actually ships
+    matches what the customer was shown, even if the active/cheapest
+    courier has changed since. Falls back to get_active_courier() only for
+    orders with no stored courier_partner (pre-multi-courier legacy rows,
+    or the admin-accept path for very old orders). Returns
     (waybill, error_msg, partner_name) -- the partner name lets callers do
     courier-specific follow-up (e.g. pickup scheduling) correctly."""
-    partner_name, provider = get_active_courier()
+    order_row_dict = dict(order_row) if not isinstance(order_row, dict) else order_row
+    stored_partner = order_row_dict.get('courier_partner')
+    if stored_partner:
+        partner_name, provider = get_courier(stored_partner)
+    else:
+        partner_name, provider = get_active_courier()
     if partner_name == 'shiprocket':
         waybill, err = create_shiprocket_shipment(order_row, cart_items, cod_amount_override=cod_amount_override, provider=provider)
     else:
@@ -2504,9 +2593,62 @@ def _check_delivered_orders(db):
             )
 
 
+SHIPROCKET_AUTH_ALERT_INTERVAL_HOURS = 24
+
+
+def _check_shiprocket_auth(db):
+    """If Shiprocket is enabled but its stored credentials are failing to
+    authenticate, emails the admin -- repeating once every 24 hours until a
+    login succeeds again. Note this is NOT about the short-lived bearer
+    token expiring -- get_courier()/get_enabled_couriers() already refresh
+    that transparently on every use. This only fires when even a *fresh*
+    login attempt fails (wrong/changed password, Shiprocket account issue,
+    etc.), since that's the one Shiprocket auth failure the app can't
+    self-heal from.
+
+    Re-alert timing is tracked via the most recent 'shiprocket_auth_failed'
+    admin_events row, mirroring how _check_unaccepted_orders tracks what's
+    already been alerted on -- no separate schedule table needed."""
+    partner = db.execute(
+        "SELECT dp.id FROM delivery_partners dp WHERE dp.name='shiprocket' AND dp.is_enabled=1"
+    ).fetchone()
+    if not partner:
+        return  # not enabled -- nothing to monitor
+
+    _name, provider = get_courier('shiprocket')
+    if getattr(provider, 'token', None):
+        return  # authenticated fine
+
+    last_alert = db.execute(
+        "SELECT created_at FROM admin_events WHERE event_type='shiprocket_auth_failed' "
+        "ORDER BY created_at DESC LIMIT 1"
+    ).fetchone()
+    if last_alert:
+        last_at = _parse_db_timestamp(last_alert.get('created_at'))
+        if last_at and (datetime.now() - last_at).total_seconds() < SHIPROCKET_AUTH_ALERT_INTERVAL_HOURS * 3600:
+            return  # already alerted within the last day
+
+    error_msg = getattr(provider, 'last_error', None) or 'Login failed for an unknown reason'
+    log_admin_event(db, 'shiprocket_auth_failed', 'Shiprocket login is failing', detail=error_msg)
+    try:
+        send_contact_email_async(
+            ADMIN_EMAIL, '⚠️ Shiprocket login is failing — courier may be unusable',
+            f"Shiprocket is enabled in the admin panel, but the stored credentials are "
+            f"failing to authenticate.\n\nError: {error_msg}\n\n"
+            f"This usually means the Shiprocket account password was changed, or there's "
+            f"an issue with the account on Shiprocket's side. Until this is fixed, checkout "
+            f"will fall back to Delhivery (if enabled) or fail to fetch shipping rates.\n\n"
+            f"Update the credentials at: https://narinakhre.com/admin/delivery-partners\n\n"
+            f"You'll get this reminder once a day until a login succeeds again."
+        )
+    except Exception as e:
+        app.logger.warning(f'Shiprocket auth-failure admin email failed: {e}')
+
+
 def _order_watchdog():
     """Background thread: periodically checks for orders stuck unaccepted
-    past 2/6/12/24 hours, and polls Delhivery for delivery confirmation."""
+    past 2/6/12/24 hours, polls couriers for delivery confirmation, and
+    checks Shiprocket auth health."""
     _time.sleep(60)  # let the app finish starting up first
     while True:
         try:
@@ -2514,6 +2656,7 @@ def _order_watchdog():
                 db = get_db()
                 _check_unaccepted_orders(db)
                 _check_delivered_orders(db)
+                _check_shiprocket_auth(db)
         except Exception as e:
             app.logger.warning(f'Order watchdog run failed: {e}')
         _time.sleep(ORDER_WATCHDOG_INTERVAL_SECONDS)
@@ -2962,13 +3105,22 @@ def checkout_process():
     cgst_amount = gst_breakdown['cgst']
     sgst_amount = gst_breakdown['sgst']
 
-    # Shipping FREE for customers
+    # Shipping FREE for customers -- actual_shipping_cost is what we pay the
+    # courier, absorbed by the business, never shown to the customer as a
+    # charge. courier_partner/courier_eta ARE shown to the customer (see
+    # thank_you page + confirmation emails) -- rate-shopped here once, at
+    # order-creation time, and reused for actual shipment creation later
+    # (see create_courier_shipment) so what's shown matches what ships.
     actual_shipping_cost = 0.0
+    chosen_courier = 'delhivery'
+    courier_eta = None
     try:
-        _partner, provider = get_active_courier()
         cart_weight = max(sum(int(item.get('units', 1)) for item in display_cart) * 250, 250)
-        rates = provider.get_rates(app.config.get('WAREHOUSE_PIN', '482001'), consignee_pincode, cart_weight, mode=payment_mode)
+        chosen_courier, _provider, rates = get_best_courier_quote(
+            app.config.get('WAREHOUSE_PIN', '482001'), consignee_pincode, cart_weight, mode=payment_mode
+        )
         actual_shipping_cost = float(rates.get('shipping_charge', 0) or 0)
+        courier_eta = rates.get('eta')
     except Exception as e:
         app.logger.warning(f'Shipping rate fetch failed: {e}')
 
@@ -2991,14 +3143,16 @@ def checkout_process():
             internal_order_id, status, payment_mode,
             subtotal_amount, gst_amount, cgst_amount, sgst_amount,
             discount_amount, actual_shipping_cost, total_amount,
-            coupon_code, cart_items_json, credits_redeemed)
-           VALUES (?,?,?,?,?,?,?,?,?,'pending',?,?,?,?,?,?,?,?,?,?,?)''',
+            coupon_code, cart_items_json, credits_redeemed,
+            courier_partner, courier_eta)
+           VALUES (?,?,?,?,?,?,?,?,?,'pending',?,?,?,?,?,?,?,?,?,?,?,?,?)''',
         (user_id, cleaned_name, consignee_phone, consignee_email,
          cleaned_address, consignee_city, consignee_state, consignee_pincode,
          internal_order_id, payment_mode,
          subtotal_amount, gst_amount, cgst_amount, sgst_amount,
          discount_amount, actual_shipping_cost, total_amount,
-         coupon_code, cart_items_json, credits_redeemed)
+         coupon_code, cart_items_json, credits_redeemed,
+         chosen_courier, courier_eta)
     )
     conn.commit()
     session.pop('applied_credits', None)
@@ -3305,6 +3459,7 @@ def confirm_cod_order():
             'row_total': float(item.get('price', 0)) * int(item.get('units', item.get('qty', 1))),
         } for item in cart_items]
 
+        courier_eta = order_row_dict.get('courier_eta')
         if customer_email:
             order_html = render_template('retail/email_order_confirmation.html',
                 customer_name=customer_name, order_id=internal_order_id,
@@ -3315,10 +3470,13 @@ def confirm_cod_order():
                 address_state=order_row_dict.get('consignee_state', ''),
                 address_pincode=order_row_dict.get('consignee_pincode', ''),
                 tracking_url=tracking_url or None, waybill=waybill or None,
-                invoice_url=invoice_url, cod_credit_awarded=cod_credit_awarded)
+                invoice_url=invoice_url, cod_credit_awarded=cod_credit_awarded,
+                courier_partner=shipment_partner, courier_eta=courier_eta)
             order_text = (
                 f"Hi {customer_name},\n\nYour COD order is confirmed!\n\nOrder ID: {internal_order_id}\n"
                 f"Amount to pay on delivery: ₹{total:.2f}\n"
+                f"Shipped via {shipment_partner.capitalize()}"
+                + (f", estimated delivery: {courier_eta}\n" if courier_eta else "\n")
                 + (
                     f"\nNote: our delivery partner requires COD amounts to be a whole number, so this "
                     f"was rounded up from the order total. Instead of collecting exact change, we've "
@@ -3360,6 +3518,8 @@ def confirm_cod_order():
             + "\n"
             f"Shipping Address:\n{order_row_dict.get('consignee_address','')}, "
             f"{order_row_dict.get('consignee_city','')}, {order_row_dict.get('consignee_state','')} - {order_row_dict.get('consignee_pincode','')}\n\n"
+            f"Courier: {shipment_partner.capitalize()}"
+            + (f" (estimated delivery: {courier_eta})\n" if courier_eta else "\n")
             + (f"Waybill: {waybill}\n" if waybill else "Waybill: pending\n")
             + f"Admin orders panel: {admin_orders_url}\n"
         )
@@ -3488,6 +3648,8 @@ def verify_payment():
                 'row_total': float(item.get('price', 0)) * int(item.get('units', item.get('qty', 1))),
             } for item in cart_items]
 
+            courier_partner = order_row_dict.get('courier_partner')
+            courier_eta = order_row_dict.get('courier_eta')
             if customer_email:
                 order_html = render_template('retail/email_order_confirmation.html',
                     customer_name=customer_name, order_id=internal_order_id,
@@ -3498,11 +3660,13 @@ def verify_payment():
                     address_state=order_row_dict.get('consignee_state', ''),
                     address_pincode=order_row_dict.get('consignee_pincode', ''),
                     tracking_url=None, waybill=None,
-                    invoice_url=invoice_url)
+                    invoice_url=invoice_url,
+                    courier_partner=courier_partner, courier_eta=courier_eta)
                 order_text = (
                     f"Hi {customer_name},\n\nYour payment for order {internal_order_id} was successful!\n\n"
                     f"Amount paid: ₹{total:.2f}\n"
-                    f"Tracking details will be shared once your order is dispatched.\n"
+                    + (f"Shipped via {courier_partner.capitalize()}" + (f", estimated delivery: {courier_eta}\n" if courier_eta else "\n") if courier_partner else "")
+                    + f"Tracking details will be shared once your order is dispatched.\n"
                     f"Invoice: {invoice_url}\n\nThank you for shopping with Nari Nakhre!"
                 )
                 send_contact_email_async(customer_email,
@@ -3535,7 +3699,8 @@ def verify_payment():
                 + f"Total paid: ₹{total:.2f}\n\n"
                 f"Shipping Address:\n{order_row_dict.get('consignee_address','')}, "
                 f"{order_row_dict.get('consignee_city','')}, {order_row_dict.get('consignee_state','')} - {order_row_dict.get('consignee_pincode','')}\n\n"
-                f"Admin orders panel: {admin_orders_url}\n"
+                + (f"Courier: {courier_partner.capitalize()}" + (f" (estimated delivery: {courier_eta})\n" if courier_eta else "\n") if courier_partner else "")
+                + f"Admin orders panel: {admin_orders_url}\n"
             )
             send_contact_email_async(ADMIN_EMAIL,
                 f"💳 New Prepaid Order — {internal_order_id}",
@@ -3601,15 +3766,18 @@ def calculate_checkout_shipping():
     try:
         cart = session.get('cart', {})
         total_weight = max(sum(item.get('qty', 1) for item in cart.values()) * 250, 250)
-        _partner, provider = get_active_courier()
-        rates = provider.get_rates(app.config.get('WAREHOUSE_PIN', ''), pincode, total_weight, mode=payment_mode)
+        partner_name, _provider, rates = get_best_courier_quote(
+            app.config.get('WAREHOUSE_PIN', ''), pincode, total_weight, mode=payment_mode
+        )
         shipping_charge = rates.get('rate', 0) or rates.get('shipping_charge', 0)
         cod_fee = rates.get('cod_fee', 0) if payment_mode == 'COD' else 0
         return jsonify({
             "status": True,
             "shipping_charge": shipping_charge,
             "cod_fee": cod_fee,
-            "payment_mode": payment_mode
+            "payment_mode": payment_mode,
+            "courier_partner": partner_name,
+            "eta": rates.get('eta')
         })
     except Exception as e:
         app.logger.error(f'Delhivery shipping calc error: {e}')
@@ -5606,7 +5774,8 @@ def admin_api_user_search():
 @app.route('/admin/orders/new')
 @admin_required
 def admin_new_order():
-    return render_template('admin/admin_new_order.html')
+    enabled_couriers = [name for name, _provider in get_enabled_couriers()]
+    return render_template('admin/admin_new_order.html', enabled_couriers=enabled_couriers)
 
 
 @app.route('/admin/orders/create', methods=['POST'])
@@ -5745,11 +5914,29 @@ def admin_create_order():
     cleaned_name = sanitize_for_delhivery(consignee_name)
     cleaned_address = sanitize_for_delhivery(consignee_address)
 
+    # Admin explicitly picks the courier for manually-entered orders (phone/
+    # in-person) rather than rate-shopping automatically, since the admin is
+    # already hand-entering everything else. Falls back to Delhivery for any
+    # value that isn't a known partner name.
+    requested_courier = (data.get('courier_partner') or 'delhivery').strip().lower()
+    chosen_courier = requested_courier if requested_courier in ('delhivery', 'shiprocket') else 'delhivery'
+
     internal_order_id = f"NN-SHP-{datetime.now().strftime('%Y%m%d%H%M%S')}-{(consignee_phone or '0000')[-4:]}"
     subtotal_amount = sum(item['price'] * item['units'] for item in display_cart)
     gst_breakdown = calculate_inclusive_gst(display_cart, 0.0, subtotal_amount)
     total_amount = subtotal_amount
     cart_items_json = json.dumps(display_cart)
+
+    courier_eta = None
+    try:
+        _name, chosen_provider = get_courier(chosen_courier)
+        cart_weight = max(sum(item['units'] for item in display_cart) * 250, 250)
+        eta_rates = chosen_provider.get_rates(
+            app.config.get('WAREHOUSE_PIN', '482001'), consignee_pincode, cart_weight, mode=payment_mode
+        )
+        courier_eta = eta_rates.get('eta')
+    except Exception as e:
+        app.logger.warning(f'Manual order: courier ETA fetch failed: {e}')
 
     db.execute(
         '''INSERT INTO order_shipping
@@ -5758,14 +5945,16 @@ def admin_create_order():
             internal_order_id, status, payment_mode,
             subtotal_amount, gst_amount, cgst_amount, sgst_amount,
             discount_amount, actual_shipping_cost, total_amount,
-            coupon_code, cart_items_json, credits_redeemed)
-           VALUES (?,?,?,?,?,?,?,?,?,'pending',?,?,?,?,?,?,?,?,?,?,?)''',
+            coupon_code, cart_items_json, credits_redeemed,
+            courier_partner, courier_eta)
+           VALUES (?,?,?,?,?,?,?,?,?,'pending',?,?,?,?,?,?,?,?,?,?,?,?,?)''',
         (user_id, cleaned_name, consignee_phone, consignee_email,
          cleaned_address, consignee_city, consignee_state, consignee_pincode,
          internal_order_id, payment_mode,
          subtotal_amount, gst_breakdown['total_gst'], gst_breakdown['cgst'], gst_breakdown['sgst'],
          0.0, 0.0, total_amount,
-         None, cart_items_json, 0.0)
+         None, cart_items_json, 0.0,
+         chosen_courier, courier_eta)
     )
     db.commit()
 
@@ -5778,6 +5967,62 @@ def admin_create_order():
     verify = db.execute('SELECT id FROM order_shipping WHERE internal_order_id=?', (internal_order_id,)).fetchone()
     if not verify:
         return jsonify({'status': 'error', 'message': 'Order could not be saved. Please try again.'}), 500
+
+    # Confirmation emails -- customer + admin, same as checkout_process /
+    # confirm_cod_order. Best-effort: an email failure must never make the
+    # admin's manual order entry look like it failed.
+    try:
+        invoice_url = f"{request.url_root.rstrip('/')}/invoice/{internal_order_id}"
+        items_for_email = [{
+            'name': item.get('name', ''),
+            'size': item.get('size', ''),
+            'units': int(item.get('units', 1)),
+            'price': float(item.get('price', 0)),
+            'row_total': float(item.get('price', 0)) * int(item.get('units', 1)),
+        } for item in display_cart]
+
+        if consignee_email:
+            order_html = render_template('retail/email_order_confirmation.html',
+                customer_name=cleaned_name, order_id=internal_order_id,
+                items=items_for_email, payment_mode=payment_mode, amount=total_amount,
+                address_name=cleaned_name, address_line=cleaned_address,
+                address_city=consignee_city, address_state=consignee_state,
+                address_pincode=consignee_pincode,
+                tracking_url=None, waybill=None, invoice_url=invoice_url,
+                courier_partner=chosen_courier, courier_eta=courier_eta)
+            order_text = (
+                f"Hi {cleaned_name},\n\nYour order {internal_order_id} has been placed with us!\n\n"
+                f"{'Amount to pay on delivery' if payment_mode == 'COD' else 'Amount due'}: ₹{total_amount:.2f}\n"
+                f"Shipped via {chosen_courier.capitalize()}" + (f", estimated delivery: {courier_eta}\n" if courier_eta else "\n")
+                + f"Tracking details will be shared once your order is dispatched.\n"
+                f"Invoice: {invoice_url}\n\nThank you for shopping with Nari Nakhre!"
+            )
+            send_contact_email_async(consignee_email,
+                f"Order Confirmed — {internal_order_id} | Nari Nakhre",
+                order_text, html_body=order_html, from_email=ORDERS_FROM_EMAIL)
+
+        item_lines = '\n'.join(
+            f"  - {it['name']} x{it['units']} @ ₹{it['price']:.2f} = ₹{it['row_total']:.2f}"
+            for it in items_for_email
+        ) or '  (no item details)'
+        admin_orders_url = f"{request.url_root.rstrip('/')}/admin/orders"
+        admin_body = (
+            f"New order entered manually by admin.\n\n"
+            f"Order ID: {internal_order_id}\n"
+            f"Customer: {cleaned_name}\n"
+            f"Phone: {consignee_phone}\n"
+            f"Email: {consignee_email or '-'}\n\n"
+            f"Items:\n{item_lines}\n\n"
+            f"Total ({payment_mode}): ₹{total_amount:.2f}\n\n"
+            f"Shipping Address:\n{cleaned_address}, {consignee_city}, {consignee_state} - {consignee_pincode}\n\n"
+            f"Courier: {chosen_courier.capitalize()}" + (f" (estimated delivery: {courier_eta})\n" if courier_eta else "\n")
+            + f"Admin orders panel: {admin_orders_url}\n"
+        )
+        send_contact_email_async(ADMIN_EMAIL,
+            f"🧾 New Manual Order — {internal_order_id}",
+            admin_body, from_email=ORDERS_FROM_EMAIL)
+    except Exception as e:
+        app.logger.warning(f"Manual order email failed: {e}")
 
     return jsonify({
         'status': 'success',
@@ -5809,7 +6054,7 @@ def admin_order_accept(order_id):
         flash('Order not found.', 'error')
         return redirect(url_for('admin_orders'))
     waybill = order['delhivery_waybill']
-    shipment_partner = 'delhivery'
+    shipment_partner = order['courier_partner'] or 'delhivery'
     if not waybill:
         order_dict = dict(order)
         waybill, err, shipment_partner = create_courier_shipment(order_dict, [])
@@ -5854,13 +6099,16 @@ def admin_order_accept(order_id):
         internal_order_id = order_dict_for_email.get('internal_order_id', '')
         if customer_email and waybill:
             tracking_url = f"{request.url_root.rstrip('/')}/track/{waybill}"
+            courier_eta = order_dict_for_email.get('courier_eta')
             tracking_html = render_template('retail/email_tracking_update.html',
                 customer_name=customer_name, order_id=internal_order_id,
                 waybill=waybill, tracking_url=tracking_url,
-                pickup_date=pickup_date if pickup_scheduled else None)
+                pickup_date=pickup_date if pickup_scheduled else None,
+                courier_partner=shipment_partner, courier_eta=courier_eta)
             tracking_text = (
                 f"Hi {customer_name},\n\nYour order {internal_order_id} has been accepted and is on its way!\n\n"
-                f"AWB / Tracking ID: {waybill}\nTrack: {tracking_url}\n\n"
+                f"Shipped via {shipment_partner.capitalize()}" + (f", estimated delivery: {courier_eta}\n" if courier_eta else "\n")
+                + f"AWB / Tracking ID: {waybill}\nTrack: {tracking_url}\n\n"
                 f"Thank you for shopping with Nari Nakhre!"
             )
             send_contact_email_async(customer_email,

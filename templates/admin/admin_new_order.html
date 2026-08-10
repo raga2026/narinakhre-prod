@@ -173,6 +173,19 @@
                     <option value="Prepaid">Prepaid</option>
                 </select>
             </div>
+            <div class="section-card">
+                <div class="section-title">Delivery Partner</div>
+                {% if enabled_couriers %}
+                <select id="courier-partner" class="field" style="border:1.5px solid #e5e7eb;border-radius:8px;padding:8px 12px;font-size:0.85rem;">
+                    {% for c in enabled_couriers %}
+                    <option value="{{ c }}">{{ c|capitalize }}</option>
+                    {% endfor %}
+                </select>
+                {% else %}
+                <p class="text-xs text-gray-400">No courier is enabled in <a href="{{ url_for('admin_delivery_partners') }}" class="text-rose-600 hover:underline">Delivery Partners</a> yet — this order will default to Delhivery.</p>
+                <input type="hidden" id="courier-partner" value="delhivery">
+                {% endif %}
+            </div>
 
             <div id="submit-error" hidden class="bg-rose-50 border border-rose-300 text-rose-700 px-4 py-2 rounded mb-3 text-sm font-medium"></div>
 
@@ -439,7 +452,8 @@
                     return {id: item.id, price: item.price, units: item.units};
                 }),
                 customer: customerPayload,
-                payment_mode: document.getElementById('payment-mode').value
+                payment_mode: document.getElementById('payment-mode').value,
+                courier_partner: document.getElementById('courier-partner').value
             };
 
             fetch('/admin/orders/create', {
