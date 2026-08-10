@@ -21,8 +21,8 @@ from werkzeug.middleware.proxy_fix import ProxyFix
 from werkzeug.security import generate_password_hash, check_password_hash
 from supabase import create_client, Client as SupabaseClient
 
-from utils.shipping_manager import get_shipping_provider
-from utils.credential_crypto import encrypt_credentials
+from utils.shipping_manager import get_shipping_provider, ShiprocketProvider
+from utils.credential_crypto import encrypt_credentials, decrypt_credentials
 import auth_providers
 import io
 from PIL import Image as PILImage
@@ -89,6 +89,10 @@ def get_supabase():
 DELHIVERY_API_TOKEN = os.environ.get('DELHIVERY_API_TOKEN', '')
 DELHIVERY_CLIENT_NAME = os.environ.get('DELHIVERY_CLIENT_NAME', '')
 DELHIVERY_PICKUP_LOCATION = os.environ.get('DELHIVERY_PICKUP_LOCATION', '')
+# Nickname of a pickup address already registered in the Shiprocket dashboard
+# (Settings -> Pickup Addresses) -- their API requires this exact string, not
+# a raw address. Blank until one is registered there.
+SHIPROCKET_PICKUP_LOCATION = os.environ.get('SHIPROCKET_PICKUP_LOCATION', '')
 DELHIVERY_SELLER_GST = os.environ.get('DELHIVERY_SELLER_GST', '')
 WAREHOUSE_CITY = os.environ.get('WAREHOUSE_CITY', 'Jabalpur')
 WAREHOUSE_STATE = os.environ.get('WAREHOUSE_STATE', 'Madhya Pradesh')
@@ -522,6 +526,10 @@ def initialize_database_if_needed():
         "UPDATE products SET status='published' WHERE status IS NULL OR status=''",
         "ALTER TABLE products ALTER COLUMN status SET DEFAULT 'published'",
         'ALTER TABLE order_shipping ADD COLUMN IF NOT EXISTS cod_collected_amount NUMERIC',
+        # Which courier actually created the shipment for delhivery_waybill --
+        # needed so cancel/track actions call the right courier's API.
+        # Existing rows predate multi-courier support and were all Delhivery.
+        "ALTER TABLE order_shipping ADD COLUMN IF NOT EXISTS courier_partner TEXT DEFAULT 'delhivery'",
         'ALTER TABLE order_shipping ADD COLUMN IF NOT EXISTS cod_credit_awarded NUMERIC DEFAULT 0',
         'ALTER TABLE order_shipping ADD COLUMN IF NOT EXISTS credits_redeemed NUMERIC DEFAULT 0',
         'ALTER TABLE products ADD COLUMN IF NOT EXISTS model_number TEXT UNIQUE',
@@ -665,6 +673,205 @@ def calculate_inclusive_gst(display_cart, discount=0.0, full_subtotal=0.0):
     total_gst = round(total_gst, 2)
     half = round(total_gst / 2, 2)
     return {'total_gst': total_gst, 'cgst': half, 'sgst': round(total_gst - half, 2)}
+
+
+def get_courier(partner_name=None):
+    """
+    Returns (partner_name, provider_instance).
+
+    With no argument: resolves whichever courier is currently enabled in
+    delivery_partners with credentials configured, falling back to the
+    legacy SHIPPING_PROVIDER env var + DELHIVERY_API_TOKEN behavior when
+    nothing is enabled via the admin panel yet -- so existing behavior
+    doesn't change until an admin explicitly flips a partner on. If more
+    than one partner is somehow enabled at once, the first by id wins --
+    there's no rate-shopping/priority logic yet, that's later work.
+
+    With a specific partner_name: resolves THAT partner's credentials
+    regardless of is_enabled. Use this for tracking/cancelling an existing
+    shipment -- a waybill belongs to whichever courier actually created it,
+    even if the active courier has since been switched or disabled.
+    """
+    db = get_db()
+    if partner_name:
+        row = db.execute(
+            '''SELECT dp.id, dp.name, dpc.environment, dpc.encrypted_credentials,
+                      dpc.token_cache, dpc.token_expires_at
+               FROM delivery_partners dp
+               JOIN delivery_partner_credentials dpc ON dpc.partner_id = dp.id
+               WHERE dp.name = ? AND dpc.encrypted_credentials IS NOT NULL
+                     AND dpc.encrypted_credentials != ''
+               LIMIT 1''',
+            (partner_name,)
+        ).fetchone()
+    else:
+        row = db.execute(
+            '''SELECT dp.id, dp.name, dpc.environment, dpc.encrypted_credentials,
+                      dpc.token_cache, dpc.token_expires_at
+               FROM delivery_partners dp
+               JOIN delivery_partner_credentials dpc ON dpc.partner_id = dp.id
+               WHERE dp.is_enabled = 1 AND dpc.encrypted_credentials IS NOT NULL
+                     AND dpc.encrypted_credentials != ''
+               ORDER BY dp.id LIMIT 1'''
+        ).fetchone()
+
+    if not row:
+        fallback_name = partner_name or app.config.get('SHIPPING_PROVIDER', 'mock')
+        if fallback_name == 'delhivery' or not partner_name:
+            token = app.config.get('DELHIVERY_API_KEY') or app.config.get('DELHIVERY_API_TOKEN', '')
+            return fallback_name, get_shipping_provider(fallback_name if fallback_name != 'shiprocket' else 'mock', api_token=token)
+        return fallback_name, get_shipping_provider('mock')
+
+    creds = decrypt_credentials(row['encrypted_credentials'])
+
+    if row['name'] == 'delhivery':
+        provider = get_shipping_provider('delhivery', api_token=creds.get('api_token', ''))
+        return 'delhivery', provider
+
+    if row['name'] == 'shiprocket':
+        token_expires_at = None
+        if row['token_expires_at']:
+            try:
+                token_expires_at = datetime.fromisoformat(str(row['token_expires_at']))
+            except Exception:
+                token_expires_at = None
+        provider = get_shipping_provider(
+            'shiprocket',
+            email=creds.get('email', ''),
+            password=creds.get('password', ''),
+            cached_token=row['token_cache'],
+            token_expires_at=token_expires_at,
+        )
+        if provider.token_refreshed:
+            db.execute(
+                'UPDATE delivery_partner_credentials SET token_cache=?, token_expires_at=?, updated_at=NOW() WHERE partner_id=?',
+                (provider.token, provider.token_expires_at.isoformat(), row['id'])
+            )
+            db.commit()
+        return 'shiprocket', provider
+
+    # Unknown partner name shouldn't happen given the CHECK constraint, but
+    # don't leave shipping completely broken if it does.
+    provider_name = app.config.get('SHIPPING_PROVIDER', 'mock')
+    return provider_name, get_shipping_provider(provider_name)
+
+
+def get_active_courier():
+    """Whichever courier is currently enabled -- see get_courier()."""
+    return get_courier()
+
+
+def create_shiprocket_shipment(order_row, cart_items, cod_amount_override=None, provider=None):
+    """Create a Shiprocket order + assign an AWB after payment confirmation.
+    Returns (waybill, error_msg), matching create_delhivery_shipment()'s shape.
+
+    UNVERIFIED against a real order -- only Shiprocket's login, serviceability,
+    and rate endpoints have been tested live so far. Do not enable Shiprocket
+    for real customers until this has been proven with one real test order.
+    """
+    if not SHIPROCKET_PICKUP_LOCATION:
+        return None, "Shiprocket pickup location not configured (SHIPROCKET_PICKUP_LOCATION) -- register a pickup address in the Shiprocket dashboard first"
+    if provider is None:
+        _, provider = get_active_courier()
+    if not getattr(provider, 'token', None):
+        return None, provider.last_error if hasattr(provider, 'last_error') else "Shiprocket not authenticated"
+
+    order_row_dict = dict(order_row) if not isinstance(order_row, dict) else order_row
+    consignee_name = order_row_dict.get('consignee_name', '')
+    phone = order_row_dict.get('consignee_phone', '')
+    address = order_row_dict.get('consignee_address', '')
+    city = order_row_dict.get('consignee_city', '')
+    state = order_row_dict.get('consignee_state', '') or ''
+    pincode = str(order_row_dict.get('consignee_pincode', ''))
+    internal_order_id = order_row_dict.get('internal_order_id', '')
+    payment_mode = order_row_dict.get('payment_mode', 'Prepaid')
+    total_amount = float(order_row_dict.get('total_amount', 0) or 0)
+    is_cod = (payment_mode == 'COD')
+    # Shiprocket has no separate cod_amount override field like Delhivery --
+    # it collects whatever sub_total says, so the rounded COD collection
+    # amount (see round_cod_amount) becomes the sub_total itself here.
+    sub_total = float(cod_amount_override) if cod_amount_override is not None else total_amount
+
+    total_qty = max(sum(int(item.get('units', item.get('qty', 1))) for item in cart_items), 1) if cart_items else 1
+    weight_kg = max(total_qty * 0.25, 0.25)
+
+    order_items = [{
+        "name": item.get('name') or item.get('sku') or 'Item',
+        "sku": item.get('sku') or internal_order_id or 'SKU',
+        "units": int(item.get('units', item.get('qty', 1))),
+        "selling_price": float(item.get('price', 0) or 0),
+        "hsn": 7117,
+    } for item in (cart_items or [])]
+    if not order_items:
+        order_items = [{"name": "Order", "sku": internal_order_id or "SKU", "units": 1,
+                         "selling_price": total_amount, "hsn": 7117}]
+
+    payload = {
+        "order_id": internal_order_id,
+        "order_date": datetime.now().strftime('%Y-%m-%d %H:%M'),
+        "pickup_location": SHIPROCKET_PICKUP_LOCATION,
+        "billing_customer_name": consignee_name,
+        "billing_last_name": "",
+        "billing_address": address,
+        "billing_city": city,
+        "billing_pincode": pincode,
+        "billing_state": state,
+        "billing_country": "India",
+        "billing_email": order_row_dict.get('consignee_email') or ADMIN_EMAIL,
+        "billing_phone": phone,
+        "shipping_is_billing": True,
+        "order_items": order_items,
+        "payment_method": "COD" if is_cod else "Prepaid",
+        "sub_total": sub_total,
+        "length": 20, "breadth": 15, "height": 10,
+        "weight": weight_kg,
+    }
+    headers = {"Authorization": f"Bearer {provider.token}", "Content-Type": "application/json"}
+
+    try:
+        response = requests.post(
+            f"{ShiprocketProvider.BASE_URL}/orders/create/adhoc",
+            json=payload, headers=headers, timeout=30
+        )
+        resp_json = response.json()
+        app.logger.info(f"Shiprocket create response: {resp_json}")
+        shipment_id = resp_json.get('shipment_id')
+        waybill = resp_json.get('awb_code')
+        if not shipment_id:
+            error_msg = resp_json.get('message') or str(resp_json)
+            return None, f"Shiprocket order creation error: {error_msg}"
+        if waybill:
+            return waybill, None
+        # Order creation alone doesn't always assign a courier/AWB -- request
+        # one explicitly, letting Shiprocket auto-pick the courier.
+        assign_resp = requests.post(
+            f"{ShiprocketProvider.BASE_URL}/courier/assign/awb",
+            json={"shipment_id": shipment_id}, headers=headers, timeout=30
+        )
+        assign_json = assign_resp.json()
+        app.logger.info(f"Shiprocket AWB assign response: {assign_json}")
+        awb_data = (assign_json.get('response') or {}).get('data') or {}
+        waybill = awb_data.get('awb_code')
+        if waybill:
+            return waybill, None
+        return None, f"Order created (shipment_id={shipment_id}) but AWB assignment failed: {assign_json.get('message') or assign_json}"
+    except Exception as e:
+        app.logger.error(f"Shiprocket shipment creation exception: {e}")
+        return None, str(e)
+
+
+def create_courier_shipment(order_row, cart_items, cod_amount_override=None):
+    """Dispatches shipment creation to whichever courier is currently active,
+    so callers don't need to know which one is in use. Returns
+    (waybill, error_msg, partner_name) -- the partner name lets callers do
+    courier-specific follow-up (e.g. pickup scheduling) correctly."""
+    partner_name, provider = get_active_courier()
+    if partner_name == 'shiprocket':
+        waybill, err = create_shiprocket_shipment(order_row, cart_items, cod_amount_override=cod_amount_override, provider=provider)
+    else:
+        waybill, err = create_delhivery_shipment(order_row, cart_items, cod_amount_override=cod_amount_override)
+        partner_name = 'delhivery'
+    return waybill, err, partner_name
 
 
 def create_delhivery_shipment(order_row, cart_items, cod_amount_override=None):
@@ -2259,15 +2466,14 @@ def _check_unaccepted_orders(db):
 
 
 def _check_delivered_orders(db):
-    """Polls Delhivery for any order with a waybill that isn't already
-    marked delivered/cancelled, and fires an admin Inbox event + updates
-    status the moment Delhivery reports it delivered."""
-    provider = get_shipping_provider(
-        app.config.get('SHIPPING_PROVIDER', 'mock'),
-        api_token=app.config.get('DELHIVERY_API_KEY', '')
-    )
+    """Polls each order's own courier (Delhivery or Shiprocket -- whichever
+    actually created that shipment, not just whoever's active right now) for
+    any waybill that isn't already marked delivered/cancelled, and fires an
+    admin Inbox event + updates status the moment the courier reports it
+    delivered."""
+    providers_by_partner = {}
     in_transit = db.execute(
-        "SELECT internal_order_id, consignee_name, delhivery_waybill FROM order_shipping "
+        "SELECT internal_order_id, consignee_name, delhivery_waybill, courier_partner FROM order_shipping "
         "WHERE delhivery_waybill IS NOT NULL AND delhivery_waybill != '' "
         "AND status NOT IN ('delivered', 'cancelled')"
     ).fetchall()
@@ -2275,6 +2481,10 @@ def _check_delivered_orders(db):
         waybill = order.get('delhivery_waybill')
         if not waybill:
             continue
+        partner_name = order.get('courier_partner') or 'delhivery'
+        if partner_name not in providers_by_partner:
+            providers_by_partner[partner_name] = get_courier(partner_name)[1]
+        provider = providers_by_partner[partner_name]
         try:
             result = provider.track_shipment(waybill)
         except Exception as e:
@@ -2755,10 +2965,7 @@ def checkout_process():
     # Shipping FREE for customers
     actual_shipping_cost = 0.0
     try:
-        provider = get_shipping_provider(
-            app.config.get('SHIPPING_PROVIDER', 'delhivery'),
-            api_token=app.config.get('DELHIVERY_API_KEY') or app.config.get('DELHIVERY_API_TOKEN', '')
-        )
+        _partner, provider = get_active_courier()
         cart_weight = max(sum(int(item.get('units', 1)) for item in display_cart) * 250, 250)
         rates = provider.get_rates(app.config.get('WAREHOUSE_PIN', '482001'), consignee_pincode, cart_weight, mode=payment_mode)
         actual_shipping_cost = float(rates.get('shipping_charge', 0) or 0)
@@ -3059,13 +3266,13 @@ def confirm_cod_order():
         cod_rounded_up = False
     cod_credit_awarded = round((cod_collect_amount - original_total) + COD_ROUNDING_CREDIT, 2) if cod_rounded_up else 0
 
-    waybill, del_error = create_delhivery_shipment(order_row_dict, cart_items, cod_amount_override=cod_collect_amount)
+    waybill, del_error, shipment_partner = create_courier_shipment(order_row_dict, cart_items, cod_amount_override=cod_collect_amount)
     if waybill:
         conn.execute(
-            'UPDATE order_shipping SET status=?, delhivery_waybill=?, cod_collected_amount=?, cod_credit_awarded=? WHERE internal_order_id=?',
-            ('cod_confirmed', waybill, cod_collect_amount, cod_credit_awarded, internal_order_id))
+            'UPDATE order_shipping SET status=?, delhivery_waybill=?, courier_partner=?, cod_collected_amount=?, cod_credit_awarded=? WHERE internal_order_id=?',
+            ('cod_confirmed', waybill, shipment_partner, cod_collect_amount, cod_credit_awarded, internal_order_id))
     else:
-        app.logger.error(f"Delhivery failed for COD {internal_order_id}: {del_error}")
+        app.logger.error(f"{shipment_partner.capitalize()} failed for COD {internal_order_id}: {del_error}")
         conn.execute(
             'UPDATE order_shipping SET status=?, cod_collected_amount=?, cod_credit_awarded=? WHERE internal_order_id=?',
             ('cod_confirmed', cod_collect_amount, cod_credit_awarded, internal_order_id))
@@ -3369,17 +3576,15 @@ def delhivery_check_pincode(pincode):
     if not _re.match(r'^\d{6}$', str(pincode)):
         return jsonify({"status": False, "serviceable": False, "msg": "Invalid pincode format"}), 400
     try:
-        provider = get_shipping_provider(
-            app.config.get('SHIPPING_PROVIDER', 'delhivery'),
-            api_token=app.config.get('DELHIVERY_API_KEY') or app.config.get('DELHIVERY_API_TOKEN', '')
-        )
-        result = provider.verify_pincode(pincode)
+        partner, provider = get_active_courier()
+        pickup_pin = app.config.get('WAREHOUSE_PIN', '') if partner == 'shiprocket' else None
+        result = provider.verify_pincode(pincode, pickup_pincode=pickup_pin)
         # Surface the real reason in logs for debugging (visible in Render logs)
         if not result.get('serviceable') and not result.get('status'):
-            app.logger.error(f"Delhivery pincode {pincode} check failed: {result.get('msg')}")
+            app.logger.error(f"{partner.capitalize()} pincode {pincode} check failed: {result.get('msg')}")
         return jsonify(result)
     except Exception as e:
-        app.logger.error(f'Delhivery pincode check exception: {type(e).__name__}: {e}')
+        app.logger.error(f'Courier pincode check exception: {type(e).__name__}: {e}')
         return jsonify({"status": False, "serviceable": False, "msg": f"Service unavailable: {type(e).__name__}"}), 200
 
 @app.route('/api/delhivery/shipping', methods=['POST'])
@@ -3396,10 +3601,7 @@ def calculate_checkout_shipping():
     try:
         cart = session.get('cart', {})
         total_weight = max(sum(item.get('qty', 1) for item in cart.values()) * 250, 250)
-        provider = get_shipping_provider(
-            app.config.get('SHIPPING_PROVIDER', 'delhivery'),
-            api_token=app.config.get('DELHIVERY_API_KEY') or app.config.get('DELHIVERY_API_TOKEN', '')
-        )
+        _partner, provider = get_active_courier()
         rates = provider.get_rates(app.config.get('WAREHOUSE_PIN', ''), pincode, total_weight, mode=payment_mode)
         shipping_charge = rates.get('rate', 0) or rates.get('shipping_charge', 0)
         cod_fee = rates.get('cod_fee', 0) if payment_mode == 'COD' else 0
@@ -3515,10 +3717,12 @@ def api_track_shipment(waybill):
     """Live tracking status — retail only."""
     if g.site_type != 'retail':
         return jsonify({'status': False, 'msg': 'Tracking not available'}), 403
-    provider = get_shipping_provider(
-        app.config['SHIPPING_PROVIDER'],
-        api_token=app.config.get('DELHIVERY_API_KEY')
-    )
+    db = get_db()
+    order = db.execute(
+        'SELECT courier_partner FROM order_shipping WHERE delhivery_waybill=? LIMIT 1', (waybill,)
+    ).fetchone()
+    partner_name = (order.get('courier_partner') if order else None) or 'delhivery'
+    _partner, provider = get_courier(partner_name)
     try:
         result = provider.track_shipment(waybill)
         return jsonify(result)
@@ -5605,35 +5809,41 @@ def admin_order_accept(order_id):
         flash('Order not found.', 'error')
         return redirect(url_for('admin_orders'))
     waybill = order['delhivery_waybill']
+    shipment_partner = 'delhivery'
     if not waybill:
         order_dict = dict(order)
-        waybill, err = create_delhivery_shipment(order_dict, [])
+        waybill, err, shipment_partner = create_courier_shipment(order_dict, [])
         if waybill:
-            conn.execute('UPDATE order_shipping SET delhivery_waybill=? WHERE id=?', (waybill, order_id))
+            conn.execute('UPDATE order_shipping SET delhivery_waybill=?, courier_partner=? WHERE id=?', (waybill, shipment_partner, order_id))
         else:
-            flash(f'Could not create Delhivery shipment: {err}', 'error')
+            flash(f'Could not create {shipment_partner.capitalize()} shipment: {err}', 'error')
             return redirect(url_for('admin_orders'))
     pickup_scheduled = False
     pickup_id = None
-    try:
-        from datetime import date, timedelta
-        pickup_date = (date.today() + timedelta(days=1)).strftime('%Y-%m-%d')
-        payload = {'pickup_time':'10:00:00','pickup_date':pickup_date,
-                   'pickup_location':DELHIVERY_PICKUP_LOCATION,'expected_package_count':1}
-        resp = requests.post('https://track.delhivery.com/fm/request/new/',
-            json=payload, headers={'Authorization':f'Token {DELHIVERY_API_TOKEN}'}, timeout=15)
-        pickup_scheduled = resp.status_code == 200
-        if pickup_scheduled:
-            try:
-                pr = resp.json()
-                pickup_id = str(pr.get('pickup_id') or pr.get('id') or '')
-                conn.execute('UPDATE order_shipping SET pickup_id=?, pickup_date=? WHERE id=?',
-                             (pickup_id, pickup_date, order_id))
-            except Exception:
-                pass
-        app.logger.info(f"Pickup for {waybill}: {resp.status_code} {resp.text[:200]}")
-    except Exception as e:
-        app.logger.warning(f"Pickup scheduling failed: {e}")
+    pickup_date = None
+    if shipment_partner == 'delhivery':
+        # Shiprocket's pickup scheduling isn't automated yet -- their
+        # dashboard needs to be checked manually for now (see the flash
+        # message below), same as when Delhivery scheduling itself fails.
+        try:
+            from datetime import date, timedelta
+            pickup_date = (date.today() + timedelta(days=1)).strftime('%Y-%m-%d')
+            payload = {'pickup_time':'10:00:00','pickup_date':pickup_date,
+                       'pickup_location':DELHIVERY_PICKUP_LOCATION,'expected_package_count':1}
+            resp = requests.post('https://track.delhivery.com/fm/request/new/',
+                json=payload, headers={'Authorization':f'Token {DELHIVERY_API_TOKEN}'}, timeout=15)
+            pickup_scheduled = resp.status_code == 200
+            if pickup_scheduled:
+                try:
+                    pr = resp.json()
+                    pickup_id = str(pr.get('pickup_id') or pr.get('id') or '')
+                    conn.execute('UPDATE order_shipping SET pickup_id=?, pickup_date=? WHERE id=?',
+                                 (pickup_id, pickup_date, order_id))
+                except Exception:
+                    pass
+            app.logger.info(f"Pickup for {waybill}: {resp.status_code} {resp.text[:200]}")
+        except Exception as e:
+            app.logger.warning(f"Pickup scheduling failed: {e}")
     conn.execute('UPDATE order_shipping SET status=? WHERE id=?', ('accepted', order_id))
     conn.commit()
 
@@ -5659,8 +5869,11 @@ def admin_order_accept(order_id):
     except Exception as e:
         app.logger.warning(f"Order-accept tracking email failed: {e}")
 
-    msg = f"Order accepted. Waybill: {waybill}."
-    msg += " Pickup scheduled for tomorrow." if pickup_scheduled else " Note: Schedule pickup manually in Delhivery panel."
+    msg = f"Order accepted via {shipment_partner.capitalize()}. Waybill: {waybill}."
+    if pickup_scheduled:
+        msg += " Pickup scheduled for tomorrow."
+    else:
+        msg += f" Note: Schedule pickup manually in the {shipment_partner.capitalize()} panel."
     flash(msg, 'success')
     return redirect(url_for('admin_orders'))
 
@@ -5684,16 +5897,23 @@ def admin_order_cancel(order_id):
         flash('Order not found.', 'error')
         return redirect(url_for('admin_orders'))
     waybill = order['delhivery_waybill']
-    if waybill and DELHIVERY_API_TOKEN:
+    courier_partner = order['courier_partner'] or 'delhivery'
+    manual_cancel_note = ''
+    if waybill and courier_partner == 'delhivery' and DELHIVERY_API_TOKEN:
         try:
             requests.post('https://track.delhivery.com/api/p/edit',
                 json={'waybill':waybill,'cancellation':True},
                 headers={'Authorization':f'Token {DELHIVERY_API_TOKEN}'}, timeout=15)
         except Exception as e:
             app.logger.warning(f"Delhivery cancellation failed: {e}")
+    elif waybill and courier_partner == 'shiprocket':
+        # Shiprocket cancellation needs their internal order id, which isn't
+        # tracked yet (only the AWB is stored) -- cancel manually in their
+        # dashboard for now rather than risk calling the wrong courier's API.
+        manual_cancel_note = ' Note: cancel this shipment manually in the Shiprocket panel.'
     conn.execute('UPDATE order_shipping SET status=? WHERE id=?', ('cancelled', order_id))
     conn.commit()
-    flash(f"Order {order['internal_order_id']} cancelled.", 'success')
+    flash(f"Order {order['internal_order_id']} cancelled.{manual_cancel_note}", 'success')
     return redirect(url_for('admin_orders'))
 
 
@@ -5857,7 +6077,12 @@ def admin_delivery_partner_save(partner_id):
         flash('Unknown delivery partner.')
         return redirect(url_for('admin_delivery_partners'))
 
-    encrypted = encrypt_credentials(credentials)
+    try:
+        encrypted = encrypt_credentials(credentials)
+    except RuntimeError as e:
+        flash(f'Could not save credentials: {e}')
+        return redirect(url_for('admin_delivery_partners'))
+
     db.execute(
         '''INSERT INTO delivery_partner_credentials (partner_id, environment, encrypted_credentials, updated_at)
            VALUES (?, ?, ?, NOW())
@@ -5881,6 +6106,16 @@ def admin_delivery_partner_toggle(partner_id):
         flash('Delivery partner not found.')
         return redirect(url_for('admin_delivery_partners'))
     new_status = 0 if partner['is_enabled'] else 1
+
+    if new_status == 1:
+        creds = db.execute(
+            'SELECT encrypted_credentials FROM delivery_partner_credentials WHERE partner_id=?',
+            (partner_id,)
+        ).fetchone()
+        if not creds or not creds['encrypted_credentials']:
+            flash(f"Can't enable {partner['name'].capitalize()} — add credentials first.")
+            return redirect(url_for('admin_delivery_partners'))
+
     db.execute('UPDATE delivery_partners SET is_enabled=?, updated_at=NOW() WHERE id=?', (new_status, partner_id))
     db.commit()
     flash('Delivery partner status updated.')

@@ -61,7 +61,7 @@ A background keep-alive thread pings the database periodically so the free Supab
 
 Set both locally in .env and in the Render dashboard for both services. Names only, no values here:
 
-SUPABASE_URL, SUPABASE_KEY, FLASK_SECRET_KEY, ADMIN_USERNAME, ADMIN_PASSWORD, ADMIN_TOTP_SECRET, RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET, SHIPPING_PROVIDER, WAREHOUSE_PIN, DELHIVERY_API_KEY, DELHIVERY_API_TOKEN, DELHIVERY_CLIENT_NAME, DELHIVERY_PICKUP_LOCATION, ZEPTOMAIL_API_KEY, ZEPTOMAIL_API_URL (optional, defaults to the .in region endpoint), SMTP_FROM, SMTP_FROM_ORDERS, RECAPTCHA_SITE_KEY, RECAPTCHA_SECRET_KEY, DB_PATH, CREDENTIAL_ENCRYPTION_KEY.
+SUPABASE_URL, SUPABASE_KEY, FLASK_SECRET_KEY, ADMIN_USERNAME, ADMIN_PASSWORD, ADMIN_TOTP_SECRET, RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET, SHIPPING_PROVIDER, WAREHOUSE_PIN, DELHIVERY_API_KEY, DELHIVERY_API_TOKEN, DELHIVERY_CLIENT_NAME, DELHIVERY_PICKUP_LOCATION, SHIPROCKET_PICKUP_LOCATION, ZEPTOMAIL_API_KEY, ZEPTOMAIL_API_URL (optional, defaults to the .in region endpoint), SMTP_FROM, SMTP_FROM_ORDERS, RECAPTCHA_SITE_KEY, RECAPTCHA_SECRET_KEY, DB_PATH, CREDENTIAL_ENCRYPTION_KEY.
 
 Never put any of these in render.yaml or commit them to git.
 
@@ -69,7 +69,9 @@ CREDENTIAL_ENCRYPTION_KEY encrypts courier credentials (Shiprocket, Delhivery) s
 
 python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
 
-Set the result in .env for local work and in the Render dashboard for both narinakhre-test and narinakhre-production. If this key is ever lost or changed, every previously saved courier credential becomes undecryptable and must be re-entered through the admin panel.
+Set that exact same value in .env for local work and in the Render dashboard for both narinakhre-test and narinakhre-production — local, test, and production all share one Supabase project, so all three must use the identical key or credentials saved in one place won't decrypt in another. If this key is ever lost or changed, every previously saved courier credential becomes undecryptable and must be re-entered through the admin panel.
+
+SHIPROCKET_PICKUP_LOCATION is the pickup address nickname registered in the Shiprocket dashboard (Settings -> Pickup Addresses) -- their order-creation API requires this exact string, not a raw address. Currently set to "work", confirmed live via their /settings/company/pickup API on 2026-08-10 -- that's the Jabalpur warehouse address, auto-named "work" by Shiprocket when it was added (no custom nickname was ever typed). Set the same value in Render for both services since local/test/production all use the one Shiprocket account. If a new pickup address is ever registered instead, re-check its nickname the same way rather than guessing.
 
 ---
 
