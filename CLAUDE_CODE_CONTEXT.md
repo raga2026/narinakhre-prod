@@ -61,9 +61,15 @@ A background keep-alive thread pings the database periodically so the free Supab
 
 Set both locally in .env and in the Render dashboard for both services. Names only, no values here:
 
-SUPABASE_URL, SUPABASE_KEY, FLASK_SECRET_KEY, ADMIN_USERNAME, ADMIN_PASSWORD, ADMIN_TOTP_SECRET, RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET, SHIPPING_PROVIDER, WAREHOUSE_PIN, DELHIVERY_API_KEY, DELHIVERY_API_TOKEN, DELHIVERY_CLIENT_NAME, DELHIVERY_PICKUP_LOCATION, ZEPTOMAIL_API_KEY, ZEPTOMAIL_API_URL (optional, defaults to the .in region endpoint), SMTP_FROM, SMTP_FROM_ORDERS, RECAPTCHA_SITE_KEY, RECAPTCHA_SECRET_KEY, DB_PATH.
+SUPABASE_URL, SUPABASE_KEY, FLASK_SECRET_KEY, ADMIN_USERNAME, ADMIN_PASSWORD, ADMIN_TOTP_SECRET, RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET, SHIPPING_PROVIDER, WAREHOUSE_PIN, DELHIVERY_API_KEY, DELHIVERY_API_TOKEN, DELHIVERY_CLIENT_NAME, DELHIVERY_PICKUP_LOCATION, ZEPTOMAIL_API_KEY, ZEPTOMAIL_API_URL (optional, defaults to the .in region endpoint), SMTP_FROM, SMTP_FROM_ORDERS, RECAPTCHA_SITE_KEY, RECAPTCHA_SECRET_KEY, DB_PATH, CREDENTIAL_ENCRYPTION_KEY.
 
 Never put any of these in render.yaml or commit them to git.
+
+CREDENTIAL_ENCRYPTION_KEY encrypts courier credentials (Shiprocket, Delhivery) stored in the delivery_partner_credentials table via utils/credential_crypto.py. Generate one locally with:
+
+python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+
+Set the result in .env for local work and in the Render dashboard for both narinakhre-test and narinakhre-production. If this key is ever lost or changed, every previously saved courier credential becomes undecryptable and must be re-entered through the admin panel.
 
 ---
 

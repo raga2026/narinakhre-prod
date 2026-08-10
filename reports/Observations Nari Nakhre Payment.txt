@@ -1,6 +1,6 @@
 Observations:
 1. The razorpay initially said it couldn't cereate an order and then the payment went through and i made the payment.
-2. I added 600 worth items andapplied the NNJULY10 coupon and got 10 percent off and toal amount was 540 rupees , the gst should be calculated from this amount, that is the sellingprice would be inclusive of gst, in the break up , this has to be handled.
+2. I added 600 worth items and pplied the NNJULY10 coupon and got 10 percent off and toal amount was 540 rupees , the gst should be calculated from this amount, that is the sellingprice would be inclusive of gst, in the break up , this has to be handled.
 3. While the total was 540 i paid 612.41 im not sure why that was the case
 4. After the payment was made,it took me to the tank you page, which was jus the thank you pagei made for wholesale cusomers which had no information as such. it just saidthank you for your intest or your request has been received and for details contact infor@narinakhre.com it did not have any details abou the rder placed ot payment made
 5. It should actually show a green beautifully designed tick mark which says Order Placed successfully wih otder id, tracing number etc

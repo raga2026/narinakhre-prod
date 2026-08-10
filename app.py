@@ -22,6 +22,7 @@ from werkzeug.security import generate_password_hash, check_password_hash
 from supabase import create_client, Client as SupabaseClient
 
 from utils.shipping_manager import get_shipping_provider
+from utils.credential_crypto import encrypt_credentials
 import auth_providers
 import io
 from PIL import Image as PILImage
@@ -476,6 +477,25 @@ def initialize_database_if_needed():
             pincode TEXT NOT NULL,
             is_default INTEGER DEFAULT 0,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )''',
+        # Multi-courier support (Phase 1 — schema + admin CRUD only, no
+        # Shiprocket/Delhivery API calls read these tables yet).
+        '''CREATE TABLE IF NOT EXISTS delivery_partners (
+            id BIGSERIAL PRIMARY KEY,
+            name TEXT NOT NULL UNIQUE CHECK (name IN ('shiprocket', 'delhivery')),
+            is_enabled INTEGER DEFAULT 0,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )''',
+        '''CREATE TABLE IF NOT EXISTS delivery_partner_credentials (
+            id BIGSERIAL PRIMARY KEY,
+            partner_id BIGINT NOT NULL UNIQUE REFERENCES delivery_partners(id),
+            environment TEXT NOT NULL DEFAULT 'production' CHECK (environment IN ('staging', 'production')),
+            encrypted_credentials TEXT,
+            token_cache TEXT,
+            token_expires_at TIMESTAMP,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )'''
     ]
     client = get_supabase()
@@ -531,6 +551,18 @@ def initialize_database_if_needed():
             client.rpc('execute_sql', {'query': sql}).execute()
         except Exception as e:
             app.logger.warning(f'Column init warning (may already exist): {e}')
+
+    # Seed the two supported courier partners, disabled until an admin
+    # configures credentials and turns them on.
+    seed_sql = [
+        "INSERT INTO delivery_partners (name, is_enabled) VALUES ('shiprocket', 0) ON CONFLICT (name) DO NOTHING",
+        "INSERT INTO delivery_partners (name, is_enabled) VALUES ('delhivery', 0) ON CONFLICT (name) DO NOTHING",
+    ]
+    for sql in seed_sql:
+        try:
+            client.rpc('execute_sql', {'query': sql}).execute()
+        except Exception as e:
+            app.logger.warning(f'Delivery partner seed warning: {e}')
 
     # Nari Nakhre Credits reservation -- these two functions run the
     # check-balance-then-insert as a single atomic Postgres statement (a
@@ -5775,6 +5807,84 @@ def admin_coupon_edit(coupon_id):
     db.commit()
     flash('Coupon updated.')
     return redirect(url_for('admin_coupons'))
+
+
+@app.route('/admin/delivery-partners', methods=['GET'])
+@admin_required
+def admin_delivery_partners():
+    db = get_db()
+    partners = db.execute('''
+        SELECT dp.id, dp.name, dp.is_enabled, dp.updated_at AS partner_updated_at,
+               dpc.environment, dpc.updated_at AS credentials_updated_at,
+               CASE WHEN dpc.encrypted_credentials IS NOT NULL AND dpc.encrypted_credentials != ''
+                    THEN 1 ELSE 0 END AS is_configured
+        FROM delivery_partners dp
+        LEFT JOIN delivery_partner_credentials dpc ON dpc.partner_id = dp.id
+        ORDER BY dp.name
+    ''').fetchall()
+    return render_template('admin/admin_delivery_partners.html', partners=partners)
+
+
+@app.route('/admin/delivery-partners/<int:partner_id>/save', methods=['POST'])
+@admin_required
+def admin_delivery_partner_save(partner_id):
+    db = get_db()
+    partner = db.execute('SELECT * FROM delivery_partners WHERE id=?', (partner_id,)).fetchone()
+    if not partner:
+        flash('Delivery partner not found.')
+        return redirect(url_for('admin_delivery_partners'))
+
+    name = partner['name']
+    environment = 'production'
+
+    if name == 'shiprocket':
+        email = (request.form.get('email') or '').strip()
+        password = (request.form.get('password') or '').strip()
+        if not email or not password:
+            flash('Shiprocket email and password are both required.')
+            return redirect(url_for('admin_delivery_partners'))
+        credentials = {'email': email, 'password': password}
+    elif name == 'delhivery':
+        api_token = (request.form.get('api_token') or '').strip()
+        environment = (request.form.get('environment') or 'production').strip()
+        if environment not in ('staging', 'production'):
+            environment = 'production'
+        if not api_token:
+            flash('Delhivery API token is required.')
+            return redirect(url_for('admin_delivery_partners'))
+        credentials = {'api_token': api_token}
+    else:
+        flash('Unknown delivery partner.')
+        return redirect(url_for('admin_delivery_partners'))
+
+    encrypted = encrypt_credentials(credentials)
+    db.execute(
+        '''INSERT INTO delivery_partner_credentials (partner_id, environment, encrypted_credentials, updated_at)
+           VALUES (?, ?, ?, NOW())
+           ON CONFLICT (partner_id) DO UPDATE SET
+               environment = EXCLUDED.environment,
+               encrypted_credentials = EXCLUDED.encrypted_credentials,
+               updated_at = NOW()''',
+        (partner_id, environment, encrypted)
+    )
+    db.commit()
+    flash(f'{name.capitalize()} credentials saved.')
+    return redirect(url_for('admin_delivery_partners'))
+
+
+@app.route('/admin/delivery-partners/<int:partner_id>/toggle', methods=['POST'])
+@admin_required
+def admin_delivery_partner_toggle(partner_id):
+    db = get_db()
+    partner = db.execute('SELECT * FROM delivery_partners WHERE id=?', (partner_id,)).fetchone()
+    if not partner:
+        flash('Delivery partner not found.')
+        return redirect(url_for('admin_delivery_partners'))
+    new_status = 0 if partner['is_enabled'] else 1
+    db.execute('UPDATE delivery_partners SET is_enabled=?, updated_at=NOW() WHERE id=?', (new_status, partner_id))
+    db.commit()
+    flash('Delivery partner status updated.')
+    return redirect(url_for('admin_delivery_partners'))
 
 
 def _send_welcome_backfill_batch(user_rows):
