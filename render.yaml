@@ -21,3 +21,28 @@ services:
       - narinakhre.com
       - www.narinakhre.com
       - wholesale.narinakhre.com
+    envVars:
+      # Shared secret for POST /cron/weekly-report -- must be set to the
+      # same value on narinakhre-weekly-report below. Set via the Render
+      # dashboard (sync: false means Render won't overwrite it on deploy).
+      - key: WEEKLY_REPORT_CRON_SECRET
+        sync: false
+
+  # Fires send_weekly_report_email() (in app.py) once a week by POSTing to
+  # the production web service's protected /cron/weekly-report endpoint --
+  # see weekly_report_cron.py. Points at narinakhre-production specifically
+  # (not the test service) since both share the same Supabase database, so
+  # only one of them should ever actually send the report.
+  - type: cron
+    name: narinakhre-weekly-report
+    plan: Free
+    runtime: python
+    region: singapore
+    schedule: "0 9 * * 1"
+    buildCommand: "pip install requests"
+    startCommand: "python weekly_report_cron.py"
+    envVars:
+      - key: WEEKLY_REPORT_URL
+        value: https://narinakhre.com/cron/weekly-report
+      - key: WEEKLY_REPORT_CRON_SECRET
+        sync: false

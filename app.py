@@ -110,6 +110,12 @@ ADMIN_EMAIL = os.environ.get('ADMIN_EMAIL', 'mohinicosmetics.india@gmail.com')
 # kept as-is here since env var names are case-sensitive.
 ORDERS_FROM_EMAIL = os.environ.get('SMTP_ORDERS_FROM_EMAIL', 'orders-noreply@narinakhre.com')
 SUPPORT_FROM_EMAIL = os.environ.get('SMTP_support_EMAIL_FROM', 'support-noreply@narinakhre.com')
+# Shared secret checked by /cron/weekly-report -- that endpoint has no admin
+# session to check (it's hit by a Render Cron Job, see render.yaml + the
+# weekly_report_cron.py trigger script), so this header is its only guard.
+# Unset by default so the endpoint stays disabled (returns 403) until an
+# admin deliberately sets the same value here and on the cron service.
+WEEKLY_REPORT_CRON_SECRET = os.environ.get('WEEKLY_REPORT_CRON_SECRET', '')
 RAZORPAY_KEY_ID = os.environ.get('RAZORPAY_KEY_ID')
 RAZORPAY_KEY_SECRET = os.environ.get('RAZORPAY_KEY_SECRET')
 ADMIN_USERNAME = os.environ.get('ADMIN_USERNAME', '')
@@ -4673,6 +4679,88 @@ def admin_visitors():
                             hourly_data=hourly_data, peak_hour=peak_hour, max_hourly_views=max_hourly_views,
                             source_data=source_data, max_source_views=max_source_views,
                             top_pages=top_pages, max_page_views=max_page_views)
+
+
+def send_weekly_report_email():
+    """Emails ADMIN_EMAIL a rolling-7-day snapshot: unique visitors, orders
+    placed, revenue, and the week's top 10 most-viewed products. Deliberately
+    reuses the exact same window definition (rolling 7 days, status !=
+    'cancelled' for revenue) as window_stats()/top_events() in
+    admin_analytics() above, so these numbers always agree with the
+    dashboard instead of drifting into a second, slightly-different
+    definition of "revenue". Returns True/False like send_contact_email().
+    """
+    db = get_db()
+    now = datetime.now()
+    start = now - timedelta(days=7)
+    start_str = start.strftime('%Y-%m-%d 00:00:00')
+    end_str = now.strftime('%Y-%m-%d %H:%M:%S')
+
+    visitor_row = db.execute(
+        "SELECT COUNT(DISTINCT visitor_id) as visitors, COUNT(*) as views "
+        "FROM page_views WHERE created_at >= ? AND created_at <= ?",
+        (start_str, end_str)
+    ).fetchone()
+    visitors = visitor_row['visitors'] if visitor_row else 0
+    page_views = visitor_row['views'] if visitor_row else 0
+
+    order_row = db.execute(
+        "SELECT COUNT(*) as cnt, COALESCE(SUM(total_amount),0) as revenue "
+        "FROM order_shipping WHERE created_at >= ? AND created_at <= ? AND status != 'cancelled'",
+        (start_str, end_str)
+    ).fetchone()
+    order_count = order_row['cnt'] if order_row else 0
+    revenue = float(order_row['revenue'] or 0) if order_row else 0.0
+
+    top_rows = db.execute(
+        "SELECT sku, COUNT(*) as cnt FROM product_events "
+        "WHERE event_type='view' AND created_at >= ? AND created_at <= ? "
+        "GROUP BY sku ORDER BY cnt DESC LIMIT 10",
+        (start_str, end_str)
+    ).fetchall()
+    top_products = []
+    for r in top_rows:
+        p = db.execute('SELECT name FROM products WHERE sku=?', (r['sku'],)).fetchone()
+        top_products.append({'name': p['name'] if p else r['sku'], 'views': r['cnt']})
+
+    date_range_label = f"{start.strftime('%d %b')} – {now.strftime('%d %b %Y')}"
+
+    html_body = render_template('retail/email_weekly_report.html',
+        date_range_label=date_range_label, visitors=visitors, page_views=page_views,
+        order_count=order_count, revenue=revenue, top_products=top_products)
+
+    text_lines = [
+        f"Weekly Business Report ({date_range_label})", "",
+        f"Visitors: {visitors} ({page_views} page views)",
+        f"Orders: {order_count}",
+        f"Revenue: Rs.{revenue:.2f}", "",
+        "Top viewed products:",
+    ]
+    if top_products:
+        text_lines += [f"  {i+1}. {p['name']} — {p['views']} views" for i, p in enumerate(top_products)]
+    else:
+        text_lines.append("  (no product views this week)")
+    text_body = "\n".join(text_lines)
+
+    return send_contact_email(
+        ADMIN_EMAIL, f"Weekly Report — {date_range_label}",
+        text_body, html_body=html_body, from_email=SUPPORT_FROM_EMAIL
+    )
+
+
+@app.route('/cron/weekly-report', methods=['POST'])
+def cron_weekly_report():
+    """Triggered by a Render Cron Job (see render.yaml + weekly_report_cron.py)
+    once a week. Not under /admin/ and not @admin_required -- a cron job has
+    no browser session to authenticate with, so this checks a shared secret
+    header instead. Returns 403 if the secret is missing/unset/wrong, so a
+    stray request (or a forgotten/unset WEEKLY_REPORT_CRON_SECRET) can never
+    trigger a send."""
+    provided = request.headers.get('X-Cron-Secret', '')
+    if not WEEKLY_REPORT_CRON_SECRET or not hmac.compare_digest(provided, WEEKLY_REPORT_CRON_SECRET):
+        return jsonify({'status': 'error', 'message': 'Unauthorized'}), 403
+    ok = send_weekly_report_email()
+    return jsonify({'status': 'success' if ok else 'error'}), (200 if ok else 500)
 
 
 @app.route('/admin/manage-images', methods=['GET'])

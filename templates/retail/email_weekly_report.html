@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Nari Nakhre Weekly Report</title>
+    <style>
+        body { font-family: 'Segoe UI', Arial, sans-serif; background: #f8f9fa; margin: 0; }
+        .container { max-width: 600px; margin: 40px auto; background: #fff; border-radius: 16px; box-shadow: 0 2px 16px rgba(0,0,0,0.08); padding: 40px 32px; }
+        h1 { color: #be185d; margin-bottom: 4px; font-size: 1.4em; }
+        .range { color: #757575; font-size: 0.95em; margin-bottom: 24px; }
+        .stat-row { display: table; width: 100%; margin-bottom: 24px; border-spacing: 8px 0; }
+        .stat-box { display: table-cell; width: 33.33%; background: #fce4ec; border-radius: 12px; padding: 16px 8px; text-align: center; }
+        .stat-value { font-size: 1.5em; font-weight: bold; color: #be185d; display: block; }
+        .stat-label { font-size: 0.78em; color: #757575; text-transform: uppercase; letter-spacing: 0.03em; }
+        h2 { color: #1d1d1f; font-size: 1.05em; margin: 28px 0 12px; }
+        table { width: 100%; border-collapse: collapse; font-size: 13px; }
+        th, td { padding: 8px 6px; border: 1px solid #eeeeee; text-align: left; }
+        th { background: #be185d; color: #fff; font-size: 12px; }
+        td.rank { color: #9f9f9f; width: 28px; }
+        td.views { text-align: right; font-weight: 600; color: #1d1d1f; }
+        .empty { color: #9f9f9f; font-size: 0.9em; padding: 12px 0; }
+        .footer { margin-top: 32px; text-align: center; color: #757575; font-size: 0.85em; border-top: 1px solid #eeeeee; padding-top: 20px; }
+        .logo { height: 64px; margin-bottom: 16px; width: auto; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div style="text-align: center;">
+            <a href="https://narinakhre.com" target="_blank">
+                <img src="https://eopqwvssznmxfxrfzqbx.supabase.co/storage/v1/object/public/products/site/logo.png" alt="Nari Nakhre Logo" class="logo">
+            </a>
+        </div>
+
+        <h1>Weekly Business Report</h1>
+        <div class="range">{{ date_range_label }}</div>
+
+        <div class="stat-row">
+            <div class="stat-box">
+                <span class="stat-value">{{ visitors }}</span>
+                <span class="stat-label">Visitors</span>
+            </div>
+            <div class="stat-box">
+                <span class="stat-value">{{ order_count }}</span>
+                <span class="stat-label">Orders</span>
+            </div>
+            <div class="stat-box">
+                <span class="stat-value">&#8377;{{ '%.0f'|format(revenue) }}</span>
+                <span class="stat-label">Revenue</span>
+            </div>
+        </div>
+        <div style="text-align:center;color:#9f9f9f;font-size:0.78em;margin-top:-14px;margin-bottom:8px;">{{ page_views }} total page views</div>
+
+        <h2>Top 10 Most-Viewed Products</h2>
+        {% if top_products and top_products|length > 0 %}
+        <table>
+            <thead>
+                <tr><th>#</th><th>Product</th><th style="text-align:right;">Views</th></tr>
+            </thead>
+            <tbody>
+                {% for p in top_products %}
+                <tr>
+                    <td class="rank">{{ loop.index }}</td>
+                    <td>{{ p.name }}</td>
+                    <td class="views">{{ p.views }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+        <div class="empty">No product views recorded this week.</div>
+        {% endif %}
+
+        <div class="footer">
+            Automated weekly report from narinakhre.com<br>
+            Full dashboard: <a href="https://narinakhre.com/admin/analytics" style="color:#be185d;">Analytics</a> &middot;
+            <a href="https://narinakhre.com/admin/visitors" style="color:#be185d;">Visitors</a>
+        </div>
+    </div>
+</body>
+</html>
