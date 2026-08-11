@@ -50,6 +50,12 @@
   }
   .ck-left  { grid-column: 1; }
   .ck-right { grid-column: 2; position: sticky; top: 80px; }
+  /* Payment + Place Order live in their own full-width row below both
+     columns, instead of being squeezed into the 420px right sidebar --
+     keeps the primary action centered under the page rather than pinned
+     to the right edge. */
+  .ck-checkout-footer { grid-column: 1 / -1; display: flex; justify-content: center; }
+  .ck-checkout-footer > .ck-section { width: 100%; max-width: 480px; }
 }
 
 /* ── Section card ── */
@@ -240,33 +246,37 @@
 .ck-signin-alt-row button:hover { color: #9f1239; }
 
 /* ── Courier picker ── */
-.ck-courier-block { margin: 4px 0 14px; }
+.ck-courier-block { margin: 6px 0 16px; }
 .ck-courier-hint {
-  font-size: 0.78rem; color: #9f9f9f; padding: 10px 0;
+  font-size: 0.8rem; color: #9f9f9f; padding: 12px 14px;
+  background: #f9f9f9; border-radius: 12px; margin-top: 6px;
 }
-.ck-courier-options { display: flex; flex-direction: column; gap: 8px; }
+.ck-courier-options { display: flex; flex-direction: column; gap: 10px; margin-top: 6px; }
 .ck-courier-option {
-  display: flex; align-items: center; gap: 10px;
-  border: 1.5px solid #e5e5e7; border-radius: 12px;
-  padding: 10px 12px; cursor: pointer;
-  transition: border-color 0.15s, background 0.15s;
+  display: flex; align-items: center; gap: 12px;
+  border: 1.5px solid #e5e5e7; border-radius: 14px;
+  padding: 12px 14px; cursor: pointer;
+  transition: border-color 0.15s, background 0.15s, box-shadow 0.15s;
 }
 .ck-courier-option:hover { border-color: #d2d2d7; }
-.ck-courier-option.selected { border-color: #be185d; background: #fff7f8; }
-.ck-courier-option input { margin: 0; accent-color: #be185d; flex-shrink: 0; }
+.ck-courier-option.selected {
+  border-color: #be185d; background: #fff7f8;
+  box-shadow: 0 0 0 1px #be185d;
+}
+.ck-courier-option input { margin: 0; width: 18px; height: 18px; accent-color: #be185d; flex-shrink: 0; }
 .ck-courier-badge {
-  width: 44px; height: 32px; border-radius: 8px; flex-shrink: 0;
+  width: 52px; height: 36px; border-radius: 9px; flex-shrink: 0;
   display: flex; align-items: center; justify-content: center;
-  background: white; border: 1px solid #eee; overflow: hidden; padding: 4px;
+  background: white; border: 1px solid #ececec; overflow: hidden; padding: 5px;
 }
 .ck-courier-badge img { max-width: 100%; max-height: 100%; object-fit: contain; display: block; }
 .ck-courier-badge.fallback {
-  color: white; font-size: 0.8rem; font-weight: 800; border: none; padding: 0;
+  color: white; font-size: 0.85rem; font-weight: 800; border: none; padding: 0;
 }
 .ck-courier-info { flex: 1; min-width: 0; }
-.ck-courier-name { font-size: 0.85rem; font-weight: 700; color: #1d1d1f; display: block; }
-.ck-courier-eta { font-size: 0.72rem; color: #6e6e73; display: block; margin-top: 1px; }
-.ck-courier-price { font-size: 0.8rem; font-weight: 700; color: #16a34a; white-space: nowrap; flex-shrink: 0; }
+.ck-courier-name { font-size: 0.87rem; font-weight: 700; color: #1d1d1f; display: block; }
+.ck-courier-eta { font-size: 0.73rem; color: #6e6e73; display: block; margin-top: 2px; }
+.ck-courier-price { font-size: 0.82rem; font-weight: 800; color: #16a34a; white-space: nowrap; flex-shrink: 0; }
 .ck-courier-price.upgrade { color: #be185d; }
 
 /* ── Payment toggle ── */
@@ -606,7 +616,14 @@
         <div id="coupon-nudge" style="{% if not next_coupon_gap %}display:none;{% endif %}font-size:0.78rem;color:#be185d;font-weight:600;margin-top:6px;">
           {% if next_coupon_gap %}Add ₹{{ next_coupon_gap.amount_needed|round(0, 'ceil')|int }} more to avail code {{ next_coupon_gap.code }} ({{ next_coupon_gap.discount_percent|int }}% off){% endif %}
         </div>
+      </div>
+    </div>
 
+    <!-- ── Checkout action bar: payment method + Place Order — its own
+         full-width row below both columns on desktop (see .ck-checkout-footer
+         in the 768px+ media query), last element on mobile. ── -->
+    <div class="ck-checkout-footer">
+      <div class="ck-section">
         <!-- Payment method — large tap-friendly toggle buttons -->
         <div class="ck-form-group">
           <label class="ck-form-label">Payment Method</label>
@@ -992,9 +1009,12 @@ function ckRenderCourierOptions(options) {
             ? '<span class="ck-courier-price upgrade">+₹' + Math.round(opt.extra_charge) + '</span>'
             : '<span class="ck-courier-price">FREE</span>';
         const etaHtml = opt.eta ? ('Est. delivery: ' + opt.eta) : 'Standard delivery';
+        // alt="" -- the logo is decorative here; the visible courier-name text
+        // right next to it already says "Delhivery"/"Shiprocket", so a
+        // non-empty alt would make screen readers announce the name twice.
         const badgeHtml = meta.logo
-            ? '<span class="ck-courier-badge"><img src="' + meta.logo + '" alt="' + meta.label + '"></span>'
-            : '<span class="ck-courier-badge fallback" style="background:' + meta.color + ';">' + meta.initial + '</span>';
+            ? '<span class="ck-courier-badge"><img src="' + meta.logo + '" alt=""></span>'
+            : '<span class="ck-courier-badge fallback" aria-hidden="true" style="background:' + meta.color + ';">' + meta.initial + '</span>';
         return '<label class="ck-courier-option' + (selected ? ' selected' : '') + '" data-partner="' + opt.courier_partner + '">'
             + '<input type="radio" name="ck_courier_choice" value="' + opt.courier_partner + '"' + (selected ? ' checked' : '') + ' onchange="ckSelectCourier(\'' + opt.courier_partner + '\')">'
             + badgeHtml

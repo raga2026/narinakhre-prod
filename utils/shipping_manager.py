@@ -328,13 +328,23 @@ class ShiprocketProvider(BaseShippingProvider):
             return {"status": False, "msg": str(e)}
 
     def calculate_rates(self, o_pin, d_pin, weight):
-        result = self._serviceability(o_pin, d_pin, weight)
+        result = self._serviceability(o_pin, d_pin, self._weight_kg(weight))
         if not result.get('status'):
             return {"status": False, "msg": result.get('msg')}
         couriers = result['data'].get('available_courier_companies') or []
         if not couriers:
             return {"status": False, "msg": "No rates found"}
         return {"status": True, "rate": couriers[0].get('rate'), "msg": "OK"}
+
+    @staticmethod
+    def _weight_kg(weight_grams):
+        """Every caller in this codebase works in grams (see DelhiveryProvider's
+        'cgm' param and app.py's cart_weight calc), but Shiprocket's
+        serviceability/rate API takes 'weight' in KILOGRAMS -- without this
+        conversion a normal ~1kg cart gets quoted as a 1000kg shipment, wildly
+        inflating the rate. verify_pincode()'s hardcoded weight=0.5 below is
+        already kg (a nominal probe weight), which is what gave this away."""
+        return max(float(weight_grams) / 1000.0, 0.1)
 
     def verify_pincode(self, pincode, pickup_pincode=None):
         """
@@ -355,7 +365,7 @@ class ShiprocketProvider(BaseShippingProvider):
 
     def get_rates(self, o_pin, d_pin, weight, mode="Prepaid"):
         is_cod = (mode == "COD")
-        result = self._serviceability(o_pin, d_pin, weight, cod=is_cod)
+        result = self._serviceability(o_pin, d_pin, self._weight_kg(weight), cod=is_cod)
         if not result.get('status'):
             return {"rate": 0, "shipping_charge": 0, "cod_fee": 0, "msg": result.get('msg')}
         couriers = result['data'].get('available_courier_companies') or []
