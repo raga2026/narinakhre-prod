@@ -35,7 +35,7 @@ services:
   # only one of them should ever actually send the report.
   - type: cron
     name: narinakhre-weekly-report
-    plan: Free
+    plan: Starter
     runtime: python
     region: singapore
     schedule: "0 9 * * 1"
