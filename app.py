@@ -558,6 +558,13 @@ def initialize_database_if_needed():
         # or blank emails (see the app-level check in email_signup as the
         # real guard against duplicate accounts).
         'ALTER TABLE users ADD CONSTRAINT users_email_unique UNIQUE (email)',
+        # Customer-facing surcharge for picking a pricier courier than the
+        # cheapest quote at checkout (see calculate_checkout_shipping /
+        # checkout_process). The cheapest option always ships free; this is
+        # the delta the customer actually paid on top of that, folded into
+        # total_amount already -- stored separately too so admin/emails can
+        # show the breakdown instead of just a mismatched total.
+        'ALTER TABLE order_shipping ADD COLUMN IF NOT EXISTS shipping_upgrade_charge NUMERIC DEFAULT 0',
     ]
     for sql in alter_sql:
         try:
@@ -806,21 +813,21 @@ def get_configured_courier_names():
     return [row['name'] for row in rows]
 
 
-def get_best_courier_quote(o_pin, d_pin, weight, mode="Prepaid"):
+def get_all_courier_quotes(o_pin, d_pin, weight, mode="Prepaid"):
     """
-    Rate-shops across every currently enabled courier and returns the
-    cheapest working quote as (partner_name, provider, rate_info) --
-    rate_info is whatever that provider's get_rates() returned (rate,
-    shipping_charge, cod_fee, and 'eta' when the courier supplies one;
-    Delhivery's rate API doesn't return an ETA today, so rate_info['eta']
-    will be None for Delhivery quotes).
+    Rate-shops across every currently enabled courier and returns every
+    working quote as [(partner_name, provider, rate_info), ...] -- rate_info
+    is whatever that provider's get_rates() returned (rate, shipping_charge,
+    cod_fee, and 'eta' when the courier supplies one; Delhivery's rate API
+    doesn't return an ETA today, so rate_info['eta'] will be None for
+    Delhivery quotes). Ordered cheapest first.
 
-    With only one partner enabled, skips comparison and just uses it. With
-    none enabled, falls back to get_active_courier()'s legacy behavior. A
-    courier whose rate call fails/errors is skipped, not fatal -- if every
-    enabled courier fails, falls back to whichever get_active_courier()
-    would have picked anyway, so checkout never hard-fails just because one
-    courier's API had a bad moment.
+    With only one partner enabled, returns just that one (no comparison
+    needed). With none enabled, falls back to get_active_courier()'s legacy
+    behavior. A courier whose rate call fails/errors is skipped, not fatal
+    -- if every enabled courier fails, falls back to whichever
+    get_active_courier() would have picked anyway, so checkout never
+    hard-fails just because one courier's API had a bad moment.
     """
     couriers = get_enabled_couriers()
     if not couriers:
@@ -847,13 +854,25 @@ def get_best_courier_quote(o_pin, d_pin, weight, mode="Prepaid"):
             rate_info = provider.get_rates(o_pin, d_pin, weight, mode=mode)
         except Exception:
             rate_info = {"rate": 0, "shipping_charge": 0, "cod_fee": 0, "eta": None}
-        return partner_name, provider, rate_info
+        return [(partner_name, provider, rate_info)]
 
     def _rate_of(q):
         info = q[2]
         return float(info.get('rate') if info.get('rate') is not None else info.get('shipping_charge') or 0)
 
-    return min(quotes, key=_rate_of)
+    return sorted(quotes, key=_rate_of)
+
+
+def get_best_courier_quote(o_pin, d_pin, weight, mode="Prepaid"):
+    """The single cheapest quote -- see get_all_courier_quotes()."""
+    return get_all_courier_quotes(o_pin, d_pin, weight, mode=mode)[0]
+
+
+def _customer_shipping_charge(rate_info):
+    """What a given quote's rate_info would cost -- 'rate' if the provider
+    supplied one, else 'shipping_charge'. Same key precedence get_all_courier_quotes
+    sorts by, so this always agrees with which quote is "cheapest"."""
+    return float(rate_info.get('rate') if rate_info.get('rate') is not None else rate_info.get('shipping_charge') or 0)
 
 
 def create_shiprocket_shipment(order_row, cart_items, cod_amount_override=None, provider=None):
@@ -3121,26 +3140,40 @@ def checkout_process():
     cgst_amount = gst_breakdown['cgst']
     sgst_amount = gst_breakdown['sgst']
 
-    # Shipping FREE for customers -- actual_shipping_cost is what we pay the
-    # courier, absorbed by the business, never shown to the customer as a
-    # charge. courier_partner/courier_eta ARE shown to the customer (see
-    # thank_you page + confirmation emails) -- rate-shopped here once, at
-    # order-creation time, and reused for actual shipment creation later
-    # (see create_courier_shipment) so what's shown matches what ships.
+    # The cheapest quote always ships free -- actual_shipping_cost is what we
+    # pay the courier for it, absorbed by the business, never shown to the
+    # customer as a charge. If the customer picked a pricier courier on the
+    # checkout page (see ckSelectedCourier in checkout.html), they pay the
+    # delta above the cheapest quote -- shipping_upgrade_charge, folded into
+    # total_amount below. courier_partner/courier_eta ARE shown to the
+    # customer (see thank_you page + confirmation emails) -- rate-shopped
+    # here once, at order-creation time, and reused for actual shipment
+    # creation later (see create_courier_shipment) so what's shown matches
+    # what ships.
     actual_shipping_cost = 0.0
+    shipping_upgrade_charge = 0.0
     chosen_courier = 'delhivery'
     courier_eta = None
     try:
         cart_weight = max(sum(int(item.get('units', 1)) for item in display_cart) * 250, 250)
-        chosen_courier, _provider, rates = get_best_courier_quote(
+        quotes = get_all_courier_quotes(
             app.config.get('WAREHOUSE_PIN', '482001'), consignee_pincode, cart_weight, mode=payment_mode
         )
+        # Customer may have picked a non-default courier on the checkout
+        # page -- honor it if it's one of the couriers that actually quoted
+        # successfully for this order; otherwise (not sent, or no longer
+        # valid) fall back to cheapest, same as before this override existed.
+        requested_courier = (request.form.get('courier_partner') or '').strip().lower()
+        selected = next((q for q in quotes if q[0] == requested_courier), None) if requested_courier else None
+        chosen_courier, _provider, rates = selected or quotes[0]
         actual_shipping_cost = float(rates.get('shipping_charge', 0) or 0)
         courier_eta = rates.get('eta')
+        base_charge = _customer_shipping_charge(quotes[0][2])
+        shipping_upgrade_charge = round(max(_customer_shipping_charge(rates) - base_charge, 0), 2)
     except Exception as e:
         app.logger.warning(f'Shipping rate fetch failed: {e}')
 
-    total_amount = max(subtotal_amount - discount_amount - credits_redeemed, 0)
+    total_amount = max(subtotal_amount - discount_amount - credits_redeemed + shipping_upgrade_charge, 0)
 
     # Store cart items as JSON for admin order view
     cart_items_json = json.dumps([{
@@ -3160,15 +3193,15 @@ def checkout_process():
             subtotal_amount, gst_amount, cgst_amount, sgst_amount,
             discount_amount, actual_shipping_cost, total_amount,
             coupon_code, cart_items_json, credits_redeemed,
-            courier_partner, courier_eta)
-           VALUES (?,?,?,?,?,?,?,?,?,'pending',?,?,?,?,?,?,?,?,?,?,?,?,?)''',
+            courier_partner, courier_eta, shipping_upgrade_charge)
+           VALUES (?,?,?,?,?,?,?,?,?,'pending',?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',
         (user_id, cleaned_name, consignee_phone, consignee_email,
          cleaned_address, consignee_city, consignee_state, consignee_pincode,
          internal_order_id, payment_mode,
          subtotal_amount, gst_amount, cgst_amount, sgst_amount,
          discount_amount, actual_shipping_cost, total_amount,
          coupon_code, cart_items_json, credits_redeemed,
-         chosen_courier, courier_eta)
+         chosen_courier, courier_eta, shipping_upgrade_charge)
     )
     conn.commit()
     session.pop('applied_credits', None)
@@ -3782,18 +3815,34 @@ def calculate_checkout_shipping():
     try:
         cart = session.get('cart', {})
         total_weight = max(sum(item.get('qty', 1) for item in cart.values()) * 250, 250)
-        partner_name, _provider, rates = get_best_courier_quote(
+        quotes = get_all_courier_quotes(
             app.config.get('WAREHOUSE_PIN', ''), pincode, total_weight, mode=payment_mode
         )
-        shipping_charge = rates.get('rate', 0) or rates.get('shipping_charge', 0)
-        cod_fee = rates.get('cod_fee', 0) if payment_mode == 'COD' else 0
+        # Cheapest first (get_all_courier_quotes already sorts this way) --
+        # that's the default (free) selection; the customer can switch to a
+        # pricier option, in which case they pay the delta above the
+        # cheapest quote (extra_charge) -- see checkout_process, which
+        # applies the same math server-side when the order is actually
+        # placed. cod_fee/shipping_charge stay internal (never shown to the
+        # customer as a price), only extra_charge (already the customer-
+        # facing delta), courier name + eta are customer-facing.
+        base_charge = _customer_shipping_charge(quotes[0][2])
+        options = [{
+            "courier_partner": name,
+            "eta": rates.get('eta'),
+            "shipping_charge": rates.get('rate', 0) or rates.get('shipping_charge', 0),
+            "cod_fee": rates.get('cod_fee', 0) if payment_mode == 'COD' else 0,
+            "extra_charge": round(max(_customer_shipping_charge(rates) - base_charge, 0), 2),
+        } for name, _provider, rates in quotes]
+        default = options[0]
         return jsonify({
             "status": True,
-            "shipping_charge": shipping_charge,
-            "cod_fee": cod_fee,
+            "shipping_charge": default["shipping_charge"],
+            "cod_fee": default["cod_fee"],
             "payment_mode": payment_mode,
-            "courier_partner": partner_name,
-            "eta": rates.get('eta')
+            "courier_partner": default["courier_partner"],
+            "eta": default["eta"],
+            "options": options
         })
     except Exception as e:
         app.logger.error(f'Delhivery shipping calc error: {e}')

@@ -239,6 +239,36 @@
 }
 .ck-signin-alt-row button:hover { color: #9f1239; }
 
+/* ── Courier picker ── */
+.ck-courier-block { margin: 4px 0 14px; }
+.ck-courier-hint {
+  font-size: 0.78rem; color: #9f9f9f; padding: 10px 0;
+}
+.ck-courier-options { display: flex; flex-direction: column; gap: 8px; }
+.ck-courier-option {
+  display: flex; align-items: center; gap: 10px;
+  border: 1.5px solid #e5e5e7; border-radius: 12px;
+  padding: 10px 12px; cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+}
+.ck-courier-option:hover { border-color: #d2d2d7; }
+.ck-courier-option.selected { border-color: #be185d; background: #fff7f8; }
+.ck-courier-option input { margin: 0; accent-color: #be185d; flex-shrink: 0; }
+.ck-courier-badge {
+  width: 44px; height: 32px; border-radius: 8px; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center;
+  background: white; border: 1px solid #eee; overflow: hidden; padding: 4px;
+}
+.ck-courier-badge img { max-width: 100%; max-height: 100%; object-fit: contain; display: block; }
+.ck-courier-badge.fallback {
+  color: white; font-size: 0.8rem; font-weight: 800; border: none; padding: 0;
+}
+.ck-courier-info { flex: 1; min-width: 0; }
+.ck-courier-name { font-size: 0.85rem; font-weight: 700; color: #1d1d1f; display: block; }
+.ck-courier-eta { font-size: 0.72rem; color: #6e6e73; display: block; margin-top: 1px; }
+.ck-courier-price { font-size: 0.8rem; font-weight: 700; color: #16a34a; white-space: nowrap; flex-shrink: 0; }
+.ck-courier-price.upgrade { color: #be185d; }
+
 /* ── Payment toggle ── */
 .ck-payment-options { display: flex; gap: 10px; }
 .ck-payment-option {
@@ -518,36 +548,6 @@
                      value="{{ saved_address.consignee_city if saved_address else '' }}">
             </div>
           </div>
-
-          <!-- Payment method — large tap-friendly toggle buttons -->
-          <div class="ck-form-group" style="margin-top:10px;">
-            <label class="ck-form-label">Payment Method</label>
-            <input type="hidden" name="payment_mode" id="payment_mode_input" value="Prepaid">
-            <div style="display:flex;gap:10px;margin-top:6px;">
-              <button type="button" id="btn-prepaid" onclick="setPayment('Prepaid')"
-                style="flex:1;padding:16px 8px;border-radius:16px;border:2.5px solid #be185d;
-                       background:#be185d;color:white;font-size:0.88rem;font-weight:800;
-                       cursor:pointer;line-height:1.4;text-align:center;">
-                💳<br>Prepaid<br>
-                <span style="font-size:0.68rem;font-weight:500;opacity:0.9;">Pay online now</span>
-              </button>
-              <button type="button" id="btn-cod" onclick="setPayment('COD')"
-                style="flex:1;padding:16px 8px;border-radius:16px;border:2.5px solid #9f9f9f;
-                       background:#f9f9f9;color:#374151;font-size:0.88rem;font-weight:800;
-                       cursor:pointer;line-height:1.4;text-align:center;">
-                💵<br>Cash on Delivery<br>
-                <span style="font-size:0.68rem;font-weight:500;color:#6b7280;">Pay when delivered</span>
-              </button>
-            </div>
-          </div>
-
-          <button type="submit" class="ck-submit-btn" id="ck-submit-btn">
-            Place Order
-          </button>
-          <div class="ck-submit-note">
-            By placing your order you agree to our terms.<br>
-            🔒 Payments processed securely by Razorpay.
-          </div>
         </form>
       </div>
     </div>
@@ -580,9 +580,17 @@
           <span class="ck-sum-label">Shipping</span>
           <span class="ck-sum-value free" id="s-ship">FREE</span>
         </div>
-        <div class="ck-sum-row" id="s-courier-row" style="display:none;">
-          <span class="ck-sum-label" style="font-size:0.75rem;color:#6e6e73;">Courier</span>
-          <span class="ck-sum-value" id="s-courier" style="font-size:0.75rem;color:#6e6e73;font-weight:600;"></span>
+
+        <!-- Courier picker -->
+        <div class="ck-courier-block">
+          <label class="ck-form-label">Delivery Option</label>
+          <div id="ck-courier-hint" class="ck-courier-hint">Enter your pincode to see delivery options.</div>
+          <div id="ck-courier-options" class="ck-courier-options" style="display:none;"></div>
+        </div>
+
+        <div class="ck-sum-row" id="s-upgrade-row" style="display:none;">
+          <span class="ck-sum-label">Delivery upgrade</span>
+          <span class="ck-sum-value" id="s-upgrade" style="color:#be185d;">₹0</span>
         </div>
         <div class="ck-sum-row" id="s-cod-row" style="display:none;">
           <span class="ck-sum-label">COD Fee</span>
@@ -599,8 +607,38 @@
           {% if next_coupon_gap %}Add ₹{{ next_coupon_gap.amount_needed|round(0, 'ceil')|int }} more to avail code {{ next_coupon_gap.code }} ({{ next_coupon_gap.discount_percent|int }}% off){% endif %}
         </div>
 
+        <!-- Payment method — large tap-friendly toggle buttons -->
+        <div class="ck-form-group">
+          <label class="ck-form-label">Payment Method</label>
+          <input type="hidden" id="payment_mode_input" value="Prepaid">
+          <div style="display:flex;gap:10px;margin-top:6px;">
+            <button type="button" id="btn-prepaid" onclick="setPayment('Prepaid')"
+              style="flex:1;padding:16px 8px;border-radius:16px;border:2.5px solid #be185d;
+                     background:#be185d;color:white;font-size:0.88rem;font-weight:800;
+                     cursor:pointer;line-height:1.4;text-align:center;">
+              💳<br>Prepaid<br>
+              <span style="font-size:0.68rem;font-weight:500;opacity:0.9;">Pay online now</span>
+            </button>
+            <button type="button" id="btn-cod" onclick="setPayment('COD')"
+              style="flex:1;padding:16px 8px;border-radius:16px;border:2.5px solid #9f9f9f;
+                     background:#f9f9f9;color:#374151;font-size:0.88rem;font-weight:800;
+                     cursor:pointer;line-height:1.4;text-align:center;">
+              💵<br>Cash on Delivery<br>
+              <span style="font-size:0.68rem;font-weight:500;color:#6b7280;">Pay when delivered</span>
+            </button>
+          </div>
+        </div>
+
+        <button type="submit" form="ck-form" class="ck-submit-btn" id="ck-submit-btn">
+          Place Order
+        </button>
+        <div class="ck-submit-note">
+          By placing your order you agree to our terms.<br>
+          🔒 Payments processed securely by Razorpay.
+        </div>
+
         <div style="margin-top:18px;padding:14px;background:#f9f9f9;border-radius:12px;font-size:0.75rem;color:#6e6e73;line-height:1.6;">
-          🚚 <strong>Free shipping</strong> on all orders<br>
+          🚚 <strong>Free shipping</strong> on our cheapest courier<br>
           🔒 Secure payment via Razorpay
         </div>
       </div>
@@ -636,6 +674,17 @@
 <script>
 const RZP_KEY = {{ config.get('RAZORPAY_KEY_ID', '')|tojson }};
 let ckServiceable = false, ckShip = 0, ckCodFee = 0;
+let ckCourierOptions = [], ckSelectedCourier = null, ckExtraCharge = 0;
+const CK_COURIER_META = {
+    delhivery:  { label: 'Delhivery',  logo: {{ url_for('static', filename='assets/delhivery-logo.png')|tojson }},  color: '#eb1e2c', initial: 'D' },
+    shiprocket: { label: 'Shiprocket', logo: {{ url_for('static', filename='assets/shiprocket-logo.png')|tojson }}, color: '#5b21b6', initial: 'S' },
+};
+function ckCourierMeta(name) {
+    const key = (name || '').toLowerCase();
+    if (CK_COURIER_META[key]) return CK_COURIER_META[key];
+    const label = key ? key.charAt(0).toUpperCase() + key.slice(1) : 'Courier';
+    return { label: label, color: '#6e6e73', initial: label.charAt(0).toUpperCase() };
+}
 let appliedCoupon = null;
 let currentDiscount = {{ discount|default(0)|round(2) }};
 const subtotalBase = {{ subtotal|round(2) }};
@@ -748,7 +797,7 @@ function ckRecalc() {
     let disc = appliedCoupon ? Math.min(sub*(appliedCoupon.pct/100), appliedCoupon.max_discount>0?appliedCoupon.max_discount:Infinity) : discountBase;
     if (appliedCoupon && sub < appliedCoupon.min_order) { disc = 0; }
     currentDiscount = disc;
-    document.getElementById('s-total').textContent = '₹'+Math.max(sub-disc-creditsApplied,0).toFixed(0);
+    document.getElementById('s-total').textContent = '₹'+Math.max(sub-disc-creditsApplied+ckExtraCharge,0).toFixed(0);
     updateCouponNudge(sub);
 }
 function updateCouponNudge(sub) {
@@ -906,12 +955,78 @@ function ckCheckPin() {
     }, 500);
 }
 function ckFetchShipping(pin) {
-    const mode = document.querySelector('input[name="payment_mode"]:checked')?.value||'Prepaid';
+    const mode = document.getElementById('payment_mode_input').value || 'Prepaid';
     fetch('/api/delhivery/shipping',{method:'POST',headers:{'Content-Type':'application/json'},
         body:JSON.stringify({pincode:pin,mode})})
     .then(r=>r.json()).then(d=>{
         ckShip=d.shipping_charge||0; ckCodFee=d.cod_fee||0;
-    }).catch(()=>{ ckShip=0; ckCodFee=0; });
+        ckRenderCourierOptions(d.options || []);
+    }).catch(()=>{ ckShip=0; ckCodFee=0; ckRenderCourierOptions([]); });
+}
+function ckRenderCourierOptions(options) {
+    ckCourierOptions = options || [];
+    const hint = document.getElementById('ck-courier-hint');
+    const list = document.getElementById('ck-courier-options');
+    if (!ckCourierOptions.length) {
+        hint.textContent = 'Delivery options unavailable — please recheck your pincode.';
+        hint.style.display = 'block';
+        list.style.display = 'none';
+        list.innerHTML = '';
+        ckSelectedCourier = null;
+        ckExtraCharge = 0;
+        ckUpdateUpgradeRow();
+        ckRecalc();
+        return;
+    }
+    // Keep the customer's previous pick if it's still on offer (e.g. after a
+    // payment-mode switch re-fetches quotes), otherwise default to cheapest.
+    const stillValid = ckCourierOptions.some(o => o.courier_partner === ckSelectedCourier);
+    if (!stillValid) ckSelectedCourier = ckCourierOptions[0].courier_partner;
+
+    hint.style.display = 'none';
+    list.style.display = 'flex';
+    list.innerHTML = ckCourierOptions.map(function (opt) {
+        const meta = ckCourierMeta(opt.courier_partner);
+        const selected = opt.courier_partner === ckSelectedCourier;
+        const priceHtml = opt.extra_charge > 0
+            ? '<span class="ck-courier-price upgrade">+₹' + Math.round(opt.extra_charge) + '</span>'
+            : '<span class="ck-courier-price">FREE</span>';
+        const etaHtml = opt.eta ? ('Est. delivery: ' + opt.eta) : 'Standard delivery';
+        const badgeHtml = meta.logo
+            ? '<span class="ck-courier-badge"><img src="' + meta.logo + '" alt="' + meta.label + '"></span>'
+            : '<span class="ck-courier-badge fallback" style="background:' + meta.color + ';">' + meta.initial + '</span>';
+        return '<label class="ck-courier-option' + (selected ? ' selected' : '') + '" data-partner="' + opt.courier_partner + '">'
+            + '<input type="radio" name="ck_courier_choice" value="' + opt.courier_partner + '"' + (selected ? ' checked' : '') + ' onchange="ckSelectCourier(\'' + opt.courier_partner + '\')">'
+            + badgeHtml
+            + '<span class="ck-courier-info"><span class="ck-courier-name">' + meta.label + '</span><span class="ck-courier-eta">' + etaHtml + '</span></span>'
+            + priceHtml
+            + '</label>';
+    }).join('');
+
+    ckApplySelectedCourier();
+}
+function ckSelectCourier(partner) {
+    ckSelectedCourier = partner;
+    document.querySelectorAll('#ck-courier-options .ck-courier-option').forEach(function (el) {
+        el.classList.toggle('selected', el.dataset.partner === partner);
+    });
+    ckApplySelectedCourier();
+}
+function ckApplySelectedCourier() {
+    const opt = ckCourierOptions.find(o => o.courier_partner === ckSelectedCourier);
+    ckExtraCharge = opt ? (opt.extra_charge || 0) : 0;
+    ckUpdateUpgradeRow();
+    ckRecalc();
+}
+function ckUpdateUpgradeRow() {
+    const row = document.getElementById('s-upgrade-row');
+    const val = document.getElementById('s-upgrade');
+    if (ckExtraCharge > 0) {
+        val.textContent = '+₹' + Math.round(ckExtraCharge);
+        row.style.display = 'flex';
+    } else {
+        row.style.display = 'none';
+    }
 }
 function ckPayMode() {
     const pin = document.getElementById('ck-pin').value.trim();
@@ -1007,6 +1122,10 @@ document.getElementById('ck-form').addEventListener('submit', async function(e){
         document.getElementById('ck-pin').focus();
         return;
     }
+    if (!ckSelectedCourier) {
+        alert('Please choose a delivery option before placing your order.');
+        return;
+    }
 
     submitBtn.disabled = true;
     submitBtn.textContent = 'Processing…';
@@ -1016,10 +1135,10 @@ document.getElementById('ck-form').addEventListener('submit', async function(e){
     document.querySelectorAll('.ck-item').forEach(r=>{
         sub += +r.dataset.price * +r.querySelector('.ck-qty').textContent;
     });
-    // Informational only -- the server derives the actual charge from the
-    // order's stored total_amount (which already reflects credits), never
-    // trusting this value directly.
-    const totalRupees = Math.max(sub - currentDiscount - creditsApplied, 0);
+    // Informational only -- the server derives the actual charge (including
+    // any delivery-upgrade surcharge for the chosen courier) from the
+    // order's stored total_amount, never trusting this value directly.
+    const totalRupees = Math.max(sub - currentDiscount - creditsApplied + ckExtraCharge, 0);
 
     const fd = new FormData();
     fd.append('consignee_name', name);
@@ -1030,6 +1149,7 @@ document.getElementById('ck-form').addEventListener('submit', async function(e){
     fd.append('consignee_pincode', pin);
     fd.append('payment_mode', mode);
     fd.append('email', email);
+    fd.append('courier_partner', ckSelectedCourier);
 
     try {
         const r1 = await fetch('/retail/checkout/process', {method:'POST', body:fd});
