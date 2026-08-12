@@ -257,13 +257,13 @@
                 <button class="share-btn"
                     onclick="shareProduct(
                         {{ product.name|tojson|forceescape }},
-                        {{ url_for('product_detail', product_id=product.id, _external=True)|tojson|forceescape }},
+                        {{ url_for('product_detail_wholesale', product_id=product.id, _external=True)|tojson|forceescape }},
                         {{ product.images[0]|tojson|forceescape if product.images else ''|tojson }})">
                     <img src="{{ url_for('static', filename='assets/share.svg') }}" alt="Share" style="width:18px;height:18px;" />
                 </button>
 
                 <!-- Product image -->
-                <a href="{{ url_for('product_detail', product_id=product.id) }}" class="block w-full">
+                <a href="{{ url_for('product_detail_wholesale', product_id=product.id) }}" class="block w-full">
                     {% set img_src = product.images[0] if product.images and product.images|length > 0 else '/static/assets/products/default.jpg' %}
                     <img id="carousel-img-{{ product.id }}"
                          class="product-img"
@@ -274,7 +274,7 @@
                 </a>
 
                 <!-- Product name -->
-                <a href="{{ url_for('product_detail', product_id=product.id) }}"
+                <a href="{{ url_for('product_detail_wholesale', product_id=product.id) }}"
                    class="product-title mt-2 w-full">
                     {% if product.brand_name %}{{ product.brand_name }} {% endif %}{{ product.name }}{% if product.pack_unit and product.pack_count %} <span style="font-size:0.75em;color:#9f9f9f;font-weight:700;">&#8211; {{ product.pack_unit }} Of {{ product.pack_count }}</span>{% endif %}
                 </a>

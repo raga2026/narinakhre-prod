@@ -355,7 +355,7 @@
     {% set ns.first = false %}
     {% endfor %}
     {% for p in carousel_products %}
-    <a href="{{ url_for('product_detail', product_id=p.id) }}"
+    <a href="{{ url_for('product_detail_retail', product_id=p.id) }}"
        class="offers-slide offer-product-slide{% if ns.first %} active{% endif %}"
        aria-label="{{ p.name }} — {{ p.disc_pct }}% off, now ₹{{ p.current_price|round(0)|int }}, view product">
         <div class="offer-product-card">
@@ -463,7 +463,7 @@
     {%- set rp  = product.retail_price or product.price1 or 0 -%}
     {%- set disc = ((mrp - rp) / mrp * 100)|round(0)|int if mrp and mrp > rp else 0 -%}
     <div class="prod-card">
-        <div class="prod-img-wrap">
+        <a href="/retail/product/{{ product.id }}" class="prod-img-wrap" style="display:block;">
             {% if disc > 0 %}
             <span class="prod-badge">{{ disc }}% off</span>
             {% endif %}
@@ -474,8 +474,9 @@
                  data-images='{{ product.images|tojson }}'
                  data-index="0"
                  onerror="this.onerror=null;this.src='/static/assets/products/default.jpg';">
-        </div>
+        </a>
         <div class="prod-info">
+            <a href="/retail/product/{{ product.id }}" style="text-decoration:none;color:inherit;display:block;">
             <div class="prod-name">{% if product.brand_name %}{{ product.brand_name }} {% endif %}{{ product.name }}{% if product.pack_unit and product.pack_count %} <span style="font-size:0.85em;color:#9f9f9f;font-weight:700;">&#8211; {{ product.pack_unit }} Of {{ product.pack_count }}</span>{% endif %}{% if product.model_number %} <span style="font-size:0.75em;color:#9ca3af;font-weight:600;">({{ product.model_number }})</span>{% endif %}</div>
             <div class="prod-price-wrap">
                 {% if mrp and mrp > rp %}
@@ -483,6 +484,7 @@
                 {% endif %}
                 <span class="prod-price">₹{{ rp|round(0)|int }}</span>
             </div>
+            </a>
             <!-- Size select for bangles / sized products -->
             {% set is_bangle = 'bangle' in (product.category|lower if product.category else '') or 'bangle' in (product.sub_category|lower if product.sub_category else '') or 'bangle' in (product.name|lower if product.name else '') %}
             {% if is_bangle %}

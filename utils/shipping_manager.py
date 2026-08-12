@@ -210,6 +210,39 @@ class DelhiveryProvider(BaseShippingProvider):
             print(f"Delhivery tracking error: {e}")
             return {"status": False, "msg": f"Could not fetch tracking info: {e}"}
 
+    def get_packing_slip(self, waybill):
+        """
+        Fetch Delhivery's own packing-slip data for a waybill. Delhivery does
+        NOT hand back a ready PDF here -- this is JSON that Delhivery's own
+        docs say the client must render into a slip layout -- so callers
+        still need their own printable template; this just supplies
+        Delhivery-sourced fields for it instead of relying only on locally
+        stored order data.
+
+        UNVERIFIED against a live response -- Delhivery's docs don't publish
+        the exact JSON field names, so this parses defensively (several
+        plausible shapes) and logs the raw response when nothing matches, so
+        the real shape can be read from production logs and fixed here.
+        """
+        if not self.api_token:
+            return {"status": False, "msg": "Delhivery API key not configured"}
+        if not waybill:
+            return {"status": False, "msg": "No waybill provided"}
+        url = f"{self.base_url}/api/p/packing_slip"
+        params = {"wbns": str(waybill), "pdf": "true"}
+        try:
+            response = requests.get(url, params=params, headers=self.headers, timeout=15)
+            data = response.json()
+            packages = data.get('packages') if isinstance(data, dict) else None
+            package = packages[0] if packages and isinstance(packages, list) else None
+            if not package:
+                print(f"Delhivery packing slip response (no package found): {data}")
+                return {"status": False, "msg": "Packing slip not available for this waybill"}
+            return {"status": True, "data": package}
+        except Exception as e:
+            print(f"Delhivery packing slip fetch error: {e}")
+            return {"status": False, "msg": str(e)}
+
     def create_shipment(self, order_data, pickup_location_name=None):
         import os as _os
         url = f"{self.base_url}/api/cmu/create.json"
@@ -402,6 +435,36 @@ class ShiprocketProvider(BaseShippingProvider):
             print(f"Shiprocket order creation error: {e}")
             return {"status": False, "msg": f"Order creation failed: {e}"}
 
+    def get_label(self, shipment_id):
+        """
+        Fetch Shiprocket's own ready-to-print label PDF for an already-
+        created shipment. Needs Shiprocket's internal numeric shipment_id
+        (NOT the AWB/waybill) -- returned by create_shipment()/order
+        creation, must be persisted by the caller.
+
+        UNVERIFIED against a live response -- 'label_url' is the commonly
+        documented field name, checked at both the top level and nested
+        under 'response' in case Shiprocket wraps it; if neither matches,
+        the raw response is logged so the real shape can be read from
+        production logs and fixed here.
+        """
+        if not self.token:
+            return {"status": False, "msg": self.last_error or "Shiprocket not authenticated"}
+        if not shipment_id:
+            return {"status": False, "msg": "No Shiprocket shipment_id stored for this order"}
+        url = f"{self.BASE_URL}/courier/generate/label"
+        try:
+            response = requests.post(url, json={"shipment_id": [shipment_id]}, headers=self._headers(), timeout=20)
+            data = response.json()
+            label_url = data.get('label_url') or (data.get('response') or {}).get('label_url')
+            if not label_url:
+                print(f"Shiprocket label response (no label_url found): {data}")
+                return {"status": False, "msg": data.get('message') or "Label not generated yet"}
+            return {"status": True, "label_url": label_url}
+        except Exception as e:
+            print(f"Shiprocket label fetch error: {e}")
+            return {"status": False, "msg": str(e)}
+
     def track_shipment(self, waybill):
         if not waybill:
             return {"status": False, "msg": "No waybill provided"}
@@ -460,6 +523,12 @@ class MockShippingProvider(BaseShippingProvider):
             "waybill": "MOCK-AWB-123",
             "msg": "Order created successfully (Mock)"
         }
+
+    def get_label(self, shipment_id):
+        return {"status": False, "msg": "Mock provider has no real label to fetch"}
+
+    def get_packing_slip(self, waybill):
+        return {"status": False, "msg": "Mock provider has no real packing slip to fetch"}
 
     def track_shipment(self, waybill):
         return {

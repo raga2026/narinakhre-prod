@@ -94,11 +94,10 @@
   }
   .pd-btn-buy:hover { opacity: 0.9; }
   .pd-unit-counter {
-    display: none; align-items: center; justify-content: space-between;
+    display: flex; align-items: center; justify-content: space-between;
     border: 2px solid #fda4af; background: #fff1f2;
     border-radius: 30px; padding: 4px 10px; margin-bottom: 0;
   }
-  .pd-unit-counter.visible { display: flex; }
   .pd-uc-btn {
     width: 32px; height: 32px; border-radius: 50%; border: none;
     background: #ffe4e6; color: #be185d; font-size: 1.1rem;
@@ -130,8 +129,7 @@
   .pd-rel-add { width: 100%; padding: 6px; border-radius: 20px; border: 2px solid #be185d; background: white; color: #be185d; font-weight: 700; font-size: 0.72rem; cursor: pointer; transition: background 0.15s; }
   .pd-rel-add:hover { background: #fff1f2; }
   .pd-rel-buy { width: 100%; padding: 6px; border-radius: 20px; border: none; background: linear-gradient(135deg,#be185d,#f472b6); color: white; font-weight: 700; font-size: 0.72rem; cursor: pointer; margin-top: 4px; }
-  .pd-rel-counter { display: none; align-items: center; justify-content: space-between; border: 1.5px solid #fda4af; background: #fff1f2; border-radius: 20px; padding: 2px 8px; margin-bottom: 4px; }
-  .pd-rel-counter.visible { display: flex; }
+  .pd-rel-counter { display: flex; align-items: center; justify-content: space-between; border: 1.5px solid #fda4af; background: #fff1f2; border-radius: 20px; padding: 2px 8px; margin-bottom: 4px; }
   .pd-rel-uc { width: 24px; height: 24px; border-radius: 50%; border: none; background: #ffe4e6; color: #be185d; font-size: 0.9rem; font-weight: bold; cursor: pointer; }
   .pd-rel-qty { font-weight: 800; font-size: 0.85rem; color: #9f1239; }
 
@@ -207,7 +205,7 @@
     {% set ns_mini.first = false %}
     {% endfor %}
     {% for p in carousel_products %}
-    <a href="{{ url_for('product_detail', product_id=p.id) }}"
+    <a href="{{ url_for('product_detail_retail', product_id=p.id) }}"
        class="offers-slide-mini offer-mini-product{% if ns_mini.first %} active{% endif %}"
        aria-label="{{ p.name }} — {{ p.disc_pct }}% off, now ₹{{ p.current_price|round(0)|int }}, view product">
         <img src="{{ p.thumb }}" alt="" class="offer-mini-product-img" loading="lazy"
@@ -308,7 +306,7 @@
           🛒 Add to Cart
         </button>
         <!-- Unit counter (hidden by default) -->
-        <div class="unit-counter pd-unit-counter">
+        <div class="unit-counter pd-unit-counter hidden">
           <button class="decrement-btn pd-uc-btn">−</button>
           <span class="qty-display pd-qty-display">1</span>
           <button class="increment-btn pd-uc-btn">+</button>
@@ -373,7 +371,7 @@
           <button class="add-to-cart-btn pd-rel-add"
                   data-sku="{{ rel.sku }}" data-price="{{ rel.retail_price }}" data-name="{{ rel.name }}"
                   onclick="retailAddToCart(this)">🛒 Add</button>
-          <div class="unit-counter pd-rel-counter">
+          <div class="unit-counter pd-rel-counter hidden">
             <button class="decrement-btn pd-rel-uc">−</button>
             <span class="qty-display pd-rel-qty">1</span>
             <button class="increment-btn pd-rel-uc">+</button>
@@ -487,8 +485,8 @@ document.addEventListener('DOMContentLoaded', function() {
                 fetch('/update-cart', { method:'POST', headers:{'Content-Type':'application/json'},
                     body: JSON.stringify({product_id:sku, qty:0, price:price, size:size})})
                 .then(r=>r.json()).then(d => {
-                    counter.classList.remove('visible');
-                    addBtn.style.display = '';
+                    counter.classList.add('hidden');
+                    addBtn.classList.remove('hidden');
                     display.textContent = 1;
                     if (typeof syncCartCount === 'function') syncCartCount(d.new_total || 0);
                 });

@@ -5,6 +5,16 @@
 
 // 1. Helper to detect current site mode
 function getSiteMode() {
+    // The homepage itself is served at bare "/" (not "/retail/..."), so
+    // path/host sniffing alone misreports it as wholesale -- base.html
+    // always stamps <body class="... retail"> or "... wholesale"> from the
+    // server-rendered template (see body_class block), which is reliable
+    // regardless of URL shape. Path/host stay as a fallback for any script
+    // context that runs before body classes are available.
+    if (document.body) {
+        if (document.body.classList.contains('retail')) return 'retail';
+        if (document.body.classList.contains('wholesale')) return 'wholesale';
+    }
     return window.location.pathname.includes('/retail') || window.location.host.includes('retail') ? 'retail' : 'wholesale';
 }
 
@@ -151,7 +161,14 @@ function updateUnits(productId, tier, units, parent, btn, price, size) {
 window.updateUnits = updateUnits;
 
 // 5. Global Event Listener
+// Retail pages wire up their own Add to Cart / unit-counter logic inline
+// (it needs to read the per-card quantity dropdown, which this generic
+// handler doesn't know about) -- this listener is wholesale-only, same as
+// insertUnitControls() below. Without this guard it double-handles retail
+// clicks: it POSTs its own qty=1 to /update-cart alongside the page's
+// correct POST, and injects a second counter box next to the page's own.
 document.addEventListener('click', function(e) {
+    if (getSiteMode() === 'retail') return;
     // Check for any "Add to Cart" or "Add to Quote" button
     if (e.target.classList.contains('add-to-cart-btn') || e.target.classList.contains('add-to-quote-btn')) {
         addToCart(e.target);

@@ -8,7 +8,7 @@ from selenium.common.exceptions import TimeoutException
 from selenium.webdriver.common.by import By
 from selenium.webdriver.remote.webdriver import WebDriver
 from selenium.webdriver.support import expected_conditions as EC
-from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support.ui import Select, WebDriverWait
 
 RETAIL = "https://test-retail.narinakhre.com"
 WHOLESALE = "https://test-wholesale.narinakhre.com"
@@ -127,6 +127,45 @@ def test_retail_home_loads(driver):
     assert strike_found or discount_badge, "Expected MRP strikethrough or discount badge display logic"
 
 
+def test_trending_items_link_to_product_pages(driver):
+    """Trending Now cards must navigate to their retail product page on click.
+    Regression check: the cards used to have no <a> wrapper at all, so
+    clicking the image or name did nothing."""
+    _open_with_retry(driver, f"{RETAIL}/retail")
+
+    trending_grid = driver.find_elements(By.CSS_SELECTOR, "#trending-grid")
+    if not trending_grid or not trending_grid[0].is_displayed():
+        pytest.skip("No Trending Now shelf on homepage to check")
+
+    trending_links = _all_visible(driver, "#trending-grid a[href*='/retail/product/']")
+    assert trending_links, "Expected Trending Now cards to link to a retail product page"
+
+    href = trending_links[0].get_attribute("href")
+    trending_links[0].click()
+
+    WebDriverWait(driver, 10).until(EC.url_to_be(href))
+    assert "/retail/product/" in driver.current_url
+
+
+def test_offers_carousel_links_to_retail_not_wholesale(driver):
+    """Regression check: url_for('product_detail', ...) used to resolve to
+    the wholesale route regardless of which site rendered the link, so the
+    homepage's top offers carousel sent retail visitors to
+    /wholesale/product/<id>. Checks the href attribute directly rather than
+    clicking, since the carousel only shows one auto-rotating slide at a
+    time and the rest stay hidden."""
+    _open_with_retry(driver, f"{RETAIL}/retail")
+
+    carousel_links = driver.find_elements(By.CSS_SELECTOR, "#offers-carousel a.offer-product-slide, .offers-carousel a.offer-product-slide")
+    if not carousel_links:
+        pytest.skip("No product slides in the offers carousel to check")
+
+    for link in carousel_links:
+        href = link.get_attribute("href") or ""
+        assert "/retail/product/" in href, f"Expected retail product link, got {href}"
+        assert "/wholesale/product/" not in href, f"Carousel link wrongly points at wholesale: {href}"
+
+
 def test_product_detail(driver):
     driver.get(f"{RETAIL}/retail/product/1")
 
@@ -170,6 +209,52 @@ def test_add_to_cart(driver):
         lambda d: _extract_int(_safe_text(_first_visible_css(d, ["#cart-count", ".cart-count", "[data-cart-count]"], timeout=3)))
         >= max(1, before + 1)
     )
+
+
+def test_add_to_cart_shows_single_counter(driver):
+    """Regression check: a stray global click handler (meant for wholesale
+    only) used to also fire on retail Add to Cart clicks and inject a
+    second, separate counter widget (.qty-controls) next to the page's own
+    .unit-counter -- so clicking Add to Cart showed two counters at once."""
+    _open_with_retry(driver, f"{RETAIL}/retail/category/Bangles")
+
+    card = _first_clickable_xpath(
+        driver,
+        ["(//div[contains(@class,'cart-container')][.//button[contains(@class,'add-to-cart-btn')]])[1]"],
+        timeout=10,
+    )
+    card.find_element(By.CSS_SELECTOR, ".add-to-cart-btn").click()
+
+    WebDriverWait(driver, 10).until(
+        lambda d: card.find_element(By.CSS_SELECTOR, ".unit-counter").is_displayed()
+    )
+    assert not driver.find_elements(By.CSS_SELECTOR, ".qty-controls"), (
+        "Found a stray .qty-controls widget -- the wholesale-only cart_global.js handler "
+        "fired on a retail page and injected a duplicate counter"
+    )
+
+
+def test_quantity_dropdown_respected_on_add_to_cart(driver):
+    """Regression check: the generic global Add to Cart handler ignored the
+    per-card quantity dropdown and always sent qty=1 to the server, while a
+    different duplicate script displayed whatever was selected -- so the
+    on-screen count didn't match what was actually in the cart. The page's
+    own counter must reflect the quantity chosen before Add to Cart."""
+    _open_with_retry(driver, f"{RETAIL}/retail/category/Bangles")
+
+    card = _first_clickable_xpath(
+        driver,
+        ["(//div[contains(@class,'cart-container')][.//select[contains(@class,'qty-select')]])[1]"],
+        timeout=10,
+    )
+    Select(card.find_element(By.CSS_SELECTOR, ".qty-select")).select_by_value("2")
+    card.find_element(By.CSS_SELECTOR, ".add-to-cart-btn").click()
+
+    WebDriverWait(driver, 10).until(
+        lambda d: card.find_element(By.CSS_SELECTOR, ".unit-counter").is_displayed()
+    )
+    qty_display = card.find_element(By.CSS_SELECTOR, ".qty-display")
+    assert _extract_int(_safe_text(qty_display)) == 2, "Expected counter to reflect the quantity chosen before Add to Cart"
 
 
 def test_checkout_loads(cart_driver):

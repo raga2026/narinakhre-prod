@@ -82,7 +82,7 @@
     {% set ns_mini.first = false %}
     {% endfor %}
     {% for p in carousel_products %}
-    <a href="{{ url_for('product_detail', product_id=p.id) }}"
+    <a href="{{ url_for('product_detail_retail', product_id=p.id) }}"
        class="offers-slide-mini offer-mini-product{% if ns_mini.first %} active{% endif %}"
        aria-label="{{ p.name }} — {{ p.disc_pct }}% off, now ₹{{ p.current_price|round(0)|int }}, view product">
         <img src="{{ p.thumb }}" alt="" class="offer-mini-product-img" loading="lazy"

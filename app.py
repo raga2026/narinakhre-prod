@@ -571,6 +571,11 @@ def initialize_database_if_needed():
         # total_amount already -- stored separately too so admin/emails can
         # show the breakdown instead of just a mismatched total.
         'ALTER TABLE order_shipping ADD COLUMN IF NOT EXISTS shipping_upgrade_charge NUMERIC DEFAULT 0',
+        # Shiprocket's internal numeric shipment id (distinct from the AWB/
+        # waybill) -- their label-generation API needs this, not the AWB.
+        # NULL for Delhivery orders and for pre-existing Shiprocket orders
+        # created before this was tracked.
+        'ALTER TABLE order_shipping ADD COLUMN IF NOT EXISTS shiprocket_shipment_id TEXT',
     ]
     for sql in alter_sql:
         try:
@@ -883,18 +888,21 @@ def _customer_shipping_charge(rate_info):
 
 def create_shiprocket_shipment(order_row, cart_items, cod_amount_override=None, provider=None):
     """Create a Shiprocket order + assign an AWB after payment confirmation.
-    Returns (waybill, error_msg), matching create_delhivery_shipment()'s shape.
+    Returns (waybill, error_msg, shipment_id) -- shipment_id is Shiprocket's
+    own internal numeric id (distinct from the AWB), which their label-
+    generation API needs; the caller must persist it if real label fetching
+    (see ShiprocketProvider.get_label) is to work later.
 
     UNVERIFIED against a real order -- only Shiprocket's login, serviceability,
     and rate endpoints have been tested live so far. Do not enable Shiprocket
     for real customers until this has been proven with one real test order.
     """
     if not SHIPROCKET_PICKUP_LOCATION:
-        return None, "Shiprocket pickup location not configured (SHIPROCKET_PICKUP_LOCATION) -- register a pickup address in the Shiprocket dashboard first"
+        return None, "Shiprocket pickup location not configured (SHIPROCKET_PICKUP_LOCATION) -- register a pickup address in the Shiprocket dashboard first", None
     if provider is None:
         _, provider = get_active_courier()
     if not getattr(provider, 'token', None):
-        return None, provider.last_error if hasattr(provider, 'last_error') else "Shiprocket not authenticated"
+        return None, (provider.last_error if hasattr(provider, 'last_error') else "Shiprocket not authenticated"), None
 
     order_row_dict = dict(order_row) if not isinstance(order_row, dict) else order_row
     consignee_name = order_row_dict.get('consignee_name', '')
@@ -959,9 +967,9 @@ def create_shiprocket_shipment(order_row, cart_items, cod_amount_override=None, 
         waybill = resp_json.get('awb_code')
         if not shipment_id:
             error_msg = resp_json.get('message') or str(resp_json)
-            return None, f"Shiprocket order creation error: {error_msg}"
+            return None, f"Shiprocket order creation error: {error_msg}", None
         if waybill:
-            return waybill, None
+            return waybill, None, shipment_id
         # Order creation alone doesn't always assign a courier/AWB -- request
         # one explicitly, letting Shiprocket auto-pick the courier.
         assign_resp = requests.post(
@@ -973,11 +981,11 @@ def create_shiprocket_shipment(order_row, cart_items, cod_amount_override=None, 
         awb_data = (assign_json.get('response') or {}).get('data') or {}
         waybill = awb_data.get('awb_code')
         if waybill:
-            return waybill, None
-        return None, f"Order created (shipment_id={shipment_id}) but AWB assignment failed: {assign_json.get('message') or assign_json}"
+            return waybill, None, shipment_id
+        return None, f"Order created (shipment_id={shipment_id}) but AWB assignment failed: {assign_json.get('message') or assign_json}", shipment_id
     except Exception as e:
         app.logger.error(f"Shiprocket shipment creation exception: {e}")
-        return None, str(e)
+        return None, str(e), None
 
 
 def create_courier_shipment(order_row, cart_items, cod_amount_override=None):
@@ -988,8 +996,10 @@ def create_courier_shipment(order_row, cart_items, cod_amount_override=None):
     courier has changed since. Falls back to get_active_courier() only for
     orders with no stored courier_partner (pre-multi-courier legacy rows,
     or the admin-accept path for very old orders). Returns
-    (waybill, error_msg, partner_name) -- the partner name lets callers do
-    courier-specific follow-up (e.g. pickup scheduling) correctly."""
+    (waybill, error_msg, partner_name, shipment_id) -- partner_name lets
+    callers do courier-specific follow-up (e.g. pickup scheduling)
+    correctly; shipment_id is Shiprocket's internal shipment id (needed for
+    real label fetching later), always None for Delhivery."""
     order_row_dict = dict(order_row) if not isinstance(order_row, dict) else order_row
     stored_partner = order_row_dict.get('courier_partner')
     if stored_partner:
@@ -997,11 +1007,12 @@ def create_courier_shipment(order_row, cart_items, cod_amount_override=None):
     else:
         partner_name, provider = get_active_courier()
     if partner_name == 'shiprocket':
-        waybill, err = create_shiprocket_shipment(order_row, cart_items, cod_amount_override=cod_amount_override, provider=provider)
+        waybill, err, shipment_id = create_shiprocket_shipment(order_row, cart_items, cod_amount_override=cod_amount_override, provider=provider)
     else:
         waybill, err = create_delhivery_shipment(order_row, cart_items, cod_amount_override=cod_amount_override)
         partner_name = 'delhivery'
-    return waybill, err, partner_name
+        shipment_id = None
+    return waybill, err, partner_name, shipment_id
 
 
 def create_delhivery_shipment(order_row, cart_items, cod_amount_override=None):
@@ -2856,8 +2867,8 @@ def category_products(category):
                         public_coupons=public_coupons, carousel_products=carousel_products)
 
 @app.route('/product/<int:product_id>')
-@app.route('/retail/product/<int:product_id>')
-@app.route('/wholesale/product/<int:product_id>')
+@app.route('/retail/product/<int:product_id>', endpoint='product_detail_retail')
+@app.route('/wholesale/product/<int:product_id>', endpoint='product_detail_wholesale')
 def product_detail(product_id):
     if request.path.startswith('/retail'):
         g.site_type = 'retail'
@@ -3475,11 +3486,11 @@ def confirm_cod_order():
         cod_rounded_up = False
     cod_credit_awarded = round((cod_collect_amount - original_total) + COD_ROUNDING_CREDIT, 2) if cod_rounded_up else 0
 
-    waybill, del_error, shipment_partner = create_courier_shipment(order_row_dict, cart_items, cod_amount_override=cod_collect_amount)
+    waybill, del_error, shipment_partner, shipment_id = create_courier_shipment(order_row_dict, cart_items, cod_amount_override=cod_collect_amount)
     if waybill:
         conn.execute(
-            'UPDATE order_shipping SET status=?, delhivery_waybill=?, courier_partner=?, cod_collected_amount=?, cod_credit_awarded=? WHERE internal_order_id=?',
-            ('cod_confirmed', waybill, shipment_partner, cod_collect_amount, cod_credit_awarded, internal_order_id))
+            'UPDATE order_shipping SET status=?, delhivery_waybill=?, courier_partner=?, cod_collected_amount=?, cod_credit_awarded=?, shiprocket_shipment_id=? WHERE internal_order_id=?',
+            ('cod_confirmed', waybill, shipment_partner, cod_collect_amount, cod_credit_awarded, shipment_id, internal_order_id))
     else:
         app.logger.error(f"{shipment_partner.capitalize()} failed for COD {internal_order_id}: {del_error}")
         conn.execute(
@@ -6212,9 +6223,9 @@ def admin_order_accept(order_id):
     shipment_partner = order['courier_partner'] or 'delhivery'
     if not waybill:
         order_dict = dict(order)
-        waybill, err, shipment_partner = create_courier_shipment(order_dict, [])
+        waybill, err, shipment_partner, shipment_id = create_courier_shipment(order_dict, [])
         if waybill:
-            conn.execute('UPDATE order_shipping SET delhivery_waybill=?, courier_partner=? WHERE id=?', (waybill, shipment_partner, order_id))
+            conn.execute('UPDATE order_shipping SET delhivery_waybill=?, courier_partner=?, shiprocket_shipment_id=? WHERE id=?', (waybill, shipment_partner, shipment_id, order_id))
         else:
             flash(f'Could not create {shipment_partner.capitalize()} shipment: {err}', 'error')
             return redirect(url_for('admin_orders'))
@@ -6323,12 +6334,34 @@ def admin_order_cancel(order_id):
 @app.route('/admin/orders/<int:order_id>/label')
 @admin_required
 def admin_shipping_label(order_id):
+    """
+    Print Label -- courier-specific. Shiprocket hands back a ready-made PDF
+    (its own official label), so that's opened directly. Delhivery's API
+    only returns JSON meant to be rendered client-side, so that data (when
+    fetchable) is passed into our own printable template alongside a real
+    Code128 barcode of the waybill. Either courier falls back to rendering
+    from locally stored order data if the live fetch fails, so Print Label
+    still works even when the courier API is briefly unavailable.
+    """
     conn = get_db()
     order = conn.execute('SELECT * FROM order_shipping WHERE id=?', (order_id,)).fetchone()
     if not order or not order['delhivery_waybill']:
         flash('No waybill found for this order.', 'error')
         return redirect(url_for('admin_orders'))
-    return render_template('admin/shipping_label.html', order=order)
+
+    courier_partner = order['courier_partner'] or 'delhivery'
+    _, provider = get_courier(courier_partner)
+
+    if courier_partner == 'shiprocket':
+        result = provider.get_label(order['shiprocket_shipment_id'])
+        if result.get('status') and result.get('label_url'):
+            return redirect(result['label_url'])
+        flash(f"Could not fetch Shiprocket's official label ({result.get('msg')}) -- showing a basic label instead.", 'error')
+        return render_template('admin/shipping_label.html', order=order, delhivery_slip=None)
+
+    slip_result = provider.get_packing_slip(order['delhivery_waybill'])
+    delhivery_slip = slip_result.get('data') if slip_result.get('status') else None
+    return render_template('admin/shipping_label.html', order=order, delhivery_slip=delhivery_slip)
 
 
 @app.route('/admin/coupons', methods=['GET'])

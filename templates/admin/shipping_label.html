@@ -3,13 +3,16 @@
 <head>
     <meta charset="UTF-8">
     <title>Shipping Label — {{ order.delhivery_waybill }}</title>
+    <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.5/dist/JsBarcode.all.min.js"></script>
     <style>
         @page { size: A6; margin: 5mm; }
         body { font-family: Arial, sans-serif; font-size: 11px; margin: 0; }
         .label-box { border: 2px solid #000; padding: 8px; max-width: 105mm; }
         .header { display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #000; padding-bottom: 6px; margin-bottom: 6px; }
         .logo { font-size: 16px; font-weight: 900; }
-        .waybill { font-size: 20px; font-weight: 900; letter-spacing: 2px; text-align: center; border: 2px solid #000; padding: 4px 8px; margin-bottom: 8px; }
+        .waybill { font-size: 20px; font-weight: 900; letter-spacing: 2px; text-align: center; border: 2px solid #000; padding: 4px 8px; margin-bottom: 4px; }
+        .barcode-wrap { text-align: center; margin-bottom: 8px; }
+        .verified-note { font-size: 8px; color: #16a34a; text-align: center; margin-bottom: 8px; }
         .section-title { font-size: 9px; font-weight: 700; color: #666; text-transform: uppercase; margin-bottom: 2px; }
         .section { margin-bottom: 8px; }
         .name { font-size: 14px; font-weight: 900; }
@@ -29,6 +32,10 @@
         <div>{{ order.payment_mode or 'Prepaid' }}</div>
     </div>
     <div class="waybill">{{ order.delhivery_waybill }}</div>
+    <div class="barcode-wrap"><svg id="waybill-barcode"></svg></div>
+    {% if delhivery_slip %}
+    <div class="verified-note">✓ Verified against Delhivery's own shipment record</div>
+    {% endif %}
     <div class="section">
         <div class="section-title">Ship To</div>
         <div class="name">{{ order.consignee_name }}</div>
@@ -47,5 +54,12 @@
         <div>₹{{ "%.2f"|format(order.total_amount or 0) }}</div>
     </div>
 </div>
+<script>
+    if (window.JsBarcode) {
+        JsBarcode("#waybill-barcode", {{ order.delhivery_waybill|tojson }}, {
+            format: "CODE128", displayValue: false, height: 40, margin: 0
+        });
+    }
+</script>
 </body>
 </html>
