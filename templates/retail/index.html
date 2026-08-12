@@ -330,7 +330,48 @@
     }
     .unit-counter button:hover { background: #fecdd3; }
     .qty-display { font-weight: bold; font-size: 0.85rem; color: #9f1239; }
+
+    /* ── Order-placed notification (one-line, shown once right after checkout) ── */
+    #order-placed-banner {
+        display: none; background: #16a34a; color: white; padding: 10px 40px 10px 16px;
+        text-align: center; font-size: 0.82rem; font-weight: 700; position: relative;
+    }
+    #order-placed-banner a { color: white; text-decoration: underline; font-weight: 900; }
+    #order-placed-dismiss {
+        position: absolute; right: 10px; top: 50%; transform: translateY(-50%);
+        background: none; border: none; color: white; font-size: 1.2rem;
+        line-height: 1; cursor: pointer; padding: 4px;
+    }
 </style>
+
+<div id="order-placed-banner" role="status">
+    <span id="order-placed-text"></span>
+    <button type="button" id="order-placed-dismiss" aria-label="Dismiss notification">&times;</button>
+</div>
+<script>
+(function () {
+    try {
+        var raw = sessionStorage.getItem('nn_order_notice');
+        if (!raw) return;
+        sessionStorage.removeItem('nn_order_notice');
+        var notice = JSON.parse(raw);
+        var banner = document.getElementById('order-placed-banner');
+        var textEl = document.getElementById('order-placed-text');
+        if (!banner || !textEl) return;
+        textEl.textContent = '✅ Your order has been placed! ';
+        if (notice.trackUrl) {
+            var link = document.createElement('a');
+            link.href = notice.trackUrl;
+            link.textContent = 'View details';
+            textEl.appendChild(link);
+        }
+        banner.style.display = 'block';
+        document.getElementById('order-placed-dismiss').addEventListener('click', function () {
+            banner.style.display = 'none';
+        });
+    } catch (e) {}
+})();
+</script>
 
 {% set has_coupons = public_coupons and public_coupons|length > 0 %}
 {% set has_carousel_products = carousel_products and carousel_products|length > 0 %}
@@ -609,17 +650,6 @@
 
                 <!-- Cart actions -->
                 <div class="cart-container mt-auto" id="cart-action-{{ product.sku }}">
-                    <!-- Qty select -->
-                    <div style="display:flex;align-items:center;gap:4px;margin-bottom:3px;">
-                        <label style="font-size:0.65rem;font-weight:600;color:#9f9f9f;white-space:nowrap;">Qty</label>
-                        <select class="input-field qty-select" id="qty-{{ product.sku }}" style="margin-bottom:0;flex:1;">
-                            <option value="1" selected>1</option>
-                            <option value="2">2</option>
-                            <option value="3">3</option>
-                            <option value="4">4</option>
-                            <option value="5">5</option>
-                        </select>
-                    </div>
                     {% if product.stock_total and product.stock_total > 0 %}
                     <!-- Add to Cart -->
                     <button class="btn-add-cart add-to-cart-btn"

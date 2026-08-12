@@ -27,12 +27,12 @@
     .ty-hint { font-size: 0.7rem; color: #9f9f9f; margin-top: 10px; }
     .ty-continue-btn {
         display: block; width: 100%; padding: 14px; border-radius: 30px;
-        border: 2px solid #be185d; background: white; color: #be185d;
+        border: 2px solid #881337; background: #881337; color: white;
         font-weight: 900; font-size: 0.95rem; text-decoration: none;
         margin-top: 22px; text-align: center; box-sizing: border-box;
-        transition: background 0.15s, color 0.15s;
+        transition: opacity 0.15s;
     }
-    .ty-continue-btn:hover { background: #be185d; color: white; }
+    .ty-continue-btn:hover { opacity: 0.88; }
     .ty-contact { font-size: 0.78rem; color: #6b7280; margin-top: 18px; }
     .ty-contact a { color: #be185d; font-weight: 700; text-decoration: none; }
 </style>
@@ -123,5 +123,19 @@
 <script>
     localStorage.removeItem('quoteCart');
     localStorage.removeItem('retail_cart');
+    {% if order_id %}
+    // Hand the order off to the homepage as a one-line notification, then
+    // auto-return there -- this page is only meant to be seen briefly right
+    // after checkout, not lingered on.
+    try {
+        sessionStorage.setItem('nn_order_notice', JSON.stringify({
+            orderId: {{ order_id|tojson }},
+            trackUrl: {{ (tracking_url or '')|tojson }}
+        }));
+    } catch (e) {}
+    setTimeout(function () {
+        window.location.href = '/retail';
+    }, 5000);
+    {% endif %}
 </script>
 {% endblock %}
