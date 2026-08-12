@@ -508,13 +508,21 @@
             </div>
             {% endif %}
             {% if product.stock_total and product.stock_total > 0 %}
-            <button class="add-to-cart-btn btn-add-cart"
-                    data-sku="{{ product.sku }}"
-                    data-price="{{ rp }}"
-                    data-name="{{ product.name }}"
-                    style="width:100%;margin-top:6px;padding:7px;border-radius:8px;font-size:0.75rem;font-weight:700;background:white;border:1.5px solid #be185d;color:#be185d;cursor:pointer;">
-                🛒 Add to Cart
-            </button>
+            <div class="cart-container">
+                <button class="add-to-cart-btn btn-add-cart"
+                        data-sku="{{ product.sku }}"
+                        data-price="{{ rp }}"
+                        data-name="{{ product.name }}"
+                        style="width:100%;margin-top:6px;padding:7px;border-radius:8px;font-size:0.75rem;font-weight:700;background:white;border:1.5px solid #be185d;color:#be185d;cursor:pointer;">
+                    🛒 Add to Cart
+                </button>
+                <div class="counter-size-label hidden" style="font-size:0.65rem;font-weight:700;color:#9f1239;margin:6px 0 2px;"></div>
+                <div class="unit-counter hidden">
+                    <button class="decrement-btn">-</button>
+                    <span class="qty-display">1</span>
+                    <button class="increment-btn">+</button>
+                </div>
+            </div>
             {% else %}
             <button disabled style="width:100%;margin-top:6px;padding:7px;border-radius:8px;font-size:0.75rem;font-weight:700;background:#e5e7eb;color:#9f9f9f;border:none;cursor:not-allowed;">
                 Out of Stock
@@ -621,6 +629,7 @@
                         🛒 Add to Cart
                     </button>
                     <!-- Unit counter (hidden by default) -->
+                    <div class="counter-size-label hidden" style="font-size:0.65rem;font-weight:700;color:#9f1239;margin:0 0 2px;"></div>
                     <div class="unit-counter hidden">
                         <button class="decrement-btn">-</button>
                         <span class="qty-display">1</span>
@@ -815,81 +824,8 @@ document.addEventListener('DOMContentLoaded', function () {
         }
     })();
 
-    /* ── Cart logic ── */
-    function getSize(container) {
-        const card = container.closest('.product-card') || container;
-        const s = card.querySelector('.size-select');
-        return s ? s.value : 'Standard';
-    }
-    function updateCartCount(data) {
-        const el = document.getElementById('cart-count');
-        if (el && data && typeof data.cart_count !== 'undefined') el.textContent = data.cart_count;
-    }
-
-    document.querySelectorAll('.cart-container').forEach(function (container) {
-        const addBtn = container.querySelector('.add-to-cart-btn');
-        const buyBtn = container.querySelector('.buy-now-btn');
-        const counter = container.querySelector('.unit-counter');
-        const qtySel = container.querySelector('.qty-select');
-        const minusBtn = container.querySelector('.decrement-btn');
-        const plusBtn = container.querySelector('.increment-btn');
-        const qtyDisplay = container.querySelector('.qty-display');
-
-        function getQty() { return parseInt(qtySel ? qtySel.value : 1); }
-        function postCart(sku, qty, price, size) {
-            return fetch('/update-cart', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ product_id: sku, qty: qty, price: price, size: size })
-            }).then(r => r.json());
-        }
-
-        if (addBtn) {
-            addBtn.addEventListener('click', function (e) {
-                e.preventDefault();
-                const sku = addBtn.dataset.sku, price = addBtn.dataset.price;
-                postCart(sku, getQty(), price, getSize(container)).then(data => {
-                    addBtn.style.display = 'none';
-                    if (counter) { counter.classList.remove('hidden'); if (qtyDisplay) qtyDisplay.textContent = getQty(); }
-                    updateCartCount(data);
-                });
-            });
-        }
-        if (buyBtn) {
-            buyBtn.addEventListener('click', function (e) {
-                e.preventDefault();
-                const sku = buyBtn.dataset.sku, price = buyBtn.dataset.price;
-                postCart(sku, getQty(), price, getSize(container)).then(() => { window.location.href = '/retail/checkout'; });
-            });
-        }
-        if (minusBtn) {
-            minusBtn.addEventListener('click', function () {
-                let val = parseInt(qtyDisplay.textContent);
-                const sku = addBtn.dataset.sku, price = addBtn.dataset.price;
-                if (val > 1) {
-                    val--;
-                    qtyDisplay.textContent = val;
-                    postCart(sku, val, price, getSize(container)).then(updateCartCount);
-                } else {
-                    postCart(sku, 0, price, getSize(container)).then(updateCartCount);
-                    counter.classList.add('hidden');
-                    addBtn.style.display = '';
-                    if (qtyDisplay) qtyDisplay.textContent = 1;
-                }
-            });
-        }
-        if (plusBtn) {
-            plusBtn.addEventListener('click', function () {
-                let val = parseInt(qtyDisplay.textContent);
-                if (val < 5) {
-                    val++;
-                    qtyDisplay.textContent = val;
-                    const sku = addBtn.dataset.sku, price = addBtn.dataset.price;
-                    postCart(sku, val, price, getSize(container)).then(updateCartCount);
-                }
-            });
-        }
-    });
+    // Add to Cart / quantity counter logic lives in static/js/retail_cart.js
+    // (shared across every retail template) so it's implemented once.
 });
 </script>
 {% endblock %}

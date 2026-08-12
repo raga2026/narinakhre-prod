@@ -2934,6 +2934,17 @@ def sitemap():
     return app.response_class('\n'.join(lines), mimetype='application/xml')
 
 # --- CART & CHECKOUT ---
+@app.route('/cart', methods=['GET'])
+def get_cart():
+    """Current session cart as JSON, keyed the same way session['cart'] is
+    stored (f"{sku}_{size}"). Used by the client to know, without guessing,
+    how much of a given product+size is already in the cart -- e.g. to
+    restore the Add to Cart/counter UI on page load, or to tell whether
+    switching a product's size selector should show that size's existing
+    quantity or reset to a fresh Add to Cart button."""
+    return jsonify(session.get('cart', {}))
+
+
 @app.route('/update-cart', methods=['POST'])
 def update_cart():
     if g.site_type != 'retail':

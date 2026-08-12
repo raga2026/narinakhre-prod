@@ -1,28 +1,47 @@
 ============================= test session starts =============================
-platform win32 -- Python 3.13.12, pytest-9.1.1, pluggy-1.6.0 -- C:\Users\ragha\AppData\Local\Programs\Python\Python313\python.exe
+platform win32 -- Python 3.13.12, pytest-9.1.1, pluggy-1.6.0 -- C:\Users\ragha\Documents\NariNakhre\.venv\Scripts\python.exe
 cachedir: .pytest_cache
-metadata: {'Python': '3.13.12', 'Platform': 'Windows-11-10.0.26200-SP0', 'Packages': {'pytest': '9.1.1', 'pluggy': '1.6.0'}, 'Plugins': {'anyio': '4.12.1', 'html': '4.2.0', 'metadata': '3.1.1'}}
-rootdir: c:\Users\ragha\Documents\NariNakhre
-plugins: anyio-4.12.1, html-4.2.0, metadata-3.1.1
-collecting ... collected 17 items
+metadata: {'Python': '3.13.12', 'Platform': 'Windows-11-10.0.26200-SP0', 'Packages': {'pytest': '9.1.1', 'pluggy': '1.6.0'}, 'Plugins': {'anyio': '4.14.1', 'html': '4.2.0', 'metadata': '3.1.1'}}
+rootdir: C:\Users\ragha\Documents\NariNakhre
+plugins: anyio-4.14.1, html-4.2.0, metadata-3.1.1
+collecting ... collected 21 items
 
-tests/test_selenium_e2e.py::test_retail_home_loads PASSED                [  5%]
-tests/test_selenium_e2e.py::test_product_detail PASSED                   [ 11%]
-tests/test_selenium_e2e.py::test_add_to_cart PASSED                      [ 17%]
-tests/test_selenium_e2e.py::test_checkout_loads PASSED                   [ 23%]
-tests/test_selenium_e2e.py::test_checkout_desktop_layout PASSED          [ 29%]
-tests/test_selenium_e2e.py::test_checkout_mobile_layout PASSED           [ 35%]
-tests/test_selenium_e2e.py::test_pincode_serviceable PASSED              [ 41%]
-tests/test_selenium_e2e.py::test_coupon_apply PASSED                     [ 47%]
-tests/test_selenium_e2e.py::test_admin_login_page PASSED                 [ 52%]
-tests/test_selenium_e2e.py::test_admin_orders_page SKIPPED (Admin cr...) [ 58%]
-tests/test_selenium_e2e.py::test_admin_coupons_page SKIPPED (Admin c...) [ 64%]
-tests/test_selenium_e2e.py::test_tracking_page PASSED                    [ 70%]
-tests/test_selenium_e2e.py::test_invoice_page SKIPPED (Admin credent...) [ 76%]
-tests/test_selenium_e2e.py::test_wholesale_home PASSED                   [ 82%]
-tests/test_selenium_e2e.py::test_wholesale_tracking_blocked PASSED       [ 88%]
-tests/test_selenium_e2e.py::test_sitemap PASSED                          [ 94%]
+tests/test_selenium_e2e.py::test_retail_home_loads PASSED                [  4%]
+tests/test_selenium_e2e.py::test_trending_items_link_to_product_pages SKIPPED [  9%]
+tests/test_selenium_e2e.py::test_offers_carousel_links_to_retail_not_wholesale SKIPPED [ 14%]
+tests/test_selenium_e2e.py::test_product_detail PASSED                   [ 19%]
+tests/test_selenium_e2e.py::test_add_to_cart PASSED                      [ 23%]
+tests/test_selenium_e2e.py::test_add_to_cart_shows_single_counter PASSED [ 28%]
+tests/test_selenium_e2e.py::test_quantity_dropdown_respected_on_add_to_cart PASSED [ 33%]
+tests/test_selenium_e2e.py::test_checkout_loads PASSED                   [ 38%]
+tests/test_selenium_e2e.py::test_checkout_desktop_layout PASSED          [ 42%]
+tests/test_selenium_e2e.py::test_checkout_mobile_layout PASSED           [ 47%]
+tests/test_selenium_e2e.py::test_pincode_serviceable PASSED              [ 52%]
+tests/test_selenium_e2e.py::test_coupon_apply PASSED                     [ 57%]
+tests/test_selenium_e2e.py::test_admin_login_page PASSED                 [ 61%]
+tests/test_selenium_e2e.py::test_admin_orders_page SKIPPED (Admin cr...) [ 66%]
+tests/test_selenium_e2e.py::test_admin_coupons_page SKIPPED (Admin c...) [ 71%]
+tests/test_selenium_e2e.py::test_tracking_page PASSED                    [ 76%]
+tests/test_selenium_e2e.py::test_invoice_page SKIPPED (Admin credent...) [ 80%]
+tests/test_selenium_e2e.py::test_wholesale_home PASSED                   [ 85%]
+tests/test_selenium_e2e.py::test_wholesale_tracking_blocked PASSED       [ 90%]
+tests/test_selenium_e2e.py::test_sitemap PASSED                          [ 95%]
 tests/test_selenium_e2e.py::test_robots_txt PASSED                       [100%]
 
-- Generated html report: file:///c:/Users/ragha/Documents/NariNakhre/reports/selenium_report.html -
-================== 14 passed, 3 skipped in 208.34s (0:03:28) ==================
+============================== warnings summary ===============================
+tests/test_selenium_e2e.py::test_trending_items_link_to_product_pages
+tests/test_selenium_e2e.py::test_offers_carousel_links_to_retail_not_wholesale
+  c:\Users\ragha\Documents\NariNakhre\.venv\Lib\site-packages\pytest_html\plugin.py:133: DeprecationWarning: The 'report.extra' attribute is deprecated and will be removed in a future release, use 'report.extras' instead.
+    warnings.warn(
+
+tests/test_selenium_e2e.py::test_trending_items_link_to_product_pages
+  c:\Users\ragha\Documents\NariNakhre\.venv\Lib\site-packages\pytest_html\selfcontained_report.py:31: UserWarning: Self-contained HTML report includes link to external resource: C:\Users\ragha\Documents\NariNakhre\reports\screenshots\tests_test_selenium_e2e.py_test_trending_items_link_to_product_pages.png
+    warnings.warn(
+
+tests/test_selenium_e2e.py::test_offers_carousel_links_to_retail_not_wholesale
+  c:\Users\ragha\Documents\NariNakhre\.venv\Lib\site-packages\pytest_html\selfcontained_report.py:31: UserWarning: Self-contained HTML report includes link to external resource: C:\Users\ragha\Documents\NariNakhre\reports\screenshots\tests_test_selenium_e2e.py_test_offers_carousel_links_to_retail_not_wholesale.png
+    warnings.warn(
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+- Generated html report: file:///C:/Users/ragha/Documents/NariNakhre/reports/selenium_report.html -
+============ 16 passed, 5 skipped, 4 warnings in 159.49s (0:02:39) ============

@@ -218,6 +218,7 @@
                     🛒 Add to Cart
                 </button>
                 <!-- Unit Counter (hidden by default, replaces Add to Cart) -->
+                <div class="counter-size-label hidden" style="font-size:0.65rem;font-weight:700;color:#9f1239;margin:0 0 2px 4px;"></div>
                 <div class="unit-counter border-2 border-rose-300 bg-rose-50 rounded-full flex flex-row items-center justify-between px-2 py-1 hidden">
                     <button class="decrement-btn w-7 h-7 rounded-full bg-rose-100 text-rose-700 font-bold text-base hover:bg-rose-200 focus:outline-none flex items-center justify-center">−</button>
                     <span class="qty-display text-base font-bold text-rose-800 mx-2 select-none">1</span>
@@ -310,134 +311,8 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     });
 
-    // --- Retail Cart UI Logic ---
-    function getSize(container) {
-        const card = container.closest('.product-card') || container;
-        const sizeSel = card.querySelector('.size-select');
-        return sizeSel ? sizeSel.value : '';
-    }
-    function getQty(container) {
-        const qtySel = container.querySelector('.qty-select');
-        return qtySel ? parseInt(qtySel.value) : 1;
-    }
-    function updateCartCount(count) {
-        const cartCount = document.getElementById('cart-count');
-        if (cartCount) cartCount.textContent = count;
-    }
-    document.querySelectorAll('.cart-container').forEach(function(container) {
-        const addBtn = container.querySelector('.add-to-cart-btn');
-        const buyBtn = container.querySelector('.buy-now-btn');
-        const unitCounter = container.querySelector('.unit-counter');
-        const qtySel = container.querySelector('.qty-select');
-        const minusBtn = container.querySelector('.decrement-btn');
-        const plusBtn = container.querySelector('.increment-btn');
-        const qtyDisplay = container.querySelector('.qty-display');
-        // Add to Cart
-        if (addBtn) {
-            addBtn.addEventListener('click', function(e) {
-                e.preventDefault();
-                const sku = addBtn.getAttribute('data-sku');
-                const price = addBtn.getAttribute('data-price');
-                const name = addBtn.getAttribute('data-name');
-                const size = getSize(container);
-                const qty = getQty(container);
-                fetch('/update-cart', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ product_id: sku, qty: qty, price: price, size: size })
-                })
-                .then(res => res.json())
-                .then(data => {
-                    addBtn.style.display = 'none';
-                    if (unitCounter) {
-                        unitCounter.classList.remove('hidden');
-                        if (qtyDisplay) qtyDisplay.textContent = qty;
-                    }
-                    if (data && typeof data.cart_count !== 'undefined') updateCartCount(data.cart_count);
-                });
-            });
-        }
-        // Buy Now
-        if (buyBtn) {
-            buyBtn.addEventListener('click', function(e) {
-                e.preventDefault();
-                const sku = buyBtn.getAttribute('data-sku');
-                const price = buyBtn.getAttribute('data-price');
-                const name = buyBtn.getAttribute('data-name');
-                const size = getSize(container);
-                const qty = getQty(container);
-                fetch('/update-cart', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ product_id: sku, qty: qty, price: price, size: size })
-                })
-                .then(() => { window.location.href = '/retail/checkout'; });
-            });
-        }
-        // Unit Counter logic
-        if (minusBtn && plusBtn && qtyDisplay && qtySel) {
-            minusBtn.addEventListener('click', function() {
-                let val = parseInt(qtyDisplay.textContent);
-                if (val > 1) {
-                    val--;
-                    qtyDisplay.textContent = val;
-                    qtySel.value = val;
-                    // Update cart
-                    const sku = addBtn.getAttribute('data-sku');
-                    const price = addBtn.getAttribute('data-price');
-                    const size = getSize(container);
-                    fetch('/update-cart', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ product_id: sku, qty: val, price: price, size: size })
-                    })
-                    .then(res => res.json())
-                    .then(data => { if (data && typeof data.cart_count !== 'undefined') updateCartCount(data.cart_count); });
-                } else {
-                    // Remove from cart, reset UI
-                    const sku = addBtn.getAttribute('data-sku');
-                    const price = addBtn.getAttribute('data-price');
-                    const size = getSize(container);
-                    fetch('/update-cart', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ product_id: sku, qty: 0, price: price, size: size })
-                    })
-                    .then(res => res.json())
-                    .then(data => { if (data && typeof data.cart_count !== 'undefined') updateCartCount(data.cart_count); });
-                    unitCounter.classList.add('hidden');
-                    addBtn.style.display = '';
-                    qtySel.value = 1;
-                    qtyDisplay.textContent = 1;
-                }
-            });
-            plusBtn.addEventListener('click', function() {
-                let val = parseInt(qtyDisplay.textContent);
-                if (val < 5) {
-                    val++;
-                    qtyDisplay.textContent = val;
-                    qtySel.value = val;
-                    // Update cart
-                    const sku = addBtn.getAttribute('data-sku');
-                    const price = addBtn.getAttribute('data-price');
-                    const size = getSize(container);
-                    fetch('/update-cart', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ product_id: sku, qty: val, price: price, size: size })
-                    })
-                    .then(res => res.json())
-                    .then(data => { if (data && typeof data.cart_count !== 'undefined') updateCartCount(data.cart_count); });
-                }
-            });
-        }
-        // Sync dropdown and counter
-        if (qtySel && qtyDisplay && unitCounter) {
-            qtySel.addEventListener('change', function() {
-                qtyDisplay.textContent = qtySel.value;
-            });
-        }
-    });
+    // Add to Cart / quantity counter logic lives in static/js/retail_cart.js
+    // (shared across every retail template) so it's implemented once.
 });
 </script>
 {% endblock %}

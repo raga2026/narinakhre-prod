@@ -301,11 +301,11 @@
         {% if product.stock_total and product.stock_total > 0 %}
         <!-- Add to Cart -->
         <button class="add-to-cart-btn pd-btn-add"
-                data-sku="{{ product.sku }}" data-price="{{ product.retail_price }}" data-name="{{ product.name }}"
-                onclick="retailAddToCart(this)">
+                data-sku="{{ product.sku }}" data-price="{{ product.retail_price }}" data-name="{{ product.name }}">
           🛒 Add to Cart
         </button>
         <!-- Unit counter (hidden by default) -->
+        <div class="counter-size-label hidden" style="font-size:0.75rem;font-weight:700;color:#9f1239;margin-bottom:2px;"></div>
         <div class="unit-counter pd-unit-counter hidden">
           <button class="decrement-btn pd-uc-btn">−</button>
           <span class="qty-display pd-qty-display">1</span>
@@ -313,8 +313,7 @@
         </div>
         <!-- Buy Now -->
         <button class="buy-now-btn pd-btn-buy"
-                data-sku="{{ product.sku }}" data-price="{{ product.retail_price }}" data-name="{{ product.name }}"
-                onclick="retailBuyNow(this)">
+                data-sku="{{ product.sku }}" data-price="{{ product.retail_price }}" data-name="{{ product.name }}">
           ⚡ Buy Now
         </button>
         {% else %}
@@ -369,16 +368,14 @@
         </div>
         <div class="cart-container">
           <button class="add-to-cart-btn pd-rel-add"
-                  data-sku="{{ rel.sku }}" data-price="{{ rel.retail_price }}" data-name="{{ rel.name }}"
-                  onclick="retailAddToCart(this)">🛒 Add</button>
+                  data-sku="{{ rel.sku }}" data-price="{{ rel.retail_price }}" data-name="{{ rel.name }}">🛒 Add</button>
           <div class="unit-counter pd-rel-counter hidden">
             <button class="decrement-btn pd-rel-uc">−</button>
             <span class="qty-display pd-rel-qty">1</span>
             <button class="increment-btn pd-rel-uc">+</button>
           </div>
           <button class="buy-now-btn pd-rel-buy"
-                  data-sku="{{ rel.sku }}" data-price="{{ rel.retail_price }}" data-name="{{ rel.name }}"
-                  onclick="retailBuyNow(this)">⚡ Buy</button>
+                  data-sku="{{ rel.sku }}" data-price="{{ rel.retail_price }}" data-name="{{ rel.name }}">⚡ Buy</button>
         </div>
       </div>
       {% endfor %}
@@ -455,51 +452,8 @@ document.addEventListener('DOMContentLoaded', function() {
         }, 4000);
     }
 
-    document.querySelectorAll('.cart-container').forEach(function(c) {
-        const addBtn = c.querySelector('.add-to-cart-btn');
-        const counter = c.querySelector('.unit-counter');
-        const display = c.querySelector('.qty-display');
-        const plus = c.querySelector('.increment-btn');
-        const minus = c.querySelector('.decrement-btn');
-        if (!addBtn || !counter || !display) return;
-
-        plus && plus.addEventListener('click', function() {
-            const sku = addBtn.dataset.sku, price = addBtn.dataset.price;
-            const ss = document.getElementById('size-main');
-            const size = ss ? ss.value : '';
-            let qty = parseInt(display.textContent) + 1;
-            fetch('/update-cart', { method:'POST', headers:{'Content-Type':'application/json'},
-                body: JSON.stringify({product_id:sku, qty:qty, price:price, size:size})})
-            .then(r=>r.json()).then(d => {
-                display.textContent = qty;
-                if (typeof syncCartCount === 'function') syncCartCount(d.new_total || 0);
-            });
-        });
-
-        minus && minus.addEventListener('click', function() {
-            const sku = addBtn.dataset.sku, price = addBtn.dataset.price;
-            const ss = document.getElementById('size-main');
-            const size = ss ? ss.value : '';
-            let qty = parseInt(display.textContent) - 1;
-            if (qty <= 0) {
-                fetch('/update-cart', { method:'POST', headers:{'Content-Type':'application/json'},
-                    body: JSON.stringify({product_id:sku, qty:0, price:price, size:size})})
-                .then(r=>r.json()).then(d => {
-                    counter.classList.add('hidden');
-                    addBtn.classList.remove('hidden');
-                    display.textContent = 1;
-                    if (typeof syncCartCount === 'function') syncCartCount(d.new_total || 0);
-                });
-            } else {
-                fetch('/update-cart', { method:'POST', headers:{'Content-Type':'application/json'},
-                    body: JSON.stringify({product_id:sku, qty:qty, price:price, size:size})})
-                .then(r=>r.json()).then(d => {
-                    display.textContent = qty;
-                    if (typeof syncCartCount === 'function') syncCartCount(d.new_total || 0);
-                });
-            }
-        });
-    });
+    // Add to Cart / quantity counter logic lives in static/js/retail_cart.js
+    // (shared across every retail template) so it's implemented once.
 });
 </script>
 {% endblock %}
