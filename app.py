@@ -5857,6 +5857,26 @@ def admin_upload_excel():
         flash(f'Catalog sync failed: {exc}')
         return redirect(url_for('admin_dashboard'))
 
+@app.route('/order/<order_id>')
+def customer_order_detail(order_id):
+    """Public, shareable per-order details page -- retail only. Combines
+    what the separate /track and /invoice pages show (items, amounts,
+    shipping address, live tracking) into one Amazon-style order page,
+    since neither of those alone covers everything a customer wants to see
+    about a single order. Same no-login, unguessable-ID access pattern as
+    /track/<waybill> and /invoice/<order_id> -- guest checkouts need to be
+    able to open this link too, not just signed-in accounts."""
+    if g.site_type != 'retail':
+        return redirect('/')
+    conn = get_db()
+    order = conn.execute(
+        'SELECT * FROM order_shipping WHERE internal_order_id=?', (order_id,)
+    ).fetchone()
+    if not order:
+        return "Order not found", 404
+    return render_template('retail/order_detail.html', order=order)
+
+
 @app.route('/invoice/<order_id>')
 def customer_invoice(order_id):
     """Public invoice page for customers — link sent via email."""

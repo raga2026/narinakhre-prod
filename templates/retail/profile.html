@@ -247,7 +247,7 @@
                     'dispatched': 'Dispatched', 'delivered': 'Delivered', 'cancelled': 'Cancelled'
                 } %}
                 <tr style="border-top:1px solid #fce7f3;">
-                    <td class="py-3 px-4 font-mono text-sm">{{ order['internal_order_id'] }}</td>
+                    <td class="py-3 px-4 font-mono text-sm"><a href="/order/{{ order['internal_order_id'] }}" class="rose-accent underline">{{ order['internal_order_id'] }}</a></td>
                     <td class="py-3 px-4">{{ order['created_at'] }}</td>
                     <td class="py-3 px-4">{{ items|length }}</td>
                     <td class="py-3 px-4">

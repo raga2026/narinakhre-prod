@@ -130,7 +130,7 @@
     try {
         sessionStorage.setItem('nn_order_notice', JSON.stringify({
             orderId: {{ order_id|tojson }},
-            trackUrl: {{ (tracking_url or '')|tojson }}
+            orderUrl: {{ ('/order/' ~ order_id)|tojson }}
         }));
     } catch (e) {}
     setTimeout(function () {

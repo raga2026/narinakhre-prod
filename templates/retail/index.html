@@ -359,10 +359,10 @@
         var textEl = document.getElementById('order-placed-text');
         if (!banner || !textEl) return;
         textEl.textContent = '✅ Your order has been placed! ';
-        if (notice.trackUrl) {
+        if (notice.orderUrl) {
             var link = document.createElement('a');
-            link.href = notice.trackUrl;
-            link.textContent = 'View details';
+            link.href = notice.orderUrl;
+            link.textContent = 'View Details';
             textEl.appendChild(link);
         }
         banner.style.display = 'block';

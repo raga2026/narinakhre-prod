@@ -1,0 +1,139 @@
+{% extends "retail/base.html" %}
+{% block title %}Order {{ order['internal_order_id'] }} | Nari Nakhre{% endblock %}
+{% block content %}
+<meta name="robots" content="noindex">
+<style>
+  .od-wrap { max-width: 620px; margin: 0 auto; padding: 16px 12px 60px; }
+  .od-header { text-align: center; margin-bottom: 18px; }
+  .od-order-id { font-size: 1.15rem; font-weight: 900; color: #881337; }
+  .od-date { font-size: 0.8rem; color: #9f9f9f; margin-top: 2px; }
+  .od-status-badge {
+    display: inline-block; margin-top: 8px; padding: 4px 14px; border-radius: 20px;
+    font-size: 0.78rem; font-weight: 800; background: #fdf2f8; color: #be185d;
+  }
+  .od-card { background: white; border: 1px solid #fce7f3; border-radius: 20px; padding: 18px; margin-bottom: 16px; }
+  .od-section-title { font-size: 0.85rem; font-weight: 800; color: #881337; text-transform: uppercase; letter-spacing: 0.03em; margin-bottom: 12px; }
+
+  /* Tracking (shared styles with track_order.html's timeline widget) */
+  .od-waybill { font-size: 0.75rem; color: #9f9f9f; text-align: center; margin-bottom: 8px; }
+  .tk-status-badge { display: block; text-align: center; font-size: 1.1rem; font-weight: 900; color: #be185d; margin-bottom: 4px; }
+  .tk-status-sub { text-align: center; font-size: 0.78rem; color: #9f1239; margin-bottom: 14px; }
+  .tk-eta { text-align: center; font-size: 0.78rem; color: #64748b; background: #fdf2f8; border-radius: 12px; padding: 8px; margin-bottom: 8px; }
+  .tk-timeline { position: relative; padding-left: 22px; }
+  .tk-timeline::before { content: ''; position: absolute; left: 7px; top: 6px; bottom: 6px; width: 2px; background: #fce7f3; }
+  .tk-step { position: relative; padding-bottom: 18px; }
+  .tk-step:last-child { padding-bottom: 0; }
+  .tk-step::before { content: ''; position: absolute; left: -22px; top: 2px; width: 14px; height: 14px; border-radius: 50%; background: #be185d; border: 3px solid #fce7f3; }
+  .tk-step-title { font-size: 0.85rem; font-weight: 700; color: #881337; }
+  .tk-step-meta { font-size: 0.72rem; color: #9f9f9f; margin-top: 2px; }
+  .tk-loading, .tk-empty { text-align: center; padding: 20px 0; color: #9f9f9f; font-size: 0.85rem; }
+
+  .od-item-row { display: flex; justify-content: space-between; gap: 10px; padding: 10px 0; border-bottom: 1px solid #fdf2f8; font-size: 0.85rem; }
+  .od-item-row:last-child { border-bottom: none; }
+  .od-item-name { color: #374151; }
+  .od-item-meta { font-size: 0.72rem; color: #9f9f9f; }
+  .od-item-total { font-weight: 700; color: #881337; white-space: nowrap; }
+
+  .od-sum-row { display: flex; justify-content: space-between; font-size: 0.85rem; padding: 6px 0; }
+  .od-sum-row.total { font-weight: 900; font-size: 1rem; color: #881337; border-top: 1px solid #fce7f3; margin-top: 6px; padding-top: 10px; }
+  .od-sum-label-credit { color: #15803d; }
+  .od-sum-label-discount { color: #be185d; }
+
+  .od-address { font-size: 0.85rem; color: #374151; line-height: 1.6; }
+  .od-links { display: flex; flex-direction: column; gap: 10px; margin-top: 4px; }
+  .od-link-btn {
+    display: block; width: 100%; padding: 12px; border-radius: 30px; text-align: center;
+    border: 2px solid #be185d; background: white; color: #be185d; font-weight: 800;
+    font-size: 0.88rem; text-decoration: none; box-sizing: border-box;
+  }
+  .od-back-link { display: block; text-align: center; margin-top: 18px; color: #9f9f9f; font-size: 0.82rem; text-decoration: none; }
+</style>
+
+<div class="od-wrap">
+  <div class="od-header">
+    <div class="od-order-id">Order {{ order['internal_order_id'] }}</div>
+    <div class="od-date">Placed on {{ order['created_at'] }}</div>
+    {% set status_labels = {
+        'pending': 'Payment Pending', 'paid': 'Payment Confirmed',
+        'cod_confirmed': 'Confirmed (COD)', 'accepted': 'Preparing to Ship',
+        'dispatched': 'Dispatched', 'delivered': 'Delivered', 'cancelled': 'Cancelled'
+    } %}
+    <div class="od-status-badge">{{ status_labels.get(order['status'], (order['status']|capitalize) if order['status'] else 'Processing') }}</div>
+  </div>
+
+  {% if order['delhivery_waybill'] %}
+  <div class="od-card">
+    <div class="od-section-title">📦 Tracking</div>
+    <div class="od-waybill">Waybill: {{ order['delhivery_waybill'] }}{% if order['courier_partner'] %} &middot; via {{ order['courier_partner']|capitalize }}{% endif %}</div>
+    <div id="od-tracking-content">
+      <div class="tk-loading">Fetching latest status…</div>
+    </div>
+  </div>
+  {% else %}
+  <div class="od-card">
+    <div class="od-section-title">📦 Tracking</div>
+    <div class="tk-empty" style="padding:4px 0;">Not yet shipped — tracking will appear here once your order is dispatched.</div>
+  </div>
+  {% endif %}
+
+  {% set items = (order['cart_items_json'] | fromjson) if order['cart_items_json'] else [] %}
+  {% if items %}
+  <div class="od-card">
+    <div class="od-section-title">🛍️ Items</div>
+    {% for item in items %}
+    <div class="od-item-row">
+      <div>
+        <div class="od-item-name">{{ item.name }}{% if item.size %} <span class="od-item-meta">(Size {{ item.size }})</span>{% endif %}</div>
+        <div class="od-item-meta">Qty {{ item.units or item.qty or 1 }} × ₹{{ '%.2f'|format(item.price|float) }}</div>
+      </div>
+      <div class="od-item-total">₹{{ '%.2f'|format((item.price|float) * ((item.units or item.qty or 1)|int)) }}</div>
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+
+  <div class="od-card">
+    <div class="od-section-title">💳 Order Summary</div>
+    {% if order['discount_amount'] and order['discount_amount']|float > 0 %}
+    <div class="od-sum-row od-sum-label-discount"><span>Coupon Discount</span><span>−₹{{ '%.2f'|format(order['discount_amount']|float) }}</span></div>
+    {% endif %}
+    {% if order['credits_redeemed'] and order['credits_redeemed']|float > 0 %}
+    <div class="od-sum-row od-sum-label-credit"><span>Credits Used</span><span>−₹{{ '%.2f'|format(order['credits_redeemed']|float) }}</span></div>
+    {% endif %}
+    {% if order['shipping_upgrade_charge'] and order['shipping_upgrade_charge']|float > 0 %}
+    <div class="od-sum-row"><span>Courier Upgrade</span><span>+₹{{ '%.2f'|format(order['shipping_upgrade_charge']|float) }}</span></div>
+    {% endif %}
+    <div class="od-sum-row"><span>Payment Mode</span><span>{{ order['payment_mode'] or '-' }}</span></div>
+    <div class="od-sum-row total">
+      <span>{{ 'Amount to be Paid on Delivery' if order['payment_mode'] == 'COD' else 'Amount Paid' }}</span>
+      <span>₹{{ '%.2f'|format((order['cod_collected_amount'] or order['total_amount'] or 0)|float) }}</span>
+    </div>
+    {% if order['cod_credit_awarded'] and order['cod_credit_awarded']|float > 0 %}
+    <div style="font-size:0.72rem;color:#15803d;margin-top:8px;">🎁 +{{ order['cod_credit_awarded']|int }} Nari Nakhre Credits earned on this order</div>
+    {% endif %}
+  </div>
+
+  <div class="od-card">
+    <div class="od-section-title">🏠 Delivery Address</div>
+    <div class="od-address">
+      <strong>{{ order['consignee_name'] }}</strong><br>
+      {{ order['consignee_address'] }}<br>
+      {{ order['consignee_city'] }}, {{ order['consignee_state'] }} — {{ order['consignee_pincode'] }}<br>
+      📞 {{ order['consignee_phone'] }}
+    </div>
+  </div>
+
+  <div class="od-links">
+    <a href="/invoice/{{ order['internal_order_id'] }}" target="_blank" class="od-link-btn">🧾 Download GST Invoice</a>
+  </div>
+
+  <a href="/profile?tab=orders" class="od-back-link">← Back to My Orders</a>
+</div>
+
+{% if order['delhivery_waybill'] %}
+<script src="/static/js/order_tracking.js"></script>
+<script>
+  renderOrderTracking({{ order['delhivery_waybill']|tojson }}, 'od-tracking-content');
+</script>
+{% endif %}
+{% endblock %}
