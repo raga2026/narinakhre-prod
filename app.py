@@ -5874,7 +5874,27 @@ def customer_order_detail(order_id):
     ).fetchone()
     if not order:
         return "Order not found", 404
-    return render_template('retail/order_detail.html', order=order)
+
+    items = json.loads(order['cart_items_json']) if order['cart_items_json'] else []
+    for item in items:
+        item['image_url'] = ''
+        sku = item.get('sku', '')
+        if sku:
+            product = conn.execute(
+                'SELECT id, image_field FROM products WHERE sku=?', (sku,)
+            ).fetchone()
+            if product:
+                item['product_id'] = product['id']
+                try:
+                    p_dict = dict(product)
+                    p_dict['sku'] = sku
+                    imgs = get_product_images(p_dict)
+                    if imgs and imgs[0].startswith('http'):
+                        item['image_url'] = imgs[0]
+                except Exception:
+                    pass
+
+    return render_template('retail/order_detail.html', order=order, items=items)
 
 
 @app.route('/invoice/<order_id>')

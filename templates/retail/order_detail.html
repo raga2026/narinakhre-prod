@@ -3,8 +3,16 @@
 {% block content %}
 <meta name="robots" content="noindex">
 <style>
-  .od-wrap { max-width: 620px; margin: 0 auto; padding: 16px 12px 60px; }
-  .od-header { text-align: center; margin-bottom: 18px; }
+  .od-wrap { max-width: 680px; margin: 0 auto; padding: 14px 12px 60px; }
+
+  .od-topbar { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 14px; }
+  .od-continue-btn {
+    display: inline-flex; align-items: center; gap: 6px; padding: 9px 16px; border-radius: 30px;
+    background: #be185d; color: white; font-weight: 800; font-size: 0.8rem; text-decoration: none;
+    white-space: nowrap;
+  }
+
+  .od-header { text-align: center; margin-bottom: 16px; }
   .od-order-id { font-size: 1.15rem; font-weight: 900; color: #881337; }
   .od-date { font-size: 0.8rem; color: #9f9f9f; margin-top: 2px; }
   .od-status-badge {
@@ -28,11 +36,17 @@
   .tk-step-meta { font-size: 0.72rem; color: #9f9f9f; margin-top: 2px; }
   .tk-loading, .tk-empty { text-align: center; padding: 20px 0; color: #9f9f9f; font-size: 0.85rem; }
 
-  .od-item-row { display: flex; justify-content: space-between; gap: 10px; padding: 10px 0; border-bottom: 1px solid #fdf2f8; font-size: 0.85rem; }
+  .od-item-row { display: flex; align-items: center; gap: 12px; padding: 12px 0; border-bottom: 1px solid #fdf2f8; }
   .od-item-row:last-child { border-bottom: none; }
-  .od-item-name { color: #374151; }
-  .od-item-meta { font-size: 0.72rem; color: #9f9f9f; }
-  .od-item-total { font-weight: 700; color: #881337; white-space: nowrap; }
+  .od-item-img-wrap {
+    flex-shrink: 0; width: 68px; height: 68px; border-radius: 12px; overflow: hidden;
+    background: #fdf2f8; border: 1px solid #fce7f3;
+  }
+  .od-item-img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .od-item-info { flex: 1; min-width: 0; }
+  .od-item-name { color: #27272a; font-size: 0.9rem; font-weight: 700; line-height: 1.3; }
+  .od-item-meta { font-size: 0.75rem; color: #9f9f9f; margin-top: 3px; }
+  .od-item-total { font-weight: 800; color: #881337; white-space: nowrap; font-size: 0.9rem; }
 
   .od-sum-row { display: flex; justify-content: space-between; font-size: 0.85rem; padding: 6px 0; }
   .od-sum-row.total { font-weight: 900; font-size: 1rem; color: #881337; border-top: 1px solid #fce7f3; margin-top: 6px; padding-top: 10px; }
@@ -46,10 +60,19 @@
     border: 2px solid #be185d; background: white; color: #be185d; font-weight: 800;
     font-size: 0.88rem; text-decoration: none; box-sizing: border-box;
   }
-  .od-back-link { display: block; text-align: center; margin-top: 18px; color: #9f9f9f; font-size: 0.82rem; text-decoration: none; }
+  .od-back-link {
+    display: block; width: 100%; padding: 12px; border-radius: 30px; text-align: center;
+    background: #be185d; color: white; font-weight: 800; font-size: 0.88rem; text-decoration: none;
+    box-sizing: border-box; margin-top: 4px;
+  }
 </style>
 
 <div class="od-wrap">
+  <div class="od-topbar">
+    <a href="/profile?tab=orders" style="color:#9f9f9f;font-size:0.82rem;text-decoration:none;">&larr; My Orders</a>
+    <a href="/retail" class="od-continue-btn">🛍️ Continue Shopping</a>
+  </div>
+
   <div class="od-header">
     <div class="od-order-id">Order {{ order['internal_order_id'] }}</div>
     <div class="od-date">Placed on {{ order['created_at'] }}</div>
@@ -76,14 +99,19 @@
   </div>
   {% endif %}
 
-  {% set items = (order['cart_items_json'] | fromjson) if order['cart_items_json'] else [] %}
   {% if items %}
   <div class="od-card">
-    <div class="od-section-title">🛍️ Items</div>
+    <div class="od-section-title">🛍️ Items ({{ items|length }})</div>
     {% for item in items %}
     <div class="od-item-row">
-      <div>
-        <div class="od-item-name">{{ item.name }}{% if item.size %} <span class="od-item-meta">(Size {{ item.size }})</span>{% endif %}</div>
+      <div class="od-item-img-wrap">
+        <img class="od-item-img"
+             src="{{ item.image_url or 'https://eopqwvssznmxfxrfzqbx.supabase.co/storage/v1/object/public/products/site/logo.png' }}"
+             alt="{{ item.name }}"
+             onerror="this.onerror=null;this.src='{{ url_for('static', filename='assets/products/default.jpg') }}'">
+      </div>
+      <div class="od-item-info">
+        <div class="od-item-name">{{ item.name }}{% if item.size %} <span style="color:#9f9f9f;font-weight:500;">(Size {{ item.size }})</span>{% endif %}</div>
         <div class="od-item-meta">Qty {{ item.units or item.qty or 1 }} × ₹{{ '%.2f'|format(item.price|float) }}</div>
       </div>
       <div class="od-item-total">₹{{ '%.2f'|format((item.price|float) * ((item.units or item.qty or 1)|int)) }}</div>
@@ -127,7 +155,7 @@
     <a href="/invoice/{{ order['internal_order_id'] }}" target="_blank" class="od-link-btn">🧾 Download GST Invoice</a>
   </div>
 
-  <a href="/profile?tab=orders" class="od-back-link">← Back to My Orders</a>
+  <a href="/retail" class="od-back-link">← Back to Shopping</a>
 </div>
 
 {% if order['delhivery_waybill'] %}
