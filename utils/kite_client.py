@@ -1,0 +1,75 @@
+import os
+
+from kiteconnect import KiteConnect
+
+from utils.kite_session import get_kite_access_token
+
+
+class KiteClientError(RuntimeError):
+    pass
+
+
+class KiteClient:
+    """Thin wrapper around pykiteconnect for Nari Nakhre Stocks ingestion.
+
+    Reads STOCKS_KITE_API_KEY from the environment. The access token comes
+    from the encrypted kite_session (see utils/kite_session.py) -- pass
+    db=get_db() to have it looked up and decrypted automatically, or pass
+    access_token= directly (tests do this to skip the DB entirely). The old
+    Phase 1 KITE_ACCESS_TOKEN env var is tried last, only if kite_session
+    has no token yet, kept for backward compatibility during this
+    transition -- it should stop being needed once every environment has
+    logged in through /admin/stocks/kite/login at least once.
+    """
+
+    def __init__(self, db=None, access_token=None, kite=None):
+        self._kite = kite or self._build_client(db, access_token)
+
+    def _build_client(self, db, access_token):
+        api_key = os.environ.get('STOCKS_KITE_API_KEY', '').strip()
+        if not api_key:
+            raise KiteClientError('STOCKS_KITE_API_KEY must be set in the environment.')
+
+        token = (access_token or '').strip()
+        if not token and db is not None:
+            token = get_kite_access_token(db) or ''
+        if not token:
+            token = os.environ.get('KITE_ACCESS_TOKEN', '').strip()
+        if not token:
+            raise KiteClientError(
+                'No Kite access token available. A super_admin must log in via '
+                '/admin/stocks/kite/login first.'
+            )
+        kite = KiteConnect(api_key=api_key)
+        kite.set_access_token(token)
+        return kite
+
+    def fetch_daily_candles(self, symbol, exchange, from_date, to_date):
+        """Return a list of {trade_date, open, high, low, close, volume} dicts
+        for one symbol between from_date and to_date (inclusive), using Kite's
+        day-interval historical data API."""
+        instrument_key = f'{exchange}:{symbol}'
+        quote = self._kite.ltp([instrument_key])
+        instrument_token = quote[instrument_key]['instrument_token']
+
+        candles = self._kite.historical_data(
+            instrument_token,
+            from_date,
+            to_date,
+            interval='day',
+        )
+
+        records = []
+        for candle in candles:
+            trade_date = candle['date']
+            if hasattr(trade_date, 'date'):
+                trade_date = trade_date.date()
+            records.append({
+                'trade_date': trade_date,
+                'open': candle['open'],
+                'high': candle['high'],
+                'low': candle['low'],
+                'close': candle['close'],
+                'volume': candle['volume'],
+            })
+        return records

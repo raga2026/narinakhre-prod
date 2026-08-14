@@ -23,6 +23,31 @@ from supabase import create_client, Client as SupabaseClient
 
 from utils.shipping_manager import get_shipping_provider, ShiprocketProvider
 from utils.credential_crypto import encrypt_credentials, decrypt_credentials
+from utils.stock_ingestion import initialize_stock_tables_if_needed, sync_daily_data
+from utils.stock_auth import (
+    initialize_stocks_auth_if_needed,
+    authenticate_stocks_admin,
+    stocks_login_required,
+    stocks_role_required,
+    list_stocks_admin_users,
+    create_child_admin,
+    toggle_child_admin_active,
+)
+from utils.kite_client import KiteClient
+from utils.kite_session import (
+    initialize_kite_session_table_if_needed,
+    get_kite_login_url,
+    exchange_request_token,
+    save_kite_access_token,
+    get_kite_access_token,
+    get_kite_session_status,
+    IST,
+)
+from utils.kite_postback import (
+    initialize_kite_postback_log_table_if_needed,
+    verify_postback_checksum,
+    log_postback,
+)
 import auth_providers
 import io
 from PIL import Image as PILImage
@@ -669,6 +694,13 @@ def ensure_checkout_tables_exist():
 
 initialize_database_if_needed()
 ensure_checkout_tables_exist()
+# Nari Nakhre Stocks -- separate feature, own tables, kept out of the
+# e-commerce schema above. Same Supabase project only -- it has its own
+# admin login (see utils/stock_auth.py), not the storefront's.
+initialize_stock_tables_if_needed(get_supabase())
+initialize_stocks_auth_if_needed(get_supabase())
+initialize_kite_session_table_if_needed(get_supabase())
+initialize_kite_postback_log_table_if_needed(get_supabase())
 
 
 def calculate_inclusive_gst(display_cart, discount=0.0, full_subtotal=0.0):
@@ -6607,6 +6639,183 @@ def admin_delivery_partner_toggle(partner_id):
     db.commit()
     flash('Delivery partner status updated.')
     return redirect(url_for('admin_delivery_partners'))
+
+
+@app.route('/admin/stocks/sync', methods=['POST'])
+@stocks_login_required
+def admin_stocks_sync():
+    """Manual trigger for Nari Nakhre Stocks Phase 1 ingestion -- pulls the
+    latest daily candle (or backfills) for every active stock_watchlist row.
+    See utils/stock_ingestion.py. Now gated by the Stocks login (any active
+    account) rather than the storefront's admin_required, since it needs the
+    Kite session that login owns."""
+    db = get_db()
+    try:
+        access_token = get_kite_access_token(db)
+        if not access_token:
+            return jsonify({
+                'status': 'error',
+                'message': 'No Kite session yet -- a super_admin must log in via /admin/stocks/kite/login first.'
+            }), 400
+        kite_client = KiteClient(db=db, access_token=access_token)
+        summary = sync_daily_data(db, kite_client=kite_client)
+    except Exception as e:
+        app.logger.error(f'Stock sync failed: {e}')
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+    return jsonify({'status': 'ok', **summary})
+
+
+@app.route('/admin/stocks/kite/login', methods=['GET'])
+@stocks_role_required('super_admin')
+def stocks_kite_login():
+    """Sends the super_admin to Zerodha's login page. Kite redirects back to
+    stocks_kite_callback below with a request_token once they log in there."""
+    try:
+        login_url = get_kite_login_url()
+    except RuntimeError as e:
+        flash(str(e), 'error')
+        return redirect(url_for('stocks_admin_dashboard'))
+    return redirect(login_url)
+
+
+@app.route('/admin/stocks/kite/callback', methods=['GET'])
+def stocks_kite_callback():
+    """Registered as the Redirect URL on the Kite Connect app. Deliberately
+    public/unauthenticated -- Zerodha's redirect is a fresh top-level GET
+    from kite.zerodha.com, and this is the standard shape for an OAuth-style
+    callback (the request_token itself, single-use and only exchangeable
+    with our api_secret, is what proves the login happened -- not our own
+    session cookie, which may or may not have survived the round trip).
+    Exchanges the request_token for an access_token and stores it -- that's
+    the token every subsequent Kite API call uses until it expires tomorrow
+    and a super_admin repeats this flow."""
+    request_token = request.args.get('request_token')
+    status = request.args.get('status')
+    if status != 'success' or not request_token:
+        flash('Kite login was not completed successfully.', 'error')
+        return redirect(url_for('stocks_admin_dashboard'))
+
+    try:
+        access_token = exchange_request_token(request_token)
+    except Exception as e:
+        app.logger.error(f'Kite session exchange failed: {e}')
+        flash('Could not complete Kite login. Please try again.', 'error')
+        return redirect(url_for('stocks_admin_dashboard'))
+
+    db = get_db()
+    expires_at = save_kite_access_token(db, access_token, session.get('stocks_admin_id'))
+    expires_at_ist = expires_at.astimezone(IST).strftime('%d %b %Y, %I:%M %p IST')
+    flash(f'Kite access token refreshed. Expires {expires_at_ist}.')
+    return redirect(url_for('stocks_admin_dashboard'))
+
+
+@app.route('/admin/stocks/kite/postback', methods=['POST'])
+def stocks_kite_postback():
+    """Registered as the Postback URL on the Kite Connect app. Public --
+    Zerodha posts here directly, no browser session involved. Only verifies
+    the checksum and logs the payload for now; nothing here updates order or
+    suggestion state yet (that depends on execute_suggestion(), a later
+    phase)."""
+    payload = request.get_json(silent=True)
+    if payload is None:
+        payload = request.form.to_dict()
+
+    if not verify_postback_checksum(payload):
+        app.logger.warning('Kite postback rejected: invalid or missing checksum')
+        return jsonify({'status': 'error', 'message': 'Invalid checksum'}), 400
+
+    db = get_db()
+    try:
+        log_postback(db, payload)
+    except Exception as e:
+        app.logger.error(f'Kite postback log failed: {e}')
+        return jsonify({'status': 'error'}), 500
+    return jsonify({'status': 'ok'})
+
+
+@app.route('/admin/stocks/login', methods=['GET', 'POST'])
+def stocks_admin_login():
+    """Separate login for Nari Nakhre Stocks -- shared by super_admin and
+    child admins (session['stocks_admin_role'] tells them apart). Nothing to
+    do with the storefront's /admin/login or session['is_admin']."""
+    if request.method == 'GET':
+        return render_template('admin/stocks_login.html', recaptcha_site_key=RECAPTCHA_SITE_KEY)
+
+    if not verify_recaptcha(request.form.get('recaptcha_token'), remote_ip=request.remote_addr, expected_action='stocks_admin_login'):
+        app.logger.warning('Bot caught on stocks admin login (recaptcha)')
+        flash('Please try again.', 'error')
+        return render_template('admin/stocks_login.html', recaptcha_site_key=RECAPTCHA_SITE_KEY), 401
+
+    username = (request.form.get('username') or '').strip()
+    password = request.form.get('password') or ''
+
+    db = get_db()
+    admin_row = authenticate_stocks_admin(db, username, password)
+    if not admin_row:
+        flash('Invalid username or password.', 'error')
+        return render_template('admin/stocks_login.html', recaptcha_site_key=RECAPTCHA_SITE_KEY), 401
+
+    session['stocks_admin_id'] = admin_row['id']
+    session['stocks_admin_username'] = admin_row['username']
+    session['stocks_admin_role'] = admin_row['role']
+    session.modified = True
+    return redirect(url_for('stocks_admin_dashboard'))
+
+
+@app.route('/admin/stocks/logout', methods=['GET'])
+@stocks_login_required
+def stocks_admin_logout():
+    session.pop('stocks_admin_id', None)
+    session.pop('stocks_admin_username', None)
+    session.pop('stocks_admin_role', None)
+    session.modified = True
+    return redirect(url_for('stocks_admin_login'))
+
+
+@app.route('/admin/stocks/dashboard', methods=['GET'])
+@stocks_login_required
+def stocks_admin_dashboard():
+    db = get_db()
+    kite_status = get_kite_session_status(db)
+    return render_template(
+        'admin/stocks_dashboard.html',
+        username=session.get('stocks_admin_username'),
+        role=session.get('stocks_admin_role'),
+        kite_status=kite_status,
+    )
+
+
+@app.route('/admin/stocks/admins', methods=['GET'])
+@stocks_role_required('super_admin')
+def stocks_admin_manage():
+    db = get_db()
+    admins = list_stocks_admin_users(db)
+    return render_template('admin/stocks_admins.html', admins=admins)
+
+
+@app.route('/admin/stocks/admins/create', methods=['POST'])
+@stocks_role_required('super_admin')
+def stocks_admin_create():
+    db = get_db()
+    username = request.form.get('username')
+    password = request.form.get('password')
+    _row, error = create_child_admin(db, username, password, session.get('stocks_admin_id'))
+    if error:
+        flash(error, 'error')
+    else:
+        flash(f'Child admin "{username.strip()}" created.')
+    return redirect(url_for('stocks_admin_manage'))
+
+
+@app.route('/admin/stocks/admins/<int:admin_id>/toggle', methods=['POST'])
+@stocks_role_required('super_admin')
+def stocks_admin_toggle(admin_id):
+    db = get_db()
+    if not toggle_child_admin_active(db, admin_id):
+        flash('Could not update that account.', 'error')
+    else:
+        flash('Account status updated.')
+    return redirect(url_for('stocks_admin_manage'))
 
 
 def _send_welcome_backfill_batch(user_rows):

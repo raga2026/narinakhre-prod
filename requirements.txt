@@ -12,3 +12,4 @@ Pillow
 python-dotenv
 Authlib>=1.3
 cryptography
+pykiteconnect

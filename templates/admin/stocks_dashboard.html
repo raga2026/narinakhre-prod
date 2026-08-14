@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Stocks Dashboard - NariNakhre</title>
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+    <style>
+        body { background: #0f172a; color: #f8fafc; }
+        .stocks-accent { color: #0ea5e9; }
+        .stocks-btn { background: linear-gradient(90deg, #0891b2 0%, #0ea5e9 100%); color: white; }
+    </style>
+</head>
+<body class="min-h-screen p-8">
+    <div class="max-w-3xl mx-auto">
+        <div class="flex items-center justify-between mb-8">
+            <div>
+                <h1 class="text-2xl font-extrabold stocks-accent font-serif">Nari Nakhre Stocks</h1>
+                <p class="text-slate-400 text-sm mt-1">Signed in as {{ username }} ({{ role }})</p>
+            </div>
+            <a href="{{ url_for('stocks_admin_logout') }}" class="text-sm text-slate-400 hover:text-sky-400 underline">Log out</a>
+        </div>
+
+        {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+            <div class="mb-6" role="alert" aria-live="assertive">
+            {% for category, msg in messages %}
+                <div class="bg-sky-900/40 text-sky-200 border border-sky-500/30 rounded-xl p-3 mb-2 text-sm">{{ msg }}</div>
+            {% endfor %}
+            </div>
+        {% endif %}
+        {% endwith %}
+
+        {% if role == 'super_admin' %}
+        <section class="bg-slate-800 rounded-2xl p-6 border border-sky-500/20 mb-6" aria-labelledby="kite-heading">
+            <h2 id="kite-heading" class="text-lg font-bold text-slate-200 mb-2">Kite connection</h2>
+            <p role="status" aria-live="polite"
+               class="{{ 'text-emerald-400' if kite_status and kite_status.access_token_encrypted else 'text-amber-400' }}">
+                {% if kite_status and kite_status.access_token_encrypted %}
+                    Connected — expires {{ kite_status.expires_at }}.
+                {% else %}
+                    Not connected — click reconnect below.
+                {% endif %}
+            </p>
+            <p class="text-slate-400 text-sm mt-1">Kite access tokens expire daily -- reconnect each trading day before syncing.</p>
+            <p class="mt-3">
+                <a href="{{ url_for('stocks_kite_login') }}" class="text-sky-400 hover:text-sky-300 underline">
+                    {{ 'Reconnect Kite' if kite_status and kite_status.access_token_encrypted else 'Connect Kite' }}
+                </a>
+            </p>
+        </section>
+        {% endif %}
+
+        <section class="bg-slate-800 rounded-2xl p-6 border border-sky-500/20 mb-6" aria-labelledby="sync-heading">
+            <h2 id="sync-heading" class="text-lg font-bold text-slate-200 mb-2">Data sync</h2>
+            <p class="text-slate-400 text-sm mb-3">Pulls the latest daily candle for every active watchlist symbol.</p>
+            <form method="POST" action="{{ url_for('admin_stocks_sync') }}">
+                <button type="submit" class="stocks-btn py-3 px-6 rounded-2xl font-bold transition hover:opacity-90">
+                    Sync now
+                </button>
+            </form>
+        </section>
+
+        <div class="bg-slate-800 rounded-2xl p-6 border border-sky-500/20">
+            <p class="text-slate-300">Trading-mode controls and the suggestions list are being built next.</p>
+            {% if role == 'super_admin' %}
+            <p class="mt-4">
+                <a href="{{ url_for('stocks_admin_manage') }}" class="text-sky-400 hover:text-sky-300 underline">Manage admins</a>
+            </p>
+            {% endif %}
+        </div>
+    </div>
+</body>
+</html>
