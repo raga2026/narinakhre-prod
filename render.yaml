@@ -1,7 +1,7 @@
 services:
   - type: web
     name: narinakhre-test
-    plan: Free
+    plan: Starter
     runtime: python
     region: singapore
     buildCommand: "pip install -r requirements.txt"
@@ -26,6 +26,13 @@ services:
       # same value on narinakhre-weekly-report below. Set via the Render
       # dashboard (sync: false means Render won't overwrite it on deploy).
       - key: WEEKLY_REPORT_CRON_SECRET
+        sync: false
+      # Shared secret for POST /cron/stocks-fundamentals-sync -- the caller
+      # is a GitHub Actions workflow (.github/workflows/stocks-fundamentals-sync.yml),
+      # not a Render Cron Job, so there's no matching second copy of this
+      # var anywhere in this file. Set the same value as the
+      # STOCKS_FUNDAMENTALS_CRON_SECRET repo secret on GitHub.
+      - key: STOCKS_FUNDAMENTALS_CRON_SECRET
         sync: false
 
   # Fires send_weekly_report_email() (in app.py) once a week by POSTing to
