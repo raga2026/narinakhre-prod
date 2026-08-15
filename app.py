@@ -32,6 +32,8 @@ from utils.stock_auth import (
     list_stocks_admin_users,
     create_child_admin,
     toggle_child_admin_active,
+    has_valid_cron_secret,
+    legacy_stocks_redirect,
 )
 from utils.kite_client import KiteClient
 from utils.kite_session import (
@@ -47,6 +49,14 @@ from utils.kite_postback import (
     initialize_kite_postback_log_table_if_needed,
     verify_postback_checksum,
     log_postback,
+)
+from utils.fundamentals_ingestion import (
+    initialize_fundamentals_table_if_needed,
+    sync_fundamentals,
+)
+from utils.stock_universe import (
+    initialize_stock_universe_table_if_needed,
+    refresh_market_cap_filter,
 )
 import auth_providers
 import io
@@ -141,6 +151,10 @@ SUPPORT_FROM_EMAIL = os.environ.get('SMTP_support_EMAIL_FROM', 'support-noreply@
 # Unset by default so the endpoint stays disabled (returns 403) until an
 # admin deliberately sets the same value here and on the cron service.
 WEEKLY_REPORT_CRON_SECRET = os.environ.get('WEEKLY_REPORT_CRON_SECRET', '')
+# Same pattern, for the weekly Stocks fundamentals sync -- see
+# /cron/stocks-fundamentals-sync and .github/workflows/stocks-fundamentals-sync.yml
+# (a scheduled GitHub Actions workflow, not a Render Cron Job).
+STOCKS_FUNDAMENTALS_CRON_SECRET = os.environ.get('STOCKS_FUNDAMENTALS_CRON_SECRET', '')
 RAZORPAY_KEY_ID = os.environ.get('RAZORPAY_KEY_ID')
 RAZORPAY_KEY_SECRET = os.environ.get('RAZORPAY_KEY_SECRET')
 ADMIN_USERNAME = os.environ.get('ADMIN_USERNAME', '')
@@ -701,6 +715,8 @@ initialize_stock_tables_if_needed(get_supabase())
 initialize_stocks_auth_if_needed(get_supabase())
 initialize_kite_session_table_if_needed(get_supabase())
 initialize_kite_postback_log_table_if_needed(get_supabase())
+initialize_fundamentals_table_if_needed(get_supabase())
+initialize_stock_universe_table_if_needed(get_supabase())
 
 
 def calculate_inclusive_gst(display_cart, discount=0.0, full_subtotal=0.0):
@@ -6641,14 +6657,45 @@ def admin_delivery_partner_toggle(partner_id):
     return redirect(url_for('admin_delivery_partners'))
 
 
-@app.route('/admin/stocks/sync', methods=['POST'])
-@stocks_login_required
+_LEGACY_STOCKS_ROUTES = [
+    # (old path, new endpoint name, methods, redirect code)
+    ('/admin/stocks/sync', 'admin_stocks_sync', ['POST'], 308),
+    ('/admin/stocks/kite/login', 'stocks_kite_login', ['GET'], 301),
+    ('/admin/stocks/kite/callback', 'stocks_kite_callback', ['GET'], 301),
+    ('/admin/stocks/kite/postback', 'stocks_kite_postback', ['POST'], 308),
+    ('/admin/stocks/fundamentals/sync', 'admin_stocks_fundamentals_sync', ['POST'], 308),
+    ('/admin/stocks/watchlist', 'stocks_watchlist', ['GET'], 301),
+    ('/admin/stocks/login', 'stocks_admin_login', ['GET', 'POST'], 308),
+    ('/admin/stocks/logout', 'stocks_admin_logout', ['GET'], 301),
+    ('/admin/stocks/dashboard', 'stocks_admin_dashboard', ['GET'], 301),
+    ('/admin/stocks/admins', 'stocks_admin_manage', ['GET'], 301),
+    ('/admin/stocks/admins/create', 'stocks_admin_create', ['POST'], 308),
+    ('/admin/stocks/admins/<int:admin_id>/toggle', 'stocks_admin_toggle', ['POST'], 308),
+]
+for _old_path, _new_endpoint, _methods, _code in _LEGACY_STOCKS_ROUTES:
+    app.add_url_rule(
+        _old_path,
+        endpoint=f'legacy_{_new_endpoint}',
+        view_func=legacy_stocks_redirect(_new_endpoint, code=_code),
+        methods=_methods,
+    )
+
+
+@app.route('/stocks/sync', methods=['POST'])
 def admin_stocks_sync():
     """Manual trigger for Nari Nakhre Stocks Phase 1 ingestion -- pulls the
     latest daily candle (or backfills) for every active stock_watchlist row.
-    See utils/stock_ingestion.py. Now gated by the Stocks login (any active
-    account) rather than the storefront's admin_required, since it needs the
-    Kite session that login owns."""
+    See utils/stock_ingestion.py. Accepts either an active Stocks login
+    session (manual trigger from the browser, e.g. the dashboard's "Sync
+    now" button) or a valid X-Cron-Secret header (a scheduled GitHub Actions
+    workflow) -- either one is sufficient. Same header name, env var, and
+    hmac.compare_digest() check /cron/stocks-fundamentals-sync already uses,
+    just added here as a second accepted path rather than replacing the
+    session check @stocks_login_required did."""
+    if not has_valid_cron_secret(request.headers, STOCKS_FUNDAMENTALS_CRON_SECRET) \
+            and not session.get('stocks_admin_id'):
+        return redirect(url_for('stocks_admin_login'))
+
     db = get_db()
     try:
         access_token = get_kite_access_token(db)
@@ -6665,7 +6712,27 @@ def admin_stocks_sync():
     return jsonify({'status': 'ok', **summary})
 
 
-@app.route('/admin/stocks/kite/login', methods=['GET'])
+@app.route('/stocks/universe/refresh-market-cap-filter', methods=['POST'])
+def stocks_universe_refresh_market_cap_filter():
+    """Re-runs ISIN-based BSE -> NSE market cap propagation, then re-buckets
+    every stock_universe row's market_cap_band/is_scrape_eligible. Doesn't
+    re-fetch BSE's own market cap -- see utils/stock_universe.py. Same dual
+    auth as /stocks/sync: a valid X-Cron-Secret header or an active Stocks
+    login session, either sufficient."""
+    if not has_valid_cron_secret(request.headers, STOCKS_FUNDAMENTALS_CRON_SECRET) \
+            and not session.get('stocks_admin_id'):
+        return redirect(url_for('stocks_admin_login'))
+
+    db = get_db()
+    try:
+        summary = refresh_market_cap_filter(db)
+    except Exception as e:
+        app.logger.error(f'Market cap filter refresh failed: {e}')
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+    return jsonify({'status': 'ok', **summary})
+
+
+@app.route('/stocks/kite/login', methods=['GET'])
 @stocks_role_required('super_admin')
 def stocks_kite_login():
     """Sends the super_admin to Zerodha's login page. Kite redirects back to
@@ -6678,7 +6745,7 @@ def stocks_kite_login():
     return redirect(login_url)
 
 
-@app.route('/admin/stocks/kite/callback', methods=['GET'])
+@app.route('/stocks/kite/callback', methods=['GET'])
 def stocks_kite_callback():
     """Registered as the Redirect URL on the Kite Connect app. Deliberately
     public/unauthenticated -- Zerodha's redirect is a fresh top-level GET
@@ -6709,7 +6776,7 @@ def stocks_kite_callback():
     return redirect(url_for('stocks_admin_dashboard'))
 
 
-@app.route('/admin/stocks/kite/postback', methods=['POST'])
+@app.route('/stocks/kite/postback', methods=['POST'])
 def stocks_kite_postback():
     """Registered as the Postback URL on the Kite Connect app. Public --
     Zerodha posts here directly, no browser session involved. Only verifies
@@ -6733,7 +6800,61 @@ def stocks_kite_postback():
     return jsonify({'status': 'ok'})
 
 
-@app.route('/admin/stocks/login', methods=['GET', 'POST'])
+@app.route('/stocks/fundamentals/sync', methods=['POST'])
+@stocks_login_required
+def admin_stocks_fundamentals_sync():
+    """Manual trigger for the weekly fundamentals fetch (Screener.in) --
+    see utils/fundamentals_ingestion.py. Unlike the price sync this doesn't
+    need a Kite session, just network access to Screener."""
+    db = get_db()
+    try:
+        summary = sync_fundamentals(db)
+    except Exception as e:
+        app.logger.error(f'Fundamentals sync failed: {e}')
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+    return jsonify({'status': 'ok', **summary})
+
+
+@app.route('/cron/stocks-fundamentals-sync', methods=['POST'])
+def cron_stocks_fundamentals_sync():
+    """Triggered by a scheduled GitHub Actions workflow (see
+    .github/workflows/stocks-fundamentals-sync.yml) once a week. Not under
+    /admin/ and not @stocks_login_required -- the workflow has no browser
+    session, so this checks a shared secret header instead, same pattern as
+    /cron/weekly-report."""
+    provided = request.headers.get('X-Cron-Secret', '')
+    if not STOCKS_FUNDAMENTALS_CRON_SECRET or not hmac.compare_digest(provided, STOCKS_FUNDAMENTALS_CRON_SECRET):
+        return jsonify({'status': 'error', 'message': 'Unauthorized'}), 403
+    db = get_db()
+    try:
+        summary = sync_fundamentals(db)
+    except Exception as e:
+        app.logger.error(f'Fundamentals cron sync failed: {e}')
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+    return jsonify({'status': 'ok', **summary})
+
+
+@app.route('/stocks/watchlist', methods=['GET'])
+@stocks_login_required
+def stocks_watchlist():
+    """Lists every stock_watchlist row with its latest stock_fundamentals
+    snapshot (if any) joined in. Doesn't touch stock_watchlist's schema --
+    read-only here."""
+    db = get_db()
+    rows = db.execute(
+        '''SELECT w.id, w.symbol, w.exchange, w.name, w.is_active,
+                  f.pe_ratio, f.peg_ratio, f.eps, f.snapshot_date
+           FROM stock_watchlist w
+           LEFT JOIN stock_fundamentals f ON f.watchlist_id = w.id
+               AND f.snapshot_date = (
+                   SELECT MAX(f2.snapshot_date) FROM stock_fundamentals f2 WHERE f2.watchlist_id = w.id
+               )
+           ORDER BY w.symbol'''
+    ).fetchall()
+    return render_template('admin/stocks_watchlist.html', rows=rows)
+
+
+@app.route('/stocks/login', methods=['GET', 'POST'])
 def stocks_admin_login():
     """Separate login for Nari Nakhre Stocks -- shared by super_admin and
     child admins (session['stocks_admin_role'] tells them apart). Nothing to
@@ -6762,7 +6883,7 @@ def stocks_admin_login():
     return redirect(url_for('stocks_admin_dashboard'))
 
 
-@app.route('/admin/stocks/logout', methods=['GET'])
+@app.route('/stocks/logout', methods=['GET'])
 @stocks_login_required
 def stocks_admin_logout():
     session.pop('stocks_admin_id', None)
@@ -6772,7 +6893,7 @@ def stocks_admin_logout():
     return redirect(url_for('stocks_admin_login'))
 
 
-@app.route('/admin/stocks/dashboard', methods=['GET'])
+@app.route('/stocks/dashboard', methods=['GET'])
 @stocks_login_required
 def stocks_admin_dashboard():
     db = get_db()
@@ -6785,7 +6906,7 @@ def stocks_admin_dashboard():
     )
 
 
-@app.route('/admin/stocks/admins', methods=['GET'])
+@app.route('/stocks/admins', methods=['GET'])
 @stocks_role_required('super_admin')
 def stocks_admin_manage():
     db = get_db()
@@ -6793,7 +6914,7 @@ def stocks_admin_manage():
     return render_template('admin/stocks_admins.html', admins=admins)
 
 
-@app.route('/admin/stocks/admins/create', methods=['POST'])
+@app.route('/stocks/admins/create', methods=['POST'])
 @stocks_role_required('super_admin')
 def stocks_admin_create():
     db = get_db()
@@ -6807,7 +6928,7 @@ def stocks_admin_create():
     return redirect(url_for('stocks_admin_manage'))
 
 
-@app.route('/admin/stocks/admins/<int:admin_id>/toggle', methods=['POST'])
+@app.route('/stocks/admins/<int:admin_id>/toggle', methods=['POST'])
 @stocks_role_required('super_admin')
 def stocks_admin_toggle(admin_id):
     db = get_db()

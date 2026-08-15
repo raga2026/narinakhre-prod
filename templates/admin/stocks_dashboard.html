@@ -54,17 +54,26 @@
         <section class="bg-slate-800 rounded-2xl p-6 border border-sky-500/20 mb-6" aria-labelledby="sync-heading">
             <h2 id="sync-heading" class="text-lg font-bold text-slate-200 mb-2">Data sync</h2>
             <p class="text-slate-400 text-sm mb-3">Pulls the latest daily candle for every active watchlist symbol.</p>
-            <form method="POST" action="{{ url_for('admin_stocks_sync') }}">
+            <form method="POST" action="{{ url_for('admin_stocks_sync') }}" class="inline-block mr-3">
                 <button type="submit" class="stocks-btn py-3 px-6 rounded-2xl font-bold transition hover:opacity-90">
                     Sync now
+                </button>
+            </form>
+            <p class="text-slate-400 text-sm mt-4 mb-3">Fetches PE/PEG/EPS and other fundamentals from Screener.in for every active symbol -- meant to run weekly, not daily.</p>
+            <form method="POST" action="{{ url_for('admin_stocks_fundamentals_sync') }}" class="inline-block">
+                <button type="submit" class="stocks-btn py-3 px-6 rounded-2xl font-bold transition hover:opacity-90">
+                    Fetch fundamentals
                 </button>
             </form>
         </section>
 
         <div class="bg-slate-800 rounded-2xl p-6 border border-sky-500/20">
             <p class="text-slate-300">Trading-mode controls and the suggestions list are being built next.</p>
-            {% if role == 'super_admin' %}
             <p class="mt-4">
+                <a href="{{ url_for('stocks_watchlist') }}" class="text-sky-400 hover:text-sky-300 underline">View watchlist</a>
+            </p>
+            {% if role == 'super_admin' %}
+            <p class="mt-2">
                 <a href="{{ url_for('stocks_admin_manage') }}" class="text-sky-400 hover:text-sky-300 underline">Manage admins</a>
             </p>
             {% endif %}

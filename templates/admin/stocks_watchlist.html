@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Watchlist - Nari Nakhre Stocks</title>
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+    <style>
+        body { background: #0f172a; color: #f8fafc; }
+        .stocks-accent { color: #0ea5e9; }
+        table { border-collapse: collapse; width: 100%; }
+        th, td { text-align: left; padding: 0.6rem 0.9rem; border-bottom: 1px solid rgba(14, 165, 233, 0.15); }
+        th { color: #7dd3fc; font-weight: 600; }
+    </style>
+</head>
+<body class="min-h-screen p-8">
+    <div class="max-w-4xl mx-auto">
+        <div class="flex items-center justify-between mb-6">
+            <h1 class="text-2xl font-extrabold stocks-accent font-serif">Watchlist</h1>
+            <a href="{{ url_for('stocks_admin_dashboard') }}" class="text-sm text-slate-400 hover:text-sky-400 underline">Back to dashboard</a>
+        </div>
+
+        {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+            <div class="mb-6" role="alert" aria-live="assertive">
+            {% for category, msg in messages %}
+                <div class="bg-sky-900/40 text-sky-200 border border-sky-500/30 rounded-xl p-3 mb-2 text-sm">{{ msg }}</div>
+            {% endfor %}
+            </div>
+        {% endif %}
+        {% endwith %}
+
+        <div class="bg-slate-800 rounded-2xl p-6 border border-sky-500/20 overflow-x-auto">
+            <table>
+                <caption class="text-left text-slate-400 text-sm mb-3">
+                    Fundamentals show the most recent weekly snapshot per symbol -- run "Fetch fundamentals" on the dashboard to update them.
+                </caption>
+                <thead>
+                    <tr>
+                        <th scope="col">Symbol</th>
+                        <th scope="col">Exchange</th>
+                        <th scope="col">Name</th>
+                        <th scope="col">Status</th>
+                        <th scope="col">P/E</th>
+                        <th scope="col">PEG</th>
+                        <th scope="col">EPS</th>
+                        <th scope="col">As of</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for row in rows %}
+                    <tr>
+                        <th scope="row">{{ row.symbol }}</th>
+                        <td>{{ row.exchange }}</td>
+                        <td>{{ row.name or '—' }}</td>
+                        <td>{{ 'Active' if row.is_active else 'Inactive' }}</td>
+                        <td>{{ row.pe_ratio if row.pe_ratio is not none else '—' }}</td>
+                        <td>{{ row.peg_ratio if row.peg_ratio is not none else '—' }}</td>
+                        <td>{{ row.eps if row.eps is not none else '—' }}</td>
+                        <td>{{ row.snapshot_date or '—' }}</td>
+                    </tr>
+                    {% else %}
+                    <tr>
+                        <td colspan="8" class="text-slate-400">No symbols in the watchlist yet.</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</body>
+</html>

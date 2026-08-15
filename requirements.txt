@@ -13,3 +13,4 @@ python-dotenv
 Authlib>=1.3
 cryptography
 kiteconnect
+beautifulsoup4

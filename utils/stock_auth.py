@@ -1,8 +1,39 @@
+import hmac
 import os
 from functools import wraps
 
-from flask import flash, redirect, session, url_for
+from flask import flash, redirect, request, session, url_for
 from werkzeug.security import check_password_hash, generate_password_hash
+
+
+def has_valid_cron_secret(request_headers, secret):
+    """Checks the X-Cron-Secret header against secret using constant-time
+    comparison -- the exact same check /cron/stocks-fundamentals-sync does
+    inline in app.py, extracted here only so /admin/stocks/sync (and its
+    test) can reuse it without duplicating the hmac call by hand. Returns
+    False if secret is empty/unset, same as the inline version."""
+    if not secret:
+        return False
+    provided = request_headers.get('X-Cron-Secret', '')
+    return hmac.compare_digest(provided, secret)
+
+
+def legacy_stocks_redirect(new_endpoint, code=301):
+    """Builds a view function that redirects a retired /admin/stocks/...
+    path to its /stocks/... replacement, preserving any URL params (e.g.
+    admin_id) and query string (needed for kite/callback, which gets
+    request_token/status appended by Zerodha). code=308 should be used for
+    routes that accept POST -- 301/302 aren't guaranteed to preserve the
+    method and body on redirect, so a POST could silently become a GET
+    partway through (Kite's postback caller, or a login form submission);
+    308 fixes that. Transition-period only, see app.py's
+    _LEGACY_STOCKS_ROUTES for where these are registered."""
+    def _redirect(**kwargs):
+        target = url_for(new_endpoint, **kwargs)
+        if request.query_string:
+            target = f'{target}?{request.query_string.decode()}'
+        return redirect(target, code=code)
+    return _redirect
 
 # Nari Nakhre Stocks has its own login, separate from the storefront's
 # /admin/login -- one super_admin (full access, manages child admins and the
