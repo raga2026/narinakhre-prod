@@ -29,12 +29,14 @@ from utils.stock_auth import (
     authenticate_stocks_admin,
     stocks_login_required,
     stocks_role_required,
+    stocks_watchlist_access_required,
     list_stocks_admin_users,
     create_child_admin,
     toggle_child_admin_active,
     list_viewers,
     create_viewer_account,
     toggle_viewer_active,
+    delete_viewer_account,
     migrate_email_recipients_to_viewers,
     has_valid_cron_secret,
     legacy_stocks_redirect,
@@ -6963,7 +6965,10 @@ def stocks_users_manage():
     if request.method == 'POST':
         email = request.form.get('email')
         name = request.form.get('name')
-        row, password, error = create_viewer_account(db, email, name, session.get('stocks_admin_id'))
+        can_view_watchlist = request.form.get('can_view_watchlist') == 'on'
+        row, password, error = create_viewer_account(
+            db, email, name, session.get('stocks_admin_id'), can_view_watchlist=can_view_watchlist
+        )
         if error:
             flash(error, 'error')
         else:
@@ -6988,6 +6993,21 @@ def stocks_users_toggle(viewer_id):
         flash('Could not update that user.', 'error')
     else:
         flash('User status updated.')
+    return redirect(url_for('stocks_users_manage'))
+
+
+@app.route('/stocks/users/<int:viewer_id>/delete', methods=['POST'])
+@stocks_role_required('super_admin')
+def stocks_users_delete(viewer_id):
+    """Permanently removes a viewer account -- unlike the toggle above,
+    not reversible. See delete_viewer_account in utils/stock_auth.py for
+    the same role-safety guarantee toggle_viewer_active already has (can
+    never delete a super_admin/child_admin row, whatever id is passed)."""
+    db = get_db()
+    if not delete_viewer_account(db, viewer_id):
+        flash('Could not delete that user.', 'error')
+    else:
+        flash('Viewer account deleted.')
     return redirect(url_for('stocks_users_manage'))
 
 
@@ -7189,14 +7209,17 @@ def cron_stocks_fundamentals_sync():
 
 
 @app.route('/stocks/watchlist', methods=['GET'])
-@stocks_role_required('super_admin', 'child_admin')
+@stocks_watchlist_access_required
 def stocks_watchlist():
     """Lists every stock_watchlist row with its latest stock_fundamentals
-    and stock_indicators snapshots (if any) joined in. Doesn't touch
-    stock_watchlist/stock_fundamentals/stock_daily_data schemas -- read-only
-    here. Staff only (super_admin/child_admin) -- viewer accounts get their
-    own read-only page at /stocks/my/suggestions instead, not this
-    operational view."""
+    and stock_indicators snapshots (if any) joined in, including
+    cross_status (golden cross / death cross / no clear trend) per symbol.
+    Doesn't touch stock_watchlist/stock_fundamentals/stock_daily_data
+    schemas -- read-only here. super_admin/child_admin always have access;
+    a viewer only gets in if their account was created with
+    can_view_watchlist granted (see stocks_watchlist_access_required) --
+    everyone else gets their own read-only page at /stocks/my/suggestions
+    instead."""
     db = get_db()
     rows = db.execute(
         '''SELECT w.id, w.symbol, w.exchange, w.name, w.is_active,
@@ -7277,6 +7300,10 @@ def stocks_admin_login():
     session['stocks_admin_id'] = admin_row['id']
     session['stocks_admin_username'] = admin_row['username']
     session['stocks_admin_role'] = admin_row['role']
+    # Cached here rather than looked up fresh per request, same as role
+    # above -- see stocks_watchlist_access_required. Irrelevant for
+    # super_admin/child_admin, who always have watchlist access regardless.
+    session['stocks_can_view_watchlist'] = bool(admin_row.get('can_view_watchlist'))
     session.modified = True
     # viewer accounts land on their own read-only suggestions page, not the
     # staff dashboard (there was no per-role redirect at all before this --
@@ -7293,6 +7320,7 @@ def stocks_admin_logout():
     session.pop('stocks_admin_id', None)
     session.pop('stocks_admin_username', None)
     session.pop('stocks_admin_role', None)
+    session.pop('stocks_can_view_watchlist', None)
     session.modified = True
     return redirect(url_for('stocks_admin_login'))
 

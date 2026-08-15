@@ -3,14 +3,20 @@ from datetime import datetime, timedelta, timezone
 
 import requests
 
-# Fully independent from the storefront's Zeptomail integration
-# (send_contact_email in app.py) -- separate env vars, no shared config, and
-# this module is imported BY app.py rather than importing from it (avoids a
-# circular import too). Same underlying HTTP API shape, just a different
-# Mail Agent/sender/recipient. The .in region endpoint is hardcoded rather
-# than read from the storefront's ZEPTOMAIL_API_URL env var, same
-# independence reasoning -- it's a fixed public endpoint, not a secret, so
-# hardcoding it isn't really "shared config" in any meaningful sense.
+# Deliberately reuses the storefront's own "support" Zeptomail Mail Agent
+# (SMTP_SUPPORT_EMAIL_PASSWORD / SMTP_support_EMAIL_FROM, see app.py's
+# send_contact_email and its SUPPORT_FROM_EMAIL) rather than a separate
+# STOCKS_ZEPTOMAIL_API_KEY Mail Agent -- an earlier version of this module
+# used its own credentials, but that var was never actually set up on
+# Render, which meant every Stocks email (daily suggestions, viewer welcome
+# emails, job-failure alerts) failed outright, regardless of what the
+# "from" address was set to. The storefront's support sender is already a
+# verified Zeptomail identity with a working token, so reusing it just
+# works, with no new Mail Agent to provision. Only reads the same env var
+# NAMES app.py already reads -- doesn't import from app.py, no circular
+# import. The .in region endpoint is hardcoded (a fixed public endpoint,
+# not a secret) rather than read from ZEPTOMAIL_API_URL, same reasoning as
+# before.
 STOCKS_ZEPTOMAIL_API_URL = 'https://api.zeptomail.in/v1.1/email'
 ALERT_DEDUP_WINDOW_HOURS = 6
 
@@ -77,10 +83,10 @@ def send_zeptomail_stocks_email(to_email, to_name, subject, textbody, htmlbody=N
     """Low-level Zeptomail HTTP API sender shared by every Stocks-module
     email -- job-failure alerts (send_alert_email below) and the daily
     suggestions email (utils/suggestion_email.py) both go through this, so
-    there's exactly one place that builds the request. Same request shape
-    as the storefront's send_contact_email() in app.py, but fully
-    independent credentials (STOCKS_ZEPTOMAIL_API_KEY/STOCKS_ALERT_FROM_EMAIL),
-    no shared config, no import from app.py.
+    there's exactly one place that builds the request. Same request shape,
+    same credentials, and same verified sender identity as the storefront's
+    own send_contact_email() in app.py -- see the module comment above for
+    why this reuses that context instead of a separate one.
 
     Returns (success: bool, detail: str) -- never raises, since a failed
     email shouldn't itself crash whatever else was happening (a failing
@@ -92,19 +98,19 @@ def send_zeptomail_stocks_email(to_email, to_name, subject, textbody, htmlbody=N
     send" flash on /stocks/users) could say nothing more specific than
     "check the Zeptomail config", even when the real cause was sitting
     right here the whole time."""
-    api_key = os.environ.get('STOCKS_ZEPTOMAIL_API_KEY', '')
-    # Defaults to support@narinakhre.com rather than requiring
-    # STOCKS_ALERT_FROM_EMAIL to be set -- one fixed sender for every Stocks
-    # email (alerts, viewer welcome emails, daily suggestions), same domain
-    # the storefront's own Zeptomail sender already lives on. Render's env
-    # var still wins if it's ever set to something else.
-    from_email = os.environ.get('STOCKS_ALERT_FROM_EMAIL', 'support@narinakhre.com')
+    api_key = os.environ.get('SMTP_SUPPORT_EMAIL_PASSWORD', '')
+    # Matches SUPPORT_FROM_EMAIL's own default in app.py exactly -- this
+    # must be a sender Zeptomail has actually verified under the token
+    # above, or the send gets rejected regardless of the address looking
+    # plausible. Render's env var (same one app.py itself reads) still
+    # wins if it's ever set to something else.
+    from_email = os.environ.get('SMTP_support_EMAIL_FROM', 'support-noreply@narinakhre.com')
 
     if not api_key or not from_email or not to_email:
         missing = [
             name for name, value in [
-                ('STOCKS_ZEPTOMAIL_API_KEY', api_key),
-                ('STOCKS_ALERT_FROM_EMAIL', from_email),
+                ('SMTP_SUPPORT_EMAIL_PASSWORD', api_key),
+                ('SMTP_support_EMAIL_FROM', from_email),
                 ('recipient address', to_email),
             ] if not value
         ]

@@ -51,6 +51,13 @@
                     <input id="new-name" type="text" name="name" autocomplete="off"
                            class="w-full border border-sky-500/30 rounded-xl p-3 focus:outline-none focus:border-sky-500 transition">
                 </div>
+                <div class="flex items-center gap-2">
+                    <input id="new-can-view-watchlist" type="checkbox" name="can_view_watchlist"
+                           class="h-4 w-4">
+                    <label for="new-can-view-watchlist" class="text-sm text-slate-300">
+                        Also let this viewer see the watchlist (symbols, fundamentals, golden/death cross status)
+                    </label>
+                </div>
                 <button type="submit" class="stocks-btn py-3 px-6 rounded-2xl font-bold transition hover:opacity-90">
                     Add viewer
                 </button>
@@ -79,13 +86,26 @@
                     <p class="text-slate-400 text-sm">
                         Status: {{ 'Active' if viewer.is_active else 'Disabled' }}
                     </p>
-                    <form method="POST" action="{{ url_for('stocks_users_toggle', viewer_id=viewer.id) }}" class="mt-3">
-                        <button type="submit"
-                                aria-label="{{ 'Disable' if viewer.is_active else 'Enable' }} viewer {{ viewer.username }}"
-                                class="text-sm underline {{ 'text-rose-400 hover:text-rose-300' if viewer.is_active else 'text-emerald-400 hover:text-emerald-300' }}">
-                            {{ 'Disable' if viewer.is_active else 'Enable' }}
-                        </button>
-                    </form>
+                    <p class="text-slate-400 text-sm">
+                        Watchlist access: {{ 'Yes' if viewer.can_view_watchlist else 'No' }}
+                    </p>
+                    <div class="mt-3 flex items-center gap-4">
+                        <form method="POST" action="{{ url_for('stocks_users_toggle', viewer_id=viewer.id) }}">
+                            <button type="submit"
+                                    aria-label="{{ 'Disable' if viewer.is_active else 'Enable' }} viewer {{ viewer.username }}"
+                                    class="text-sm underline {{ 'text-rose-400 hover:text-rose-300' if viewer.is_active else 'text-emerald-400 hover:text-emerald-300' }}">
+                                {{ 'Disable' if viewer.is_active else 'Enable' }}
+                            </button>
+                        </form>
+                        <form method="POST" action="{{ url_for('stocks_users_delete', viewer_id=viewer.id) }}"
+                              onsubmit="return confirm('Permanently delete {{ viewer.username }}? This cannot be undone.');">
+                            <button type="submit"
+                                    aria-label="Permanently delete viewer {{ viewer.username }}"
+                                    class="text-sm underline text-rose-400 hover:text-rose-300">
+                                Delete
+                            </button>
+                        </form>
+                    </div>
                 </li>
                 {% else %}
                 <li class="text-slate-400">No viewers yet.</li>

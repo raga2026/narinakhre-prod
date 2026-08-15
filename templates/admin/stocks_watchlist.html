@@ -22,7 +22,11 @@
     <div class="max-w-4xl mx-auto">
         <div class="flex items-center justify-between mb-6">
             <h1 class="text-2xl font-extrabold stocks-accent font-serif">Watchlist</h1>
+            {% if session.stocks_admin_role == 'viewer' %}
+            <a href="{{ url_for('stocks_my_suggestions') }}" class="text-sm text-slate-400 hover:text-sky-400 underline">Back to my suggestions</a>
+            {% else %}
             <a href="{{ url_for('stocks_admin_dashboard') }}" class="text-sm text-slate-400 hover:text-sky-400 underline">Back to dashboard</a>
+            {% endif %}
         </div>
 
         {% with messages = get_flashed_messages(with_categories=true) %}
@@ -42,9 +46,9 @@
                 </caption>
                 <thead>
                     <tr>
+                        <th scope="col">Name</th>
                         <th scope="col">Symbol</th>
                         <th scope="col">Exchange</th>
-                        <th scope="col">Name</th>
                         <th scope="col">Status</th>
                         <th scope="col">P/E</th>
                         <th scope="col">PEG</th>
@@ -58,9 +62,9 @@
                 <tbody>
                     {% for row in rows %}
                     <tr>
-                        <th scope="row">{{ row.symbol }}</th>
+                        <th scope="row">{{ row.name or row.symbol }}</th>
+                        <td>{{ row.symbol }}</td>
                         <td>{{ row.exchange }}</td>
-                        <td>{{ row.name or '—' }}</td>
                         <td>{{ 'Active' if row.is_active else 'Inactive' }}</td>
                         <td>
                             {{ row.pe_ratio if row.pe_ratio is not none else '—' }}

@@ -67,6 +67,12 @@ STOCKS_AUTH_ALTER_SQL = [
     'ALTER TABLE stocks_admin_users DROP CONSTRAINT IF EXISTS stocks_admin_users_role_check',
     "ALTER TABLE stocks_admin_users ADD CONSTRAINT stocks_admin_users_role_check "
     "CHECK (role IN ('super_admin', 'child_admin', 'viewer'))",
+    # Per-viewer override letting a specific viewer see the (staff)
+    # watchlist page -- off by default; only meaningful for role='viewer'
+    # rows, super_admin/child_admin already have full watchlist access
+    # regardless of this flag. Set at account-creation time (see
+    # create_viewer_account) via a toggle on /stocks/users.
+    'ALTER TABLE stocks_admin_users ADD COLUMN IF NOT EXISTS can_view_watchlist INTEGER DEFAULT 0',
 ]
 
 
@@ -120,7 +126,8 @@ def authenticate_stocks_admin(db, username, password):
     app.py's get_db() -- unlike the startup-time init above, this always
     runs inside a request."""
     row = db.execute(
-        'SELECT id, username, password_hash, role, is_active FROM stocks_admin_users WHERE username=?',
+        'SELECT id, username, password_hash, role, is_active, can_view_watchlist '
+        'FROM stocks_admin_users WHERE username=?',
         (username,)
     ).fetchone()
     if not row or not row['is_active']:
@@ -156,6 +163,29 @@ def stocks_role_required(*roles):
             return view_func(*args, **kwargs)
         return wrapped
     return decorator
+
+
+def stocks_watchlist_access_required(view_func):
+    """Same access as stocks_role_required('super_admin', 'child_admin'),
+    plus any viewer whose can_view_watchlist flag was granted when their
+    account was created (see create_viewer_account) -- the flag is cached
+    into session['stocks_can_view_watchlist'] at login time
+    (stocks_admin_login in app.py), same staleness tradeoff
+    session['stocks_admin_role'] already accepts everywhere else in this
+    module: toggling the flag after a viewer's already logged in takes
+    effect on their next login, not immediately."""
+    @wraps(view_func)
+    def wrapped(*args, **kwargs):
+        if not session.get('stocks_admin_id'):
+            return redirect(url_for('stocks_admin_login'))
+        role = session.get('stocks_admin_role')
+        if role in ('super_admin', 'child_admin'):
+            return view_func(*args, **kwargs)
+        if role == 'viewer' and session.get('stocks_can_view_watchlist'):
+            return view_func(*args, **kwargs)
+        flash('You do not have access to that page.', 'error')
+        return ('Forbidden', 403)
+    return wrapped
 
 
 def list_stocks_admin_users(db):
@@ -217,11 +247,12 @@ def toggle_child_admin_active(db, admin_id):
 
 def list_viewers(db):
     return db.execute(
-        "SELECT id, username, name, is_active, created_at FROM stocks_admin_users WHERE role='viewer' ORDER BY created_at DESC"
+        "SELECT id, username, name, is_active, can_view_watchlist, created_at "
+        "FROM stocks_admin_users WHERE role='viewer' ORDER BY created_at DESC"
     ).fetchall()
 
 
-def create_viewer_account(db, email, name, created_by_id):
+def create_viewer_account(db, email, name, created_by_id, can_view_watchlist=False):
     """Creates a new role='viewer' account -- email stored in the username
     column (stocks_admin_users has no separate email field, and username is
     already the login field for every role). Generates a real, random,
@@ -232,6 +263,11 @@ def create_viewer_account(db, email, name, created_by_id):
     utils/suggestion_email.send_viewer_welcome_email); it's returned here,
     in plaintext, only so that send can happen -- nothing else stores or
     logs the plaintext, only its hash persists in the database.
+
+    can_view_watchlist grants this specific viewer access to the (staff)
+    /stocks/watchlist page -- off by default; see
+    stocks_watchlist_access_required. Most viewers should stay read-only
+    to their own suggestions, so this is opt-in per account, not global.
 
     Returns (row, plaintext_password, error_message) -- password is None
     on error."""
@@ -246,14 +282,15 @@ def create_viewer_account(db, email, name, created_by_id):
     password = secrets.token_urlsafe(12)
     password_hash = generate_password_hash(password)
     db.execute(
-        '''INSERT INTO stocks_admin_users (username, password_hash, role, name, created_by)
-           VALUES (?, ?, 'viewer', ?, ?)''',
-        (email, password_hash, (name or '').strip() or None, created_by_id)
+        '''INSERT INTO stocks_admin_users (username, password_hash, role, name, created_by, can_view_watchlist)
+           VALUES (?, ?, 'viewer', ?, ?, ?)''',
+        (email, password_hash, (name or '').strip() or None, created_by_id, 1 if can_view_watchlist else 0)
     )
     db.commit()
 
     row = db.execute(
-        'SELECT id, username, name, role, is_active, created_at FROM stocks_admin_users WHERE username=?',
+        'SELECT id, username, name, role, is_active, can_view_watchlist, created_at '
+        'FROM stocks_admin_users WHERE username=?',
         (email,)
     ).fetchone()
     return row, password, None
@@ -273,6 +310,24 @@ def toggle_viewer_active(db, admin_id):
         'UPDATE stocks_admin_users SET is_active=?, updated_at=NOW() WHERE id=?',
         (new_status, admin_id)
     )
+    db.commit()
+    return True
+
+
+def delete_viewer_account(db, admin_id):
+    """Permanently deletes a viewer row -- unlike toggle_viewer_active
+    (reversible), this is not. Mirrors the same role safety pattern as
+    toggle_viewer_active/toggle_child_admin_active: only ever touches a
+    row that's actually role='viewer', regardless of what id is passed in,
+    so this can never be used to delete a super_admin or child_admin by
+    mistake (e.g. a wrong/tampered id). Returns True if a row was deleted,
+    False if not found or not a viewer."""
+    row = db.execute(
+        'SELECT id, role FROM stocks_admin_users WHERE id=?', (admin_id,)
+    ).fetchone()
+    if not row or row['role'] != 'viewer':
+        return False
+    db.execute('DELETE FROM stocks_admin_users WHERE id=? AND role=?', (admin_id, 'viewer'))
     db.commit()
     return True
 

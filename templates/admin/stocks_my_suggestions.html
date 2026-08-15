@@ -21,6 +21,10 @@
         </div>
         <p class="text-slate-400 text-sm mb-6">
             <a href="{{ url_for('stocks_my_history') }}" class="text-sky-400 hover:text-sky-300 underline">View full history</a>
+            {% if session.stocks_can_view_watchlist %}
+            &nbsp;·&nbsp;
+            <a href="{{ url_for('stocks_watchlist') }}" class="text-sky-400 hover:text-sky-300 underline">View watchlist</a>
+            {% endif %}
         </p>
 
         {% with messages = get_flashed_messages(with_categories=true) %}

@@ -166,17 +166,20 @@ def test_check_missed_jobs_skips_jobs_not_due_yet():
 def test_send_zeptomail_stocks_email_missing_config_reports_which_var():
     # This is the exact scenario behind the old "check the Zeptomail
     # config" flash message -- the caller must now get told WHICH var is
-    # missing, not just that something failed.
-    with patch.dict(os.environ, {'STOCKS_ZEPTOMAIL_API_KEY': '', 'STOCKS_ALERT_FROM_EMAIL': ''}, clear=False):
+    # missing, not just that something failed. Uses the storefront's own
+    # SMTP_SUPPORT_EMAIL_PASSWORD/SMTP_support_EMAIL_FROM vars, not a
+    # separate Stocks-only credential -- see the module comment in
+    # utils/stock_alerting.py for why.
+    with patch.dict(os.environ, {'SMTP_SUPPORT_EMAIL_PASSWORD': '', 'SMTP_support_EMAIL_FROM': ''}, clear=False):
         ok, detail = send_zeptomail_stocks_email('to@example.com', 'To', 'Subject', 'Body')
 
     assert ok is False
-    assert 'STOCKS_ZEPTOMAIL_API_KEY' in detail
-    assert 'STOCKS_ALERT_FROM_EMAIL' in detail
+    assert 'SMTP_SUPPORT_EMAIL_PASSWORD' in detail
+    assert 'SMTP_support_EMAIL_FROM' in detail
 
 
 def test_send_zeptomail_stocks_email_success_returns_ok():
-    env = {'STOCKS_ZEPTOMAIL_API_KEY': 'test-key', 'STOCKS_ALERT_FROM_EMAIL': 'from@example.com'}
+    env = {'SMTP_SUPPORT_EMAIL_PASSWORD': 'test-key', 'SMTP_support_EMAIL_FROM': 'support-noreply@narinakhre.com'}
     with patch.dict(os.environ, env, clear=False), \
          patch('utils.stock_alerting.requests.post', return_value=Mock(status_code=201)):
         ok, detail = send_zeptomail_stocks_email('to@example.com', 'To', 'Subject', 'Body')
@@ -186,7 +189,7 @@ def test_send_zeptomail_stocks_email_success_returns_ok():
 
 
 def test_send_zeptomail_stocks_email_http_error_reports_status_and_body():
-    env = {'STOCKS_ZEPTOMAIL_API_KEY': 'test-key', 'STOCKS_ALERT_FROM_EMAIL': 'from@example.com'}
+    env = {'SMTP_SUPPORT_EMAIL_PASSWORD': 'test-key', 'SMTP_support_EMAIL_FROM': 'support-noreply@narinakhre.com'}
     mock_resp = Mock(status_code=401, text='Invalid API key')
     with patch.dict(os.environ, env, clear=False), \
          patch('utils.stock_alerting.requests.post', return_value=mock_resp):
@@ -198,7 +201,7 @@ def test_send_zeptomail_stocks_email_http_error_reports_status_and_body():
 
 
 def test_send_zeptomail_stocks_email_network_error_reports_exception():
-    env = {'STOCKS_ZEPTOMAIL_API_KEY': 'test-key', 'STOCKS_ALERT_FROM_EMAIL': 'from@example.com'}
+    env = {'SMTP_SUPPORT_EMAIL_PASSWORD': 'test-key', 'SMTP_support_EMAIL_FROM': 'support-noreply@narinakhre.com'}
     with patch.dict(os.environ, env, clear=False), \
          patch('utils.stock_alerting.requests.post', side_effect=ConnectionError('DNS lookup failed')):
         ok, detail = send_zeptomail_stocks_email('to@example.com', 'To', 'Subject', 'Body')
@@ -206,3 +209,16 @@ def test_send_zeptomail_stocks_email_network_error_reports_exception():
     assert ok is False
     assert 'ConnectionError' in detail
     assert 'DNS lookup failed' in detail
+
+
+def test_send_zeptomail_stocks_email_defaults_to_support_noreply_sender(monkeypatch):
+    # No SMTP_support_EMAIL_FROM set at all -- must still work, using the
+    # same default app.py's own SUPPORT_FROM_EMAIL falls back to.
+    monkeypatch.setenv('SMTP_SUPPORT_EMAIL_PASSWORD', 'test-key')
+    monkeypatch.delenv('SMTP_support_EMAIL_FROM', raising=False)
+    with patch('utils.stock_alerting.requests.post', return_value=Mock(status_code=201)) as mock_post:
+        ok, _ = send_zeptomail_stocks_email('to@example.com', 'To', 'Subject', 'Body')
+
+    assert ok is True
+    payload = mock_post.call_args.kwargs['json']
+    assert payload['from']['address'] == 'support-noreply@narinakhre.com'
