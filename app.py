@@ -60,6 +60,10 @@ from utils.stock_universe import (
     refresh_market_cap_filter,
 )
 from utils.stock_shortlist import run_fundamental_shortlist
+from utils.stock_indicators import (
+    initialize_stock_indicators_table_if_needed,
+    run_indicator_calculation,
+)
 import auth_providers
 import io
 from PIL import Image as PILImage
@@ -719,6 +723,7 @@ initialize_kite_session_table_if_needed(get_supabase())
 initialize_kite_postback_log_table_if_needed(get_supabase())
 initialize_fundamentals_table_if_needed(get_supabase())
 initialize_stock_universe_table_if_needed(get_supabase())
+initialize_stock_indicators_table_if_needed(get_supabase())
 
 
 def calculate_inclusive_gst(display_cart, discount=0.0, full_subtotal=0.0):
@@ -6758,6 +6763,28 @@ def stocks_watchlist_refresh_shortlist():
     return jsonify({'status': 'ok', **summary})
 
 
+@app.route('/stocks/indicators/calculate', methods=['POST'])
+def stocks_indicators_calculate():
+    """Computes MA21/50/200, RSI-14, cross status, and volume trend for
+    every active stock_watchlist row -- see utils/stock_indicators.py and
+    utils/indicator_engine.py. Requires stock_daily_data to already have
+    that day's prices, hence the daily GitHub Actions workflow for this is
+    scheduled after the price-sync one. Same dual auth as /stocks/sync: a
+    valid X-Cron-Secret header or an active Stocks login session, either
+    sufficient."""
+    if not has_valid_cron_secret(request.headers, STOCKS_FUNDAMENTALS_CRON_SECRET) \
+            and not session.get('stocks_admin_id'):
+        return redirect(url_for('stocks_admin_login'))
+
+    db = get_db()
+    try:
+        summary = run_indicator_calculation(db)
+    except Exception as e:
+        app.logger.error(f'Indicator calculation failed: {e}')
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+    return jsonify({'status': 'ok', **summary})
+
+
 @app.route('/stocks/kite/login', methods=['GET'])
 @stocks_role_required('super_admin')
 def stocks_kite_login():
@@ -6885,16 +6912,22 @@ def cron_stocks_fundamentals_sync():
 @stocks_login_required
 def stocks_watchlist():
     """Lists every stock_watchlist row with its latest stock_fundamentals
-    snapshot (if any) joined in. Doesn't touch stock_watchlist's schema --
-    read-only here."""
+    and stock_indicators snapshots (if any) joined in. Doesn't touch
+    stock_watchlist/stock_fundamentals/stock_daily_data schemas -- read-only
+    here."""
     db = get_db()
     rows = db.execute(
         '''SELECT w.id, w.symbol, w.exchange, w.name, w.is_active,
-                  f.pe_ratio, f.peg_ratio, f.eps, f.snapshot_date
+                  f.pe_ratio, f.peg_ratio, f.eps, f.snapshot_date,
+                  i.rsi_14, i.cross_status, i.calc_date
            FROM stock_watchlist w
            LEFT JOIN stock_fundamentals f ON f.watchlist_id = w.id
                AND f.snapshot_date = (
                    SELECT MAX(f2.snapshot_date) FROM stock_fundamentals f2 WHERE f2.watchlist_id = w.id
+               )
+           LEFT JOIN stock_indicators i ON i.watchlist_id = w.id
+               AND i.calc_date = (
+                   SELECT MAX(i2.calc_date) FROM stock_indicators i2 WHERE i2.watchlist_id = w.id
                )
            ORDER BY w.symbol'''
     ).fetchall()

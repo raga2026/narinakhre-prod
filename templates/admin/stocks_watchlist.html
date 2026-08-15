@@ -11,6 +11,10 @@
         table { border-collapse: collapse; width: 100%; }
         th, td { text-align: left; padding: 0.6rem 0.9rem; border-bottom: 1px solid rgba(14, 165, 233, 0.15); }
         th { color: #7dd3fc; font-weight: 600; }
+        .badge { display:inline-flex; align-items:center; padding:2px 10px; border-radius:999px; font-size:0.72rem; font-weight:700; white-space: nowrap; }
+        .badge-golden_cross    { background:#dcfce7; color:#15803d; }
+        .badge-death_cross     { background:#fee2e2; color:#b91c1c; }
+        .badge-no_clear_trend  { background:#e2e8f0; color:#475569; }
     </style>
 </head>
 <body class="min-h-screen p-8">
@@ -45,6 +49,8 @@
                         <th scope="col">PEG</th>
                         <th scope="col">EPS</th>
                         <th scope="col">As of</th>
+                        <th scope="col">RSI (14)</th>
+                        <th scope="col">Cross</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -58,10 +64,18 @@
                         <td>{{ row.peg_ratio if row.peg_ratio is not none else '—' }}</td>
                         <td>{{ row.eps if row.eps is not none else '—' }}</td>
                         <td>{{ row.snapshot_date or '—' }}</td>
+                        <td>{{ row.rsi_14 if row.rsi_14 is not none else '—' }}</td>
+                        <td>
+                            {% if row.cross_status %}
+                                <span class="badge badge-{{ row.cross_status }}">{{ row.cross_status.replace('_', ' ') | title }}</span>
+                            {% else %}
+                                —
+                            {% endif %}
+                        </td>
                     </tr>
                     {% else %}
                     <tr>
-                        <td colspan="8" class="text-slate-400">No symbols in the watchlist yet.</td>
+                        <td colspan="10" class="text-slate-400">No symbols in the watchlist yet.</td>
                     </tr>
                     {% endfor %}
                 </tbody>

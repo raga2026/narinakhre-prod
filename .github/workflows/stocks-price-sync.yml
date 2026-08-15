@@ -1,0 +1,31 @@
+name: Stocks price sync
+
+on:
+  schedule:
+    # 00:30 UTC daily = 06:00 IST -- well after NSE/BSE close (15:30 IST)
+    # and settlement, before market open the same day. Triggers
+    # POST /stocks/sync (utils/stock_ingestion.py), which needs an active
+    # Kite session (see /stocks/kite/login) to actually pull candles.
+    #
+    # This workflow was missing until stocks-indicators-calculate.yml
+    # needed to be scheduled after it -- /stocks/sync itself was made
+    # cron-compatible earlier, but nothing was ever wired up to trigger it
+    # daily until now.
+    - cron: '30 0 * * *'
+  workflow_dispatch: {}  # lets you trigger it manually from the Actions tab
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: POST to /stocks/sync
+        run: |
+          status=$(curl -s -o /tmp/response.txt -w "%{http_code}" --max-time 120 -X POST \
+            -H "X-Cron-Secret: ${{ secrets.STOCKS_FUNDAMENTALS_CRON_SECRET }}" \
+            https://narinakhre.com/stocks/sync)
+          echo "HTTP status: $status"
+          cat /tmp/response.txt
+          if [ "$status" != "200" ]; then
+            echo "Request failed"
+            exit 1
+          fi
