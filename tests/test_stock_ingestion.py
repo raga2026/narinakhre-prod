@@ -1,7 +1,7 @@
-from datetime import date
+from datetime import date, timedelta
 from unittest.mock import MagicMock
 
-from utils.stock_ingestion import sync_daily_data
+from utils.stock_ingestion import BACKFILL_DAYS, sync_daily_data
 
 
 class FakeCursor:
@@ -107,3 +107,24 @@ def test_sync_daily_data_records_per_symbol_failure_without_stopping_batch():
     assert summary['failed'] == 1
     assert summary['failures'][0]['symbol'] == 'RELIANCE'
     assert len(db.daily_data) == 1
+
+
+def test_symbol_returning_no_candles_is_tracked_separately_from_failures():
+    # Kite can respond successfully with an empty candle list (no exception)
+    # -- that must not be silently indistinguishable from "already synced".
+    watchlist = [{'id': 1, 'symbol': 'THINLYTRADED', 'exchange': 'BSE', 'is_active': 1}]
+    db = FakeDB(watchlist)
+
+    mock_kite = MagicMock()
+    mock_kite.fetch_daily_candles.return_value = []
+
+    summary = sync_daily_data(db, kite_client=mock_kite)
+
+    expected_from_date = (date.today() - timedelta(days=BACKFILL_DAYS)).isoformat()
+    assert summary['inserted'] == 0
+    assert summary['failed'] == 0
+    assert summary['zero_candles'] == [{
+        'symbol': 'THINLYTRADED', 'exchange': 'BSE',
+        'from_date': expected_from_date,
+        'to_date': date.today().isoformat(),
+    }]

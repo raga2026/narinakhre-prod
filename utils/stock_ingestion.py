@@ -83,6 +83,12 @@ def sync_daily_data(db, kite_client=None):
     .commit(), matching app.py's SupabaseDB/get_db(). kite_client defaults to
     a real KiteClient built from environment variables; pass a stub/mock to
     test without hitting Kite.
+
+    The returned summary's 'zero_candles' list is distinct from 'failures':
+    a symbol lands there when Kite responded successfully (no exception)
+    but returned no candles at all for the requested date range -- worth
+    watching for since it's otherwise silent and looks identical to a
+    symbol that was simply already up to date.
     """
     kite_client = kite_client or KiteClient()
 
@@ -94,6 +100,12 @@ def sync_daily_data(db, kite_client=None):
     inserted = 0
     failed = 0
     failures = []
+    # Kite can return an empty candle list without raising -- e.g. a
+    # from_date/to_date window with no completed trading sessions for that
+    # instrument. That's indistinguishable from "already up to date" unless
+    # tracked separately: a symbol landing here got a real (non-error)
+    # response from Kite, just with zero rows in it.
+    zero_candles = []
 
     for row in watchlist_rows:
         watchlist_id = row['id']
@@ -112,6 +124,12 @@ def sync_daily_data(db, kite_client=None):
                 continue
 
             candles = kite_client.fetch_daily_candles(symbol, exchange, from_date, today)
+
+            if not candles:
+                zero_candles.append({
+                    'symbol': symbol, 'exchange': exchange,
+                    'from_date': from_date.isoformat(), 'to_date': today.isoformat(),
+                })
 
             for candle in candles:
                 trade_date = candle['trade_date']
@@ -143,4 +161,5 @@ def sync_daily_data(db, kite_client=None):
         'inserted': inserted,
         'failed': failed,
         'failures': failures,
+        'zero_candles': zero_candles,
     }
