@@ -50,6 +50,12 @@ class KiteClient:
         day-interval historical data API."""
         instrument_key = f'{exchange}:{symbol}'
         quote = self._kite.ltp([instrument_key])
+        if instrument_key not in quote:
+            raise KiteClientError(
+                f'Kite has no quote for {instrument_key} -- it may not be tradable '
+                f'through Kite (illiquid/unlisted-on-Kite BSE scrip), or the symbol '
+                f'may be delisted/renamed on the exchange.'
+            )
         instrument_token = quote[instrument_key]['instrument_token']
 
         candles = self._kite.historical_data(
