@@ -65,6 +65,12 @@
                     Fetch fundamentals
                 </button>
             </form>
+            <p class="text-slate-400 text-sm mt-4 mb-3">Matches Kite's own instrument list against our companies by name, so price sync can use Kite's real ID instead of guessing -- run this if "Sync now" reports symbols Kite has no quote for. Not a daily task.</p>
+            <form method="POST" action="{{ url_for('stocks_kite_sync_instrument_map') }}" class="inline-block">
+                <button type="submit" class="stocks-btn py-3 px-6 rounded-2xl font-bold transition hover:opacity-90">
+                    Sync Kite instrument map
+                </button>
+            </form>
         </section>
 
         <section class="bg-slate-800 rounded-2xl p-6 border border-sky-500/20 mb-6" aria-labelledby="shortlist-heading">

@@ -44,19 +44,40 @@ class KiteClient:
         kite.set_access_token(token)
         return kite
 
-    def fetch_daily_candles(self, symbol, exchange, from_date, to_date):
+    def fetch_instruments(self, exchange):
+        """Returns Kite's full instrument list for one exchange ('NSE' or
+        'BSE') as-is: a list of dicts including tradingsymbol, name,
+        instrument_token, exchange, among others. This is Kite's own
+        authoritative symbol/token mapping -- see
+        utils/kite_instrument_map.py, which matches it against
+        stock_universe by company name so fetch_daily_candles() can use a
+        real instrument_token directly instead of relying on ltp() (which
+        silently omits any instrument it doesn't recognize under our stored
+        symbol string, notably for a chunk of BSE listings)."""
+        return self._kite.instruments(exchange)
+
+    def fetch_daily_candles(self, symbol, exchange, from_date, to_date, instrument_token=None):
         """Return a list of {trade_date, open, high, low, close, volume} dicts
         for one symbol between from_date and to_date (inclusive), using Kite's
-        day-interval historical data API."""
-        instrument_key = f'{exchange}:{symbol}'
-        quote = self._kite.ltp([instrument_key])
-        if instrument_key not in quote:
-            raise KiteClientError(
-                f'Kite has no quote for {instrument_key} -- it may not be tradable '
-                f'through Kite (illiquid/unlisted-on-Kite BSE scrip), or the symbol '
-                f'may be delisted/renamed on the exchange.'
-            )
-        instrument_token = quote[instrument_key]['instrument_token']
+        day-interval historical data API.
+
+        instrument_token, if given (see utils/kite_instrument_map.get_cached_instrument_token),
+        skips the ltp() lookup entirely and goes straight to historical_data
+        -- this is what lets a BSE company whose Kite tradingsymbol doesn't
+        match our stored scrip code still sync, once it's been matched by
+        name at least once. Falls back to the ltp()-based lookup (unchanged
+        from before instrument mapping existed) when no cached token is
+        available yet."""
+        if instrument_token is None:
+            instrument_key = f'{exchange}:{symbol}'
+            quote = self._kite.ltp([instrument_key])
+            if instrument_key not in quote:
+                raise KiteClientError(
+                    f'Kite has no quote for {instrument_key} -- it may not be tradable '
+                    f'through Kite (illiquid/unlisted-on-Kite BSE scrip), or the symbol '
+                    f'may be delisted/renamed on the exchange.'
+                )
+            instrument_token = quote[instrument_key]['instrument_token']
 
         candles = self._kite.historical_data(
             instrument_token,

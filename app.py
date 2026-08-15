@@ -40,6 +40,10 @@ from utils.stock_auth import (
     legacy_stocks_redirect,
 )
 from utils.kite_client import KiteClient
+from utils.kite_instrument_map import (
+    initialize_kite_instrument_map_table_if_needed,
+    sync_kite_instrument_map,
+)
 from utils.kite_session import (
     initialize_kite_session_table_if_needed,
     get_kite_login_url,
@@ -743,6 +747,7 @@ initialize_stock_tables_if_needed(get_supabase())
 initialize_stocks_auth_if_needed(get_supabase())
 initialize_kite_session_table_if_needed(get_supabase())
 initialize_kite_postback_log_table_if_needed(get_supabase())
+initialize_kite_instrument_map_table_if_needed(get_supabase())
 initialize_fundamentals_table_if_needed(get_supabase())
 initialize_stock_universe_table_if_needed(get_supabase())
 initialize_stock_indicators_table_if_needed(get_supabase())
@@ -6743,6 +6748,35 @@ def admin_stocks_sync():
         alert_job_error(db, 'price_sync', str(e))
         return jsonify({'status': 'error', 'message': str(e)}), 500
     record_job_success(db, 'price_sync')
+    return jsonify({'status': 'ok', **summary})
+
+
+@app.route('/stocks/kite/sync-instrument-map', methods=['POST'])
+def stocks_kite_sync_instrument_map():
+    """Manual trigger for matching Kite's full NSE+BSE instrument list
+    against stock_universe by company name and caching the result -- see
+    utils/kite_instrument_map.py. Not something that needs to run daily
+    (Kite's instrument list and our own universe both change slowly), so
+    there's no cron entry for this, just this button. Same dual auth as
+    /stocks/sync: a valid X-Cron-Secret header or an active Stocks login
+    session, either sufficient."""
+    if not has_valid_cron_secret(request.headers, STOCKS_FUNDAMENTALS_CRON_SECRET) \
+            and not session.get('stocks_admin_id'):
+        return redirect(url_for('stocks_admin_login'))
+
+    db = get_db()
+    try:
+        access_token = get_kite_access_token(db)
+        if not access_token:
+            return jsonify({
+                'status': 'error',
+                'message': 'No Kite session yet -- a super_admin must log in via /admin/stocks/kite/login first.'
+            }), 400
+        kite_client = KiteClient(db=db, access_token=access_token)
+        summary = sync_kite_instrument_map(db, kite_client)
+    except Exception as e:
+        app.logger.error(f'Kite instrument map sync failed: {e}')
+        return jsonify({'status': 'error', 'message': str(e)}), 500
     return jsonify({'status': 'ok', **summary})
 
 

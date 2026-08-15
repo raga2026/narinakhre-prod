@@ -1,6 +1,7 @@
 from datetime import date, timedelta
 
 from utils.kite_client import KiteClient
+from utils.kite_instrument_map import get_cached_instrument_token
 
 # How far back to pull the first time a symbol has no rows yet in
 # stock_daily_data. Kept short since this is Phase 1 (ingestion only) --
@@ -123,7 +124,15 @@ def sync_daily_data(db, kite_client=None):
             if from_date > today:
                 continue
 
-            candles = kite_client.fetch_daily_candles(symbol, exchange, from_date, today)
+            # A cached Kite instrument_token (see utils/kite_instrument_map.py)
+            # skips fetch_daily_candles()'s own ltp()-based lookup entirely --
+            # this is what lets a BSE company whose Kite tradingsymbol doesn't
+            # match our stored scrip code still sync. None just means "not
+            # matched yet", falling back to the original ltp() lookup.
+            instrument_token = get_cached_instrument_token(db, symbol, exchange)
+            candles = kite_client.fetch_daily_candles(
+                symbol, exchange, from_date, today, instrument_token=instrument_token
+            )
 
             if not candles:
                 zero_candles.append({

@@ -22,9 +22,10 @@ class FakeDB:
     in place instead of adding a row -- the same guarantee ON CONFLICT DO
     UPDATE gives against the real Postgres table."""
 
-    def __init__(self, watchlist_rows):
+    def __init__(self, watchlist_rows, instrument_map=None):
         self.watchlist_rows = watchlist_rows
         self.daily_data = {}
+        self.instrument_map = instrument_map or {}  # {(symbol, exchange): token}
 
     def execute(self, sql, params=None):
         params = params or ()
@@ -38,6 +39,11 @@ class FakeDB:
             watchlist_id = params[0]
             dates = [d for (wid, d) in self.daily_data if wid == watchlist_id]
             return FakeCursor([{'last_date': max(dates) if dates else None}])
+
+        if normalized.startswith('SELECT kite_instrument_token FROM stock_kite_instrument_map'):
+            symbol, exchange = params
+            token = self.instrument_map.get((symbol, exchange))
+            return FakeCursor([{'kite_instrument_token': token}] if token else [])
 
         if normalized.startswith('INSERT INTO stock_daily_data'):
             watchlist_id, trade_date, o, h, l, c, v = params
@@ -128,3 +134,32 @@ def test_symbol_returning_no_candles_is_tracked_separately_from_failures():
         'from_date': expected_from_date,
         'to_date': date.today().isoformat(),
     }]
+
+
+def test_cached_kite_instrument_token_is_passed_through_to_the_client():
+    # This is the whole point of the mapping table: a symbol matched by
+    # utils/kite_instrument_map.py must reach KiteClient.fetch_daily_candles
+    # as instrument_token=, not force it to fall back to ltp().
+    watchlist = [{'id': 1, 'symbol': '532835', 'exchange': 'BSE', 'is_active': 1}]
+    db = FakeDB(watchlist, instrument_map={('532835', 'BSE'): 99999})
+
+    mock_kite = MagicMock()
+    mock_kite.fetch_daily_candles.return_value = []
+
+    sync_daily_data(db, kite_client=mock_kite)
+
+    _, kwargs = mock_kite.fetch_daily_candles.call_args
+    assert kwargs['instrument_token'] == 99999
+
+
+def test_unmapped_symbol_passes_none_instrument_token():
+    watchlist = [{'id': 1, 'symbol': 'RELIANCE', 'exchange': 'NSE', 'is_active': 1}]
+    db = FakeDB(watchlist)  # no instrument_map entries
+
+    mock_kite = MagicMock()
+    mock_kite.fetch_daily_candles.return_value = []
+
+    sync_daily_data(db, kite_client=mock_kite)
+
+    _, kwargs = mock_kite.fetch_daily_candles.call_args
+    assert kwargs['instrument_token'] is None
