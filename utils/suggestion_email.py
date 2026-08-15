@@ -1,6 +1,7 @@
 from datetime import date
 
 from utils.stock_alerting import send_zeptomail_stocks_email
+from utils.suggestion_engine import get_suggestions
 
 DISCLAIMER = (
     "This is personal market analysis shared informally among friends, not "
@@ -8,6 +9,56 @@ DISCLAIMER = (
     "making any investment decision."
 )
 
+STOCKS_LOGIN_URL = 'https://narinakhre.com/stocks/login'
+
+
+def send_viewer_welcome_email(email, name, password):
+    """Sent immediately when a viewer account is created (see app.py's
+    /stocks/users POST handler and the recipient-migration route) -- there's
+    no separate password-reset/invite-link flow in this codebase, so this
+    is the only way a new viewer ever finds out their login credentials.
+    Includes the real password in plaintext (this is a small trusted
+    personal circle, not a public product -- see the module this belongs
+    to), the login link, and a short explanation of what they signed up
+    for. Returns True/False, never raises, same as send_zeptomail_stocks_email
+    itself."""
+    greeting = name or email
+    subject = 'Nari Nakhre Stocks — your login'
+    text_body = (
+        f'Hi {greeting},\n\n'
+        f"You've been added as a viewer on Nari Nakhre Stocks. Each day (when the "
+        f"screening criteria are met), you'll get up to a few stock suggestions by "
+        f"email -- buy price, target sell price, stop-loss, and how long to hold. "
+        f"You can also log in anytime to see today's suggestions and your full "
+        f"history.\n\n"
+        f'Login: {STOCKS_LOGIN_URL}\n'
+        f'Username: {email}\n'
+        f'Password: {password}\n\n'
+        f'{DISCLAIMER}\n'
+    )
+    html_body = (
+        f'<p>Hi {greeting},</p>'
+        f"<p>You've been added as a viewer on Nari Nakhre Stocks. Each day (when the "
+        f"screening criteria are met), you'll get up to a few stock suggestions by "
+        f"email -- buy price, target sell price, stop-loss, and how long to hold. "
+        f"You can also log in anytime to see today's suggestions and your full "
+        f"history.</p>"
+        f'<p><a href="{STOCKS_LOGIN_URL}">{STOCKS_LOGIN_URL}</a><br>'
+        f'Username: {email}<br>'
+        f'Password: {password}</p>'
+        f'<p style="color:#64748b;font-size:0.85em;margin-top:16px;">{DISCLAIMER}</p>'
+    )
+    return send_zeptomail_stocks_email(
+        to_email=email, to_name=greeting, subject=subject,
+        textbody=text_body, htmlbody=html_body, sender_name='Nari Nakhre Stocks',
+    )
+
+# DEPRECATED as of the viewer-role migration -- recipients now live as
+# role='viewer' rows in stocks_admin_users (utils/stock_auth.py), which
+# supports real login, not just an email address. This table and the three
+# functions below are kept, unused by send_daily_suggestions_email, purely
+# so the pre-migration data isn't lost and a rollback stays possible. Don't
+# build new features against this table -- use stocks_admin_users instead.
 STOCKS_EMAIL_RECIPIENTS_TABLE_SQL = [
     '''CREATE TABLE IF NOT EXISTS stocks_email_recipients (
         id BIGSERIAL PRIMARY KEY,
@@ -29,41 +80,11 @@ def initialize_stocks_email_recipients_table_if_needed(client):
 
 
 def list_recipients(db):
+    """DEPRECATED -- see the module docstring above. Kept only so the
+    pre-migration data is still readable if needed for a rollback."""
     return db.execute(
         'SELECT id, email, name, is_active, created_at FROM stocks_email_recipients ORDER BY created_at DESC'
     ).fetchall()
-
-
-def add_recipient(db, email, name, added_by_id):
-    """Admin-only, manual list -- no self-serve signup. Returns
-    (created: bool, error_message_or_None), matching create_child_admin's
-    pattern in utils/stock_auth.py: checks for an existing email first
-    because SupabaseCursor swallows SQL errors (e.g. the UNIQUE constraint)
-    instead of raising."""
-    email = (email or '').strip()
-    if not email:
-        return False, 'Email is required.'
-
-    existing = db.execute('SELECT id FROM stocks_email_recipients WHERE email=?', (email,)).fetchone()
-    if existing:
-        return False, 'That email is already on the list.'
-
-    db.execute(
-        'INSERT INTO stocks_email_recipients (email, name, added_by) VALUES (?, ?, ?)',
-        (email, (name or '').strip() or None, added_by_id)
-    )
-    db.commit()
-    return True, None
-
-
-def toggle_recipient_active(db, recipient_id):
-    row = db.execute('SELECT id, is_active FROM stocks_email_recipients WHERE id=?', (recipient_id,)).fetchone()
-    if not row:
-        return False
-    new_status = 0 if row['is_active'] else 1
-    db.execute('UPDATE stocks_email_recipients SET is_active=? WHERE id=?', (new_status, recipient_id))
-    db.commit()
-    return True
 
 
 def _build_email_content(suggestions, today_label):
@@ -114,28 +135,26 @@ def _build_email_content(suggestions, today_label):
 
 
 def send_daily_suggestions_email(db):
-    """Fetches today's stock_suggestions rows (symbol/exchange joined from
-    stock_watchlist) and emails every is_active stocks_email_recipients row
-    -- one send per recipient. Always sends something, even with zero
+    """Fetches today's stock_suggestions rows via the shared
+    suggestion_engine.get_suggestions() query and emails every active
+    role='viewer' account in stocks_admin_users -- one send per recipient.
+    Recipients now come from stocks_admin_users, NOT the deprecated
+    stocks_email_recipients table (see that table's docstring above) --
+    a viewer account is a real login, not just an address on a list.
+    stocks_admin_users has no separate email column, so the login
+    "username" doubles as the recipient address (see create_viewer_account
+    in utils/stock_auth.py). Always sends something, even with zero
     suggestions today (see _build_email_content). Every email includes the
     fixed disclaimer line, unmodified, per DISCLAIMER above."""
     today = date.today().isoformat()
     today_label = date.today().strftime('%d %b %Y')
 
-    suggestions = db.execute(
-        '''SELECT w.symbol, w.exchange, s.buy_price, s.target_sell_price,
-                  s.stop_loss_price, s.holding_period_days, s.rationale
-           FROM stock_suggestions s
-           JOIN stock_watchlist w ON w.id = s.watchlist_id
-           WHERE s.suggestion_date = ?
-           ORDER BY s.score DESC''',
-        (today,)
-    ).fetchall()
+    suggestions = get_suggestions(db, start_date=today, end_date=today)
 
     subject, text_body, html_body = _build_email_content(suggestions, today_label)
 
     recipients = db.execute(
-        'SELECT email, name FROM stocks_email_recipients WHERE is_active=1'
+        "SELECT username AS email, name FROM stocks_admin_users WHERE role='viewer' AND is_active=1"
     ).fetchall()
 
     sent = 0

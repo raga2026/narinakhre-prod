@@ -1,5 +1,6 @@
 import hmac
 import os
+import secrets
 from functools import wraps
 
 from flask import flash, redirect, request, session, url_for
@@ -54,6 +55,21 @@ STOCKS_AUTH_TABLES_SQL = [
 ]
 
 
+# Added after stocks_admin_users already had data in it -- kept separate so
+# ADD COLUMN IF NOT EXISTS / the constraint swap apply cleanly, same
+# additive-migration pattern used everywhere else in this codebase.
+# 'viewer' is a read-only role for the small trusted circle previously only
+# in stocks_email_recipients (see utils/suggestion_email.py) -- they can log
+# in and see their own suggestions, nothing else. name is nullable and only
+# really used by viewer accounts; super_admin/child_admin rows leave it null.
+STOCKS_AUTH_ALTER_SQL = [
+    'ALTER TABLE stocks_admin_users ADD COLUMN IF NOT EXISTS name TEXT',
+    'ALTER TABLE stocks_admin_users DROP CONSTRAINT IF EXISTS stocks_admin_users_role_check',
+    "ALTER TABLE stocks_admin_users ADD CONSTRAINT stocks_admin_users_role_check "
+    "CHECK (role IN ('super_admin', 'child_admin', 'viewer'))",
+]
+
+
 def initialize_stocks_auth_if_needed(client):
     """Create stocks_admin_users if needed and seed the one bootstrap
     super_admin from env vars. Call once at app startup, same as
@@ -61,7 +77,7 @@ def initialize_stocks_auth_if_needed(client):
     client (no app/request context exists yet at startup, so get_db()'s
     flask.g isn't available here -- same reason app.py's own
     initialize_database_if_needed() uses client.rpc directly instead)."""
-    for sql in STOCKS_AUTH_TABLES_SQL:
+    for sql in STOCKS_AUTH_TABLES_SQL + STOCKS_AUTH_ALTER_SQL:
         try:
             client.rpc('execute_sql', {'query': sql}).execute()
         except Exception as e:
@@ -124,14 +140,17 @@ def stocks_login_required(view_func):
     return wrapped
 
 
-def stocks_role_required(role):
-    """Restricts a route to one specific role, e.g. @stocks_role_required('super_admin')."""
+def stocks_role_required(*roles):
+    """Restricts a route to one or more specific roles, e.g.
+    @stocks_role_required('super_admin') (unchanged usage/behavior from
+    before) or @stocks_role_required('super_admin', 'child_admin') for a
+    staff-only page that viewer accounts shouldn't reach."""
     def decorator(view_func):
         @wraps(view_func)
         def wrapped(*args, **kwargs):
             if not session.get('stocks_admin_id'):
                 return redirect(url_for('stocks_admin_login'))
-            if session.get('stocks_admin_role') != role:
+            if session.get('stocks_admin_role') not in roles:
                 flash('You do not have access to that page.', 'error')
                 return ('Forbidden', 403)
             return view_func(*args, **kwargs)
@@ -194,3 +213,90 @@ def toggle_child_admin_active(db, admin_id):
     )
     db.commit()
     return True
+
+
+def list_viewers(db):
+    return db.execute(
+        "SELECT id, username, name, is_active, created_at FROM stocks_admin_users WHERE role='viewer' ORDER BY created_at DESC"
+    ).fetchall()
+
+
+def create_viewer_account(db, email, name, created_by_id):
+    """Creates a new role='viewer' account -- email stored in the username
+    column (stocks_admin_users has no separate email field, and username is
+    already the login field for every role). Generates a real, random,
+    usable password (there's still no password-reset/change flow anywhere
+    in this codebase, so this is the only way the account gets one at all)
+    -- the caller is expected to email it to the new viewer immediately
+    (see app.py's /stocks/users POST handler and
+    utils/suggestion_email.send_viewer_welcome_email); it's returned here,
+    in plaintext, only so that send can happen -- nothing else stores or
+    logs the plaintext, only its hash persists in the database.
+
+    Returns (row, plaintext_password, error_message) -- password is None
+    on error."""
+    email = (email or '').strip()
+    if not email:
+        return None, None, 'Email is required.'
+
+    existing = db.execute('SELECT id FROM stocks_admin_users WHERE username=?', (email,)).fetchone()
+    if existing:
+        return None, None, 'That email is already registered.'
+
+    password = secrets.token_urlsafe(12)
+    password_hash = generate_password_hash(password)
+    db.execute(
+        '''INSERT INTO stocks_admin_users (username, password_hash, role, name, created_by)
+           VALUES (?, ?, 'viewer', ?, ?)''',
+        (email, password_hash, (name or '').strip() or None, created_by_id)
+    )
+    db.commit()
+
+    row = db.execute(
+        'SELECT id, username, name, role, is_active, created_at FROM stocks_admin_users WHERE username=?',
+        (email,)
+    ).fetchone()
+    return row, password, None
+
+
+def toggle_viewer_active(db, admin_id):
+    """Flips is_active for a viewer row only -- mirrors
+    toggle_child_admin_active's safety pattern (never touches a row outside
+    the role it's meant for)."""
+    row = db.execute(
+        'SELECT id, role, is_active FROM stocks_admin_users WHERE id=?', (admin_id,)
+    ).fetchone()
+    if not row or row['role'] != 'viewer':
+        return False
+    new_status = 0 if row['is_active'] else 1
+    db.execute(
+        'UPDATE stocks_admin_users SET is_active=?, updated_at=NOW() WHERE id=?',
+        (new_status, admin_id)
+    )
+    db.commit()
+    return True
+
+
+def migrate_email_recipients_to_viewers(db, created_by_id):
+    """One-time (safely re-runnable) migration: for each stocks_email_recipients
+    row, creates a matching role='viewer' account if one doesn't already
+    exist (by email/username). Does not touch or delete
+    stocks_email_recipients -- kept for rollback. Returns each newly-created
+    account's (email, name, password) too, alongside the plain migrated list
+    of emails, so the caller (app.py) can send each of them the same
+    welcome/credentials email a manually-created viewer gets -- otherwise
+    migrated accounts would be stuck unable to log in while new ones work."""
+    recipients = db.execute('SELECT email, name FROM stocks_email_recipients').fetchall()
+
+    migrated = []
+    created_accounts = []
+    skipped = []
+    for r in recipients:
+        row, password, error = create_viewer_account(db, r['email'], r.get('name'), created_by_id)
+        if row:
+            migrated.append(r['email'])
+            created_accounts.append({'email': r['email'], 'name': r.get('name'), 'password': password})
+        else:
+            skipped.append({'email': r['email'], 'reason': error})
+
+    return {'migrated': migrated, 'created_accounts': created_accounts, 'skipped': skipped}

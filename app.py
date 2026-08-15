@@ -9,7 +9,7 @@ import smtplib
 import requests
 import razorpay
 import pyotp
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from functools import wraps
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
@@ -32,6 +32,10 @@ from utils.stock_auth import (
     list_stocks_admin_users,
     create_child_admin,
     toggle_child_admin_active,
+    list_viewers,
+    create_viewer_account,
+    toggle_viewer_active,
+    migrate_email_recipients_to_viewers,
     has_valid_cron_secret,
     legacy_stocks_redirect,
 )
@@ -73,13 +77,13 @@ from utils.stock_alerting import (
 from utils.suggestion_engine import (
     initialize_stock_suggestions_table_if_needed,
     generate_daily_suggestions,
+    get_suggestions,
+    HOLDING_PERIOD_DAYS,
 )
 from utils.suggestion_email import (
     initialize_stocks_email_recipients_table_if_needed,
-    list_recipients,
-    add_recipient,
-    toggle_recipient_active,
     send_daily_suggestions_email,
+    send_viewer_welcome_email,
 )
 import auth_providers
 import io
@@ -6832,36 +6836,72 @@ def stocks_suggestions_send_daily_email():
     return jsonify({'status': 'ok', **summary})
 
 
-@app.route('/stocks/recipients', methods=['GET', 'POST'])
+@app.route('/stocks/users', methods=['GET', 'POST'])
 @stocks_role_required('super_admin')
-def stocks_recipients_manage():
-    """Admin-managed email recipient list -- no self-serve signup, no
-    plans, no payment. Purely a super_admin-maintained list of who gets
-    the daily suggestions email (see utils/suggestion_email.py)."""
+def stocks_users_manage():
+    """Replaces the old /stocks/recipients page -- viewers are now real
+    stocks_admin_users accounts (role='viewer'), not just an email on a
+    list, so they can log in and see their own suggestions (see
+    /stocks/my/suggestions). No self-serve signup, no plans, no payment --
+    purely a super_admin-maintained list, same as before.
+
+    A newly-created viewer gets a real, random, usable password (see
+    create_viewer_account in utils/stock_auth.py) and is emailed it
+    immediately, along with the login link and a short explanation of the
+    suggestions system -- there's still no separate password-reset/change
+    flow anywhere in this codebase, so this welcome email is the only way
+    they ever learn their credentials."""
     db = get_db()
     if request.method == 'POST':
         email = request.form.get('email')
         name = request.form.get('name')
-        created, error = add_recipient(db, email, name, session.get('stocks_admin_id'))
+        row, password, error = create_viewer_account(db, email, name, session.get('stocks_admin_id'))
         if error:
             flash(error, 'error')
         else:
-            flash(f'Added {(email or "").strip()} to the recipient list.')
-        return redirect(url_for('stocks_recipients_manage'))
+            email = email.strip()
+            if send_viewer_welcome_email(email, name, password):
+                flash(f'Added {email} as a viewer and emailed their login details.')
+            else:
+                flash(f'Added {email} as a viewer, but the welcome email failed to send -- '
+                      f'check the Zeptomail config, or share their login manually.', 'error')
+        return redirect(url_for('stocks_users_manage'))
 
-    recipients = list_recipients(db)
-    return render_template('admin/stocks_recipients.html', recipients=recipients)
+    viewers = list_viewers(db)
+    return render_template('admin/stocks_users.html', viewers=viewers)
 
 
-@app.route('/stocks/recipients/<int:recipient_id>/toggle', methods=['POST'])
+@app.route('/stocks/users/<int:viewer_id>/toggle', methods=['POST'])
 @stocks_role_required('super_admin')
-def stocks_recipients_toggle(recipient_id):
+def stocks_users_toggle(viewer_id):
     db = get_db()
-    if not toggle_recipient_active(db, recipient_id):
-        flash('Could not update that recipient.', 'error')
+    if not toggle_viewer_active(db, viewer_id):
+        flash('Could not update that user.', 'error')
     else:
-        flash('Recipient status updated.')
-    return redirect(url_for('stocks_recipients_manage'))
+        flash('User status updated.')
+    return redirect(url_for('stocks_users_manage'))
+
+
+@app.route('/stocks/users/migrate-recipients', methods=['POST'])
+@stocks_role_required('super_admin')
+def stocks_users_migrate_recipients():
+    """One-time (safely re-runnable) migration button: creates a viewer
+    account for every stocks_email_recipients row that doesn't already have
+    one, and emails each of them their new login credentials -- same
+    welcome email a manually-created viewer gets (see stocks_users_manage
+    above). See migrate_email_recipients_to_viewers in utils/stock_auth.py."""
+    db = get_db()
+    summary = migrate_email_recipients_to_viewers(db, session.get('stocks_admin_id'))
+    emailed = 0
+    for account in summary['created_accounts']:
+        if send_viewer_welcome_email(account['email'], account['name'], account['password']):
+            emailed += 1
+    if summary['migrated']:
+        flash(f"Migrated {len(summary['migrated'])} recipient(s) to viewer accounts "
+              f"and emailed login details to {emailed} of them.")
+    else:
+        flash('No new recipients to migrate.')
+    return redirect(url_for('stocks_users_manage'))
 
 
 @app.route('/stocks/indicators/calculate', methods=['POST'])
@@ -7033,12 +7073,14 @@ def cron_stocks_fundamentals_sync():
 
 
 @app.route('/stocks/watchlist', methods=['GET'])
-@stocks_login_required
+@stocks_role_required('super_admin', 'child_admin')
 def stocks_watchlist():
     """Lists every stock_watchlist row with its latest stock_fundamentals
     and stock_indicators snapshots (if any) joined in. Doesn't touch
     stock_watchlist/stock_fundamentals/stock_daily_data schemas -- read-only
-    here."""
+    here. Staff only (super_admin/child_admin) -- viewer accounts get their
+    own read-only page at /stocks/my/suggestions instead, not this
+    operational view."""
     db = get_db()
     rows = db.execute(
         '''SELECT w.id, w.symbol, w.exchange, w.name, w.is_active,
@@ -7056,6 +7098,34 @@ def stocks_watchlist():
            ORDER BY w.symbol'''
     ).fetchall()
     return render_template('admin/stocks_watchlist.html', rows=rows)
+
+
+@app.route('/stocks/my/suggestions', methods=['GET'])
+@stocks_login_required
+def stocks_my_suggestions():
+    """Read-only, any logged-in role (this is viewer's own landing page,
+    but staff can see it too -- no edit/execute controls here regardless of
+    role). Shows suggestions from the last HOLDING_PERIOD_DAYS days, using
+    the same get_suggestions() query the daily email and /stocks/my/history
+    both use."""
+    db = get_db()
+    start_date = (date.today() - timedelta(days=HOLDING_PERIOD_DAYS)).isoformat()
+    suggestions = get_suggestions(db, start_date=start_date)
+    return render_template('admin/stocks_my_suggestions.html', suggestions=suggestions)
+
+
+@app.route('/stocks/my/history', methods=['GET'])
+@stocks_login_required
+def stocks_my_history():
+    """Read-only, any logged-in role. All-time suggestion history --
+    unlike the name might suggest, there's no real outcome/ROI tracking
+    yet (nothing ever moves a suggestion's status away from 'pending', see
+    execute_suggestion in an earlier deferred phase), so every row's
+    status genuinely reads 'Pending' here rather than a fabricated
+    result."""
+    db = get_db()
+    suggestions = get_suggestions(db)
+    return render_template('admin/stocks_my_history.html', suggestions=suggestions)
 
 
 @app.route('/stocks/login', methods=['GET', 'POST'])
@@ -7084,6 +7154,12 @@ def stocks_admin_login():
     session['stocks_admin_username'] = admin_row['username']
     session['stocks_admin_role'] = admin_row['role']
     session.modified = True
+    # viewer accounts land on their own read-only suggestions page, not the
+    # staff dashboard (there was no per-role redirect at all before this --
+    # super_admin/child_admin both just went to stocks_admin_dashboard,
+    # which they still do, unchanged).
+    if admin_row['role'] == 'viewer':
+        return redirect(url_for('stocks_my_suggestions'))
     return redirect(url_for('stocks_admin_dashboard'))
 
 

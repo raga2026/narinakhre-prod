@@ -1,6 +1,6 @@
 from unittest.mock import patch
 
-from utils.suggestion_email import DISCLAIMER, send_daily_suggestions_email
+from utils.suggestion_email import DISCLAIMER, send_daily_suggestions_email, send_viewer_welcome_email
 
 
 class FakeCursor:
@@ -22,10 +22,10 @@ class FakeEmailDB:
     def execute(self, sql, params=None):
         normalized = ' '.join(sql.split())
 
-        if normalized.startswith('SELECT w.symbol, w.exchange, s.buy_price'):
+        if normalized.startswith('SELECT w.symbol, w.exchange, s.suggestion_date, s.buy_price'):
             return FakeCursor(self.suggestion_rows)
 
-        if normalized.startswith('SELECT email, name FROM stocks_email_recipients'):
+        if normalized.startswith("SELECT username AS email, name FROM stocks_admin_users WHERE role='viewer'"):
             return FakeCursor(self.recipient_rows)
 
         raise AssertionError(f'Unexpected SQL in test: {sql}')
@@ -97,3 +97,27 @@ def test_a_failed_send_is_counted_without_stopping_the_rest():
 
     assert summary['sent'] == 1
     assert summary['failed'] == 1
+
+
+def test_viewer_welcome_email_includes_login_link_username_and_password():
+    with patch('utils.suggestion_email.send_zeptomail_stocks_email', return_value=True) as mock_send:
+        result = send_viewer_welcome_email('new@example.com', 'New Viewer', 'r4nd0mPass123')
+
+    assert result is True
+    mock_send.assert_called_once()
+    kwargs = mock_send.call_args.kwargs
+    assert kwargs['to_email'] == 'new@example.com'
+    assert kwargs['to_name'] == 'New Viewer'
+    assert 'new@example.com' in kwargs['textbody']
+    assert 'r4nd0mPass123' in kwargs['textbody']
+    assert 'r4nd0mPass123' in kwargs['htmlbody']
+    assert '/stocks/login' in kwargs['textbody']
+    assert DISCLAIMER in kwargs['textbody']
+
+
+def test_viewer_welcome_email_falls_back_to_email_as_greeting_when_no_name():
+    with patch('utils.suggestion_email.send_zeptomail_stocks_email', return_value=True) as mock_send:
+        send_viewer_welcome_email('noname@example.com', '', 'somepass')
+
+    kwargs = mock_send.call_args.kwargs
+    assert kwargs['to_name'] == 'noname@example.com'

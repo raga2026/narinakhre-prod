@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Viewer Users - Nari Nakhre Stocks</title>
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+    <style>
+        body { background: #0f172a; color: #f8fafc; }
+        .stocks-accent { color: #0ea5e9; }
+        .stocks-btn { background: linear-gradient(90deg, #0891b2 0%, #0ea5e9 100%); color: white; }
+        input {
+            color:#ffffff; background-color:#0f172a;
+        }
+    </style>
+</head>
+<body class="min-h-screen p-8">
+    <div class="max-w-2xl mx-auto">
+        <div class="flex items-center justify-between mb-6">
+            <div>
+                <h1 class="text-2xl font-extrabold stocks-accent font-serif">Viewer Users</h1>
+                <p class="text-slate-400 text-sm mt-1">Super admin only -- admin-managed accounts, no self-serve signup</p>
+            </div>
+            <a href="{{ url_for('stocks_admin_dashboard') }}" class="text-sm text-slate-400 hover:text-sky-400 underline">Back to dashboard</a>
+        </div>
+
+        {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+            <div class="mb-6" role="alert" aria-live="assertive">
+            {% for category, msg in messages %}
+                <div class="bg-sky-900/40 text-sky-200 border border-sky-500/30 rounded-xl p-3 mb-2 text-sm">{{ msg }}</div>
+            {% endfor %}
+            </div>
+        {% endif %}
+        {% endwith %}
+
+        <section class="bg-slate-800 rounded-2xl p-6 border border-sky-500/20 mb-6" aria-labelledby="add-viewer-heading">
+            <h2 id="add-viewer-heading" class="text-lg font-bold text-slate-200 mb-4">Add a viewer</h2>
+            <p class="text-slate-400 text-sm mb-4">
+                Viewers can log in and see their own suggestions, nothing else. A welcome email with
+                their login and password is sent immediately when you add them.
+            </p>
+            <form method="POST" action="{{ url_for('stocks_users_manage') }}" class="space-y-4">
+                <div>
+                    <label for="new-email" class="block text-sm font-semibold text-slate-300 mb-1">Email</label>
+                    <input id="new-email" type="email" name="email" required autocomplete="off"
+                           class="w-full border border-sky-500/30 rounded-xl p-3 focus:outline-none focus:border-sky-500 transition">
+                </div>
+                <div>
+                    <label for="new-name" class="block text-sm font-semibold text-slate-300 mb-1">Name (optional)</label>
+                    <input id="new-name" type="text" name="name" autocomplete="off"
+                           class="w-full border border-sky-500/30 rounded-xl p-3 focus:outline-none focus:border-sky-500 transition">
+                </div>
+                <button type="submit" class="stocks-btn py-3 px-6 rounded-2xl font-bold transition hover:opacity-90">
+                    Add viewer
+                </button>
+            </form>
+        </section>
+
+        <section class="bg-slate-800 rounded-2xl p-6 border border-sky-500/20 mb-6" aria-labelledby="migrate-heading">
+            <h2 id="migrate-heading" class="text-lg font-bold text-slate-200 mb-2">Migrate old recipient list</h2>
+            <p class="text-slate-400 text-sm mb-4">
+                Creates a viewer account for anyone still only in the old email recipient list. Safe to click more than once -- already-migrated people are skipped.
+            </p>
+            <form method="POST" action="{{ url_for('stocks_users_migrate_recipients') }}">
+                <button type="submit" class="stocks-btn py-3 px-6 rounded-2xl font-bold transition hover:opacity-90">
+                    Migrate recipients
+                </button>
+            </form>
+        </section>
+
+        <section aria-labelledby="viewer-list-heading">
+            <h2 id="viewer-list-heading" class="text-lg font-bold text-slate-200 mb-4">Current viewers</h2>
+            <ul class="space-y-3">
+                {% for viewer in viewers %}
+                <li class="bg-slate-800 rounded-2xl p-5 border border-sky-500/20">
+                    <p class="text-slate-100 font-semibold">{{ viewer.name or viewer.username }}</p>
+                    {% if viewer.name %}<p class="text-slate-400 text-sm">{{ viewer.username }}</p>{% endif %}
+                    <p class="text-slate-400 text-sm">
+                        Status: {{ 'Active' if viewer.is_active else 'Disabled' }}
+                    </p>
+                    <form method="POST" action="{{ url_for('stocks_users_toggle', viewer_id=viewer.id) }}" class="mt-3">
+                        <button type="submit"
+                                aria-label="{{ 'Disable' if viewer.is_active else 'Enable' }} viewer {{ viewer.username }}"
+                                class="text-sm underline {{ 'text-rose-400 hover:text-rose-300' if viewer.is_active else 'text-emerald-400 hover:text-emerald-300' }}">
+                            {{ 'Disable' if viewer.is_active else 'Enable' }}
+                        </button>
+                    </form>
+                </li>
+                {% else %}
+                <li class="text-slate-400">No viewers yet.</li>
+                {% endfor %}
+            </ul>
+        </section>
+    </div>
+</body>
+</html>

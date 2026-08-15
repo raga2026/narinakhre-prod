@@ -147,6 +147,36 @@ def _fetch_candidates(db):
     ).fetchall()
 
 
+def get_suggestions(db, start_date=None, end_date=None):
+    """Fetches stock_suggestions rows (symbol/exchange joined from
+    stock_watchlist), most recent first, optionally bounded by
+    suggestion_date on either end (either or both may be omitted). Shared
+    by the daily email (utils/suggestion_email.py) and the read-only viewer
+    pages (/stocks/my/suggestions, /stocks/my/history) so there's exactly
+    one place building this join, not three."""
+    conditions = []
+    params = []
+    if start_date:
+        conditions.append('s.suggestion_date >= ?')
+        params.append(start_date)
+    if end_date:
+        conditions.append('s.suggestion_date <= ?')
+        params.append(end_date)
+    where_clause = ('WHERE ' + ' AND '.join(conditions)) if conditions else ''
+
+    return db.execute(
+        f'''SELECT w.symbol, w.exchange, s.suggestion_date, s.buy_price,
+                   s.target_sell_price, s.stop_loss_price, s.holding_period_days,
+                   s.rsi_at_suggestion, s.pe_at_suggestion, s.peg_at_suggestion,
+                   s.score, s.rationale, s.status
+            FROM stock_suggestions s
+            JOIN stock_watchlist w ON w.id = s.watchlist_id
+            {where_clause}
+            ORDER BY s.suggestion_date DESC, s.score DESC''',
+        tuple(params)
+    ).fetchall()
+
+
 def generate_daily_suggestions(db):
     """Builds the candidate pool (active watchlist joined to today's
     indicators and each symbol's latest fundamentals snapshot within 20
