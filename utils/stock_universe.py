@@ -165,43 +165,50 @@ def propagate_bse_market_cap_to_nse(db):
     NSE row of the same company, matched by ISIN, for NSE rows that don't
     have a market cap yet. Never merges or deletes either row -- both stay
     as separate stock_universe rows, only the two columns get copied. Runs
-    as two set-based SQL statements (a self-join UPDATE, not a per-row
-    loop) since stock_universe has thousands of rows and a Python loop
-    issuing one RPC call per row would be far slower over HTTP. Takes
-    app.py's db (get_db()), not the raw client -- this runs inside a
-    request (the refresh route), unlike the seed_* functions above which
-    run from the standalone seed script."""
-    would_update = db.execute(
-        '''SELECT COUNT(*) AS count
-           FROM stock_universe nse
-           JOIN stock_universe bse ON bse.isin = nse.isin AND bse.exchange = 'BSE'
+    as a set-based self-join UPDATE, not a per-row loop, since
+    stock_universe has thousands of rows and a Python loop issuing one RPC
+    call per row would be far slower over HTTP. Takes app.py's db
+    (get_db()), not the raw client -- this runs inside a request (the
+    refresh route), unlike the seed_* functions above which run from the
+    standalone seed script.
+
+    "propagated" is measured as a before/after diff on the same simple
+    COUNT, not a separate up-front JOIN-based estimate -- an earlier version
+    used a second, differently-shaped COUNT query to predict the number
+    before running the UPDATE, and in production that predicted number came
+    back 0 while the UPDATE itself still correctly propagated thousands of
+    rows (confirmed against live data: NSE rows with a market cap after the
+    UPDATE landed exactly on the full NSE/BSE ISIN overlap count). Measuring
+    the same query's state before and after removes that discrepancy
+    entirely, whatever caused it, since there's only one query shape to
+    trust instead of two that have to agree."""
+    before = db.execute(
+        "SELECT COUNT(*) AS count FROM stock_universe WHERE exchange='NSE' AND last_market_cap IS NULL"
+    ).fetchone()
+    before_count = (before['count'] if before else 0) or 0
+
+    # Always run -- harmless/no-op if nothing matches, and avoids trusting a
+    # separate pre-check to decide whether to bother.
+    db.execute(
+        '''UPDATE stock_universe AS nse
+           SET last_market_cap = bse.last_market_cap,
+               last_market_cap_date = bse.last_market_cap_date,
+               updated_at = NOW()
+           FROM stock_universe AS bse
            WHERE nse.exchange = 'NSE'
+             AND bse.exchange = 'BSE'
+             AND nse.isin = bse.isin
              AND nse.isin IS NOT NULL AND nse.isin != ''
              AND nse.last_market_cap IS NULL
              AND bse.last_market_cap IS NOT NULL'''
-    ).fetchone()
-    to_propagate = (would_update['count'] if would_update else 0) or 0
-
-    if to_propagate:
-        db.execute(
-            '''UPDATE stock_universe AS nse
-               SET last_market_cap = bse.last_market_cap,
-                   last_market_cap_date = bse.last_market_cap_date,
-                   updated_at = NOW()
-               FROM stock_universe AS bse
-               WHERE nse.exchange = 'NSE'
-                 AND bse.exchange = 'BSE'
-                 AND nse.isin = bse.isin
-                 AND nse.isin IS NOT NULL AND nse.isin != ''
-                 AND nse.last_market_cap IS NULL
-                 AND bse.last_market_cap IS NOT NULL'''
-        )
-        db.commit()
+    )
+    db.commit()
 
     remaining = db.execute(
         "SELECT COUNT(*) AS count FROM stock_universe WHERE exchange='NSE' AND last_market_cap IS NULL"
     ).fetchone()
     remaining_count = (remaining['count'] if remaining else 0) or 0
+    to_propagate = before_count - remaining_count
 
     print(f'Market cap propagation: {to_propagate} NSE rows got a value from BSE, '
           f'{remaining_count} NSE rows still have none (no BSE-listed counterpart).')
@@ -215,7 +222,17 @@ def rebucket_market_cap_bands(db):
     scrape-eligible; that's the actual daily-scrape target size for the
     future rotation scraper (not built in this task). last_market_cap is
     assumed to already be in rupees crore, matching the unit BSE's
-    scrip-master API returns it in."""
+    scrip-master API returns it in.
+
+    WHERE id IS NOT NULL below is not decorative -- the execute_sql Postgres
+    function this app calls through rejects any UPDATE with no WHERE clause
+    at all ("UPDATE requires a WHERE clause", error code 21000) as a safety
+    guard, and app.py's SupabaseCursor swallows that error silently (catches
+    it, logs server-side only, returns as if nothing happened) rather than
+    raising it to the caller. Confirmed directly against the live database
+    while debugging why every row stayed at its 'unknown' default. id IS NOT
+    NULL is always true (id is the primary key) so this still updates every
+    row -- it exists purely to satisfy the guard."""
     db.execute(
         '''UPDATE stock_universe
            SET market_cap_band = CASE
@@ -225,7 +242,8 @@ def rebucket_market_cap_bands(db):
                    ELSE 'above_30000cr'
                END,
                is_scrape_eligible = (last_market_cap IS NOT NULL AND last_market_cap >= 5000 AND last_market_cap <= 30000),
-               updated_at = NOW()'''
+               updated_at = NOW()
+           WHERE id IS NOT NULL'''
     )
     db.commit()
 

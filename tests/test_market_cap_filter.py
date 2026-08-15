@@ -25,16 +25,18 @@ class FakeUniverseDB:
     def execute(self, sql, params=None):
         normalized = ' '.join(sql.split())
 
-        if normalized.startswith('SELECT COUNT(*) AS count FROM stock_universe nse JOIN stock_universe bse'):
-            return FakeCursor([{'count': self._count_propagatable()}])
+        # propagate_bse_market_cap_to_nse() calls this same simple count
+        # twice (before and after the UPDATE) rather than a separate
+        # JOIN-based pre-check -- see its docstring for why. Recomputing
+        # live from self.rows each call naturally gives the right answer
+        # both times, before and after _apply_propagation() mutates it.
+        if normalized.startswith("SELECT COUNT(*) AS count FROM stock_universe WHERE exchange='NSE' AND last_market_cap IS NULL"):
+            count = sum(1 for r in self.rows if r['exchange'] == 'NSE' and r['last_market_cap'] is None)
+            return FakeCursor([{'count': count}])
 
         if normalized.startswith('UPDATE stock_universe AS nse SET last_market_cap = bse.last_market_cap'):
             self._apply_propagation()
             return FakeCursor([])
-
-        if normalized.startswith("SELECT COUNT(*) AS count FROM stock_universe WHERE exchange='NSE' AND last_market_cap IS NULL"):
-            count = sum(1 for r in self.rows if r['exchange'] == 'NSE' and r['last_market_cap'] is None)
-            return FakeCursor([{'count': count}])
 
         if normalized.startswith('UPDATE stock_universe SET market_cap_band = CASE'):
             self._rebucket()
@@ -45,16 +47,6 @@ class FakeUniverseDB:
             return FakeCursor([{'count': count}])
 
         raise AssertionError(f'Unexpected SQL in test: {sql}')
-
-    def _count_propagatable(self):
-        n = 0
-        for nse in self.rows:
-            if nse['exchange'] != 'NSE' or not nse.get('isin') or nse['last_market_cap'] is not None:
-                continue
-            if any(b['exchange'] == 'BSE' and b.get('isin') == nse['isin'] and b['last_market_cap'] is not None
-                   for b in self.rows):
-                n += 1
-        return n
 
     def _apply_propagation(self):
         for nse in self.rows:
