@@ -44,9 +44,24 @@ STOCK_SUGGESTIONS_TABLE_SQL = [
     )'''
 ]
 
+# Added after stock_suggestions already had data -- separate additive
+# migration, same pattern as everywhere else in this codebase.
+# fundamental_tier snapshots the watchlist row's golden/silver classification
+# (see fundamental_screen.classify_fundamental_tier) at suggestion time, same
+# reasoning as pe_at_suggestion/peg_at_suggestion already snapshotting their
+# values rather than being looked up live later. opm_at_suggestion is new
+# alongside it -- OPM was already used in scoring but never persisted per
+# suggestion before, and a silver suggestion's PE/OPM values need to be
+# displayable without a live re-fetch.
+STOCK_SUGGESTIONS_ALTER_SQL = [
+    'ALTER TABLE stock_suggestions ADD COLUMN IF NOT EXISTS opm_at_suggestion NUMERIC(6,2)',
+    "ALTER TABLE stock_suggestions ADD COLUMN IF NOT EXISTS fundamental_tier TEXT "
+    "CHECK (fundamental_tier IS NULL OR fundamental_tier IN ('golden', 'silver'))",
+]
+
 
 def initialize_stock_suggestions_table_if_needed(client):
-    for sql in STOCK_SUGGESTIONS_TABLE_SQL:
+    for sql in STOCK_SUGGESTIONS_TABLE_SQL + STOCK_SUGGESTIONS_ALTER_SQL:
         try:
             client.rpc('execute_sql', {'query': sql}).execute()
         except Exception as e:
@@ -126,7 +141,7 @@ def _fetch_candidates(db):
     today = date.today().isoformat()
     fundamentals_cutoff = (date.today() - timedelta(days=20)).isoformat()
     return db.execute(
-        '''SELECT w.id AS watchlist_id, w.symbol, w.exchange,
+        '''SELECT w.id AS watchlist_id, w.symbol, w.exchange, w.fundamental_tier,
                   i.rsi_14, i.cross_status, i.volume_trend,
                   f.pe_ratio, f.peg_ratio, f.opm_pct, f.roce_pct,
                   f.quarterly_profit_growth_pct,
@@ -168,6 +183,7 @@ def get_suggestions(db, start_date=None, end_date=None):
         f'''SELECT w.symbol, w.exchange, s.suggestion_date, s.buy_price,
                    s.target_sell_price, s.stop_loss_price, s.holding_period_days,
                    s.rsi_at_suggestion, s.pe_at_suggestion, s.peg_at_suggestion,
+                   s.opm_at_suggestion, s.fundamental_tier,
                    s.score, s.rationale, s.status
             FROM stock_suggestions s
             JOIN stock_watchlist w ON w.id = s.watchlist_id
@@ -219,8 +235,9 @@ def generate_daily_suggestions(db):
             '''INSERT INTO stock_suggestions
                    (watchlist_id, suggestion_date, buy_price, target_sell_price,
                     stop_loss_price, holding_period_days, rsi_at_suggestion,
-                    pe_at_suggestion, peg_at_suggestion, score, rationale, status)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')
+                    pe_at_suggestion, peg_at_suggestion, opm_at_suggestion,
+                    fundamental_tier, score, rationale, status)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')
                ON CONFLICT (watchlist_id, suggestion_date) DO UPDATE SET
                    buy_price = EXCLUDED.buy_price,
                    target_sell_price = EXCLUDED.target_sell_price,
@@ -228,11 +245,14 @@ def generate_daily_suggestions(db):
                    rsi_at_suggestion = EXCLUDED.rsi_at_suggestion,
                    pe_at_suggestion = EXCLUDED.pe_at_suggestion,
                    peg_at_suggestion = EXCLUDED.peg_at_suggestion,
+                   opm_at_suggestion = EXCLUDED.opm_at_suggestion,
+                   fundamental_tier = EXCLUDED.fundamental_tier,
                    score = EXCLUDED.score,
                    rationale = EXCLUDED.rationale''',
             (watchlist_id, today, buy_price, target_sell_price, stop_loss_price,
              HOLDING_PERIOD_DAYS, candidate['rsi_14'], candidate['pe_ratio'],
-             candidate['peg_ratio'], score, rationale)
+             candidate['peg_ratio'], candidate['opm_pct'], candidate.get('fundamental_tier'),
+             score, rationale)
         )
         db.commit()
         created.append({'symbol': candidate['symbol'], 'buy_price': buy_price, 'score': score})

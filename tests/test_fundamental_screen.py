@@ -1,4 +1,4 @@
-from utils.fundamental_screen import evaluate_fundamentals
+from utils.fundamental_screen import classify_fundamental_tier, evaluate_fundamentals, get_metric_note
 
 PASSING_ROW = {
     'pe_ratio': 20,
@@ -134,3 +134,112 @@ def test_negative_quarterly_growth_fails_same_as_any_other_sub_floor_value():
     assert passes is False
     assert 'quarterly profit growth' in failed
     assert 'quarterly revenue growth' in failed
+
+
+# --- get_metric_note ---------------------------------------------------
+
+def test_get_metric_note_pe_within_ideal_range_returns_none():
+    assert get_metric_note('pe_ratio', 20) is None
+    assert get_metric_note('pe_ratio', 15) is None  # boundary, inclusive
+    assert get_metric_note('pe_ratio', 25) is None  # boundary, inclusive
+
+
+def test_get_metric_note_pe_outside_ideal_range_returns_note():
+    note = get_metric_note('pe_ratio', 30)
+    assert note == 'outside ideal 15-25 range — scored on a sliding scale, not hard-filtered'
+    assert get_metric_note('pe_ratio', 5) == note  # same note regardless of direction
+
+
+def test_get_metric_note_pe_missing_returns_none():
+    assert get_metric_note('pe_ratio', None) is None
+
+
+def test_get_metric_note_opm_at_or_above_ideal_returns_none():
+    assert get_metric_note('opm_pct', 25) is None  # boundary, inclusive
+    assert get_metric_note('opm_pct', 40) is None
+
+
+def test_get_metric_note_opm_below_ideal_but_above_silver_floor_returns_note():
+    note = get_metric_note('opm_pct', 18)
+    assert note == 'below ideal 25% threshold — partial credit given, not disqualifying'
+    assert get_metric_note('opm_pct', 15) == note  # boundary, inclusive
+
+
+def test_get_metric_note_opm_below_silver_floor_returns_none():
+    # Below 15% isn't "partial credit" territory -- it's excluded outright,
+    # same as before this tiering existed, so no note is shown.
+    assert get_metric_note('opm_pct', 14.9) is None
+    assert get_metric_note('opm_pct', 0) is None
+
+
+def test_get_metric_note_opm_missing_returns_none():
+    assert get_metric_note('opm_pct', None) is None
+
+
+def test_get_metric_note_unknown_metric_returns_none():
+    assert get_metric_note('roce_pct', 5) is None
+
+
+# --- classify_fundamental_tier ------------------------------------------
+
+def test_classify_all_passing_row_is_golden():
+    tier, failed = classify_fundamental_tier(PASSING_ROW, PASSING_PREVIOUS_ROW)
+
+    assert tier == 'golden'
+    assert failed == []
+
+
+def test_classify_pe_only_failure_is_silver():
+    row = {**PASSING_ROW, 'pe_ratio': 45}
+
+    tier, failed = classify_fundamental_tier(row, previous_fundamentals_row=None)
+
+    assert tier == 'silver'
+    assert failed == ['PE range']
+
+
+def test_classify_opm_failure_above_silver_floor_is_silver():
+    row = {**PASSING_ROW, 'opm_pct': 18}  # below ideal 25, at/above silver floor 15
+
+    tier, failed = classify_fundamental_tier(row, previous_fundamentals_row=None)
+
+    assert tier == 'silver'
+    assert failed == ['OPM']
+
+
+def test_classify_opm_failure_below_silver_floor_is_excluded():
+    row = {**PASSING_ROW, 'opm_pct': 10}  # below the silver floor entirely
+
+    tier, failed = classify_fundamental_tier(row, previous_fundamentals_row=None)
+
+    assert tier is None
+    assert failed == ['OPM']
+
+
+def test_classify_pe_and_opm_both_failing_is_still_silver():
+    row = {**PASSING_ROW, 'pe_ratio': 45, 'opm_pct': 18}
+
+    tier, failed = classify_fundamental_tier(row, previous_fundamentals_row=None)
+
+    assert tier == 'silver'
+    assert set(failed) == {'PE range', 'OPM'}
+
+
+def test_classify_missing_pe_never_earns_silver():
+    # Missing data doesn't get the benefit of the doubt -- same rule
+    # evaluate_fundamentals() already applies to every other field.
+    row = {**PASSING_ROW, 'pe_ratio': None}
+
+    tier, failed = classify_fundamental_tier(row, previous_fundamentals_row=None)
+
+    assert tier is None
+    assert failed == ['PE range']
+
+
+def test_classify_failure_on_unrelated_criterion_is_excluded_regardless_of_pe_opm():
+    row = {**PASSING_ROW, 'pe_ratio': 45, 'roce_pct': -1}
+
+    tier, failed = classify_fundamental_tier(row, previous_fundamentals_row=None)
+
+    assert tier is None
+    assert set(failed) == {'PE range', 'ROCE'}

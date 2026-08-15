@@ -64,6 +64,7 @@ from utils.stock_universe import (
     refresh_market_cap_filter,
 )
 from utils.stock_shortlist import run_fundamental_shortlist
+from utils.fundamental_screen import get_metric_note
 from utils.stock_indicators import (
     initialize_stock_indicators_table_if_needed,
     run_indicator_calculation,
@@ -7084,7 +7085,7 @@ def stocks_watchlist():
     db = get_db()
     rows = db.execute(
         '''SELECT w.id, w.symbol, w.exchange, w.name, w.is_active,
-                  f.pe_ratio, f.peg_ratio, f.eps, f.snapshot_date,
+                  f.pe_ratio, f.peg_ratio, f.eps, f.opm_pct, f.snapshot_date,
                   i.rsi_14, i.cross_status, i.calc_date
            FROM stock_watchlist w
            LEFT JOIN stock_fundamentals f ON f.watchlist_id = w.id
@@ -7097,6 +7098,14 @@ def stocks_watchlist():
                )
            ORDER BY w.symbol'''
     ).fetchall()
+    # get_metric_note() adds a short visible explanation next to PE/OPM when
+    # they're outside the "ideal" band but didn't disqualify the stock (see
+    # utils/fundamental_screen.py) -- None (shown as nothing) otherwise.
+    rows = [
+        {**row, 'pe_note': get_metric_note('pe_ratio', row.get('pe_ratio')),
+         'opm_note': get_metric_note('opm_pct', row.get('opm_pct'))}
+        for row in rows
+    ]
     return render_template('admin/stocks_watchlist.html', rows=rows)
 
 

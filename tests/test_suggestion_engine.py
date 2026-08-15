@@ -17,7 +17,7 @@ def _candidate(watchlist_id, symbol, peg_ratio, quarterly_profit_growth_pct, opm
         'watchlist_id': watchlist_id, 'symbol': symbol, 'exchange': 'NSE',
         'peg_ratio': peg_ratio, 'quarterly_profit_growth_pct': quarterly_profit_growth_pct,
         'opm_pct': opm_pct, 'roce_pct': roce_pct,
-        'pe_ratio': 20, 'latest_close': 100.0,
+        'pe_ratio': 20, 'latest_close': 100.0, 'fundamental_tier': 'golden',
         **GOOD_INDICATORS,
     }
     row.update(overrides)
@@ -120,10 +120,11 @@ class FakeSuggestionDB:
         if normalized.startswith('INSERT INTO stock_suggestions'):
             (watchlist_id, suggestion_date, buy_price, target_sell_price, stop_loss_price,
              holding_period_days, rsi_at_suggestion, pe_at_suggestion, peg_at_suggestion,
-             score, rationale) = params
+             opm_at_suggestion, fundamental_tier, score, rationale) = params
             self.suggestions.append({
                 'watchlist_id': watchlist_id, 'suggestion_date': suggestion_date,
                 'status': 'pending', 'buy_price': buy_price,
+                'opm_at_suggestion': opm_at_suggestion, 'fundamental_tier': fundamental_tier,
             })
             return FakeCursor([])
 
@@ -159,3 +160,20 @@ def test_new_suggestion_created_when_no_open_one_exists():
     assert summary['created'][0]['symbol'] == 'FRESH'
     assert summary['skipped_duplicates'] == []
     assert len(db.suggestions) == 1
+
+
+def test_watchlist_fundamental_tier_and_opm_carry_through_to_the_suggestion():
+    # A silver-tier watchlist stock should insert as a silver suggestion,
+    # with opm_at_suggestion snapshotted alongside it -- same reasoning as
+    # pe_at_suggestion/peg_at_suggestion already snapshotting their values.
+    candidates = [_candidate(
+        1, 'SILVERSTOCK', peg_ratio=0.5, quarterly_profit_growth_pct=20, opm_pct=18, roce_pct=20,
+        fundamental_tier='silver',
+    )]
+    db = FakeSuggestionDB(candidates)
+
+    generate_daily_suggestions(db)
+
+    assert len(db.suggestions) == 1
+    assert db.suggestions[0]['fundamental_tier'] == 'silver'
+    assert db.suggestions[0]['opm_at_suggestion'] == 18

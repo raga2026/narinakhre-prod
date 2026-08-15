@@ -7,6 +7,11 @@ PE_MIN, PE_MAX = 15, 25
 PEG_MAX = 1
 QUARTERLY_GROWTH_MIN = 10
 OPM_MIN_PCT = 25
+# Floor for OPM to still qualify for the 'silver' tier (see
+# classify_fundamental_tier below) -- below this, OPM fails outright same as
+# before this tiering existed. PE has no equivalent floor/ceiling: any
+# present (non-None) PE value outside [PE_MIN, PE_MAX] is silver-eligible.
+OPM_SILVER_MIN_PCT = 15
 PRICE_TO_BOOK_PASS_MIN, PRICE_TO_BOOK_PASS_MAX = 2, 7
 # As given in the domain expert's notes. Worth flagging: this is an unusual
 # range for a price-to-book multiple -- most listed companies run well
@@ -108,3 +113,69 @@ def evaluate_fundamentals(fundamentals_row, previous_fundamentals_row=None):
             failed.append('FII holding trend')
 
     return (len(failed) == 0, failed)
+
+
+# Criteria that classify_fundamental_tier() will forgive (demote to
+# 'silver' rather than exclude outright) when they're the only thing a
+# company fails. Every other failed criterion still means outright
+# exclusion, unchanged from evaluate_fundamentals()'s original behavior.
+SILVER_ELIGIBLE_CRITERIA = {'PE range', 'OPM'}
+
+
+def get_metric_note(metric_name, value):
+    """Short, factual context for a PE or OPM value that's outside its
+    'ideal' band but still made the cut via the silver tier (see
+    classify_fundamental_tier) -- for display next to the value, not for
+    screening logic. Returns None when there's nothing worth saying: the
+    value is within the ideal band, or missing. metric_name is 'pe_ratio'
+    or 'opm_pct'; any other name returns None."""
+    if metric_name == 'pe_ratio':
+        if value is None or PE_MIN <= value <= PE_MAX:
+            return None
+        return f'outside ideal {PE_MIN}-{PE_MAX} range — scored on a sliding scale, not hard-filtered'
+
+    if metric_name == 'opm_pct':
+        if value is None or value >= OPM_MIN_PCT:
+            return None
+        if value >= OPM_SILVER_MIN_PCT:
+            return f'below ideal {OPM_MIN_PCT}% threshold — partial credit given, not disqualifying'
+        return None
+
+    return None
+
+
+def classify_fundamental_tier(fundamentals_row, previous_fundamentals_row=None):
+    """Runs evaluate_fundamentals() and sorts the result into a two-tier
+    outcome for stock_shortlist.run_fundamental_shortlist():
+      - 'golden': passes every criterion outright.
+      - 'silver': fails ONLY on PE range and/or OPM (every other criterion
+        still passes) -- these two become a soft second-level filter instead
+        of disqualifying outright. OPM only earns silver down to
+        OPM_SILVER_MIN_PCT; below that it's excluded same as any other
+        failure. A missing (None) PE or OPM value never earns silver --
+        missing data still doesn't get the benefit of the doubt, same rule
+        evaluate_fundamentals() already applies everywhere else.
+      - None: excluded -- fails on some other criterion, or PE/OPM data is
+        missing, or OPM is below OPM_SILVER_MIN_PCT.
+
+    Returns (tier, failed_criteria) -- failed_criteria is exactly what
+    evaluate_fundamentals() returned, so run_fundamental_shortlist's
+    failed_criteria_counts reporting (which only wants criteria that
+    actually caused exclusion) keeps working: it should only be recorded
+    for a None tier, never for 'silver'."""
+    passes, failed_criteria = evaluate_fundamentals(fundamentals_row, previous_fundamentals_row)
+    if passes:
+        return 'golden', failed_criteria
+
+    if set(failed_criteria) - SILVER_ELIGIBLE_CRITERIA:
+        return None, failed_criteria
+
+    if 'PE range' in failed_criteria and fundamentals_row.get('pe_ratio') is None:
+        return None, failed_criteria
+
+    if 'OPM' in failed_criteria:
+        opm_pct = fundamentals_row.get('opm_pct')
+        if opm_pct is None or opm_pct < OPM_SILVER_MIN_PCT:
+            return None, failed_criteria
+
+    return 'silver', failed_criteria

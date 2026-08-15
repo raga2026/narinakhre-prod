@@ -83,6 +83,66 @@ def test_email_sent_to_every_active_recipient_and_includes_disclaimer():
     assert summary['sent'] == 2
 
 
+def test_golden_suggestion_shows_golden_label_without_pe_or_opm():
+    db = FakeEmailDB(
+        suggestion_rows=[
+            {'symbol': 'GLD', 'exchange': 'NSE', 'buy_price': 100.0, 'target_sell_price': 105.0,
+             'stop_loss_price': 97.0, 'holding_period_days': 10, 'rationale': 'Golden cross with confirming volume',
+             'fundamental_tier': 'golden', 'pe_at_suggestion': 20.0, 'opm_at_suggestion': 30.0},
+        ],
+        recipient_rows=[{'email': 'a@example.com', 'name': 'A'}],
+    )
+
+    with patch('utils.suggestion_email.send_zeptomail_stocks_email', return_value=True) as mock_send:
+        send_daily_suggestions_email(db)
+
+    textbody = mock_send.call_args.kwargs['textbody']
+    htmlbody = mock_send.call_args.kwargs['htmlbody']
+    assert 'GLD (NSE) — Golden:' in textbody
+    assert '<td>Golden</td>' in htmlbody
+    # Golden suggestions don't need their PE/OPM called out -- that's what
+    # distinguishes them from silver ones.
+    assert 'PE 20' not in textbody
+    assert 'OPM 30' not in textbody
+
+
+def test_silver_suggestion_shows_silver_label_with_pe_and_opm_values():
+    db = FakeEmailDB(
+        suggestion_rows=[
+            {'symbol': 'SLV', 'exchange': 'NSE', 'buy_price': 50.0, 'target_sell_price': 52.5,
+             'stop_loss_price': 48.5, 'holding_period_days': 10, 'rationale': 'Golden cross with confirming volume',
+             'fundamental_tier': 'silver', 'pe_at_suggestion': 32.1, 'opm_at_suggestion': 18.0},
+        ],
+        recipient_rows=[{'email': 'a@example.com', 'name': 'A'}],
+    )
+
+    with patch('utils.suggestion_email.send_zeptomail_stocks_email', return_value=True) as mock_send:
+        send_daily_suggestions_email(db)
+
+    textbody = mock_send.call_args.kwargs['textbody']
+    htmlbody = mock_send.call_args.kwargs['htmlbody']
+    assert 'SLV (NSE) — Silver (PE 32.10, OPM 18%):' in textbody
+    assert 'Silver (PE 32.10, OPM 18%)' in htmlbody
+
+
+def test_suggestion_predating_tier_column_shows_no_tier_label():
+    # An old suggestion row from before fundamental_tier existed -- no key
+    # at all, not just None. Must not crash, and shows no tier text.
+    db = FakeEmailDB(
+        suggestion_rows=[
+            {'symbol': 'OLD', 'exchange': 'NSE', 'buy_price': 10.0, 'target_sell_price': 10.5,
+             'stop_loss_price': 9.7, 'holding_period_days': 10, 'rationale': 'Golden cross with confirming volume'},
+        ],
+        recipient_rows=[{'email': 'a@example.com', 'name': 'A'}],
+    )
+
+    with patch('utils.suggestion_email.send_zeptomail_stocks_email', return_value=True) as mock_send:
+        send_daily_suggestions_email(db)
+
+    textbody = mock_send.call_args.kwargs['textbody']
+    assert 'OLD (NSE):' in textbody  # no " — ..." tier suffix at all
+
+
 def test_a_failed_send_is_counted_without_stopping_the_rest():
     db = FakeEmailDB(
         suggestion_rows=[],

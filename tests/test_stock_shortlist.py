@@ -19,7 +19,8 @@ PASSING_FUNDAMENTALS = {
     'quarterly_profit_growth_pct': 12, 'quarterly_revenue_growth_pct': 11,
 }
 
-FAILING_FUNDAMENTALS = {**PASSING_FUNDAMENTALS, 'pe_ratio': 45}  # fails PE range only
+FAILING_FUNDAMENTALS = {**PASSING_FUNDAMENTALS, 'roce_pct': -1}  # fails ROCE -- excluded outright, not silver-eligible
+SILVER_FUNDAMENTALS = {**PASSING_FUNDAMENTALS, 'pe_ratio': 45}  # fails PE range only -- silver-eligible
 
 
 class FakeShortlistDB:
@@ -74,18 +75,20 @@ class FakeShortlistDB:
             }])
 
         if normalized.startswith('INSERT INTO stock_watchlist'):
-            symbol, exchange, name, insert_source, update_source, guard_source = params
+            (symbol, exchange, name, insert_source, insert_tier,
+             update_source, update_tier, guard_source) = params
             key = (symbol, exchange)
             existing = self.watchlist.get(key)
             if existing is None:
                 self.watchlist[key] = {
                     'symbol': symbol, 'exchange': exchange, 'name': name,
-                    'is_active': 1, 'source': insert_source,
+                    'is_active': 1, 'source': insert_source, 'fundamental_tier': insert_tier,
                 }
             elif existing['source'] == guard_source or existing['source'] is None:
                 existing['is_active'] = 1
                 existing['source'] = update_source
                 existing['name'] = name
+                existing['fundamental_tier'] = update_tier
             # else: a different source (e.g. 'manual') -- left untouched.
             return FakeCursor([])
 
@@ -117,13 +120,16 @@ def test_shortlist_deactivates_no_longer_passing_and_protects_manual_rows():
 
     assert summary['evaluated'] == 3
     assert summary['passed'] == 2   # STILLGOOD, MANUALCO
+    assert summary['golden'] == 2
+    assert summary['silver'] == 0
     assert summary['failed'] == 1   # NOWBAD
-    assert summary['failed_criteria_counts'] == {'PE range': 1}
+    assert summary['failed_criteria_counts'] == {'ROCE': 1}
 
-    # Still passing -> stays active, still auto-shortlisted.
+    # Still passing -> stays active, still auto-shortlisted, golden tier.
     still_good = db.watchlist[('STILLGOOD', 'NSE')]
     assert still_good['is_active'] == 1
     assert still_good['source'] == SHORTLIST_SOURCE
+    assert still_good['fundamental_tier'] == 'golden'
 
     # No longer passing -> deactivated, not deleted, source unchanged.
     now_bad = db.watchlist[('NOWBAD', 'NSE')]
@@ -149,7 +155,54 @@ def test_passing_company_not_previously_in_watchlist_gets_inserted():
     summary = run_fundamental_shortlist(db)
 
     assert summary['passed'] == 1
+    assert summary['golden'] == 1
     newco = db.watchlist[('NEWCO', 'NSE')]
     assert newco['is_active'] == 1
     assert newco['source'] == SHORTLIST_SOURCE
     assert newco['name'] == 'New Co Ltd'
+
+
+def test_pe_only_failure_gets_included_as_silver_not_excluded():
+    # The whole point of the silver tier: a company failing only PE range
+    # (or OPM, or both, per fundamental_screen.classify_fundamental_tier)
+    # gets watchlisted, not excluded like before this tiering existed.
+    universe = [
+        {'id': 1, 'symbol': 'SILVERCO', 'exchange': 'NSE', 'company_name': 'Silver Co Ltd', 'is_scrape_eligible': True},
+    ]
+    fundamentals = [
+        {'universe_id': 1, 'snapshot_date': '2026-08-10', **SILVER_FUNDAMENTALS},
+    ]
+    db = FakeShortlistDB(universe, fundamentals, watchlist_rows=[])
+
+    summary = run_fundamental_shortlist(db)
+
+    assert summary['evaluated'] == 1
+    assert summary['passed'] == 1
+    assert summary['golden'] == 0
+    assert summary['silver'] == 1
+    assert summary['failed'] == 0
+    # A silver company's PE "failure" didn't cause exclusion, so it must not
+    # show up in the exclusion-reason breakdown.
+    assert summary['failed_criteria_counts'] == {}
+
+    silverco = db.watchlist[('SILVERCO', 'NSE')]
+    assert silverco['is_active'] == 1
+    assert silverco['fundamental_tier'] == 'silver'
+
+
+def test_opm_below_silver_floor_stays_excluded_not_silver():
+    universe = [
+        {'id': 1, 'symbol': 'TOOLOWOPM', 'exchange': 'NSE', 'company_name': 'Too Low OPM Ltd', 'is_scrape_eligible': True},
+    ]
+    fundamentals = [
+        {'universe_id': 1, 'snapshot_date': '2026-08-10', **{**PASSING_FUNDAMENTALS, 'opm_pct': 10}},
+    ]
+    db = FakeShortlistDB(universe, fundamentals, watchlist_rows=[])
+
+    summary = run_fundamental_shortlist(db)
+
+    assert summary['passed'] == 0
+    assert summary['silver'] == 0
+    assert summary['failed'] == 1
+    assert summary['failed_criteria_counts'] == {'OPM': 1}
+    assert ('TOOLOWOPM', 'NSE') not in db.watchlist

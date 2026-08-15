@@ -34,6 +34,7 @@
                     <tr>
                         <th scope="col">Symbol</th>
                         <th scope="col">Date</th>
+                        <th scope="col">Tier</th>
                         <th scope="col">Buy</th>
                         <th scope="col">Target</th>
                         <th scope="col">Stop-loss</th>
@@ -47,6 +48,12 @@
                     <tr>
                         <th scope="row">{{ s.symbol }} ({{ s.exchange }})</th>
                         <td>{{ s.suggestion_date }}</td>
+                        <td>
+                            {% if s.fundamental_tier == 'golden' %}Golden
+                            {% elif s.fundamental_tier == 'silver' %}Silver (PE {{ '%.2f'|format(s.pe_at_suggestion) if s.pe_at_suggestion is not none else '—' }}, OPM {{ '%.0f'|format(s.opm_at_suggestion) if s.opm_at_suggestion is not none else '—' }}%)
+                            {% else %}—
+                            {% endif %}
+                        </td>
                         <td>{{ s.buy_price }}</td>
                         <td>{{ s.target_sell_price }}</td>
                         <td>{{ s.stop_loss_price }}</td>
@@ -56,7 +63,7 @@
                     </tr>
                     {% else %}
                     <tr>
-                        <td colspan="8" class="text-slate-400">No suggestions yet.</td>
+                        <td colspan="9" class="text-slate-400">No suggestions yet.</td>
                     </tr>
                     {% endfor %}
                 </tbody>

@@ -46,6 +46,13 @@ STOCK_TABLES_SQL = [
 # rule protects them automatically without a separate backfill step.
 STOCK_WATCHLIST_ALTER_SQL = [
     "ALTER TABLE stock_watchlist ADD COLUMN IF NOT EXISTS source TEXT DEFAULT 'manual'",
+    # 'golden' = passed every fundamental screening criterion outright;
+    # 'silver' = passed everything except PE range and/or OPM, which are a
+    # softer second-level filter (see fundamental_screen.classify_fundamental_tier).
+    # NULL for rows predating this column and for manually-added rows, which
+    # were never screened at all.
+    "ALTER TABLE stock_watchlist ADD COLUMN IF NOT EXISTS fundamental_tier TEXT "
+    "CHECK (fundamental_tier IS NULL OR fundamental_tier IN ('golden', 'silver'))",
 ]
 
 

@@ -15,6 +15,7 @@
         .badge-golden_cross    { background:#dcfce7; color:#15803d; }
         .badge-death_cross     { background:#fee2e2; color:#b91c1c; }
         .badge-no_clear_trend  { background:#e2e8f0; color:#475569; }
+        .metric-note { font-size: 0.75rem; color: #94a3b8; display: block; }
     </style>
 </head>
 <body class="min-h-screen p-8">
@@ -47,6 +48,7 @@
                         <th scope="col">Status</th>
                         <th scope="col">P/E</th>
                         <th scope="col">PEG</th>
+                        <th scope="col">OPM</th>
                         <th scope="col">EPS</th>
                         <th scope="col">As of</th>
                         <th scope="col">RSI (14)</th>
@@ -60,8 +62,15 @@
                         <td>{{ row.exchange }}</td>
                         <td>{{ row.name or '—' }}</td>
                         <td>{{ 'Active' if row.is_active else 'Inactive' }}</td>
-                        <td>{{ row.pe_ratio if row.pe_ratio is not none else '—' }}</td>
+                        <td>
+                            {{ row.pe_ratio if row.pe_ratio is not none else '—' }}
+                            {% if row.pe_note %}<span class="metric-note">{{ row.pe_note }}</span>{% endif %}
+                        </td>
                         <td>{{ row.peg_ratio if row.peg_ratio is not none else '—' }}</td>
+                        <td>
+                            {{ row.opm_pct if row.opm_pct is not none else '—' }}
+                            {% if row.opm_note %}<span class="metric-note">{{ row.opm_note }}</span>{% endif %}
+                        </td>
                         <td>{{ row.eps if row.eps is not none else '—' }}</td>
                         <td>{{ row.snapshot_date or '—' }}</td>
                         <td>{{ row.rsi_14 if row.rsi_14 is not none else '—' }}</td>
@@ -75,7 +84,7 @@
                     </tr>
                     {% else %}
                     <tr>
-                        <td colspan="10" class="text-slate-400">No symbols in the watchlist yet.</td>
+                        <td colspan="11" class="text-slate-400">No symbols in the watchlist yet.</td>
                     </tr>
                     {% endfor %}
                 </tbody>

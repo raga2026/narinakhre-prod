@@ -87,6 +87,25 @@ def list_recipients(db):
     ).fetchall()
 
 
+def _tier_label(s):
+    """'Golden' or 'Silver (PE x, OPM y%)' beside a suggestion, or None for
+    suggestions that predate the fundamental_tier column. Silver always
+    shows its PE/OPM values inline -- those are exactly the two metrics that
+    let it in on the softer second-level filter (see
+    fundamental_screen.classify_fundamental_tier), so the reader can see
+    why, not just that."""
+    tier = s.get('fundamental_tier')
+    if tier == 'golden':
+        return 'Golden'
+    if tier == 'silver':
+        pe = s.get('pe_at_suggestion')
+        opm = s.get('opm_at_suggestion')
+        pe_str = f'{pe:.2f}' if pe is not None else '—'
+        opm_str = f'{opm:.0f}%' if opm is not None else '—'
+        return f'Silver (PE {pe_str}, OPM {opm_str})'
+    return None
+
+
 def _build_email_content(suggestions, today_label):
     """Returns (subject, textbody, htmlbody). Always produces a real email,
     even with zero suggestions -- a silent "nothing sent" looks identical
@@ -108,14 +127,17 @@ def _build_email_content(suggestions, today_label):
     text_lines = [f'Today\'s suggestions ({today_label}):', '']
     html_rows = []
     for s in suggestions:
+        tier_label = _tier_label(s)
+        tier_suffix = f' — {tier_label}' if tier_label else ''
         text_lines.append(
-            f"{s['symbol']} ({s['exchange']}): Buy {s['buy_price']}, "
+            f"{s['symbol']} ({s['exchange']}){tier_suffix}: Buy {s['buy_price']}, "
             f"Target {s['target_sell_price']}, Stop-loss {s['stop_loss_price']}, "
             f"Hold {s['holding_period_days']} days. {s['rationale']}"
         )
         text_lines.append('')
         html_rows.append(
             f"<tr><td>{s['symbol']} ({s['exchange']})</td>"
+            f"<td>{tier_label or '—'}</td>"
             f"<td>{s['buy_price']}</td><td>{s['target_sell_price']}</td>"
             f"<td>{s['stop_loss_price']}</td><td>{s['holding_period_days']} days</td>"
             f"<td>{s['rationale']}</td></tr>"
@@ -126,7 +148,7 @@ def _build_email_content(suggestions, today_label):
     html_body = (
         '<p>Today\'s suggestions:</p>'
         '<table border="1" cellpadding="6" cellspacing="0">'
-        '<tr><th>Symbol</th><th>Buy</th><th>Target</th><th>Stop-loss</th><th>Hold</th><th>Rationale</th></tr>'
+        '<tr><th>Symbol</th><th>Tier</th><th>Buy</th><th>Target</th><th>Stop-loss</th><th>Hold</th><th>Rationale</th></tr>'
         + ''.join(html_rows) +
         '</table>'
         f'<p style="color:#64748b;font-size:0.85em;margin-top:16px;">{DISCLAIMER}</p>'
