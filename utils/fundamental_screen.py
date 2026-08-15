@@ -5,7 +5,7 @@ stock_universe/stock_fundamentals and synced into stock_watchlist)."""
 
 PE_MIN, PE_MAX = 15, 25
 PEG_MAX = 1
-QUARTERLY_GROWTH_MIN, QUARTERLY_GROWTH_MAX = 10, 15
+QUARTERLY_GROWTH_MIN = 10
 OPM_MIN_PCT = 25
 PRICE_TO_BOOK_PASS_MIN, PRICE_TO_BOOK_PASS_MAX = 2, 7
 # As given in the domain expert's notes. Worth flagging: this is an unusual
@@ -30,9 +30,9 @@ def evaluate_fundamentals(fundamentals_row, previous_fundamentals_row=None):
     screening criteria:
       - PE ratio in [15, 25]
       - PEG ratio < 1
-      - Quarterly profit growth AND revenue growth in [10, 15]%, never
-        negative (a value outside that range, including negative, fails --
-        _in_range already excludes anything below 10)
+      - Quarterly profit growth AND revenue growth >= 10%, no upper bound --
+        growing faster than 10% should never be a reason to fail. Never
+        negative either, but that's already implied by the >=10 floor.
       - OPM >= 25%
       - ROCE and ROA both positive
       - EPS positive
@@ -66,10 +66,12 @@ def evaluate_fundamentals(fundamentals_row, previous_fundamentals_row=None):
     if peg_ratio is None or peg_ratio >= PEG_MAX:
         failed.append('PEG')
 
-    if not _in_range(fundamentals_row.get('quarterly_profit_growth_pct'), QUARTERLY_GROWTH_MIN, QUARTERLY_GROWTH_MAX):
+    profit_growth = fundamentals_row.get('quarterly_profit_growth_pct')
+    if profit_growth is None or profit_growth < QUARTERLY_GROWTH_MIN:
         failed.append('quarterly profit growth')
 
-    if not _in_range(fundamentals_row.get('quarterly_revenue_growth_pct'), QUARTERLY_GROWTH_MIN, QUARTERLY_GROWTH_MAX):
+    revenue_growth = fundamentals_row.get('quarterly_revenue_growth_pct')
+    if revenue_growth is None or revenue_growth < QUARTERLY_GROWTH_MIN:
         failed.append('quarterly revenue growth')
 
     opm_pct = fundamentals_row.get('opm_pct')

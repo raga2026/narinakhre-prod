@@ -103,3 +103,34 @@ def test_missing_required_field_fails_that_check():
 
     assert passes is False
     assert 'ROCE' in failed
+
+
+def test_quarterly_growth_above_old_15pct_cap_now_passes():
+    # Growth is a floor, not a range -- a company growing profit 30% and
+    # revenue 40% should never fail for growing "too fast".
+    row = {**PASSING_ROW, 'quarterly_profit_growth_pct': 30, 'quarterly_revenue_growth_pct': 40}
+
+    passes, failed = evaluate_fundamentals(row, previous_fundamentals_row=None)
+
+    assert passes is True
+    assert failed == []
+
+
+def test_quarterly_growth_below_10pct_floor_still_fails():
+    row = {**PASSING_ROW, 'quarterly_profit_growth_pct': 5, 'quarterly_revenue_growth_pct': 5}
+
+    passes, failed = evaluate_fundamentals(row, previous_fundamentals_row=None)
+
+    assert passes is False
+    assert 'quarterly profit growth' in failed
+    assert 'quarterly revenue growth' in failed
+
+
+def test_negative_quarterly_growth_fails_same_as_any_other_sub_floor_value():
+    row = {**PASSING_ROW, 'quarterly_profit_growth_pct': -5, 'quarterly_revenue_growth_pct': -5}
+
+    passes, failed = evaluate_fundamentals(row, previous_fundamentals_row=None)
+
+    assert passes is False
+    assert 'quarterly profit growth' in failed
+    assert 'quarterly revenue growth' in failed
