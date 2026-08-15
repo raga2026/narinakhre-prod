@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ company.name or company.symbol }} - Nari Nakhre Stocks</title>
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+    <style>
+        body { background: #0f172a; color: #f8fafc; }
+        .stocks-accent { color: #0ea5e9; }
+        table { border-collapse: collapse; width: 100%; }
+        th, td { text-align: left; padding: 0.6rem 0.9rem; border-bottom: 1px solid rgba(14, 165, 233, 0.15); }
+        th { color: #7dd3fc; font-weight: 600; }
+        .badge { display:inline-flex; align-items:center; padding:4px 12px; border-radius:999px; font-size:0.78rem; font-weight:700; white-space: nowrap; }
+        .badge-golden_cross    { background:#dcfce7; color:#15803d; }
+        .badge-death_cross     { background:#fee2e2; color:#b91c1c; }
+        .badge-no_clear_trend  { background:#e2e8f0; color:#475569; }
+        .badge-recommended     { background:#166534; color:#dcfce7; }
+        .badge-not-recommended { background:#1e293b; color:#94a3b8; border:1px solid rgba(148,163,184,0.3); }
+        .badge-golden           { background:#78350f; color:#fef3c7; }
+        .badge-silver           { background:#334155; color:#e2e8f0; }
+        .metric-note { font-size: 0.75rem; color: #94a3b8; display: block; margin-top: 2px; }
+        .stat-card { background: #1e293b; border: 1px solid rgba(14,165,233,0.15); border-radius: 1rem; padding: 1.1rem 1.25rem; }
+        .stat-label { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.04em; color: #7dd3fc; font-weight: 600; }
+        .stat-value { font-size: 1.4rem; font-weight: 800; margin-top: 4px; }
+        .section-card { background: #1e293b; border: 1px solid rgba(14,165,233,0.15); border-radius: 1rem; padding: 1.5rem; }
+    </style>
+</head>
+<body class="min-h-screen p-8">
+    <div class="max-w-4xl mx-auto">
+        <div class="flex items-center justify-between mb-2">
+            <a href="{{ url_for('stocks_watchlist') }}" class="text-sm text-slate-400 hover:text-sky-400 underline">&larr; Back to watchlist</a>
+        </div>
+
+        <div class="flex flex-wrap items-center justify-between gap-3 mb-6 mt-2">
+            <div>
+                <h1 class="text-3xl font-extrabold stocks-accent font-serif">{{ company.name or company.symbol }}</h1>
+                <p class="text-slate-400 text-sm mt-1">{{ company.symbol }} &middot; {{ company.exchange }}</p>
+            </div>
+            <div class="flex gap-2 flex-wrap">
+                {% if company.fundamental_tier == 'golden' %}
+                    <span class="badge badge-golden">Golden tier</span>
+                {% elif company.fundamental_tier == 'silver' %}
+                    <span class="badge badge-silver">Silver tier</span>
+                {% endif %}
+                {% if company.cross_status %}
+                    <span class="badge badge-{{ company.cross_status }}">{{ company.cross_status.replace('_', ' ') | title }}</span>
+                {% endif %}
+                {% if company.is_recommended %}
+                    <span class="badge badge-recommended">Highly recommended to buy</span>
+                {% else %}
+                    <span class="badge badge-not-recommended">Not currently recommended</span>
+                {% endif %}
+            </div>
+        </div>
+
+        {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+            <div class="mb-6" role="alert" aria-live="assertive">
+            {% for category, msg in messages %}
+                <div class="bg-sky-900/40 text-sky-200 border border-sky-500/30 rounded-xl p-3 mb-2 text-sm">{{ msg }}</div>
+            {% endfor %}
+            </div>
+        {% endif %}
+        {% endwith %}
+
+        <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
+            <div class="stat-card">
+                <p class="stat-label">Price</p>
+                <p class="stat-value">{{ company.latest_price if company.latest_price is not none else '—' }}</p>
+                <p class="text-slate-500 text-xs mt-1">as of {{ company.price_date or '—' }}</p>
+            </div>
+            <div class="stat-card">
+                <p class="stat-label">P/E</p>
+                <p class="stat-value">{{ company.pe_ratio if company.pe_ratio is not none else '—' }}</p>
+                {% if company.pe_note %}<p class="metric-note">{{ company.pe_note }}</p>{% endif %}
+            </div>
+            <div class="stat-card">
+                <p class="stat-label">OPM</p>
+                <p class="stat-value">{{ company.opm_pct if company.opm_pct is not none else '—' }}</p>
+                {% if company.opm_note %}<p class="metric-note">{{ company.opm_note }}</p>{% endif %}
+            </div>
+            <div class="stat-card">
+                <p class="stat-label">RSI (14)</p>
+                <p class="stat-value">{{ company.rsi_14 if company.rsi_14 is not none else '—' }}</p>
+                <p class="text-slate-500 text-xs mt-1">as of {{ company.indicators_date or '—' }}</p>
+            </div>
+        </div>
+
+        <div class="section-card mb-6">
+            <h2 class="text-lg font-bold text-slate-200 mb-4">Fundamentals</h2>
+            <p class="text-slate-400 text-sm mb-4">Most recent weekly snapshot, {{ company.fundamentals_date or '—' }}.</p>
+            <div class="overflow-x-auto">
+                <table>
+                    <caption class="sr-only">Fundamental metrics for {{ company.name or company.symbol }}</caption>
+                    <tbody>
+                        <tr><th scope="row">PEG ratio</th><td>{{ company.peg_ratio if company.peg_ratio is not none else '—' }}</td></tr>
+                        <tr><th scope="row">EPS</th><td>{{ company.eps if company.eps is not none else '—' }}</td></tr>
+                        <tr><th scope="row">Market cap</th><td>{{ company.market_cap if company.market_cap is not none else '—' }}</td></tr>
+                        <tr><th scope="row">ROE</th><td>{{ company.roe if company.roe is not none else '—' }}</td></tr>
+                        <tr><th scope="row">ROCE</th><td>{{ company.roce_pct if company.roce_pct is not none else '—' }}</td></tr>
+                        <tr><th scope="row">ROA</th><td>{{ company.roa_pct if company.roa_pct is not none else '—' }}</td></tr>
+                        <tr><th scope="row">Debt to equity</th><td>{{ company.debt_to_equity if company.debt_to_equity is not none else '—' }}</td></tr>
+                        <tr><th scope="row">Price to book</th><td>{{ company.price_to_book if company.price_to_book is not none else '—' }}</td></tr>
+                        <tr><th scope="row">Current ratio</th><td>{{ company.current_ratio if company.current_ratio is not none else '—' }}</td></tr>
+                        <tr><th scope="row">Sector avg P/E</th><td>{{ company.sector_avg_pe if company.sector_avg_pe is not none else '—' }}</td></tr>
+                        <tr><th scope="row">Quarterly profit growth</th><td>{{ company.quarterly_profit_growth_pct if company.quarterly_profit_growth_pct is not none else '—' }}</td></tr>
+                        <tr><th scope="row">Quarterly revenue growth</th><td>{{ company.quarterly_revenue_growth_pct if company.quarterly_revenue_growth_pct is not none else '—' }}</td></tr>
+                        <tr><th scope="row">Earnings growth</th><td>{{ company.earnings_growth_pct if company.earnings_growth_pct is not none else '—' }}</td></tr>
+                        <tr><th scope="row">Free cash flow</th><td>{{ company.free_cash_flow if company.free_cash_flow is not none else '—' }}</td></tr>
+                        <tr><th scope="row">Promoter holding</th><td>{{ company.promoter_holding_pct if company.promoter_holding_pct is not none else '—' }}</td></tr>
+                        <tr><th scope="row">FII holding</th><td>{{ company.fii_holding_pct if company.fii_holding_pct is not none else '—' }}</td></tr>
+                        <tr><th scope="row">Public holding</th><td>{{ company.public_holding_pct if company.public_holding_pct is not none else '—' }}</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <div class="section-card mb-6">
+            <h2 class="text-lg font-bold text-slate-200 mb-4">Technicals</h2>
+            <p class="text-slate-400 text-sm mb-4">As of {{ company.indicators_date or '—' }}.</p>
+            <div class="overflow-x-auto">
+                <table>
+                    <caption class="sr-only">Technical indicators for {{ company.name or company.symbol }}</caption>
+                    <tbody>
+                        <tr><th scope="row">21-day moving average</th><td>{{ company.ma_21 if company.ma_21 is not none else '—' }}</td></tr>
+                        <tr><th scope="row">50-day moving average</th><td>{{ company.ma_50 if company.ma_50 is not none else '—' }}</td></tr>
+                        <tr><th scope="row">200-day moving average</th><td>{{ company.ma_200 if company.ma_200 is not none else '—' }}</td></tr>
+                        <tr><th scope="row">Volume trend</th><td>{{ (company.volume_trend or '—').replace('_', ' ') | title }}</td></tr>
+                        <tr><th scope="row">20-day average volume</th><td>{{ company.volume_avg_20d if company.volume_avg_20d is not none else '—' }}</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <div class="section-card mb-6">
+            <h2 class="text-lg font-bold text-slate-200 mb-4">Recent prices</h2>
+            <div class="overflow-x-auto">
+                <table>
+                    <caption class="text-left text-slate-400 text-sm mb-3">Last {{ recent_prices | length }} trading day{{ 's' if recent_prices | length != 1 }}, most recent first.</caption>
+                    <thead>
+                        <tr>
+                            <th scope="col">Date</th>
+                            <th scope="col">Close</th>
+                            <th scope="col">Volume</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for p in recent_prices %}
+                        <tr>
+                            <th scope="row">{{ p.trade_date }}</th>
+                            <td>{{ p.close }}</td>
+                            <td>{{ p.volume }}</td>
+                        </tr>
+                        {% else %}
+                        <tr><td colspan="3" class="text-slate-400">No price history yet.</td></tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <div class="section-card">
+            <h2 class="text-lg font-bold text-slate-200 mb-4">Suggestion history</h2>
+            <div class="overflow-x-auto">
+                <table>
+                    <caption class="text-left text-slate-400 text-sm mb-3">Every past buy suggestion for this company, most recent first.</caption>
+                    <thead>
+                        <tr>
+                            <th scope="col">Date</th>
+                            <th scope="col">Tier</th>
+                            <th scope="col">Buy</th>
+                            <th scope="col">Target</th>
+                            <th scope="col">Stop-loss</th>
+                            <th scope="col">Hold</th>
+                            <th scope="col">Outcome</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for s in suggestion_history %}
+                        <tr>
+                            <th scope="row">{{ s.suggestion_date }}</th>
+                            <td>{{ s.fundamental_tier | title if s.fundamental_tier else '—' }}</td>
+                            <td>{{ s.buy_price }}</td>
+                            <td>{{ s.target_sell_price }}</td>
+                            <td>{{ s.stop_loss_price }}</td>
+                            <td>{{ s.holding_period_days }} days</td>
+                            <td>{{ s.status | title }}</td>
+                        </tr>
+                        {% else %}
+                        <tr><td colspan="7" class="text-slate-400">No suggestions have been made for this company yet.</td></tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</body>
+</html>

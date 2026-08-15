@@ -9,19 +9,34 @@
         body { background: #0f172a; color: #f8fafc; }
         .stocks-accent { color: #0ea5e9; }
         table { border-collapse: collapse; width: 100%; }
-        th, td { text-align: left; padding: 0.6rem 0.9rem; border-bottom: 1px solid rgba(14, 165, 233, 0.15); }
-        th { color: #7dd3fc; font-weight: 600; }
-        .badge { display:inline-flex; align-items:center; padding:2px 10px; border-radius:999px; font-size:0.72rem; font-weight:700; white-space: nowrap; }
+        th, td { text-align: left; padding: 0.7rem 0.9rem; border-bottom: 1px solid rgba(14, 165, 233, 0.15); }
+        th { color: #7dd3fc; font-weight: 600; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.03em; }
+        tbody tr:hover { background: rgba(14, 165, 233, 0.06); }
+        tr.is-recommended { box-shadow: inset 3px 0 0 #22c55e; }
+        .badge { display:inline-flex; align-items:center; padding:3px 11px; border-radius:999px; font-size:0.72rem; font-weight:700; white-space: nowrap; }
         .badge-golden_cross    { background:#dcfce7; color:#15803d; }
         .badge-death_cross     { background:#fee2e2; color:#b91c1c; }
         .badge-no_clear_trend  { background:#e2e8f0; color:#475569; }
+        .badge-recommended     { background:#166534; color:#dcfce7; }
+        .badge-not-recommended { background:#1e293b; color:#64748b; }
         .metric-note { font-size: 0.75rem; color: #94a3b8; display: block; }
+        .company-link { color: #f8fafc; text-decoration: underline; text-decoration-color: rgba(148,163,184,0.4); }
+        .company-link:hover { color: #38bdf8; }
+        .filter-pill { padding: 6px 14px; border-radius: 999px; font-size: 0.85rem; font-weight: 600; border: 1px solid rgba(14,165,233,0.3); }
+        .filter-pill.active { background: #0ea5e9; color: #0f172a; }
+        .filter-pill:not(.active) { color: #7dd3fc; }
     </style>
 </head>
 <body class="min-h-screen p-8">
-    <div class="max-w-4xl mx-auto">
+    <div class="max-w-5xl mx-auto">
         <div class="flex items-center justify-between mb-6">
-            <h1 class="text-2xl font-extrabold stocks-accent font-serif">Watchlist</h1>
+            <div>
+                <h1 class="text-2xl font-extrabold stocks-accent font-serif">Watchlist</h1>
+                <p class="text-slate-400 text-sm mt-1">
+                    {{ rows | length }} compan{{ 'y' if rows | length == 1 else 'ies' }} shown
+                    {% if cross_filter == 'golden' %}&middot; golden cross only{% endif %}
+                </p>
+            </div>
             {% if session.stocks_admin_role == 'viewer' %}
             <a href="{{ url_for('stocks_my_suggestions') }}" class="text-sm text-slate-400 hover:text-sky-400 underline">Back to my suggestions</a>
             {% else %}
@@ -39,10 +54,64 @@
         {% endif %}
         {% endwith %}
 
+        <nav aria-label="Filter watchlist by cross-over status" class="flex gap-2 mb-6">
+            <a href="{{ url_for('stocks_watchlist') }}"
+               class="filter-pill {{ 'active' if cross_filter == 'all' }}"
+               {% if cross_filter == 'all' %}aria-current="page"{% endif %}>All companies</a>
+            <a href="{{ url_for('stocks_watchlist', filter='golden') }}"
+               class="filter-pill {{ 'active' if cross_filter == 'golden' }}"
+               {% if cross_filter == 'golden' %}aria-current="page"{% endif %}>Golden cross only</a>
+        </nav>
+
         <div class="bg-slate-800 rounded-2xl p-6 border border-sky-500/20 overflow-x-auto">
+            {% if session.stocks_admin_role == 'viewer' %}
+            {# Simplified table: name, price, cross-over, recommended -- sorted recommended-first (see the route). #}
             <table>
                 <caption class="text-left text-slate-400 text-sm mb-3">
-                    Fundamentals show the most recent weekly snapshot per symbol -- run "Fetch fundamentals" on the dashboard to update them.
+                    Sorted with the most promising companies first. Click a name for the full analysis.
+                </caption>
+                <thead>
+                    <tr>
+                        <th scope="col">Company</th>
+                        <th scope="col">Price</th>
+                        <th scope="col">Cross-over</th>
+                        <th scope="col">Recommended</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for row in rows %}
+                    <tr class="{{ 'is-recommended' if row.is_recommended }}">
+                        <th scope="row">
+                            <a class="company-link" href="{{ url_for('stocks_company_detail', watchlist_id=row.id) }}">{{ row.name or row.symbol }}</a>
+                        </th>
+                        <td>{{ row.latest_price if row.latest_price is not none else '—' }}</td>
+                        <td>
+                            {% if row.cross_status %}
+                                <span class="badge badge-{{ row.cross_status }}">{{ row.cross_status.replace('_', ' ') | title }}</span>
+                            {% else %}
+                                —
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% if row.is_recommended %}
+                                <span class="badge badge-recommended">Highly recommended to buy</span>
+                            {% else %}
+                                <span class="badge badge-not-recommended">Not yet</span>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% else %}
+                    <tr>
+                        <td colspan="4" class="text-slate-400">No symbols in the watchlist yet.</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+            {% else %}
+            {# Full operational table for staff -- every fundamentals/technicals column, plus the same recommended flag. #}
+            <table>
+                <caption class="text-left text-slate-400 text-sm mb-3">
+                    Fundamentals show the most recent weekly snapshot per symbol -- run "Fetch fundamentals" on the dashboard to update them. Sorted recommended-first, then golden-cross-first.
                 </caption>
                 <thead>
                     <tr>
@@ -50,6 +119,7 @@
                         <th scope="col">Symbol</th>
                         <th scope="col">Exchange</th>
                         <th scope="col">Status</th>
+                        <th scope="col">Price</th>
                         <th scope="col">P/E</th>
                         <th scope="col">PEG</th>
                         <th scope="col">OPM</th>
@@ -57,15 +127,19 @@
                         <th scope="col">As of</th>
                         <th scope="col">RSI (14)</th>
                         <th scope="col">Cross</th>
+                        <th scope="col">Recommended</th>
                     </tr>
                 </thead>
                 <tbody>
                     {% for row in rows %}
-                    <tr>
-                        <th scope="row">{{ row.name or row.symbol }}</th>
+                    <tr class="{{ 'is-recommended' if row.is_recommended }}">
+                        <th scope="row">
+                            <a class="company-link" href="{{ url_for('stocks_company_detail', watchlist_id=row.id) }}">{{ row.name or row.symbol }}</a>
+                        </th>
                         <td>{{ row.symbol }}</td>
                         <td>{{ row.exchange }}</td>
                         <td>{{ 'Active' if row.is_active else 'Inactive' }}</td>
+                        <td>{{ row.latest_price if row.latest_price is not none else '—' }}</td>
                         <td>
                             {{ row.pe_ratio if row.pe_ratio is not none else '—' }}
                             {% if row.pe_note %}<span class="metric-note">{{ row.pe_note }}</span>{% endif %}
@@ -85,14 +159,22 @@
                                 —
                             {% endif %}
                         </td>
+                        <td>
+                            {% if row.is_recommended %}
+                                <span class="badge badge-recommended">Yes</span>
+                            {% else %}
+                                <span class="badge badge-not-recommended">No</span>
+                            {% endif %}
+                        </td>
                     </tr>
                     {% else %}
                     <tr>
-                        <td colspan="11" class="text-slate-400">No symbols in the watchlist yet.</td>
+                        <td colspan="13" class="text-slate-400">No symbols in the watchlist yet.</td>
                     </tr>
                     {% endfor %}
                 </tbody>
             </table>
+            {% endif %}
         </div>
     </div>
 </body>

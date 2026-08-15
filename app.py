@@ -77,6 +77,7 @@ from utils.stock_universe import (
 )
 from utils.stock_shortlist import run_fundamental_shortlist
 from utils.fundamental_screen import get_metric_note
+from utils.watchlist_view import enrich_and_sort_watchlist_rows
 from utils.stock_indicators import (
     initialize_stock_indicators_table_if_needed,
     run_indicator_calculation,
@@ -91,6 +92,7 @@ from utils.suggestion_engine import (
     initialize_stock_suggestions_table_if_needed,
     generate_daily_suggestions,
     get_suggestions,
+    passes_hard_filters,
     HOLDING_PERIOD_DAYS,
 )
 from utils.suggestion_email import (
@@ -7212,20 +7214,32 @@ def cron_stocks_fundamentals_sync():
 @app.route('/stocks/watchlist', methods=['GET'])
 @stocks_watchlist_access_required
 def stocks_watchlist():
-    """Lists every stock_watchlist row with its latest stock_fundamentals
-    and stock_indicators snapshots (if any) joined in, including
-    cross_status (golden cross / death cross / no clear trend) per symbol.
-    Doesn't touch stock_watchlist/stock_fundamentals/stock_daily_data
-    schemas -- read-only here. super_admin/child_admin always have access;
-    a viewer only gets in if their account was created with
-    can_view_watchlist granted (see stocks_watchlist_access_required) --
-    everyone else gets their own read-only page at /stocks/my/suggestions
-    instead."""
+    """Lists every stock_watchlist row with its latest stock_fundamentals,
+    stock_indicators, and stock_daily_data (price) snapshots joined in,
+    including cross_status (golden cross / death cross / no clear trend)
+    and whether it currently passes the same hard filters the suggestion
+    engine uses to decide what to recommend (see
+    suggestion_engine.passes_hard_filters) -- shown as "Recommended to buy".
+    Doesn't touch any of those tables -- read-only here. super_admin/
+    child_admin always have access; a viewer only gets in if their account
+    was created with can_view_watchlist granted (see
+    stocks_watchlist_access_required) -- everyone else gets their own
+    read-only page at /stocks/my/suggestions instead.
+
+    Staff (super_admin/child_admin) get the full operational table incl.
+    PE/PEG/OPM/RSI. A viewer gets a simplified table instead (see the
+    template): name, price, cross-over status, and the recommended flag
+    only, sorted recommended-first -- they don't need the underlying
+    fundamentals numbers to decide whether to act on it.
+
+    ?filter=golden narrows the list to golden_cross rows only, for either
+    audience -- the "view only golden cross companies" option."""
     db = get_db()
     rows = db.execute(
-        '''SELECT w.id, w.symbol, w.exchange, w.name, w.is_active,
+        '''SELECT w.id, w.symbol, w.exchange, w.name, w.is_active, w.fundamental_tier,
                   f.pe_ratio, f.peg_ratio, f.eps, f.opm_pct, f.snapshot_date,
-                  i.rsi_14, i.cross_status, i.calc_date
+                  i.rsi_14, i.cross_status, i.volume_trend, i.calc_date,
+                  d.close AS latest_price, d.trade_date AS price_date
            FROM stock_watchlist w
            LEFT JOIN stock_fundamentals f ON f.watchlist_id = w.id
                AND f.snapshot_date = (
@@ -7235,17 +7249,84 @@ def stocks_watchlist():
                AND i.calc_date = (
                    SELECT MAX(i2.calc_date) FROM stock_indicators i2 WHERE i2.watchlist_id = w.id
                )
+           LEFT JOIN stock_daily_data d ON d.watchlist_id = w.id
+               AND d.trade_date = (
+                   SELECT MAX(d2.trade_date) FROM stock_daily_data d2 WHERE d2.watchlist_id = w.id
+               )
            ORDER BY w.symbol'''
     ).fetchall()
-    # get_metric_note() adds a short visible explanation next to PE/OPM when
-    # they're outside the "ideal" band but didn't disqualify the stock (see
-    # utils/fundamental_screen.py) -- None (shown as nothing) otherwise.
-    rows = [
-        {**row, 'pe_note': get_metric_note('pe_ratio', row.get('pe_ratio')),
-         'opm_note': get_metric_note('opm_pct', row.get('opm_pct'))}
-        for row in rows
-    ]
-    return render_template('admin/stocks_watchlist.html', rows=rows)
+
+    cross_filter = request.args.get('filter')
+    rows = enrich_and_sort_watchlist_rows(rows, cross_filter=cross_filter)
+
+    return render_template(
+        'admin/stocks_watchlist.html', rows=rows, cross_filter=cross_filter or 'all'
+    )
+
+
+@app.route('/stocks/company/<int:watchlist_id>', methods=['GET'])
+@stocks_watchlist_access_required
+def stocks_company_detail(watchlist_id):
+    """Full fundamentals + technicals + recent price/suggestion history for
+    one watchlist company -- the drill-down every row on /stocks/watchlist
+    links to. Same access as the watchlist itself. Read-only."""
+    db = get_db()
+    company = db.execute(
+        '''SELECT w.id, w.symbol, w.exchange, w.name, w.is_active, w.fundamental_tier,
+                  f.pe_ratio, f.peg_ratio, f.eps, f.market_cap, f.roe, f.debt_to_equity,
+                  f.earnings_growth_pct, f.sector_avg_pe, f.price_to_book, f.opm_pct,
+                  f.roce_pct, f.roa_pct, f.current_ratio, f.tol_by_tnw,
+                  f.promoter_holding_pct, f.fii_holding_pct, f.public_holding_pct,
+                  f.quarterly_profit_growth_pct, f.quarterly_revenue_growth_pct,
+                  f.free_cash_flow, f.snapshot_date AS fundamentals_date,
+                  i.ma_21, i.ma_50, i.ma_200, i.rsi_14, i.volume_avg_20d,
+                  i.cross_status, i.volume_trend, i.calc_date AS indicators_date,
+                  d.close AS latest_price, d.trade_date AS price_date
+           FROM stock_watchlist w
+           LEFT JOIN stock_fundamentals f ON f.watchlist_id = w.id
+               AND f.snapshot_date = (
+                   SELECT MAX(f2.snapshot_date) FROM stock_fundamentals f2 WHERE f2.watchlist_id = w.id
+               )
+           LEFT JOIN stock_indicators i ON i.watchlist_id = w.id
+               AND i.calc_date = (
+                   SELECT MAX(i2.calc_date) FROM stock_indicators i2 WHERE i2.watchlist_id = w.id
+               )
+           LEFT JOIN stock_daily_data d ON d.watchlist_id = w.id
+               AND d.trade_date = (
+                   SELECT MAX(d2.trade_date) FROM stock_daily_data d2 WHERE d2.watchlist_id = w.id
+               )
+           WHERE w.id = ?''',
+        (watchlist_id,)
+    ).fetchone()
+    if not company:
+        flash('No such company in the watchlist.', 'error')
+        return redirect(url_for('stocks_watchlist'))
+
+    company = {
+        **company,
+        'pe_note': get_metric_note('pe_ratio', company.get('pe_ratio')),
+        'opm_note': get_metric_note('opm_pct', company.get('opm_pct')),
+        'is_recommended': passes_hard_filters(company),
+    }
+
+    recent_prices = db.execute(
+        '''SELECT trade_date, close, volume FROM stock_daily_data
+           WHERE watchlist_id=? ORDER BY trade_date DESC LIMIT 15''',
+        (watchlist_id,)
+    ).fetchall()
+
+    suggestion_history = db.execute(
+        '''SELECT suggestion_date, buy_price, target_sell_price, stop_loss_price,
+                  holding_period_days, score, fundamental_tier, status, rationale
+           FROM stock_suggestions WHERE watchlist_id=?
+           ORDER BY suggestion_date DESC LIMIT 20''',
+        (watchlist_id,)
+    ).fetchall()
+
+    return render_template(
+        'admin/stocks_company_detail.html',
+        company=company, recent_prices=recent_prices, suggestion_history=suggestion_history
+    )
 
 
 @app.route('/stocks/my/suggestions', methods=['GET'])
