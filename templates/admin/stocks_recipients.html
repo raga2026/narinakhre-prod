@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Email Recipients - Nari Nakhre Stocks</title>
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+    <style>
+        body { background: #0f172a; color: #f8fafc; }
+        .stocks-accent { color: #0ea5e9; }
+        .stocks-btn { background: linear-gradient(90deg, #0891b2 0%, #0ea5e9 100%); color: white; }
+        input {
+            color:#ffffff; background-color:#0f172a;
+        }
+    </style>
+</head>
+<body class="min-h-screen p-8">
+    <div class="max-w-2xl mx-auto">
+        <div class="flex items-center justify-between mb-6">
+            <div>
+                <h1 class="text-2xl font-extrabold stocks-accent font-serif">Email Recipients</h1>
+                <p class="text-slate-400 text-sm mt-1">Super admin only -- admin-managed list, no self-serve signup</p>
+            </div>
+            <a href="{{ url_for('stocks_admin_dashboard') }}" class="text-sm text-slate-400 hover:text-sky-400 underline">Back to dashboard</a>
+        </div>
+
+        {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+            <div class="mb-6" role="alert" aria-live="assertive">
+            {% for category, msg in messages %}
+                <div class="bg-sky-900/40 text-sky-200 border border-sky-500/30 rounded-xl p-3 mb-2 text-sm">{{ msg }}</div>
+            {% endfor %}
+            </div>
+        {% endif %}
+        {% endwith %}
+
+        <section class="bg-slate-800 rounded-2xl p-6 border border-sky-500/20 mb-6" aria-labelledby="add-recipient-heading">
+            <h2 id="add-recipient-heading" class="text-lg font-bold text-slate-200 mb-4">Add a recipient</h2>
+            <form method="POST" action="{{ url_for('stocks_recipients_manage') }}" class="space-y-4">
+                <div>
+                    <label for="new-email" class="block text-sm font-semibold text-slate-300 mb-1">Email</label>
+                    <input id="new-email" type="email" name="email" required autocomplete="off"
+                           class="w-full border border-sky-500/30 rounded-xl p-3 focus:outline-none focus:border-sky-500 transition">
+                </div>
+                <div>
+                    <label for="new-name" class="block text-sm font-semibold text-slate-300 mb-1">Name (optional)</label>
+                    <input id="new-name" type="text" name="name" autocomplete="off"
+                           class="w-full border border-sky-500/30 rounded-xl p-3 focus:outline-none focus:border-sky-500 transition">
+                </div>
+                <button type="submit" class="stocks-btn py-3 px-6 rounded-2xl font-bold transition hover:opacity-90">
+                    Add recipient
+                </button>
+            </form>
+        </section>
+
+        <section aria-labelledby="recipient-list-heading">
+            <h2 id="recipient-list-heading" class="text-lg font-bold text-slate-200 mb-4">Current recipients</h2>
+            <ul class="space-y-3">
+                {% for recipient in recipients %}
+                <li class="bg-slate-800 rounded-2xl p-5 border border-sky-500/20">
+                    <p class="text-slate-100 font-semibold">{{ recipient.name or recipient.email }}</p>
+                    {% if recipient.name %}<p class="text-slate-400 text-sm">{{ recipient.email }}</p>{% endif %}
+                    <p class="text-slate-400 text-sm">
+                        Status: {{ 'Active' if recipient.is_active else 'Disabled' }}
+                    </p>
+                    <form method="POST" action="{{ url_for('stocks_recipients_toggle', recipient_id=recipient.id) }}" class="mt-3">
+                        <button type="submit"
+                                aria-label="{{ 'Disable' if recipient.is_active else 'Enable' }} recipient {{ recipient.email }}"
+                                class="text-sm underline {{ 'text-rose-400 hover:text-rose-300' if recipient.is_active else 'text-emerald-400 hover:text-emerald-300' }}">
+                            {{ 'Disable' if recipient.is_active else 'Enable' }}
+                        </button>
+                    </form>
+                </li>
+                {% else %}
+                <li class="text-slate-400">No recipients yet.</li>
+                {% endfor %}
+            </ul>
+        </section>
+    </div>
+</body>
+</html>

@@ -70,6 +70,17 @@ from utils.stock_alerting import (
     record_job_success,
     check_missed_jobs,
 )
+from utils.suggestion_engine import (
+    initialize_stock_suggestions_table_if_needed,
+    generate_daily_suggestions,
+)
+from utils.suggestion_email import (
+    initialize_stocks_email_recipients_table_if_needed,
+    list_recipients,
+    add_recipient,
+    toggle_recipient_active,
+    send_daily_suggestions_email,
+)
 import auth_providers
 import io
 from PIL import Image as PILImage
@@ -731,6 +742,8 @@ initialize_fundamentals_table_if_needed(get_supabase())
 initialize_stock_universe_table_if_needed(get_supabase())
 initialize_stock_indicators_table_if_needed(get_supabase())
 initialize_stock_alerting_tables_if_needed(get_supabase())
+initialize_stock_suggestions_table_if_needed(get_supabase())
+initialize_stocks_email_recipients_table_if_needed(get_supabase())
 
 
 def calculate_inclusive_gst(display_cart, discount=0.0, full_subtotal=0.0):
@@ -6770,8 +6783,85 @@ def stocks_watchlist_refresh_shortlist():
         summary = run_fundamental_shortlist(db)
     except Exception as e:
         app.logger.error(f'Fundamental shortlist refresh failed: {e}')
+        alert_job_error(db, 'shortlist_refresh', str(e))
         return jsonify({'status': 'error', 'message': str(e)}), 500
+    record_job_success(db, 'shortlist_refresh')
     return jsonify({'status': 'ok', **summary})
+
+
+@app.route('/stocks/suggestions/generate', methods=['POST'])
+def stocks_suggestions_generate():
+    """Runs the suggestion engine (see utils/suggestion_engine.py) over
+    today's watchlist/indicators/fundamentals and inserts up to
+    TOP_N_SUGGESTIONS new stock_suggestions rows. Same dual auth as
+    /stocks/sync: a valid X-Cron-Secret header or an active Stocks login
+    session, either sufficient."""
+    if not has_valid_cron_secret(request.headers, STOCKS_FUNDAMENTALS_CRON_SECRET) \
+            and not session.get('stocks_admin_id'):
+        return redirect(url_for('stocks_admin_login'))
+
+    db = get_db()
+    try:
+        summary = generate_daily_suggestions(db)
+    except Exception as e:
+        app.logger.error(f'Suggestion generation failed: {e}')
+        alert_job_error(db, 'suggestion_generate', str(e))
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+    record_job_success(db, 'suggestion_generate')
+    return jsonify({'status': 'ok', **summary})
+
+
+@app.route('/stocks/suggestions/send-daily-email', methods=['POST'])
+def stocks_suggestions_send_daily_email():
+    """Generates today's suggestions (if not already run) and emails every
+    active stocks_email_recipients row -- see utils/suggestion_engine.py
+    and utils/suggestion_email.py. Same dual auth as /stocks/sync."""
+    if not has_valid_cron_secret(request.headers, STOCKS_FUNDAMENTALS_CRON_SECRET) \
+            and not session.get('stocks_admin_id'):
+        return redirect(url_for('stocks_admin_login'))
+
+    db = get_db()
+    try:
+        generate_daily_suggestions(db)
+        summary = send_daily_suggestions_email(db)
+    except Exception as e:
+        app.logger.error(f'Daily suggestions email failed: {e}')
+        alert_job_error(db, 'suggestion_email', str(e))
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+    record_job_success(db, 'suggestion_email')
+    return jsonify({'status': 'ok', **summary})
+
+
+@app.route('/stocks/recipients', methods=['GET', 'POST'])
+@stocks_role_required('super_admin')
+def stocks_recipients_manage():
+    """Admin-managed email recipient list -- no self-serve signup, no
+    plans, no payment. Purely a super_admin-maintained list of who gets
+    the daily suggestions email (see utils/suggestion_email.py)."""
+    db = get_db()
+    if request.method == 'POST':
+        email = request.form.get('email')
+        name = request.form.get('name')
+        created, error = add_recipient(db, email, name, session.get('stocks_admin_id'))
+        if error:
+            flash(error, 'error')
+        else:
+            flash(f'Added {(email or "").strip()} to the recipient list.')
+        return redirect(url_for('stocks_recipients_manage'))
+
+    recipients = list_recipients(db)
+    return render_template('admin/stocks_recipients.html', recipients=recipients)
+
+
+@app.route('/stocks/recipients/<int:recipient_id>/toggle', methods=['POST'])
+@stocks_role_required('super_admin')
+def stocks_recipients_toggle(recipient_id):
+    db = get_db()
+    if not toggle_recipient_active(db, recipient_id):
+        flash('Could not update that recipient.', 'error')
+    else:
+        flash('Recipient status updated.')
+    return redirect(url_for('stocks_recipients_manage'))
 
 
 @app.route('/stocks/indicators/calculate', methods=['POST'])

@@ -1,0 +1,27 @@
+name: Stocks shortlist refresh
+
+on:
+  schedule:
+    # 23:45 UTC = 05:15 IST -- before market open (09:15 IST) and, just as
+    # importantly, before stocks-price-sync.yml (06:00 IST) and
+    # stocks-indicators-calculate.yml (06:45 IST): both of those read
+    # stock_watchlist, so this needs to update it first, not after, or
+    # they'd be working off yesterday's watchlist all day.
+    - cron: '45 23 * * *'
+  workflow_dispatch: {}  # lets you trigger it manually from the Actions tab
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - name: POST to /stocks/watchlist/refresh-shortlist
+        run: |
+          status=$(curl -s -o /tmp/response.txt -w "%{http_code}" --max-time 120 -X POST \
+            -H "X-Cron-Secret: ${{ secrets.STOCKS_FUNDAMENTALS_CRON_SECRET }}" \
+            https://narinakhre.com/stocks/watchlist/refresh-shortlist)
+          echo "HTTP status: $status"
+          cat /tmp/response.txt
+          if [ "$status" != "200" ]; then
+            echo "Request failed"
+            exit 1
+          fi

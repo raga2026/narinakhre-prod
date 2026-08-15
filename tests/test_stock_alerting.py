@@ -2,7 +2,7 @@ from datetime import datetime as RealDatetime
 from datetime import timezone
 from unittest.mock import patch
 
-from utils.stock_alerting import IST, alert_job_error, check_missed_jobs
+from utils.stock_alerting import IST, JOB_EXPECTATIONS, alert_job_error, check_missed_jobs
 
 
 class FakeCursor:
@@ -105,10 +105,11 @@ def test_check_missed_jobs_flags_a_job_with_no_success_record_today():
     with patch('utils.stock_alerting.send_alert_email') as mock_send:
         summary = check_missed_jobs(db, now=fixed_now)
 
-    assert set(summary['checked']) == {'price_sync', 'indicator_calc', 'fundamentals_rotation', 'market_cap_filter'}
-    assert set(summary['missed']) == {'price_sync', 'indicator_calc', 'fundamentals_rotation', 'market_cap_filter'}
-    assert mock_send.call_count == 4
-    assert len(db.alerts) == 4
+    all_sources = set(JOB_EXPECTATIONS.keys())
+    assert set(summary['checked']) == all_sources
+    assert set(summary['missed']) == all_sources
+    assert mock_send.call_count == len(all_sources)
+    assert len(db.alerts) == len(all_sources)
     assert all(a['alert_type'] == 'job_missed' for a in db.alerts)
 
 
@@ -123,9 +124,9 @@ def test_check_missed_jobs_does_not_flag_a_job_that_ran_today():
         summary = check_missed_jobs(db, now=fixed_now)
 
     assert 'price_sync' not in summary['missed']
-    # The other three still have no success record -- still flagged.
+    # Everything else still has no success record -- still flagged.
     assert 'indicator_calc' in summary['missed']
-    assert mock_send.call_count == 3
+    assert mock_send.call_count == len(JOB_EXPECTATIONS) - 1
 
 
 def test_check_missed_jobs_ignores_a_success_from_a_previous_day():

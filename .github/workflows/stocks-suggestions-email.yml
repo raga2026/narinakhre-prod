@@ -1,0 +1,27 @@
+name: Stocks suggestions email
+
+on:
+  schedule:
+    # 02:00 UTC daily = 07:30 IST -- after stocks-indicators-calculate.yml
+    # (01:15 UTC / 06:45 IST), since generate_daily_suggestions() needs
+    # today's stock_indicators rows (cross_status/volume_trend/rsi_14) to
+    # exist first. Triggers POST /stocks/suggestions/send-daily-email, which
+    # generates today's suggestions and emails the recipient list in one go.
+    - cron: '0 2 * * *'
+  workflow_dispatch: {}  # lets you trigger it manually from the Actions tab
+
+jobs:
+  send:
+    runs-on: ubuntu-latest
+    steps:
+      - name: POST to /stocks/suggestions/send-daily-email
+        run: |
+          status=$(curl -s -o /tmp/response.txt -w "%{http_code}" --max-time 120 -X POST \
+            -H "X-Cron-Secret: ${{ secrets.STOCKS_FUNDAMENTALS_CRON_SECRET }}" \
+            https://narinakhre.com/stocks/suggestions/send-daily-email)
+          echo "HTTP status: $status"
+          cat /tmp/response.txt
+          if [ "$status" != "200" ]; then
+            echo "Request failed"
+            exit 1
+          fi

@@ -22,18 +22,28 @@ IST = timezone(timedelta(hours=5, minutes=30))
 # .github/workflows/stocks-*.yml) and would need updating together with
 # those anyway. Derived from the real scheduled times, each with roughly an
 # hour of buffer for the job to actually finish running:
-#   price_sync            00:30 UTC = 06:00 IST -> expect done by 07:00 IST
+#   shortlist_refresh      23:45 UTC = 05:15 IST -> expect done by 06:00 IST
+#                          (fast DB-only job, no scraping -- runs first, so
+#                          stock_watchlist is current before price_sync and
+#                          indicator_calc read it; before market open 09:15 IST)
+#   price_sync             00:30 UTC = 06:00 IST -> expect done by 07:00 IST
 #   indicator_calc         01:15 UTC = 06:45 IST -> expect done by 08:00 IST
 #                          (runs after price_sync, needs that day's prices)
+#   suggestion_email       02:00 UTC = 07:30 IST -> expect done by 09:00 IST
+#                          (runs after indicator_calc, needs today's
+#                          cross_status/volume_trend/rsi_14 to score against;
+#                          rounded to a whole hour like the others above)
 #   fundamentals_rotation  05:30 UTC = 11:00 IST -> expect done by 12:00 IST
 #   market_cap_filter      07:00 UTC = 12:30 IST -> expect done by 13:00 IST
-#                          (no workflow existed for this route before this
-#                          task -- added stocks-market-cap-filter.yml
-#                          alongside this alerting work so there's actually
-#                          something to check against)
+#                          (no workflow existed for this route before the
+#                          alerting task -- added stocks-market-cap-filter.yml
+#                          alongside it so there's actually something to
+#                          check against)
 JOB_EXPECTATIONS = {
+    'shortlist_refresh': {'expected_by_ist_hour': 6, 'label': '6 AM IST'},
     'price_sync': {'expected_by_ist_hour': 7, 'label': '7 AM IST'},
     'indicator_calc': {'expected_by_ist_hour': 8, 'label': '8 AM IST'},
+    'suggestion_email': {'expected_by_ist_hour': 9, 'label': '9 AM IST'},
     'fundamentals_rotation': {'expected_by_ist_hour': 12, 'label': '12 PM IST'},
     'market_cap_filter': {'expected_by_ist_hour': 13, 'label': '1 PM IST'},
 }
@@ -62,27 +72,35 @@ def initialize_stock_alerting_tables_if_needed(client):
             print(f'Stock alerting table init warning (may already exist): {e}')
 
 
-def send_alert_email(subject, body):
-    """Sends via Zeptomail's HTTP API -- same request shape as the
-    storefront's send_contact_email() in app.py, but using
-    STOCKS_ZEPTOMAIL_API_KEY/STOCKS_ALERT_FROM_EMAIL/STOCKS_ALERT_TO_EMAIL.
-    Returns True/False, never raises -- a failed alert email shouldn't
-    itself crash whatever job was already failing."""
+def send_zeptomail_stocks_email(to_email, to_name, subject, textbody, htmlbody=None,
+                                 sender_name='Nari Nakhre Stocks Alerts'):
+    """Low-level Zeptomail HTTP API sender shared by every Stocks-module
+    email -- job-failure alerts (send_alert_email below) and the daily
+    suggestions email (utils/suggestion_email.py) both go through this, so
+    there's exactly one place that builds the request. Same request shape
+    as the storefront's send_contact_email() in app.py, but fully
+    independent credentials (STOCKS_ZEPTOMAIL_API_KEY/STOCKS_ALERT_FROM_EMAIL),
+    no shared config, no import from app.py. Returns True/False, never
+    raises -- a failed email shouldn't itself crash whatever else was
+    happening (a failing job, or a batch of suggestion emails where one
+    recipient's address bounces)."""
     api_key = os.environ.get('STOCKS_ZEPTOMAIL_API_KEY', '')
     from_email = os.environ.get('STOCKS_ALERT_FROM_EMAIL', '')
-    to_email = os.environ.get('STOCKS_ALERT_TO_EMAIL', '')
 
     if not api_key or not from_email or not to_email:
-        print('Stock alert email skipped: STOCKS_ZEPTOMAIL_API_KEY / STOCKS_ALERT_FROM_EMAIL / '
-              'STOCKS_ALERT_TO_EMAIL must all be set.')
+        print('Stock email skipped: STOCKS_ZEPTOMAIL_API_KEY / STOCKS_ALERT_FROM_EMAIL / '
+              'a recipient address must all be set.')
         return False
 
     payload = {
-        'from': {'address': from_email, 'name': 'Nari Nakhre Stocks Alerts'},
-        'to': [{'email_address': {'address': to_email, 'name': to_email}}],
+        'from': {'address': from_email, 'name': sender_name},
+        'to': [{'email_address': {'address': to_email, 'name': to_name or to_email}}],
         'subject': subject,
-        'textbody': body,
+        'textbody': textbody,
     }
+    if htmlbody:
+        payload['htmlbody'] = htmlbody
+
     headers = {
         'Authorization': f'Zoho-enczapikey {api_key}',
         'Content-Type': 'application/json',
@@ -93,11 +111,25 @@ def send_alert_email(subject, body):
         resp = requests.post(STOCKS_ZEPTOMAIL_API_URL, json=payload, headers=headers, timeout=10)
         if resp.status_code in (200, 201):
             return True
-        print(f'Stock alert email failed: HTTP {resp.status_code}: {resp.text[:500]}')
+        print(f'Stock email failed: HTTP {resp.status_code}: {resp.text[:500]}')
         return False
     except Exception as e:
-        print(f'Stock alert email failed: {type(e).__name__}: {e}')
+        print(f'Stock email failed: {type(e).__name__}: {e}')
         return False
+
+
+def send_alert_email(subject, body):
+    """Sends a job-failure/missed alert to the fixed STOCKS_ALERT_TO_EMAIL
+    address -- see send_zeptomail_stocks_email for the actual HTTP call.
+    Kept as its own function (rather than every call site reading
+    STOCKS_ALERT_TO_EMAIL itself) since alert_job_error/alert_job_missed
+    below both call this with just a subject/body, same as before this was
+    refactored to share the low-level sender."""
+    to_email = os.environ.get('STOCKS_ALERT_TO_EMAIL', '')
+    if not to_email:
+        print('Stock alert email skipped: STOCKS_ALERT_TO_EMAIL must be set.')
+        return False
+    return send_zeptomail_stocks_email(to_email, to_email, subject, body)
 
 
 def _parse_timestamp(value):
