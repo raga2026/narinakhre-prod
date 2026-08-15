@@ -38,11 +38,22 @@ STOCK_TABLES_SQL = [
 ]
 
 
+# Added after stock_watchlist already had data in it -- kept as a separate
+# additive migration, same pattern as everywhere else in this codebase.
+# DEFAULT 'manual' means every pre-existing row (added before this column
+# existed, i.e. by hand) is treated as manually curated, so
+# run_fundamental_shortlist()'s "never touch a row with a different source"
+# rule protects them automatically without a separate backfill step.
+STOCK_WATCHLIST_ALTER_SQL = [
+    "ALTER TABLE stock_watchlist ADD COLUMN IF NOT EXISTS source TEXT DEFAULT 'manual'",
+]
+
+
 def initialize_stock_tables_if_needed(client):
     """Create stock_watchlist / stock_daily_data if they don't exist yet.
     Call once at app startup, same as app.py's initialize_database_if_needed()
     -- idempotent, existing data is never touched."""
-    for sql in STOCK_TABLES_SQL:
+    for sql in STOCK_TABLES_SQL + STOCK_WATCHLIST_ALTER_SQL:
         try:
             client.rpc('execute_sql', {'query': sql}).execute()
         except Exception as e:

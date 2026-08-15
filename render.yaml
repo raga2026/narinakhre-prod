@@ -5,7 +5,7 @@ services:
     runtime: python
     region: singapore
     buildCommand: "pip install -r requirements.txt"
-    startCommand: "gunicorn app:app"
+    startCommand: "gunicorn --timeout 1200 app:app"
     domains:
       - test-retail.narinakhre.com
       - test-wholesale.narinakhre.com
@@ -16,7 +16,7 @@ services:
     runtime: python
     region: singapore
     buildCommand: "pip install -r requirements.txt"
-    startCommand: "gunicorn app:app"
+    startCommand: "gunicorn --timeout 1200 app:app"
     domains:
       - narinakhre.com
       - www.narinakhre.com

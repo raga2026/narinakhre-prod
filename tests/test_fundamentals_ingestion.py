@@ -1,7 +1,7 @@
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-from utils.fundamentals_ingestion import sync_fundamentals
+from utils.fundamentals_ingestion import FUNDAMENTALS_COLUMNS, sync_fundamentals
 from utils.screener_client import ScreenerParseError, fetch_fundamentals
 
 FIXTURE_PATH = Path(__file__).resolve().parent / 'fixtures' / 'screener_sample.html'
@@ -32,14 +32,13 @@ class FakeDB:
             return FakeCursor(rows)
 
         if normalized.startswith('INSERT INTO stock_fundamentals'):
-            (watchlist_id, snapshot_date, pe_ratio, peg_ratio, eps,
-             market_cap, roe, debt_to_equity, earnings_growth_pct) = params
-            self.fundamentals[(watchlist_id, snapshot_date)] = {
-                'pe_ratio': pe_ratio, 'peg_ratio': peg_ratio, 'eps': eps,
-                'market_cap': market_cap, 'roe': roe,
-                'debt_to_equity': debt_to_equity,
-                'earnings_growth_pct': earnings_growth_pct,
-            }
+            # sync_fundamentals() always calls with watchlist_id set (never
+            # universe_id), so params are (watchlist_id, universe_id,
+            # snapshot_date, *FUNDAMENTALS_COLUMNS values) -- see
+            # _upsert_fundamentals_snapshot() in fundamentals_ingestion.py.
+            watchlist_id, universe_id, snapshot_date = params[:3]
+            data_values = params[3:]
+            self.fundamentals[(watchlist_id, snapshot_date)] = dict(zip(FUNDAMENTALS_COLUMNS, data_values))
             return FakeCursor([])
 
         raise AssertionError(f'Unexpected SQL in test: {sql}')

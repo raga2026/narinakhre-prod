@@ -1,8 +1,14 @@
 <!--
-Synthetic fixture approximating Screener.in's company page structure
-(the <ul id="top-ratios"> list and a "Compounded Profit Growth" table),
+Synthetic fixture approximating Screener.in's company page structure --
 used only to test utils/screener_client.py's parser. Not a captured real
-page and "TESTCO" is not a real company -- values are made up.
+page and "TESTCO" is not a real company -- values are made up. The
+top-ratios list and ranges-table (growth) structure below were corrected to
+match the REAL structure confirmed by fetching an actual Screener.in page
+while extending this parser (see screener_client.py's docstrings) -- the
+original version of this fixture had growth data under a plain <h2> heading
+with a "1 Year:" row, which turned out not to match any real page at all;
+the real structure is a <table class="ranges-table"> with a
+<th colspan="2"> label and a "TTM:" row instead.
 -->
 <html>
 <body>
@@ -35,13 +41,12 @@ page and "TESTCO" is not a real company -- values are made up.
 </ul>
 </div>
 
-<h2>Compounded Profit Growth</h2>
-<table>
-    <tr><th>Period</th><th>Value</th></tr>
+<table class="ranges-table">
+    <tr><th colspan="2">Compounded Profit Growth</th></tr>
     <tr><td>10 Years:</td><td>15%</td></tr>
     <tr><td>5 Years:</td><td>17%</td></tr>
     <tr><td>3 Years:</td><td>20%</td></tr>
-    <tr><td>1 Year:</td><td>22%</td></tr>
+    <tr><td>TTM:</td><td>22%</td></tr>
 </table>
 </body>
 </html>

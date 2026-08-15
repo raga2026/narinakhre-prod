@@ -4,6 +4,10 @@ from unittest.mock import patch
 from cryptography.fernet import Fernet
 
 os.environ.setdefault('CREDENTIAL_ENCRYPTION_KEY', Fernet.generate_key().decode())
+# exchange_request_token() checks these are set before ever touching the
+# mocked KiteConnect below -- dummy values, never used for a real request.
+os.environ.setdefault('STOCKS_KITE_API_KEY', 'test-api-key')
+os.environ.setdefault('STOCKS_KITE_API_SECRET', 'test-api-secret')
 
 from utils.kite_client import KiteClient
 from utils.kite_session import exchange_request_token, get_kite_access_token, save_kite_access_token

@@ -53,11 +53,13 @@ from utils.kite_postback import (
 from utils.fundamentals_ingestion import (
     initialize_fundamentals_table_if_needed,
     sync_fundamentals,
+    sync_fundamentals_rotation,
 )
 from utils.stock_universe import (
     initialize_stock_universe_table_if_needed,
     refresh_market_cap_filter,
 )
+from utils.stock_shortlist import run_fundamental_shortlist
 import auth_providers
 import io
 from PIL import Image as PILImage
@@ -6732,6 +6734,30 @@ def stocks_universe_refresh_market_cap_filter():
     return jsonify({'status': 'ok', **summary})
 
 
+@app.route('/stocks/watchlist/refresh-shortlist', methods=['POST'])
+def stocks_watchlist_refresh_shortlist():
+    """Runs the domain expert's fundamental screening criteria (see
+    utils/fundamental_screen.py) over every scrape-eligible stock_universe
+    company with a recent-enough stock_fundamentals snapshot, and syncs
+    stock_watchlist accordingly -- see utils/stock_shortlist.py for exactly
+    what "syncs" means (upsert passing companies active, deactivate
+    previously-auto-shortlisted ones that no longer pass, never touch
+    manually-added rows). Same dual auth as /stocks/sync: a valid
+    X-Cron-Secret header or an active Stocks login session, either
+    sufficient."""
+    if not has_valid_cron_secret(request.headers, STOCKS_FUNDAMENTALS_CRON_SECRET) \
+            and not session.get('stocks_admin_id'):
+        return redirect(url_for('stocks_admin_login'))
+
+    db = get_db()
+    try:
+        summary = run_fundamental_shortlist(db)
+    except Exception as e:
+        app.logger.error(f'Fundamental shortlist refresh failed: {e}')
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+    return jsonify({'status': 'ok', **summary})
+
+
 @app.route('/stocks/kite/login', methods=['GET'])
 @stocks_role_required('super_admin')
 def stocks_kite_login():
@@ -6811,6 +6837,27 @@ def admin_stocks_fundamentals_sync():
         summary = sync_fundamentals(db)
     except Exception as e:
         app.logger.error(f'Fundamentals sync failed: {e}')
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+    return jsonify({'status': 'ok', **summary})
+
+
+@app.route('/stocks/fundamentals/rotation-sync', methods=['POST'])
+def stocks_fundamentals_rotation_sync():
+    """Daily rotation over the full scrape-eligible stock_universe set (see
+    utils/fundamentals_ingestion.sync_fundamentals_rotation) -- refreshes
+    the 300 stalest companies each run, cycling the ~1,067-company eligible
+    set roughly every 4 days. Same dual auth as /stocks/sync: a valid
+    X-Cron-Secret header (the daily GitHub Actions workflow) or an active
+    Stocks login session, either sufficient."""
+    if not has_valid_cron_secret(request.headers, STOCKS_FUNDAMENTALS_CRON_SECRET) \
+            and not session.get('stocks_admin_id'):
+        return redirect(url_for('stocks_admin_login'))
+
+    db = get_db()
+    try:
+        summary = sync_fundamentals_rotation(db)
+    except Exception as e:
+        app.logger.error(f'Fundamentals rotation sync failed: {e}')
         return jsonify({'status': 'error', 'message': str(e)}), 500
     return jsonify({'status': 'ok', **summary})
 
