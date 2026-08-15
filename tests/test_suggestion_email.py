@@ -40,7 +40,7 @@ def test_no_suggestions_today_still_sends_an_email_not_nothing():
         recipient_rows=[{'email': 'friend@example.com', 'name': 'A Friend'}],
     )
 
-    with patch('utils.suggestion_email.send_zeptomail_stocks_email', return_value=True) as mock_send:
+    with patch('utils.suggestion_email.send_zeptomail_stocks_email', return_value=(True, 'ok')) as mock_send:
         summary = send_daily_suggestions_email(db)
 
     mock_send.assert_called_once()
@@ -68,7 +68,7 @@ def test_email_sent_to_every_active_recipient_and_includes_disclaimer():
         ],
     )
 
-    with patch('utils.suggestion_email.send_zeptomail_stocks_email', return_value=True) as mock_send:
+    with patch('utils.suggestion_email.send_zeptomail_stocks_email', return_value=(True, 'ok')) as mock_send:
         summary = send_daily_suggestions_email(db)
 
     assert mock_send.call_count == 2
@@ -93,7 +93,7 @@ def test_golden_suggestion_shows_golden_label_without_pe_or_opm():
         recipient_rows=[{'email': 'a@example.com', 'name': 'A'}],
     )
 
-    with patch('utils.suggestion_email.send_zeptomail_stocks_email', return_value=True) as mock_send:
+    with patch('utils.suggestion_email.send_zeptomail_stocks_email', return_value=(True, 'ok')) as mock_send:
         send_daily_suggestions_email(db)
 
     textbody = mock_send.call_args.kwargs['textbody']
@@ -116,7 +116,7 @@ def test_silver_suggestion_shows_silver_label_with_pe_and_opm_values():
         recipient_rows=[{'email': 'a@example.com', 'name': 'A'}],
     )
 
-    with patch('utils.suggestion_email.send_zeptomail_stocks_email', return_value=True) as mock_send:
+    with patch('utils.suggestion_email.send_zeptomail_stocks_email', return_value=(True, 'ok')) as mock_send:
         send_daily_suggestions_email(db)
 
     textbody = mock_send.call_args.kwargs['textbody']
@@ -136,7 +136,7 @@ def test_suggestion_predating_tier_column_shows_no_tier_label():
         recipient_rows=[{'email': 'a@example.com', 'name': 'A'}],
     )
 
-    with patch('utils.suggestion_email.send_zeptomail_stocks_email', return_value=True) as mock_send:
+    with patch('utils.suggestion_email.send_zeptomail_stocks_email', return_value=(True, 'ok')) as mock_send:
         send_daily_suggestions_email(db)
 
     textbody = mock_send.call_args.kwargs['textbody']
@@ -152,18 +152,21 @@ def test_a_failed_send_is_counted_without_stopping_the_rest():
         ],
     )
 
-    with patch('utils.suggestion_email.send_zeptomail_stocks_email', side_effect=[False, True]):
+    with patch('utils.suggestion_email.send_zeptomail_stocks_email',
+               side_effect=[(False, 'Zeptomail HTTP 500: server error'), (True, 'ok')]):
         summary = send_daily_suggestions_email(db)
 
     assert summary['sent'] == 1
     assert summary['failed'] == 1
+    assert summary['failures'] == [{'email': 'good@example.com', 'error': 'Zeptomail HTTP 500: server error'}]
 
 
 def test_viewer_welcome_email_includes_login_link_username_and_password():
-    with patch('utils.suggestion_email.send_zeptomail_stocks_email', return_value=True) as mock_send:
-        result = send_viewer_welcome_email('new@example.com', 'New Viewer', 'r4nd0mPass123')
+    with patch('utils.suggestion_email.send_zeptomail_stocks_email', return_value=(True, 'ok')) as mock_send:
+        sent, detail = send_viewer_welcome_email('new@example.com', 'New Viewer', 'r4nd0mPass123')
 
-    assert result is True
+    assert sent is True
+    assert detail == 'ok'
     mock_send.assert_called_once()
     kwargs = mock_send.call_args.kwargs
     assert kwargs['to_email'] == 'new@example.com'
@@ -175,8 +178,20 @@ def test_viewer_welcome_email_includes_login_link_username_and_password():
     assert DISCLAIMER in kwargs['textbody']
 
 
+def test_viewer_welcome_email_propagates_the_real_failure_reason():
+    # This is the exact bug the "check the Zeptomail config" flash message
+    # used to hide -- send_viewer_welcome_email must hand back the actual
+    # reason (missing config, Zeptomail's own error, etc.), not just a bool.
+    with patch('utils.suggestion_email.send_zeptomail_stocks_email',
+               return_value=(False, 'Missing: STOCKS_ZEPTOMAIL_API_KEY.')):
+        sent, detail = send_viewer_welcome_email('new@example.com', 'New Viewer', 'pass123')
+
+    assert sent is False
+    assert detail == 'Missing: STOCKS_ZEPTOMAIL_API_KEY.'
+
+
 def test_viewer_welcome_email_falls_back_to_email_as_greeting_when_no_name():
-    with patch('utils.suggestion_email.send_zeptomail_stocks_email', return_value=True) as mock_send:
+    with patch('utils.suggestion_email.send_zeptomail_stocks_email', return_value=(True, 'ok')) as mock_send:
         send_viewer_welcome_email('noname@example.com', '', 'somepass')
 
     kwargs = mock_send.call_args.kwargs

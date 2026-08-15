@@ -20,8 +20,10 @@ def send_viewer_welcome_email(email, name, password):
     Includes the real password in plaintext (this is a small trusted
     personal circle, not a public product -- see the module this belongs
     to), the login link, and a short explanation of what they signed up
-    for. Returns True/False, never raises, same as send_zeptomail_stocks_email
-    itself."""
+    for. Returns (success, detail) -- same shape as
+    send_zeptomail_stocks_email, never raises -- detail is the actual
+    reason on failure (missing Zeptomail config, Zeptomail's own HTTP
+    error, or a network error), not just a generic "it failed"."""
     greeting = name or email
     subject = 'Nari Nakhre Stocks — your login'
     text_body = (
@@ -181,8 +183,9 @@ def send_daily_suggestions_email(db):
 
     sent = 0
     failed = 0
+    failures = []
     for r in recipients:
-        ok = send_zeptomail_stocks_email(
+        ok, detail = send_zeptomail_stocks_email(
             to_email=r['email'],
             to_name=r.get('name') or r['email'],
             subject=subject,
@@ -194,10 +197,12 @@ def send_daily_suggestions_email(db):
             sent += 1
         else:
             failed += 1
+            failures.append({'email': r['email'], 'error': detail})
 
     return {
         'suggestion_count': len(suggestions),
         'recipient_count': len(recipients),
         'sent': sent,
         'failed': failed,
+        'failures': failures,
     }

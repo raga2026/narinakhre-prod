@@ -6968,11 +6968,12 @@ def stocks_users_manage():
             flash(error, 'error')
         else:
             email = email.strip()
-            if send_viewer_welcome_email(email, name, password):
+            sent, detail = send_viewer_welcome_email(email, name, password)
+            if sent:
                 flash(f'Added {email} as a viewer and emailed their login details.')
             else:
-                flash(f'Added {email} as a viewer, but the welcome email failed to send -- '
-                      f'check the Zeptomail config, or share their login manually.', 'error')
+                flash(f'Added {email} as a viewer, but the welcome email failed to send: '
+                      f'{detail} -- share their login manually for now.', 'error')
         return redirect(url_for('stocks_users_manage'))
 
     viewers = list_viewers(db)
@@ -7001,12 +7002,21 @@ def stocks_users_migrate_recipients():
     db = get_db()
     summary = migrate_email_recipients_to_viewers(db, session.get('stocks_admin_id'))
     emailed = 0
+    email_failures = []
     for account in summary['created_accounts']:
-        if send_viewer_welcome_email(account['email'], account['name'], account['password']):
+        sent, detail = send_viewer_welcome_email(account['email'], account['name'], account['password'])
+        if sent:
             emailed += 1
+        else:
+            email_failures.append(f"{account['email']} ({detail})")
     if summary['migrated']:
-        flash(f"Migrated {len(summary['migrated'])} recipient(s) to viewer accounts "
-              f"and emailed login details to {emailed} of them.")
+        message = (f"Migrated {len(summary['migrated'])} recipient(s) to viewer accounts "
+                    f"and emailed login details to {emailed} of them.")
+        if email_failures:
+            message += f" Failed to email: {'; '.join(email_failures)} -- share their login manually."
+            flash(message, 'error')
+        else:
+            flash(message)
     else:
         flash('No new recipients to migrate.')
     return redirect(url_for('stocks_users_manage'))

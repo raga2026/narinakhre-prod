@@ -1,8 +1,15 @@
+import os
 from datetime import datetime as RealDatetime
 from datetime import timezone
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
-from utils.stock_alerting import IST, JOB_EXPECTATIONS, alert_job_error, check_missed_jobs
+from utils.stock_alerting import (
+    IST,
+    JOB_EXPECTATIONS,
+    alert_job_error,
+    check_missed_jobs,
+    send_zeptomail_stocks_email,
+)
 
 
 class FakeCursor:
@@ -154,3 +161,48 @@ def test_check_missed_jobs_skips_jobs_not_due_yet():
     assert 'fundamentals_rotation' not in summary['checked']
     assert 'market_cap_filter' not in summary['checked']
     assert 'price_sync' in summary['checked']
+
+
+def test_send_zeptomail_stocks_email_missing_config_reports_which_var():
+    # This is the exact scenario behind the old "check the Zeptomail
+    # config" flash message -- the caller must now get told WHICH var is
+    # missing, not just that something failed.
+    with patch.dict(os.environ, {'STOCKS_ZEPTOMAIL_API_KEY': '', 'STOCKS_ALERT_FROM_EMAIL': ''}, clear=False):
+        ok, detail = send_zeptomail_stocks_email('to@example.com', 'To', 'Subject', 'Body')
+
+    assert ok is False
+    assert 'STOCKS_ZEPTOMAIL_API_KEY' in detail
+    assert 'STOCKS_ALERT_FROM_EMAIL' in detail
+
+
+def test_send_zeptomail_stocks_email_success_returns_ok():
+    env = {'STOCKS_ZEPTOMAIL_API_KEY': 'test-key', 'STOCKS_ALERT_FROM_EMAIL': 'from@example.com'}
+    with patch.dict(os.environ, env, clear=False), \
+         patch('utils.stock_alerting.requests.post', return_value=Mock(status_code=201)):
+        ok, detail = send_zeptomail_stocks_email('to@example.com', 'To', 'Subject', 'Body')
+
+    assert ok is True
+    assert detail == 'ok'
+
+
+def test_send_zeptomail_stocks_email_http_error_reports_status_and_body():
+    env = {'STOCKS_ZEPTOMAIL_API_KEY': 'test-key', 'STOCKS_ALERT_FROM_EMAIL': 'from@example.com'}
+    mock_resp = Mock(status_code=401, text='Invalid API key')
+    with patch.dict(os.environ, env, clear=False), \
+         patch('utils.stock_alerting.requests.post', return_value=mock_resp):
+        ok, detail = send_zeptomail_stocks_email('to@example.com', 'To', 'Subject', 'Body')
+
+    assert ok is False
+    assert '401' in detail
+    assert 'Invalid API key' in detail
+
+
+def test_send_zeptomail_stocks_email_network_error_reports_exception():
+    env = {'STOCKS_ZEPTOMAIL_API_KEY': 'test-key', 'STOCKS_ALERT_FROM_EMAIL': 'from@example.com'}
+    with patch.dict(os.environ, env, clear=False), \
+         patch('utils.stock_alerting.requests.post', side_effect=ConnectionError('DNS lookup failed')):
+        ok, detail = send_zeptomail_stocks_email('to@example.com', 'To', 'Subject', 'Body')
+
+    assert ok is False
+    assert 'ConnectionError' in detail
+    assert 'DNS lookup failed' in detail

@@ -80,17 +80,37 @@ def send_zeptomail_stocks_email(to_email, to_name, subject, textbody, htmlbody=N
     there's exactly one place that builds the request. Same request shape
     as the storefront's send_contact_email() in app.py, but fully
     independent credentials (STOCKS_ZEPTOMAIL_API_KEY/STOCKS_ALERT_FROM_EMAIL),
-    no shared config, no import from app.py. Returns True/False, never
-    raises -- a failed email shouldn't itself crash whatever else was
-    happening (a failing job, or a batch of suggestion emails where one
-    recipient's address bounces)."""
+    no shared config, no import from app.py.
+
+    Returns (success: bool, detail: str) -- never raises, since a failed
+    email shouldn't itself crash whatever else was happening (a failing
+    job, or a batch of suggestion emails where one recipient's address
+    bounces). detail is 'ok' on success, otherwise the actual reason
+    (missing config, Zeptomail's own HTTP error, or a network error) --
+    this used to be swallowed into a server-side print() only, which meant
+    a caller-facing failure message (e.g. the "welcome email failed to
+    send" flash on /stocks/users) could say nothing more specific than
+    "check the Zeptomail config", even when the real cause was sitting
+    right here the whole time."""
     api_key = os.environ.get('STOCKS_ZEPTOMAIL_API_KEY', '')
-    from_email = os.environ.get('STOCKS_ALERT_FROM_EMAIL', '')
+    # Defaults to support@narinakhre.com rather than requiring
+    # STOCKS_ALERT_FROM_EMAIL to be set -- one fixed sender for every Stocks
+    # email (alerts, viewer welcome emails, daily suggestions), same domain
+    # the storefront's own Zeptomail sender already lives on. Render's env
+    # var still wins if it's ever set to something else.
+    from_email = os.environ.get('STOCKS_ALERT_FROM_EMAIL', 'support@narinakhre.com')
 
     if not api_key or not from_email or not to_email:
-        print('Stock email skipped: STOCKS_ZEPTOMAIL_API_KEY / STOCKS_ALERT_FROM_EMAIL / '
-              'a recipient address must all be set.')
-        return False
+        missing = [
+            name for name, value in [
+                ('STOCKS_ZEPTOMAIL_API_KEY', api_key),
+                ('STOCKS_ALERT_FROM_EMAIL', from_email),
+                ('recipient address', to_email),
+            ] if not value
+        ]
+        detail = f"Missing: {', '.join(missing)}."
+        print(f'Stock email skipped: {detail}')
+        return False, detail
 
     payload = {
         'from': {'address': from_email, 'name': sender_name},
@@ -110,12 +130,14 @@ def send_zeptomail_stocks_email(to_email, to_name, subject, textbody, htmlbody=N
     try:
         resp = requests.post(STOCKS_ZEPTOMAIL_API_URL, json=payload, headers=headers, timeout=10)
         if resp.status_code in (200, 201):
-            return True
-        print(f'Stock email failed: HTTP {resp.status_code}: {resp.text[:500]}')
-        return False
+            return True, 'ok'
+        detail = f'Zeptomail HTTP {resp.status_code}: {resp.text[:300]}'
+        print(f'Stock email failed: {detail}')
+        return False, detail
     except Exception as e:
-        print(f'Stock email failed: {type(e).__name__}: {e}')
-        return False
+        detail = f'{type(e).__name__}: {e}'
+        print(f'Stock email failed: {detail}')
+        return False, detail
 
 
 def send_alert_email(subject, body):
@@ -129,7 +151,10 @@ def send_alert_email(subject, body):
     if not to_email:
         print('Stock alert email skipped: STOCKS_ALERT_TO_EMAIL must be set.')
         return False
-    return send_zeptomail_stocks_email(to_email, to_email, subject, body)
+    ok, detail = send_zeptomail_stocks_email(to_email, to_email, subject, body)
+    if not ok:
+        print(f'Stock alert email failed: {detail}')
+    return ok
 
 
 def _parse_timestamp(value):
