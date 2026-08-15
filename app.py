@@ -37,6 +37,7 @@ from utils.stock_auth import (
     create_viewer_account,
     toggle_viewer_active,
     delete_viewer_account,
+    change_own_password,
     migrate_email_recipients_to_viewers,
     has_valid_cron_secret,
     legacy_stocks_redirect,
@@ -7304,7 +7305,13 @@ def stocks_admin_login():
     # above -- see stocks_watchlist_access_required. Irrelevant for
     # super_admin/child_admin, who always have watchlist access regardless.
     session['stocks_can_view_watchlist'] = bool(admin_row.get('can_view_watchlist'))
+    session['stocks_must_change_password'] = bool(admin_row.get('must_change_password'))
     session.modified = True
+    # A forced password change wins over every other redirect below -- see
+    # stock_auth.py's access decorators, which enforce this on every
+    # subsequent request too, not just this one.
+    if session['stocks_must_change_password']:
+        return redirect(url_for('stocks_change_password'))
     # viewer accounts land on their own read-only suggestions page, not the
     # staff dashboard (there was no per-role redirect at all before this --
     # super_admin/child_admin both just went to stocks_admin_dashboard,
@@ -7321,8 +7328,39 @@ def stocks_admin_logout():
     session.pop('stocks_admin_username', None)
     session.pop('stocks_admin_role', None)
     session.pop('stocks_can_view_watchlist', None)
+    session.pop('stocks_must_change_password', None)
     session.modified = True
     return redirect(url_for('stocks_admin_login'))
+
+
+@app.route('/stocks/change-password', methods=['GET', 'POST'])
+@stocks_login_required
+def stocks_change_password():
+    """Any logged-in Stocks account can change their own password here --
+    required first for a viewer whose must_change_password flag is still
+    set (every access decorator in utils/stock_auth.py redirects here
+    until it's cleared -- see _must_change_password_redirect), but usable
+    afterward by anyone, any role, who just wants a different password.
+    No 'current password' re-entry -- the active session already proves
+    that."""
+    forced = session.get('stocks_must_change_password', False)
+    if request.method == 'POST':
+        new_password = request.form.get('new_password') or ''
+        confirm_password = request.form.get('confirm_password') or ''
+        if new_password != confirm_password:
+            flash('Passwords do not match.', 'error')
+        else:
+            ok, error = change_own_password(get_db(), session['stocks_admin_id'], new_password)
+            if not ok:
+                flash(error, 'error')
+            else:
+                session['stocks_must_change_password'] = False
+                session.modified = True
+                flash('Password updated.')
+                if session.get('stocks_admin_role') == 'viewer':
+                    return redirect(url_for('stocks_my_suggestions'))
+                return redirect(url_for('stocks_admin_dashboard'))
+    return render_template('admin/stocks_change_password.html', forced=forced)
 
 
 @app.route('/stocks/dashboard', methods=['GET'])

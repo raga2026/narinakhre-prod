@@ -1,10 +1,24 @@
 import hmac
 import os
 import secrets
+import string
 from functools import wraps
 
 from flask import flash, redirect, request, session, url_for
 from werkzeug.security import check_password_hash, generate_password_hash
+
+# Letters/digits only, and the commonly-confused ones (0/O, 1/l/I) dropped --
+# these are emailed in plaintext to a small trusted circle (see
+# create_viewer_account) and sometimes read aloud or typed by hand, so a
+# dense symbol-and-mixed-case token_urlsafe() string is worse than it needs
+# to be for that. Still plenty of entropy at PASSWORD_LENGTH for this
+# threat model (not a public product).
+_PASSWORD_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789'
+PASSWORD_LENGTH = 10
+
+
+def _generate_simple_password():
+    return ''.join(secrets.choice(_PASSWORD_ALPHABET) for _ in range(PASSWORD_LENGTH))
 
 
 def has_valid_cron_secret(request_headers, secret):
@@ -73,6 +87,20 @@ STOCKS_AUTH_ALTER_SQL = [
     # regardless of this flag. Set at account-creation time (see
     # create_viewer_account) via a toggle on /stocks/users.
     'ALTER TABLE stocks_admin_users ADD COLUMN IF NOT EXISTS can_view_watchlist INTEGER DEFAULT 0',
+    # Forces a viewer to set their own password before reaching anything
+    # else, instead of continuing to use the auto-generated one that went
+    # out in plaintext over email (see create_viewer_account). Left
+    # unspecified (NULL) rather than defaulted here on purpose: that lets
+    # the one-time backfill below tell "never resolved yet" apart from
+    # "already resolved to false" -- every row is 0 or 1 after it runs
+    # once, so on every later app start it's a no-op and never re-flags a
+    # viewer who's already changed their password. Applies retroactively
+    # to every viewer that predates this column too, per instruction --
+    # they were already emailed an auto-generated password same as any
+    # new viewer would be.
+    'ALTER TABLE stocks_admin_users ADD COLUMN IF NOT EXISTS must_change_password INTEGER',
+    "UPDATE stocks_admin_users SET must_change_password=1 WHERE role='viewer' AND must_change_password IS NULL",
+    'UPDATE stocks_admin_users SET must_change_password=0 WHERE must_change_password IS NULL',
 ]
 
 
@@ -126,7 +154,7 @@ def authenticate_stocks_admin(db, username, password):
     app.py's get_db() -- unlike the startup-time init above, this always
     runs inside a request."""
     row = db.execute(
-        'SELECT id, username, password_hash, role, is_active, can_view_watchlist '
+        'SELECT id, username, password_hash, role, is_active, can_view_watchlist, must_change_password '
         'FROM stocks_admin_users WHERE username=?',
         (username,)
     ).fetchone()
@@ -137,12 +165,29 @@ def authenticate_stocks_admin(db, username, password):
     return row
 
 
+def _must_change_password_redirect():
+    """Returns a redirect to /stocks/change-password if the current
+    session is still flagged must_change_password (see create_viewer_account
+    and the one-time migration backfill in STOCKS_AUTH_ALTER_SQL), else
+    None. Checked inside every access decorator below rather than only
+    right after login, so a viewer can't dodge the forced change by
+    hitting some other Stocks URL directly (a bookmark, or typing it in)
+    instead of following the post-login redirect. The endpoint check
+    avoids redirecting the change-password page to itself."""
+    if session.get('stocks_must_change_password') and request.endpoint != 'stocks_change_password':
+        return redirect(url_for('stocks_change_password'))
+    return None
+
+
 def stocks_login_required(view_func):
     """Any active stocks_admin_users account (super_admin or child_admin)."""
     @wraps(view_func)
     def wrapped(*args, **kwargs):
         if not session.get('stocks_admin_id'):
             return redirect(url_for('stocks_admin_login'))
+        forced = _must_change_password_redirect()
+        if forced:
+            return forced
         return view_func(*args, **kwargs)
     return wrapped
 
@@ -157,6 +202,9 @@ def stocks_role_required(*roles):
         def wrapped(*args, **kwargs):
             if not session.get('stocks_admin_id'):
                 return redirect(url_for('stocks_admin_login'))
+            forced = _must_change_password_redirect()
+            if forced:
+                return forced
             if session.get('stocks_admin_role') not in roles:
                 flash('You do not have access to that page.', 'error')
                 return ('Forbidden', 403)
@@ -178,6 +226,9 @@ def stocks_watchlist_access_required(view_func):
     def wrapped(*args, **kwargs):
         if not session.get('stocks_admin_id'):
             return redirect(url_for('stocks_admin_login'))
+        forced = _must_change_password_redirect()
+        if forced:
+            return forced
         role = session.get('stocks_admin_role')
         if role in ('super_admin', 'child_admin'):
             return view_func(*args, **kwargs)
@@ -247,7 +298,7 @@ def toggle_child_admin_active(db, admin_id):
 
 def list_viewers(db):
     return db.execute(
-        "SELECT id, username, name, is_active, can_view_watchlist, created_at "
+        "SELECT id, username, name, is_active, can_view_watchlist, must_change_password, created_at "
         "FROM stocks_admin_users WHERE role='viewer' ORDER BY created_at DESC"
     ).fetchall()
 
@@ -255,10 +306,12 @@ def list_viewers(db):
 def create_viewer_account(db, email, name, created_by_id, can_view_watchlist=False):
     """Creates a new role='viewer' account -- email stored in the username
     column (stocks_admin_users has no separate email field, and username is
-    already the login field for every role). Generates a real, random,
-    usable password (there's still no password-reset/change flow anywhere
-    in this codebase, so this is the only way the account gets one at all)
-    -- the caller is expected to email it to the new viewer immediately
+    already the login field for every role). Generates a real, random
+    password via _generate_simple_password() -- letters/digits only, no
+    ambiguous 0/O/1/l/I characters, easy to read aloud or type by hand
+    (there's still no password-reset/change flow anywhere in this
+    codebase, so this is the only way the account gets one at all) -- the
+    caller is expected to email it to the new viewer immediately
     (see app.py's /stocks/users POST handler and
     utils/suggestion_email.send_viewer_welcome_email); it's returned here,
     in plaintext, only so that send can happen -- nothing else stores or
@@ -268,6 +321,13 @@ def create_viewer_account(db, email, name, created_by_id, can_view_watchlist=Fal
     /stocks/watchlist page -- off by default; see
     stocks_watchlist_access_required. Most viewers should stay read-only
     to their own suggestions, so this is opt-in per account, not global.
+
+    Always created with must_change_password=1 -- a freshly-generated
+    password went out over email in plaintext, so the account must be
+    forced through /stocks/change-password on first login rather than
+    trusting that password to stay theirs alone indefinitely (see
+    stocks_watchlist_access_required and the other access decorators,
+    which all enforce this).
 
     Returns (row, plaintext_password, error_message) -- password is None
     on error."""
@@ -279,21 +339,44 @@ def create_viewer_account(db, email, name, created_by_id, can_view_watchlist=Fal
     if existing:
         return None, None, 'That email is already registered.'
 
-    password = secrets.token_urlsafe(12)
+    password = _generate_simple_password()
     password_hash = generate_password_hash(password)
     db.execute(
-        '''INSERT INTO stocks_admin_users (username, password_hash, role, name, created_by, can_view_watchlist)
-           VALUES (?, ?, 'viewer', ?, ?, ?)''',
+        '''INSERT INTO stocks_admin_users
+               (username, password_hash, role, name, created_by, can_view_watchlist, must_change_password)
+           VALUES (?, ?, 'viewer', ?, ?, ?, 1)''',
         (email, password_hash, (name or '').strip() or None, created_by_id, 1 if can_view_watchlist else 0)
     )
     db.commit()
 
     row = db.execute(
-        'SELECT id, username, name, role, is_active, can_view_watchlist, created_at '
+        'SELECT id, username, name, role, is_active, can_view_watchlist, must_change_password, created_at '
         'FROM stocks_admin_users WHERE username=?',
         (email,)
     ).fetchone()
     return row, password, None
+
+
+MIN_PASSWORD_LENGTH = 8
+
+
+def change_own_password(db, admin_id, new_password):
+    """Sets a new password for any stocks_admin_users account (any role)
+    and clears must_change_password. Used by /stocks/change-password --
+    the active session is what already proves the caller is this account,
+    so there's no separate 'current password' re-entry here; any logged-in
+    account can reach this to change their own password, not just a
+    viewer working through a forced first-login change. Returns
+    (ok, error_message)."""
+    if not new_password or len(new_password) < MIN_PASSWORD_LENGTH:
+        return False, f'Password must be at least {MIN_PASSWORD_LENGTH} characters.'
+    password_hash = generate_password_hash(new_password)
+    db.execute(
+        'UPDATE stocks_admin_users SET password_hash=?, must_change_password=0, updated_at=NOW() WHERE id=?',
+        (password_hash, admin_id)
+    )
+    db.commit()
+    return True, None
 
 
 def toggle_viewer_active(db, admin_id):

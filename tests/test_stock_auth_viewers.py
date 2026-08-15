@@ -1,9 +1,14 @@
 from flask import Flask, session
 
 from utils.stock_auth import (
+    PASSWORD_LENGTH,
+    _generate_simple_password,
+    change_own_password,
     create_viewer_account,
     delete_viewer_account,
     list_viewers,
+    stocks_login_required,
+    stocks_role_required,
     stocks_watchlist_access_required,
 )
 
@@ -36,23 +41,23 @@ class FakeViewerDB:
             matches = [r for r in self.rows if r['username'] == username]
             return FakeCursor(matches[:1])
 
-        if normalized.startswith('INSERT INTO stocks_admin_users (username, password_hash, role, name, created_by, can_view_watchlist)'):
+        if normalized.startswith('INSERT INTO stocks_admin_users (username, password_hash, role, name, created_by, can_view_watchlist, must_change_password)'):
             username, password_hash, name, created_by, can_view_watchlist = params
             self.rows.append({
                 'id': self._next_id, 'username': username, 'password_hash': password_hash,
                 'role': 'viewer', 'name': name, 'created_by': created_by,
-                'is_active': 1, 'can_view_watchlist': can_view_watchlist,
+                'is_active': 1, 'can_view_watchlist': can_view_watchlist, 'must_change_password': 1,
                 'created_at': '2026-08-17',
             })
             self._next_id += 1
             return FakeCursor([])
 
-        if normalized.startswith('SELECT id, username, name, role, is_active, can_view_watchlist, created_at'):
+        if normalized.startswith('SELECT id, username, name, role, is_active, can_view_watchlist, must_change_password, created_at'):
             username, = params
             matches = [r for r in self.rows if r['username'] == username]
             return FakeCursor(matches[:1])
 
-        if normalized.startswith("SELECT id, username, name, is_active, can_view_watchlist, created_at FROM stocks_admin_users WHERE role='viewer'"):
+        if normalized.startswith("SELECT id, username, name, is_active, can_view_watchlist, must_change_password, created_at FROM stocks_admin_users WHERE role='viewer'"):
             matches = [r for r in self.rows if r['role'] == 'viewer']
             matches.sort(key=lambda r: r['created_at'], reverse=True)
             return FakeCursor(matches)
@@ -67,10 +72,28 @@ class FakeViewerDB:
             self.rows = [r for r in self.rows if not (r['id'] == admin_id and r['role'] == role)]
             return FakeCursor([])
 
+        if normalized.startswith("UPDATE stocks_admin_users SET password_hash=?, must_change_password=0"):
+            password_hash, admin_id = params
+            for r in self.rows:
+                if r['id'] == admin_id:
+                    r['password_hash'] = password_hash
+                    r['must_change_password'] = 0
+            return FakeCursor([])
+
         raise AssertionError(f'Unexpected SQL in test: {sql}')
 
     def commit(self):
         pass
+
+
+def test_generated_password_has_no_ambiguous_characters_or_symbols():
+    # Emailed in plaintext and sometimes read aloud/typed by hand -- must
+    # never contain 0/O/1/l/I (easily confused) or any symbol.
+    for _ in range(200):
+        password = _generate_simple_password()
+        assert len(password) == PASSWORD_LENGTH
+        assert password.isalnum()
+        assert not any(c in password for c in '0O1lI')
 
 
 def test_create_viewer_account_defaults_can_view_watchlist_to_false():
@@ -140,10 +163,24 @@ def _build_test_app():
     def stocks_admin_login():
         return 'stocks login page', 200
 
+    @app.route('/stocks/change-password')
+    def stocks_change_password():
+        return 'change password page', 200
+
     @app.route('/stocks/watchlist')
     @stocks_watchlist_access_required
     def stocks_watchlist():
         return 'watchlist content', 200
+
+    @app.route('/stocks/users')
+    @stocks_role_required('super_admin')
+    def stocks_users_manage():
+        return 'viewer user management', 200
+
+    @app.route('/stocks/my/suggestions')
+    @stocks_login_required
+    def stocks_my_suggestions():
+        return 'my suggestions content', 200
 
     return app
 
@@ -190,3 +227,91 @@ def test_watchlist_access_logged_out_redirects_to_login():
     response = client.get('/stocks/watchlist', follow_redirects=True)
     assert response.status_code == 200
     assert b'stocks login page' in response.data
+
+
+def test_change_own_password_success_clears_the_flag():
+    db = FakeViewerDB(rows=[{
+        'id': 1, 'username': 'a@example.com', 'password_hash': 'old-hash', 'role': 'viewer',
+        'name': None, 'created_by': None, 'is_active': 1, 'can_view_watchlist': 0,
+        'must_change_password': 1, 'created_at': '2026-01-01',
+    }])
+
+    ok, error = change_own_password(db, 1, 'newpassword123')
+
+    assert ok is True
+    assert error is None
+    assert db.rows[0]['must_change_password'] == 0
+    assert db.rows[0]['password_hash'] != 'old-hash'
+
+
+def test_change_own_password_rejects_too_short_password():
+    db = FakeViewerDB(rows=[{
+        'id': 1, 'username': 'a@example.com', 'password_hash': 'old-hash', 'role': 'viewer',
+        'name': None, 'created_by': None, 'is_active': 1, 'can_view_watchlist': 0,
+        'must_change_password': 1, 'created_at': '2026-01-01',
+    }])
+
+    ok, error = change_own_password(db, 1, 'short')
+
+    assert ok is False
+    assert '8 characters' in error
+    # Row must be untouched -- the DB call is never even made.
+    assert db.rows[0]['password_hash'] == 'old-hash'
+    assert db.rows[0]['must_change_password'] == 1
+
+
+# --- forced password change gate, checked by every access decorator -----
+
+def test_viewer_who_must_change_password_is_redirected_from_watchlist():
+    app = _build_test_app()
+    client = app.test_client()
+    with client.session_transaction() as sess:
+        sess['stocks_admin_id'] = 1
+        sess['stocks_admin_role'] = 'viewer'
+        sess['stocks_can_view_watchlist'] = True  # would otherwise be allowed
+        sess['stocks_must_change_password'] = True
+
+    response = client.get('/stocks/watchlist', follow_redirects=True)
+    assert response.status_code == 200
+    assert b'change password page' in response.data
+
+
+def test_super_admin_who_must_change_password_is_redirected_from_users_page():
+    # The gate applies regardless of role -- stocks_role_required enforces
+    # it too, not just stocks_watchlist_access_required.
+    app = _build_test_app()
+    client = app.test_client()
+    with client.session_transaction() as sess:
+        sess['stocks_admin_id'] = 1
+        sess['stocks_admin_role'] = 'super_admin'
+        sess['stocks_must_change_password'] = True
+
+    response = client.get('/stocks/users', follow_redirects=True)
+    assert response.status_code == 200
+    assert b'change password page' in response.data
+
+
+def test_must_change_password_redirects_from_stocks_login_required_routes_too():
+    app = _build_test_app()
+    client = app.test_client()
+    with client.session_transaction() as sess:
+        sess['stocks_admin_id'] = 1
+        sess['stocks_admin_role'] = 'viewer'
+        sess['stocks_must_change_password'] = True
+
+    response = client.get('/stocks/my/suggestions', follow_redirects=True)
+    assert response.status_code == 200
+    assert b'change password page' in response.data
+
+
+def test_once_flag_is_cleared_normal_access_resumes():
+    app = _build_test_app()
+    client = app.test_client()
+    with client.session_transaction() as sess:
+        sess['stocks_admin_id'] = 1
+        sess['stocks_admin_role'] = 'viewer'
+        sess['stocks_must_change_password'] = False
+
+    response = client.get('/stocks/my/suggestions')
+    assert response.status_code == 200
+    assert b'my suggestions content' in response.data

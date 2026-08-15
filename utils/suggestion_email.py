@@ -36,6 +36,8 @@ def send_viewer_welcome_email(email, name, password):
         f'Login: {STOCKS_LOGIN_URL}\n'
         f'Username: {email}\n'
         f'Password: {password}\n\n'
+        f"This is a temporary password -- you'll be asked to set your own the "
+        f"first time you log in.\n\n"
         f'{DISCLAIMER}\n'
     )
     html_body = (
@@ -48,6 +50,8 @@ def send_viewer_welcome_email(email, name, password):
         f'<p><a href="{STOCKS_LOGIN_URL}">{STOCKS_LOGIN_URL}</a><br>'
         f'Username: {email}<br>'
         f'Password: {password}</p>'
+        f"<p>This is a temporary password -- you'll be asked to set your own the "
+        f"first time you log in.</p>"
         f'<p style="color:#64748b;font-size:0.85em;margin-top:16px;">{DISCLAIMER}</p>'
     )
     return send_zeptomail_stocks_email(
