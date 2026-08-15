@@ -1,0 +1,26 @@
+name: Stocks market cap filter refresh
+
+on:
+  schedule:
+    # 07:00 UTC daily = 12:30 IST. No workflow existed for this route
+    # before -- added while building failure alerting (utils/stock_alerting.py)
+    # so there's actually a scheduled run for check_missed_jobs() to verify
+    # against. Triggers POST /stocks/universe/refresh-market-cap-filter.
+    - cron: '0 7 * * *'
+  workflow_dispatch: {}  # lets you trigger it manually from the Actions tab
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - name: POST to /stocks/universe/refresh-market-cap-filter
+        run: |
+          status=$(curl -s -o /tmp/response.txt -w "%{http_code}" --max-time 120 -X POST \
+            -H "X-Cron-Secret: ${{ secrets.STOCKS_FUNDAMENTALS_CRON_SECRET }}" \
+            https://narinakhre.com/stocks/universe/refresh-market-cap-filter)
+          echo "HTTP status: $status"
+          cat /tmp/response.txt
+          if [ "$status" != "200" ]; then
+            echo "Request failed"
+            exit 1
+          fi

@@ -64,6 +64,12 @@ from utils.stock_indicators import (
     initialize_stock_indicators_table_if_needed,
     run_indicator_calculation,
 )
+from utils.stock_alerting import (
+    initialize_stock_alerting_tables_if_needed,
+    alert_job_error,
+    record_job_success,
+    check_missed_jobs,
+)
 import auth_providers
 import io
 from PIL import Image as PILImage
@@ -724,6 +730,7 @@ initialize_kite_postback_log_table_if_needed(get_supabase())
 initialize_fundamentals_table_if_needed(get_supabase())
 initialize_stock_universe_table_if_needed(get_supabase())
 initialize_stock_indicators_table_if_needed(get_supabase())
+initialize_stock_alerting_tables_if_needed(get_supabase())
 
 
 def calculate_inclusive_gst(display_cart, discount=0.0, full_subtotal=0.0):
@@ -6715,7 +6722,9 @@ def admin_stocks_sync():
         summary = sync_daily_data(db, kite_client=kite_client)
     except Exception as e:
         app.logger.error(f'Stock sync failed: {e}')
+        alert_job_error(db, 'price_sync', str(e))
         return jsonify({'status': 'error', 'message': str(e)}), 500
+    record_job_success(db, 'price_sync')
     return jsonify({'status': 'ok', **summary})
 
 
@@ -6735,7 +6744,9 @@ def stocks_universe_refresh_market_cap_filter():
         summary = refresh_market_cap_filter(db)
     except Exception as e:
         app.logger.error(f'Market cap filter refresh failed: {e}')
+        alert_job_error(db, 'market_cap_filter', str(e))
         return jsonify({'status': 'error', 'message': str(e)}), 500
+    record_job_success(db, 'market_cap_filter')
     return jsonify({'status': 'ok', **summary})
 
 
@@ -6781,6 +6792,27 @@ def stocks_indicators_calculate():
         summary = run_indicator_calculation(db)
     except Exception as e:
         app.logger.error(f'Indicator calculation failed: {e}')
+        alert_job_error(db, 'indicator_calc', str(e))
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+    record_job_success(db, 'indicator_calc')
+    return jsonify({'status': 'ok', **summary})
+
+
+@app.route('/stocks/alerts/check-missed-jobs', methods=['POST'])
+def stocks_alerts_check_missed_jobs():
+    """Checks stock_job_runs for each cron-triggered route and emails an
+    alert for anything overdue -- see utils/stock_alerting.py. Cron-only,
+    unlike the other Stocks routes: no browser session path, since this is
+    only ever meant to be called by the scheduled GitHub Actions workflow,
+    not clicked from the dashboard."""
+    if not has_valid_cron_secret(request.headers, STOCKS_FUNDAMENTALS_CRON_SECRET):
+        return jsonify({'status': 'error', 'message': 'Unauthorized'}), 403
+
+    db = get_db()
+    try:
+        summary = check_missed_jobs(db)
+    except Exception as e:
+        app.logger.error(f'Missed-job check failed: {e}')
         return jsonify({'status': 'error', 'message': str(e)}), 500
     return jsonify({'status': 'ok', **summary})
 
@@ -6885,7 +6917,9 @@ def stocks_fundamentals_rotation_sync():
         summary = sync_fundamentals_rotation(db)
     except Exception as e:
         app.logger.error(f'Fundamentals rotation sync failed: {e}')
+        alert_job_error(db, 'fundamentals_rotation', str(e))
         return jsonify({'status': 'error', 'message': str(e)}), 500
+    record_job_success(db, 'fundamentals_rotation')
     return jsonify({'status': 'ok', **summary})
 
 

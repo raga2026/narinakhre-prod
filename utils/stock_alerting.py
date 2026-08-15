@@ -1,0 +1,229 @@
+import os
+from datetime import datetime, timedelta, timezone
+
+import requests
+
+# Fully independent from the storefront's Zeptomail integration
+# (send_contact_email in app.py) -- separate env vars, no shared config, and
+# this module is imported BY app.py rather than importing from it (avoids a
+# circular import too). Same underlying HTTP API shape, just a different
+# Mail Agent/sender/recipient. The .in region endpoint is hardcoded rather
+# than read from the storefront's ZEPTOMAIL_API_URL env var, same
+# independence reasoning -- it's a fixed public endpoint, not a secret, so
+# hardcoding it isn't really "shared config" in any meaningful sense.
+STOCKS_ZEPTOMAIL_API_URL = 'https://api.zeptomail.in/v1.1/email'
+ALERT_DEDUP_WINDOW_HOURS = 6
+
+IST = timezone(timedelta(hours=5, minutes=30))
+
+# Expected-by hour (IST) per cron-triggered route, and a human label for
+# the email body. Hardcoded rather than configurable since these are tied
+# to this app's actual daily job schedule (see the matching times in
+# .github/workflows/stocks-*.yml) and would need updating together with
+# those anyway. Derived from the real scheduled times, each with roughly an
+# hour of buffer for the job to actually finish running:
+#   price_sync            00:30 UTC = 06:00 IST -> expect done by 07:00 IST
+#   indicator_calc         01:15 UTC = 06:45 IST -> expect done by 08:00 IST
+#                          (runs after price_sync, needs that day's prices)
+#   fundamentals_rotation  05:30 UTC = 11:00 IST -> expect done by 12:00 IST
+#   market_cap_filter      07:00 UTC = 12:30 IST -> expect done by 13:00 IST
+#                          (no workflow existed for this route before this
+#                          task -- added stocks-market-cap-filter.yml
+#                          alongside this alerting work so there's actually
+#                          something to check against)
+JOB_EXPECTATIONS = {
+    'price_sync': {'expected_by_ist_hour': 7, 'label': '7 AM IST'},
+    'indicator_calc': {'expected_by_ist_hour': 8, 'label': '8 AM IST'},
+    'fundamentals_rotation': {'expected_by_ist_hour': 12, 'label': '12 PM IST'},
+    'market_cap_filter': {'expected_by_ist_hour': 13, 'label': '1 PM IST'},
+}
+
+STOCK_ALERTING_TABLES_SQL = [
+    '''CREATE TABLE IF NOT EXISTS stock_alerts (
+        id BIGSERIAL PRIMARY KEY,
+        alert_type TEXT NOT NULL CHECK (alert_type IN ('job_error', 'job_missed')),
+        source TEXT NOT NULL,
+        detail TEXT,
+        sent_at TIMESTAMPTZ DEFAULT NOW(),
+        resolved BOOLEAN DEFAULT false
+    )''',
+    '''CREATE TABLE IF NOT EXISTS stock_job_runs (
+        source TEXT PRIMARY KEY,
+        last_success_at TIMESTAMPTZ
+    )''',
+]
+
+
+def initialize_stock_alerting_tables_if_needed(client):
+    for sql in STOCK_ALERTING_TABLES_SQL:
+        try:
+            client.rpc('execute_sql', {'query': sql}).execute()
+        except Exception as e:
+            print(f'Stock alerting table init warning (may already exist): {e}')
+
+
+def send_alert_email(subject, body):
+    """Sends via Zeptomail's HTTP API -- same request shape as the
+    storefront's send_contact_email() in app.py, but using
+    STOCKS_ZEPTOMAIL_API_KEY/STOCKS_ALERT_FROM_EMAIL/STOCKS_ALERT_TO_EMAIL.
+    Returns True/False, never raises -- a failed alert email shouldn't
+    itself crash whatever job was already failing."""
+    api_key = os.environ.get('STOCKS_ZEPTOMAIL_API_KEY', '')
+    from_email = os.environ.get('STOCKS_ALERT_FROM_EMAIL', '')
+    to_email = os.environ.get('STOCKS_ALERT_TO_EMAIL', '')
+
+    if not api_key or not from_email or not to_email:
+        print('Stock alert email skipped: STOCKS_ZEPTOMAIL_API_KEY / STOCKS_ALERT_FROM_EMAIL / '
+              'STOCKS_ALERT_TO_EMAIL must all be set.')
+        return False
+
+    payload = {
+        'from': {'address': from_email, 'name': 'Nari Nakhre Stocks Alerts'},
+        'to': [{'email_address': {'address': to_email, 'name': to_email}}],
+        'subject': subject,
+        'textbody': body,
+    }
+    headers = {
+        'Authorization': f'Zoho-enczapikey {api_key}',
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+    }
+
+    try:
+        resp = requests.post(STOCKS_ZEPTOMAIL_API_URL, json=payload, headers=headers, timeout=10)
+        if resp.status_code in (200, 201):
+            return True
+        print(f'Stock alert email failed: HTTP {resp.status_code}: {resp.text[:500]}')
+        return False
+    except Exception as e:
+        print(f'Stock alert email failed: {type(e).__name__}: {e}')
+        return False
+
+
+def _parse_timestamp(value):
+    """stock_job_runs.last_success_at comes back from the Supabase RPC
+    bridge as an ISO8601 string, not a native datetime -- normalizes either
+    into a timezone-aware datetime for comparison."""
+    if isinstance(value, datetime):
+        return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+    dt = datetime.fromisoformat(str(value).replace('Z', '+00:00'))
+    return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+
+
+def _has_recent_unresolved_alert(db, alert_type, source):
+    cutoff = (datetime.now(timezone.utc) - timedelta(hours=ALERT_DEDUP_WINDOW_HOURS)).isoformat()
+    existing = db.execute(
+        '''SELECT id FROM stock_alerts
+           WHERE alert_type=? AND source=? AND resolved=false AND sent_at >= ?
+           LIMIT 1''',
+        (alert_type, source, cutoff)
+    ).fetchone()
+    return existing is not None
+
+
+def alert_job_error(db, source, error_detail):
+    """Logs a job_error alert and emails immediately, UNLESS an unresolved
+    job_error alert for the same source was already logged within the last
+    ALERT_DEDUP_WINDOW_HOURS -- avoids spamming on retries/repeated
+    failures of the same underlying problem. Never raises -- called from
+    the except block of an already-failing route; a second failure here
+    must not replace or mask the original error response."""
+    try:
+        if _has_recent_unresolved_alert(db, 'job_error', source):
+            print(f'Stock alert suppressed (recent unresolved job_error already logged for {source}): {error_detail}')
+            return
+
+        now_str = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')
+        subject = f'[Nari Nakhre Stocks] {source} failed'
+        body = f'Job: {source}\nTime: {now_str}\nError: {error_detail}\n'
+        send_alert_email(subject, body)
+
+        db.execute(
+            "INSERT INTO stock_alerts (alert_type, source, detail) VALUES ('job_error', ?, ?)",
+            (source, error_detail)
+        )
+        db.commit()
+    except Exception as e:
+        print(f'alert_job_error itself failed for {source}: {type(e).__name__}: {e}')
+
+
+def alert_job_missed(db, source, expected_by):
+    """Same dedup logic as alert_job_error, for a job that didn't complete
+    successfully by its expected time today (see check_missed_jobs).
+    Never raises, same reasoning as alert_job_error."""
+    try:
+        if _has_recent_unresolved_alert(db, 'job_missed', source):
+            return
+
+        now_str = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')
+        detail = f'{source} did not complete successfully by {expected_by} today (checked {now_str}).'
+        subject = f'[Nari Nakhre Stocks] {source} did not run'
+        body = f'Job: {source}\nExpected by: {expected_by}\nChecked at: {now_str}\nStatus: did not run / did not complete successfully today\n'
+        send_alert_email(subject, body)
+
+        db.execute(
+            "INSERT INTO stock_alerts (alert_type, source, detail) VALUES ('job_missed', ?, ?)",
+            (source, detail)
+        )
+        db.commit()
+    except Exception as e:
+        print(f'alert_job_missed itself failed for {source}: {type(e).__name__}: {e}')
+
+
+def record_job_success(db, source):
+    """Upserts last_success_at=NOW() for source into stock_job_runs --
+    called on the success path of every cron-triggered route (in addition
+    to, not instead of, their existing response), read by
+    check_missed_jobs() to tell whether that job actually ran today. Never
+    raises -- a failure to record success must not turn a genuinely
+    successful job into an error response."""
+    try:
+        db.execute(
+            '''INSERT INTO stock_job_runs (source, last_success_at) VALUES (?, NOW())
+               ON CONFLICT (source) DO UPDATE SET last_success_at = NOW()''',
+            (source,)
+        )
+        db.commit()
+    except Exception as e:
+        print(f'record_job_success failed for {source}: {type(e).__name__}: {e}')
+
+
+def check_missed_jobs(db, now=None):
+    """For each job in JOB_EXPECTATIONS, checks whether it has a recorded
+    successful run (stock_job_runs.last_success_at) since today's IST
+    midnight. Only flags a job once its expected-by hour (IST) has actually
+    passed -- calling this earlier in the day would flag jobs that simply
+    haven't had their turn yet. Calls alert_job_missed() for anything that's
+    overdue and hasn't run. Meant to run once, late in the day -- see
+    /stocks/alerts/check-missed-jobs and its GitHub Actions workflow.
+
+    now defaults to the real current time; tests pass a fixed datetime
+    instead so cases can be deterministic without monkeypatching the
+    datetime module itself (which breaks _parse_timestamp's own
+    isinstance(value, datetime) check, since that would replace datetime
+    with a Mock rather than a real type)."""
+    now = now or datetime.now(timezone.utc)
+    now_ist = now.astimezone(IST)
+    today_start_ist = now_ist.replace(hour=0, minute=0, second=0, microsecond=0)
+
+    checked = []
+    missed = []
+
+    for source, expectation in JOB_EXPECTATIONS.items():
+        if now_ist.hour < expectation['expected_by_ist_hour']:
+            continue
+
+        checked.append(source)
+        row = db.execute(
+            'SELECT last_success_at FROM stock_job_runs WHERE source=?',
+            (source,)
+        ).fetchone()
+
+        last_success = _parse_timestamp(row['last_success_at']) if row and row.get('last_success_at') else None
+        ran_today = last_success is not None and last_success.astimezone(IST) >= today_start_ist
+
+        if not ran_today:
+            missed.append(source)
+            alert_job_missed(db, source, expected_by=expectation['label'])
+
+    return {'checked': checked, 'missed': missed}
