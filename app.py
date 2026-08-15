@@ -44,6 +44,11 @@ from utils.kite_instrument_map import (
     initialize_kite_instrument_map_table_if_needed,
     sync_kite_instrument_map,
 )
+from utils.background_jobs import (
+    initialize_background_jobs_table_if_needed,
+    start_background_job,
+    get_job_status,
+)
 from utils.kite_session import (
     initialize_kite_session_table_if_needed,
     get_kite_login_url,
@@ -748,6 +753,7 @@ initialize_stocks_auth_if_needed(get_supabase())
 initialize_kite_session_table_if_needed(get_supabase())
 initialize_kite_postback_log_table_if_needed(get_supabase())
 initialize_kite_instrument_map_table_if_needed(get_supabase())
+initialize_background_jobs_table_if_needed(get_supabase())
 initialize_fundamentals_table_if_needed(get_supabase())
 initialize_stock_universe_table_if_needed(get_supabase())
 initialize_stock_indicators_table_if_needed(get_supabase())
@@ -6718,6 +6724,38 @@ for _old_path, _new_endpoint, _methods, _code in _LEGACY_STOCKS_ROUTES:
     )
 
 
+def _dispatch_stocks_job(db, is_cron, job_name, job_fn):
+    """Shared trigger logic for the Stocks dashboard's background-eligible
+    admin actions (price sync, fundamentals fetch, shortlist refresh, Kite
+    instrument map sync, suggestion email). job_fn(db) -> a JSON-serializable
+    summary dict, and may raise.
+
+    A GitHub Actions cron run (is_cron=True) runs job_fn synchronously,
+    exactly as before background jobs existed -- the workflow needs the
+    real success/failure in this same response. A browser session
+    (is_cron=False) instead runs job_fn on a background thread via
+    utils/background_jobs.start_background_job and returns immediately, so
+    the request that triggered it (and every other page view sharing this
+    app's single gunicorn worker -- see render.yaml) doesn't sit blocked
+    for however long the job takes. The dashboard polls
+    /stocks/jobs/<job_name>/status for the result."""
+    if is_cron:
+        try:
+            summary = job_fn(db)
+        except Exception as e:
+            return jsonify({'status': 'error', 'message': str(e)}), 500
+        return jsonify({'status': 'ok', **summary})
+
+    result = start_background_job(
+        db, build_db=lambda: SupabaseDB(get_supabase()), job_name=job_name,
+        target_fn=job_fn, triggered_by_id=session.get('stocks_admin_id')
+    )
+    return jsonify({
+        'status': 'started', 'job_name': job_name, 'job_id': result['job_id'],
+        'already_running': not result['started'],
+    })
+
+
 @app.route('/stocks/sync', methods=['POST'])
 def admin_stocks_sync():
     """Manual trigger for Nari Nakhre Stocks Phase 1 ingestion -- pulls the
@@ -6728,27 +6766,33 @@ def admin_stocks_sync():
     workflow) -- either one is sufficient. Same header name, env var, and
     hmac.compare_digest() check /cron/stocks-fundamentals-sync already uses,
     just added here as a second accepted path rather than replacing the
-    session check @stocks_login_required did."""
-    if not has_valid_cron_secret(request.headers, STOCKS_FUNDAMENTALS_CRON_SECRET) \
-            and not session.get('stocks_admin_id'):
+    session check @stocks_login_required did.
+
+    Session-triggered runs happen on a background thread, not inline --
+    see _dispatch_stocks_job / utils/background_jobs.py."""
+    is_cron = has_valid_cron_secret(request.headers, STOCKS_FUNDAMENTALS_CRON_SECRET)
+    if not is_cron and not session.get('stocks_admin_id'):
         return redirect(url_for('stocks_admin_login'))
 
     db = get_db()
-    try:
-        access_token = get_kite_access_token(db)
-        if not access_token:
-            return jsonify({
-                'status': 'error',
-                'message': 'No Kite session yet -- a super_admin must log in via /admin/stocks/kite/login first.'
-            }), 400
-        kite_client = KiteClient(db=db, access_token=access_token)
-        summary = sync_daily_data(db, kite_client=kite_client)
-    except Exception as e:
-        app.logger.error(f'Stock sync failed: {e}')
-        alert_job_error(db, 'price_sync', str(e))
-        return jsonify({'status': 'error', 'message': str(e)}), 500
-    record_job_success(db, 'price_sync')
-    return jsonify({'status': 'ok', **summary})
+    access_token = get_kite_access_token(db)
+    if not access_token:
+        return jsonify({
+            'status': 'error',
+            'message': 'No Kite session yet -- a super_admin must log in via /admin/stocks/kite/login first.'
+        }), 400
+
+    def _job(job_db):
+        try:
+            summary = sync_daily_data(job_db, kite_client=KiteClient(access_token=access_token))
+        except Exception as e:
+            app.logger.error(f'Stock sync failed: {e}')
+            alert_job_error(job_db, 'price_sync', str(e))
+            raise
+        record_job_success(job_db, 'price_sync')
+        return summary
+
+    return _dispatch_stocks_job(db, is_cron, 'price_sync', _job)
 
 
 @app.route('/stocks/kite/sync-instrument-map', methods=['POST'])
@@ -6759,25 +6803,26 @@ def stocks_kite_sync_instrument_map():
     (Kite's instrument list and our own universe both change slowly), so
     there's no cron entry for this, just this button. Same dual auth as
     /stocks/sync: a valid X-Cron-Secret header or an active Stocks login
-    session, either sufficient."""
-    if not has_valid_cron_secret(request.headers, STOCKS_FUNDAMENTALS_CRON_SECRET) \
-            and not session.get('stocks_admin_id'):
+    session, either sufficient.
+
+    Session-triggered runs happen on a background thread -- see
+    _dispatch_stocks_job / utils/background_jobs.py."""
+    is_cron = has_valid_cron_secret(request.headers, STOCKS_FUNDAMENTALS_CRON_SECRET)
+    if not is_cron and not session.get('stocks_admin_id'):
         return redirect(url_for('stocks_admin_login'))
 
     db = get_db()
-    try:
-        access_token = get_kite_access_token(db)
-        if not access_token:
-            return jsonify({
-                'status': 'error',
-                'message': 'No Kite session yet -- a super_admin must log in via /admin/stocks/kite/login first.'
-            }), 400
-        kite_client = KiteClient(db=db, access_token=access_token)
-        summary = sync_kite_instrument_map(db, kite_client)
-    except Exception as e:
-        app.logger.error(f'Kite instrument map sync failed: {e}')
-        return jsonify({'status': 'error', 'message': str(e)}), 500
-    return jsonify({'status': 'ok', **summary})
+    access_token = get_kite_access_token(db)
+    if not access_token:
+        return jsonify({
+            'status': 'error',
+            'message': 'No Kite session yet -- a super_admin must log in via /admin/stocks/kite/login first.'
+        }), 400
+
+    def _job(job_db):
+        return sync_kite_instrument_map(job_db, KiteClient(access_token=access_token))
+
+    return _dispatch_stocks_job(db, is_cron, 'kite_instrument_map_sync', _job)
 
 
 @app.route('/stocks/universe/refresh-market-cap-filter', methods=['POST'])
@@ -6812,20 +6857,27 @@ def stocks_watchlist_refresh_shortlist():
     previously-auto-shortlisted ones that no longer pass, never touch
     manually-added rows). Same dual auth as /stocks/sync: a valid
     X-Cron-Secret header or an active Stocks login session, either
-    sufficient."""
-    if not has_valid_cron_secret(request.headers, STOCKS_FUNDAMENTALS_CRON_SECRET) \
-            and not session.get('stocks_admin_id'):
+    sufficient.
+
+    Session-triggered runs happen on a background thread -- see
+    _dispatch_stocks_job / utils/background_jobs.py."""
+    is_cron = has_valid_cron_secret(request.headers, STOCKS_FUNDAMENTALS_CRON_SECRET)
+    if not is_cron and not session.get('stocks_admin_id'):
         return redirect(url_for('stocks_admin_login'))
 
     db = get_db()
-    try:
-        summary = run_fundamental_shortlist(db)
-    except Exception as e:
-        app.logger.error(f'Fundamental shortlist refresh failed: {e}')
-        alert_job_error(db, 'shortlist_refresh', str(e))
-        return jsonify({'status': 'error', 'message': str(e)}), 500
-    record_job_success(db, 'shortlist_refresh')
-    return jsonify({'status': 'ok', **summary})
+
+    def _job(job_db):
+        try:
+            summary = run_fundamental_shortlist(job_db)
+        except Exception as e:
+            app.logger.error(f'Fundamental shortlist refresh failed: {e}')
+            alert_job_error(job_db, 'shortlist_refresh', str(e))
+            raise
+        record_job_success(job_db, 'shortlist_refresh')
+        return summary
+
+    return _dispatch_stocks_job(db, is_cron, 'shortlist_refresh', _job)
 
 
 @app.route('/stocks/suggestions/generate', methods=['POST'])
@@ -6854,21 +6906,42 @@ def stocks_suggestions_generate():
 def stocks_suggestions_send_daily_email():
     """Generates today's suggestions (if not already run) and emails every
     active stocks_email_recipients row -- see utils/suggestion_engine.py
-    and utils/suggestion_email.py. Same dual auth as /stocks/sync."""
-    if not has_valid_cron_secret(request.headers, STOCKS_FUNDAMENTALS_CRON_SECRET) \
-            and not session.get('stocks_admin_id'):
+    and utils/suggestion_email.py. Same dual auth as /stocks/sync.
+
+    Session-triggered runs happen on a background thread -- see
+    _dispatch_stocks_job / utils/background_jobs.py."""
+    is_cron = has_valid_cron_secret(request.headers, STOCKS_FUNDAMENTALS_CRON_SECRET)
+    if not is_cron and not session.get('stocks_admin_id'):
         return redirect(url_for('stocks_admin_login'))
 
     db = get_db()
-    try:
-        generate_daily_suggestions(db)
-        summary = send_daily_suggestions_email(db)
-    except Exception as e:
-        app.logger.error(f'Daily suggestions email failed: {e}')
-        alert_job_error(db, 'suggestion_email', str(e))
-        return jsonify({'status': 'error', 'message': str(e)}), 500
-    record_job_success(db, 'suggestion_email')
-    return jsonify({'status': 'ok', **summary})
+
+    def _job(job_db):
+        try:
+            generate_daily_suggestions(job_db)
+            summary = send_daily_suggestions_email(job_db)
+        except Exception as e:
+            app.logger.error(f'Daily suggestions email failed: {e}')
+            alert_job_error(job_db, 'suggestion_email', str(e))
+            raise
+        record_job_success(job_db, 'suggestion_email')
+        return summary
+
+    return _dispatch_stocks_job(db, is_cron, 'suggestion_email', _job)
+
+
+@app.route('/stocks/jobs/<job_name>/status', methods=['GET'])
+@stocks_login_required
+def stocks_job_status(job_name):
+    """Polled by the dashboard's JS after a background job starts (see
+    _dispatch_stocks_job above and utils/background_jobs.py) -- returns the
+    latest run's status for job_name: 'running', 'done' (with its result),
+    'error' (with the message), or 'never_run'. Any logged-in role can
+    poll -- it's read-only, and job_name is one of a handful of fixed
+    strings the dashboard itself controls, not user input that reaches a
+    query some other way."""
+    db = get_db()
+    return jsonify(get_job_status(db, job_name))
 
 
 @app.route('/stocks/users', methods=['GET', 'POST'])
@@ -7055,14 +7128,12 @@ def stocks_kite_postback():
 def admin_stocks_fundamentals_sync():
     """Manual trigger for the weekly fundamentals fetch (Screener.in) --
     see utils/fundamentals_ingestion.py. Unlike the price sync this doesn't
-    need a Kite session, just network access to Screener."""
+    need a Kite session, just network access to Screener. Browser-only (no
+    cron secret path here, @stocks_login_required already guarantees a
+    session), so this always runs on a background thread -- see
+    _dispatch_stocks_job / utils/background_jobs.py."""
     db = get_db()
-    try:
-        summary = sync_fundamentals(db)
-    except Exception as e:
-        app.logger.error(f'Fundamentals sync failed: {e}')
-        return jsonify({'status': 'error', 'message': str(e)}), 500
-    return jsonify({'status': 'ok', **summary})
+    return _dispatch_stocks_job(db, is_cron=False, job_name='fundamentals_sync', job_fn=sync_fundamentals)
 
 
 @app.route('/stocks/fundamentals/rotation-sync', methods=['POST'])

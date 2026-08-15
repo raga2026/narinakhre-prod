@@ -31,6 +31,8 @@
         {% endif %}
         {% endwith %}
 
+        <div id="job-status-region" role="status" aria-live="polite" class="mb-6"></div>
+
         {% if role == 'super_admin' %}
         <section class="bg-slate-800 rounded-2xl p-6 border border-sky-500/20 mb-6" aria-labelledby="kite-heading">
             <h2 id="kite-heading" class="text-lg font-bold text-slate-200 mb-2">Kite connection</h2>
@@ -54,19 +56,22 @@
         <section class="bg-slate-800 rounded-2xl p-6 border border-sky-500/20 mb-6" aria-labelledby="sync-heading">
             <h2 id="sync-heading" class="text-lg font-bold text-slate-200 mb-2">Data sync</h2>
             <p class="text-slate-400 text-sm mb-3">Pulls the latest daily candle for every active watchlist symbol.</p>
-            <form method="POST" action="{{ url_for('admin_stocks_sync') }}" class="inline-block mr-3">
+            <form method="POST" action="{{ url_for('admin_stocks_sync') }}" class="inline-block mr-3"
+                  data-job-form data-job-name="price_sync" data-job-label="Sync now">
                 <button type="submit" class="stocks-btn py-3 px-6 rounded-2xl font-bold transition hover:opacity-90">
                     Sync now
                 </button>
             </form>
             <p class="text-slate-400 text-sm mt-4 mb-3">Fetches PE/PEG/EPS and other fundamentals from Screener.in for every active symbol -- meant to run weekly, not daily.</p>
-            <form method="POST" action="{{ url_for('admin_stocks_fundamentals_sync') }}" class="inline-block">
+            <form method="POST" action="{{ url_for('admin_stocks_fundamentals_sync') }}" class="inline-block"
+                  data-job-form data-job-name="fundamentals_sync" data-job-label="Fetch fundamentals">
                 <button type="submit" class="stocks-btn py-3 px-6 rounded-2xl font-bold transition hover:opacity-90">
                     Fetch fundamentals
                 </button>
             </form>
             <p class="text-slate-400 text-sm mt-4 mb-3">Matches Kite's own instrument list against our companies by name, so price sync can use Kite's real ID instead of guessing -- run this if "Sync now" reports symbols Kite has no quote for. Not a daily task.</p>
-            <form method="POST" action="{{ url_for('stocks_kite_sync_instrument_map') }}" class="inline-block">
+            <form method="POST" action="{{ url_for('stocks_kite_sync_instrument_map') }}" class="inline-block"
+                  data-job-form data-job-name="kite_instrument_map_sync" data-job-label="Sync Kite instrument map">
                 <button type="submit" class="stocks-btn py-3 px-6 rounded-2xl font-bold transition hover:opacity-90">
                     Sync Kite instrument map
                 </button>
@@ -76,7 +81,8 @@
         <section class="bg-slate-800 rounded-2xl p-6 border border-sky-500/20 mb-6" aria-labelledby="shortlist-heading">
             <h2 id="shortlist-heading" class="text-lg font-bold text-slate-200 mb-2">Watchlist shortlist</h2>
             <p class="text-slate-400 text-sm mb-3">Re-evaluates every scrape-eligible company's latest fundamentals against the screening criteria and updates the watchlist accordingly. Also runs automatically each morning before market open.</p>
-            <form method="POST" action="{{ url_for('stocks_watchlist_refresh_shortlist') }}">
+            <form method="POST" action="{{ url_for('stocks_watchlist_refresh_shortlist') }}"
+                  data-job-form data-job-name="shortlist_refresh" data-job-label="Refresh shortlist">
                 <button type="submit" class="stocks-btn py-3 px-6 rounded-2xl font-bold transition hover:opacity-90">
                     Refresh shortlist
                 </button>
@@ -86,7 +92,8 @@
         <section class="bg-slate-800 rounded-2xl p-6 border border-sky-500/20 mb-6" aria-labelledby="suggestions-heading">
             <h2 id="suggestions-heading" class="text-lg font-bold text-slate-200 mb-2">Daily suggestions</h2>
             <p class="text-slate-400 text-sm mb-3">Generates today's suggestions from the current watchlist/indicators/fundamentals, then emails everyone on the recipient list.</p>
-            <form method="POST" action="{{ url_for('stocks_suggestions_send_daily_email') }}">
+            <form method="POST" action="{{ url_for('stocks_suggestions_send_daily_email') }}"
+                  data-job-form data-job-name="suggestion_email" data-job-label="Generate and send today's email">
                 <button type="submit" class="stocks-btn py-3 px-6 rounded-2xl font-bold transition hover:opacity-90">
                     Generate and send today's email
                 </button>
@@ -107,5 +114,124 @@
             {% endif %}
         </div>
     </div>
+
+    <script>
+    (function () {
+        var POLL_INTERVAL_MS = 3000;
+        var statusRegion = document.getElementById('job-status-region');
+        var activePolls = {};  // jobName -> intervalId, so a job is only polled once
+
+        function announce(text) {
+            statusRegion.textContent = text;
+        }
+
+        function setButtonRunning(form, running) {
+            var button = form.querySelector('button[type="submit"]');
+            if (running) {
+                if (!button.dataset.originalText) {
+                    button.dataset.originalText = button.textContent.trim();
+                }
+                button.disabled = true;
+                button.textContent = 'Running…';
+            } else {
+                button.disabled = false;
+                if (button.dataset.originalText) {
+                    button.textContent = button.dataset.originalText;
+                }
+            }
+        }
+
+        function summarizeResult(result) {
+            if (!result) { return ''; }
+            var keys = ['inserted', 'passed', 'golden', 'silver', 'failed', 'matched', 'sent'];
+            var parts = [];
+            keys.forEach(function (key) {
+                if (typeof result[key] === 'number') {
+                    parts.push(key + ': ' + result[key]);
+                }
+            });
+            return parts.length ? ' (' + parts.join(', ') + ')' : '';
+        }
+
+        function pollStatus(jobName, label, form) {
+            if (activePolls[jobName]) { return; }
+            activePolls[jobName] = setInterval(function () {
+                fetch('/stocks/jobs/' + jobName + '/status', { headers: { 'Accept': 'application/json' } })
+                    .then(function (resp) { return resp.json(); })
+                    .then(function (data) {
+                        if (data.status === 'running') { return; }
+                        clearInterval(activePolls[jobName]);
+                        delete activePolls[jobName];
+                        setButtonRunning(form, false);
+                        if (data.status === 'done') {
+                            announce(label + ': done' + summarizeResult(data.result) + '.');
+                        } else if (data.status === 'error') {
+                            announce(label + ': failed -- ' + (data.error || 'unknown error') + '.');
+                        } else {
+                            announce(label + ': finished.');
+                        }
+                    })
+                    .catch(function () {
+                        // A transient network hiccup shouldn't stop polling --
+                        // just try again on the next interval.
+                    });
+            }, POLL_INTERVAL_MS);
+        }
+
+        function resumePollingIfAlreadyRunning(jobName, label, form) {
+            // Picks up a job that was already running before this page was
+            // opened or reloaded, so the button correctly shows as busy
+            // instead of inviting a second click on top of it.
+            fetch('/stocks/jobs/' + jobName + '/status', { headers: { 'Accept': 'application/json' } })
+                .then(function (resp) { return resp.json(); })
+                .then(function (data) {
+                    if (data.status === 'running') {
+                        setButtonRunning(form, true);
+                        announce(label + ': already running from an earlier click -- watching for it to finish.');
+                        pollStatus(jobName, label, form);
+                    }
+                })
+                .catch(function () {});
+        }
+
+        document.querySelectorAll('form[data-job-form]').forEach(function (form) {
+            var jobName = form.dataset.jobName;
+            var label = form.dataset.jobLabel;
+
+            resumePollingIfAlreadyRunning(jobName, label, form);
+
+            form.addEventListener('submit', function (event) {
+                event.preventDefault();
+                setButtonRunning(form, true);
+                announce(label + ': starting…');
+
+                fetch(form.action, { method: 'POST', headers: { 'Accept': 'application/json' } })
+                    .then(function (resp) { return resp.json(); })
+                    .then(function (data) {
+                        if (data.status === 'error') {
+                            setButtonRunning(form, false);
+                            announce(label + ': ' + (data.message || 'failed to start') + '.');
+                            return;
+                        }
+                        if (data.status === 'started') {
+                            announce(data.already_running
+                                ? label + ': already running -- watching for it to finish.'
+                                : label + ': running in the background -- you can keep using the dashboard.');
+                            pollStatus(jobName, label, form);
+                            return;
+                        }
+                        // Defensive fallback -- a session-triggered click always
+                        // gets 'started' from the server, never 'ok' directly.
+                        setButtonRunning(form, false);
+                        announce(label + ': done' + summarizeResult(data) + '.');
+                    })
+                    .catch(function () {
+                        setButtonRunning(form, false);
+                        announce(label + ': request failed -- check your connection and try again.');
+                    });
+            });
+        });
+    })();
+    </script>
 </body>
 </html>
