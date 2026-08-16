@@ -3,6 +3,7 @@ utils/kite_instrument_matching.py, and looks it up during price syncing so
 fetch_daily_candles() can skip Kite's ltp() lookup (and the symbol-mismatch
 failures that come with it) once a company has been matched once."""
 from utils.kite_instrument_matching import match_instruments_to_universe
+from utils.job_progress import report as report_progress
 
 KITE_INSTRUMENT_MAP_TABLE_SQL = [
     '''CREATE TABLE IF NOT EXISTS stock_kite_instrument_map (
@@ -46,12 +47,28 @@ def get_cached_instrument_token(db, symbol, exchange):
     return row['kite_instrument_token'] if row else None
 
 
+def get_cached_kite_name(db, symbol, exchange):
+    """Returns the company name Kite itself uses for (symbol, exchange), or
+    None if it's never been matched. Kite's naming is internally consistent
+    (never mixes 'Ltd' and 'Limited' for the same company across exchanges
+    the way our own NSE/BSE source lists do), so callers that need one
+    canonical display name for a company -- e.g. after picking a single
+    NSE/BSE listing to watchlist -- prefer this over stock_universe's raw
+    company_name."""
+    row = db.execute(
+        'SELECT matched_name FROM stock_kite_instrument_map WHERE symbol=? AND exchange=?',
+        (symbol, exchange)
+    ).fetchone()
+    return row['matched_name'] if row and row['matched_name'] else None
+
+
 def upsert_instrument_map(db, matches):
     """Upserts match_instruments_to_universe()'s output. Re-running this
     (e.g. after Kite lists a new instrument, or a company's Kite
     tradingsymbol changes) safely overwrites a stale mapping rather than
     duplicating rows, via ON CONFLICT (symbol, exchange)."""
-    for i in range(0, len(matches), UPSERT_BATCH_SIZE):
+    total = len(matches)
+    for i in range(0, total, UPSERT_BATCH_SIZE):
         batch = matches[i:i + UPSERT_BATCH_SIZE]
         values_sql = ',\n'.join(
             '(?, ?, ?, ?, ?, ?)' for _ in batch
@@ -73,6 +90,7 @@ def upsert_instrument_map(db, matches):
                        updated_at = NOW()'''
         db.execute(sql, tuple(params))
         db.commit()
+        report_progress(min(i + UPSERT_BATCH_SIZE, total), total, label='Saving matched Kite instruments')
 
 
 def sync_kite_instrument_map(db, kite_client):
@@ -97,6 +115,7 @@ def sync_kite_instrument_map(db, kite_client):
         kite_client.fetch_instruments('NSE') + kite_client.fetch_instruments('BSE')
     )
 
+    report_progress(0, len(universe_rows) or 1, label='Matching companies against Kite instrument list')
     matches = match_instruments_to_universe(universe_rows, kite_instruments)
     upsert_instrument_map(db, matches)
 

@@ -1,6 +1,7 @@
 from unittest.mock import MagicMock, patch
 
-from utils.super_sync import SUPER_SYNC_STEPS, run_super_sync
+from utils.super_sync import STEP_LABELS, SUPER_SYNC_STEPS, run_super_sync
+from utils import job_progress
 
 
 def test_all_steps_run_in_the_documented_order():
@@ -63,3 +64,32 @@ def test_a_failing_step_does_not_stop_the_rest():
 def test_all_nine_steps_are_present():
     assert len(SUPER_SYNC_STEPS) == 9
     assert len(set(SUPER_SYNC_STEPS)) == 9  # no accidental duplicates
+
+
+def test_every_step_has_a_human_readable_label():
+    assert set(STEP_LABELS.keys()) == set(SUPER_SYNC_STEPS)
+
+
+def test_progress_reports_a_step_label_before_each_step_runs():
+    db = MagicMock()
+    reports = []
+    job_progress.bind(lambda current, total, label: reports.append((current, total, label)))
+
+    try:
+        with patch('utils.super_sync.KiteClient', return_value=MagicMock()), \
+             patch('utils.super_sync.sync_kite_instrument_map', return_value={}), \
+             patch('utils.super_sync.sync_fundamentals', return_value={}), \
+             patch('utils.super_sync.sync_fundamentals_rotation', return_value={}), \
+             patch('utils.super_sync.refresh_market_cap_filter', return_value={}), \
+             patch('utils.super_sync.run_fundamental_shortlist', return_value={}), \
+             patch('utils.super_sync.sync_daily_data', return_value={}), \
+             patch('utils.super_sync.run_indicator_calculation', return_value={}), \
+             patch('utils.super_sync.sync_daily_data_universe', return_value={}), \
+             patch('utils.super_sync.run_indicator_calculation_universe', return_value={}):
+            run_super_sync(db, access_token='fake-token')
+    finally:
+        job_progress.clear()
+
+    assert len(reports) == len(SUPER_SYNC_STEPS)
+    assert reports[0] == (0, 9, 'Step 1 of 9: Syncing Kite instrument map')
+    assert reports[-1] == (8, 9, 'Step 9 of 9: Calculating indicators (universe)')

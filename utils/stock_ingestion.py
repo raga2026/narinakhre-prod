@@ -3,6 +3,7 @@ from datetime import date, timedelta
 
 from utils.kite_client import KiteClient
 from utils.kite_instrument_map import get_cached_instrument_token
+from utils.job_progress import report as report_progress
 
 # How far back (calendar days) to pull when a symbol doesn't have enough
 # history yet. 380 calendar days comfortably yields 250+ trading days once
@@ -157,7 +158,7 @@ def sync_daily_data(db, kite_client=None):
     # response from Kite, just with zero rows in it.
     zero_candles = []
 
-    for row in watchlist_rows:
+    for i, row in enumerate(watchlist_rows):
         watchlist_id = row['id']
         symbol = row['symbol']
         exchange = row['exchange']
@@ -214,6 +215,8 @@ def sync_daily_data(db, kite_client=None):
             failed += 1
             failures.append({'symbol': symbol, 'exchange': exchange, 'error': str(exc)})
             print(f'Stock sync failed for {exchange}:{symbol}: {exc}')
+
+        report_progress(i + 1, len(watchlist_rows))
 
     return {
         'watchlist_count': len(watchlist_rows),
@@ -329,6 +332,8 @@ def sync_daily_data_universe(db, kite_client=None, sleep_seconds=UNIVERSE_SYNC_D
             failed += 1
             failures.append({'symbol': symbol, 'exchange': exchange, 'error': str(exc)})
             print(f'Universe stock sync failed for {exchange}:{symbol}: {exc}')
+
+        report_progress(i + 1, len(rows))
 
         if sleep_seconds and i < len(rows) - 1:
             time.sleep(sleep_seconds)

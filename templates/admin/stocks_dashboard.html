@@ -193,16 +193,44 @@
             return parts.length ? ' (' + parts.join(', ') + ')' : '';
         }
 
-        function pollStatus(jobName, label, form) {
+        function formatDateTime(value) {
+            if (!value) { return null; }
+            var d = new Date(value);
+            if (isNaN(d.getTime())) { return value; }
+            return d.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
+        }
+
+        function formatProgress(progress) {
+            if (!progress || !progress.total) { return ''; }
+            var pct = Math.round((progress.current / progress.total) * 100);
+            var base = pct + '% (' + progress.current + ' of ' + progress.total + ')';
+            return progress.label ? (progress.label + ' -- ' + base) : base;
+        }
+
+        function updateProgress(progressEl, progress, running) {
+            progressEl.textContent = running ? formatProgress(progress) : '';
+        }
+
+        function updateLastSync(lastSyncEl, lastSuccessAt) {
+            var formatted = formatDateTime(lastSuccessAt);
+            lastSyncEl.textContent = 'Last synced: ' + (formatted || 'never yet');
+        }
+
+        function pollStatus(jobName, label, form, progressEl, lastSyncEl) {
             if (activePolls[jobName]) { return; }
             activePolls[jobName] = setInterval(function () {
                 fetch('/stocks/jobs/' + jobName + '/status', { headers: { 'Accept': 'application/json' } })
                     .then(function (resp) { return resp.json(); })
                     .then(function (data) {
-                        if (data.status === 'running') { return; }
+                        if (data.status === 'running') {
+                            updateProgress(progressEl, data.progress, true);
+                            return;
+                        }
                         clearInterval(activePolls[jobName]);
                         delete activePolls[jobName];
                         setButtonRunning(form, false);
+                        updateProgress(progressEl, null, false);
+                        updateLastSync(lastSyncEl, data.last_success_at);
                         if (data.status === 'done') {
                             announce(label + ': done' + summarizeResult(data.result) + '.');
                         } else if (data.status === 'error') {
@@ -218,17 +246,22 @@
             }, POLL_INTERVAL_MS);
         }
 
-        function resumePollingIfAlreadyRunning(jobName, label, form) {
-            // Picks up a job that was already running before this page was
-            // opened or reloaded, so the button correctly shows as busy
-            // instead of inviting a second click on top of it.
+        function checkStatusOnLoad(jobName, label, form, progressEl, lastSyncEl) {
+            // Always runs on page load, whether or not a job happens to be
+            // running right now -- this is what populates "Last synced"
+            // from a previous run, and (if a job was already running before
+            // this page was opened or reloaded) picks polling back up so
+            // the button correctly shows as busy instead of inviting a
+            // second click on top of it.
             fetch('/stocks/jobs/' + jobName + '/status', { headers: { 'Accept': 'application/json' } })
                 .then(function (resp) { return resp.json(); })
                 .then(function (data) {
+                    updateLastSync(lastSyncEl, data.last_success_at);
                     if (data.status === 'running') {
                         setButtonRunning(form, true);
+                        updateProgress(progressEl, data.progress, true);
                         announce(label + ': already running from an earlier click -- watching for it to finish.');
-                        pollStatus(jobName, label, form);
+                        pollStatus(jobName, label, form, progressEl, lastSyncEl);
                     }
                 })
                 .catch(function () {});
@@ -238,11 +271,22 @@
             var jobName = form.dataset.jobName;
             var label = form.dataset.jobLabel;
 
-            resumePollingIfAlreadyRunning(jobName, label, form);
+            var progressEl = document.createElement('span');
+            progressEl.className = 'text-slate-400 text-sm ml-3';
+            var button = form.querySelector('button[type="submit"]');
+            button.insertAdjacentElement('afterend', progressEl);
+
+            var lastSyncEl = document.createElement('p');
+            lastSyncEl.className = 'text-slate-500 text-xs mt-2';
+            lastSyncEl.textContent = 'Last synced: checking…';
+            form.insertAdjacentElement('afterend', lastSyncEl);
+
+            checkStatusOnLoad(jobName, label, form, progressEl, lastSyncEl);
 
             form.addEventListener('submit', function (event) {
                 event.preventDefault();
                 setButtonRunning(form, true);
+                updateProgress(progressEl, null, true);
                 announce(label + ': starting…');
 
                 fetch(form.action, { method: 'POST', headers: { 'Accept': 'application/json' } })
@@ -250,6 +294,7 @@
                     .then(function (data) {
                         if (data.status === 'error') {
                             setButtonRunning(form, false);
+                            updateProgress(progressEl, null, false);
                             announce(label + ': ' + (data.message || 'failed to start') + '.');
                             return;
                         }
@@ -257,16 +302,19 @@
                             announce(data.already_running
                                 ? label + ': already running -- watching for it to finish.'
                                 : label + ': running in the background -- you can keep using the dashboard.');
-                            pollStatus(jobName, label, form);
+                            pollStatus(jobName, label, form, progressEl, lastSyncEl);
                             return;
                         }
                         // Defensive fallback -- a session-triggered click always
                         // gets 'started' from the server, never 'ok' directly.
                         setButtonRunning(form, false);
+                        updateProgress(progressEl, null, false);
+                        updateLastSync(lastSyncEl, data.last_success_at);
                         announce(label + ': done' + summarizeResult(data) + '.');
                     })
                     .catch(function () {
                         setButtonRunning(form, false);
+                        updateProgress(progressEl, null, false);
                         announce(label + ': request failed -- check your connection and try again.');
                     });
             });

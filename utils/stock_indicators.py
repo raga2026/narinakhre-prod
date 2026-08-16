@@ -1,6 +1,7 @@
 from datetime import date
 
 from utils.indicator_engine import calculate_moving_averages, calculate_rsi, detect_cross_status, detect_volume_trend
+from utils.job_progress import report as report_progress
 
 # How many trailing rows of stock_daily_data to pull per symbol -- 200 days
 # is what ma_200 needs; a small margin above that avoids an off-by-one
@@ -147,7 +148,7 @@ def run_indicator_calculation(db):
     skipped = 0
     failures = []
 
-    for row in watchlist_rows:
+    for i, row in enumerate(watchlist_rows):
         watchlist_id = row['id']
         symbol = row['symbol']
 
@@ -176,6 +177,8 @@ def run_indicator_calculation(db):
         except Exception as exc:
             failures.append({'symbol': symbol, 'error': str(exc)})
             print(f'Indicator calculation failed for {symbol}: {exc}')
+
+        report_progress(i + 1, len(watchlist_rows))
 
     return {
         'watchlist_count': len(watchlist_rows),
@@ -212,7 +215,7 @@ def run_indicator_calculation_universe(db):
     skipped = 0
     failures = []
 
-    for row in universe_rows:
+    for i, row in enumerate(universe_rows):
         universe_id = row['universe_id']
         watchlist_id = row.get('watchlist_id')
         symbol = row['symbol']
@@ -240,6 +243,8 @@ def run_indicator_calculation_universe(db):
         except Exception as exc:
             failures.append({'symbol': symbol, 'error': str(exc)})
             print(f'Universe indicator calculation failed for {symbol}: {exc}')
+
+        report_progress(i + 1, len(universe_rows))
 
     return {
         'universe_count': len(universe_rows),

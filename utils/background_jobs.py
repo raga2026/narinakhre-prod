@@ -21,6 +21,8 @@ success/failure. Background jobs are for the dashboard's own buttons only.
 import json
 import threading
 
+from utils.job_progress import bind as bind_progress, clear as clear_progress
+
 STOCK_BACKGROUND_JOBS_TABLE_SQL = [
     '''CREATE TABLE IF NOT EXISTS stock_background_jobs (
         id BIGSERIAL PRIMARY KEY,
@@ -34,13 +36,38 @@ STOCK_BACKGROUND_JOBS_TABLE_SQL = [
     )'''
 ]
 
+# Added after stock_background_jobs already had data in it -- see
+# utils/job_progress.py for how these get populated (best-effort, throttled
+# writes from the job's own thread while it runs) and consumed by
+# get_job_status below for the dashboard's percentage-complete ticker.
+STOCK_BACKGROUND_JOBS_ALTER_SQL = [
+    'ALTER TABLE stock_background_jobs ADD COLUMN IF NOT EXISTS progress_current INTEGER',
+    'ALTER TABLE stock_background_jobs ADD COLUMN IF NOT EXISTS progress_total INTEGER',
+    'ALTER TABLE stock_background_jobs ADD COLUMN IF NOT EXISTS progress_label TEXT',
+]
+
 
 def initialize_background_jobs_table_if_needed(client):
-    for sql in STOCK_BACKGROUND_JOBS_TABLE_SQL:
+    for sql in STOCK_BACKGROUND_JOBS_TABLE_SQL + STOCK_BACKGROUND_JOBS_ALTER_SQL:
         try:
             client.rpc('execute_sql', {'query': sql}).execute()
         except Exception as e:
             print(f'Background jobs table init warning (may already exist): {e}')
+
+
+def _make_progress_reporter(db, job_id):
+    """Best-effort -- a progress write failing must never take the actual
+    job down with it, so any error here is just logged and swallowed."""
+    def _report(current, total, label):
+        try:
+            db.execute(
+                'UPDATE stock_background_jobs SET progress_current=?, progress_total=?, progress_label=? WHERE id=?',
+                (current, total, label, job_id)
+            )
+            db.commit()
+        except Exception as e:
+            print(f'Progress update failed for background job {job_id}: {e}')
+    return _report
 
 
 def _run_and_record(build_db, job_id, target_fn):
@@ -50,6 +77,7 @@ def _run_and_record(build_db, job_id, target_fn):
     (an uncaught exception in a background thread is just silently dropped
     by Python, which would leave the job stuck showing 'running' forever)."""
     db = build_db()
+    bind_progress(_make_progress_reporter(db, job_id))
     try:
         summary = target_fn(db)
         db.execute(
@@ -67,6 +95,8 @@ def _run_and_record(build_db, job_id, target_fn):
         except Exception as inner:
             print(f'background job {job_id} failed AND failed to record the failure: {inner}')
         print(f'Background job {job_id} failed: {type(e).__name__}: {e}')
+    finally:
+        clear_progress()
 
 
 def start_background_job(db, build_db, job_name, target_fn, triggered_by_id):
@@ -112,22 +142,50 @@ def start_background_job(db, build_db, job_name, target_fn, triggered_by_id):
 def get_job_status(db, job_name):
     """Returns the most recent stock_background_jobs row for job_name as
     {'status': 'running'|'done'|'error'|'never_run', 'result': dict|None,
-    'error': str|None, 'started_at': ..., 'finished_at': ...} -- for the
-    dashboard to poll after start_background_job. result_json is parsed
-    back into a dict here so callers never touch the raw column."""
+    'error': str|None, 'started_at': ..., 'finished_at': ...,
+    'progress': {'current', 'total', 'label'}|None, 'last_success_at': ...}
+    -- for the dashboard to poll after start_background_job. result_json is
+    parsed back into a dict here so callers never touch the raw column.
+
+    'progress' reflects the latest run regardless of its status (only
+    meaningful while status is 'running' -- see utils/job_progress.py).
+    'last_success_at' is deliberately looked up separately from the latest
+    row: while a job is running, the latest row's own finished_at is still
+    None, but the dashboard still wants to show when this job last actually
+    completed -- i.e. the previous 'done' row, not this in-flight one."""
     row = db.execute(
-        'SELECT status, result_json, error_message, started_at, finished_at '
+        'SELECT status, result_json, error_message, started_at, finished_at, '
+        'progress_current, progress_total, progress_label '
         'FROM stock_background_jobs WHERE job_name=? ORDER BY id DESC LIMIT 1',
         (job_name,)
     ).fetchone()
     if not row:
-        return {'status': 'never_run', 'result': None, 'error': None, 'started_at': None, 'finished_at': None}
+        return {
+            'status': 'never_run', 'result': None, 'error': None, 'started_at': None,
+            'finished_at': None, 'progress': None, 'last_success_at': None,
+        }
 
     result = json.loads(row['result_json']) if row.get('result_json') else None
+
+    progress = None
+    if row.get('progress_total'):
+        progress = {
+            'current': row.get('progress_current') or 0,
+            'total': row['progress_total'],
+            'label': row.get('progress_label'),
+        }
+
+    last_success_row = db.execute(
+        "SELECT finished_at FROM stock_background_jobs WHERE job_name=? AND status='done' ORDER BY id DESC LIMIT 1",
+        (job_name,)
+    ).fetchone()
+
     return {
         'status': row['status'],
         'result': result,
         'error': row.get('error_message'),
         'started_at': row.get('started_at'),
         'finished_at': row.get('finished_at'),
+        'progress': progress,
+        'last_success_at': last_success_row['finished_at'] if last_success_row else None,
     }

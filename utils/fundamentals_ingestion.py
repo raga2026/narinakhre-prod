@@ -1,6 +1,7 @@
 from datetime import date
 
 from utils.screener_client import fetch_fundamentals
+from utils.job_progress import report as report_progress
 
 STOCK_FUNDAMENTALS_TABLE_SQL = [
     '''CREATE TABLE IF NOT EXISTS stock_fundamentals (
@@ -150,7 +151,7 @@ def sync_fundamentals(db, fetch_fn=None):
     failed = 0
     failures = []
 
-    for row in watchlist_rows:
+    for i, row in enumerate(watchlist_rows):
         watchlist_id = row['id']
         symbol = row['symbol']
 
@@ -162,6 +163,8 @@ def sync_fundamentals(db, fetch_fn=None):
             failed += 1
             failures.append({'symbol': symbol, 'error': str(exc)})
             print(f'Fundamentals sync failed for {symbol}: {exc}')
+
+        report_progress(i + 1, len(watchlist_rows))
 
     return {
         'watchlist_count': len(watchlist_rows),
@@ -202,7 +205,7 @@ def sync_fundamentals_rotation(db, fetch_fn=None, batch_size=ROTATION_BATCH_SIZE
     failed = 0
     failures = []
 
-    for row in rows:
+    for i, row in enumerate(rows):
         universe_id = row['universe_id']
         watchlist_id = row['watchlist_id']
         symbol = row['symbol']
@@ -220,6 +223,8 @@ def sync_fundamentals_rotation(db, fetch_fn=None, batch_size=ROTATION_BATCH_SIZE
             failed += 1
             failures.append({'symbol': symbol, 'error': str(exc)})
             print(f'Rotation fundamentals sync failed for {symbol}: {exc}')
+
+        report_progress(i + 1, len(rows))
 
     return {
         'batch_size': len(rows),

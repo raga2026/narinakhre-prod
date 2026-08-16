@@ -7,6 +7,11 @@ from utils.stock_ingestion import (
     sync_daily_data,
     sync_daily_data_universe,
 )
+from utils import job_progress
+
+
+def teardown_function(_fn):
+    job_progress.clear()
 
 
 class FakeCursor:
@@ -91,6 +96,23 @@ def test_sync_daily_data_upserts_without_duplicating_rows():
     assert second['failed'] == 0
     assert len(db.daily_data) == 1
     assert db.daily_data[(1, candle_date.isoformat())]['close'] == 104.5
+
+
+def test_sync_daily_data_reports_progress_per_symbol():
+    watchlist = [
+        {'id': 1, 'symbol': 'RELIANCE', 'exchange': 'NSE', 'is_active': 1},
+        {'id': 2, 'symbol': 'TCS', 'exchange': 'NSE', 'is_active': 1},
+    ]
+    db = FakeDB(watchlist)
+    mock_kite = MagicMock()
+    mock_kite.fetch_daily_candles.return_value = []
+
+    reports = []
+    job_progress.bind(lambda current, total, label: reports.append((current, total, label)))
+
+    sync_daily_data(db, kite_client=mock_kite)
+
+    assert reports == [(1, 2, None), (2, 2, None)]
 
 
 def test_sync_daily_data_records_per_symbol_failure_without_stopping_batch():

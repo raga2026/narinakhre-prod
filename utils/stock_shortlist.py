@@ -1,7 +1,8 @@
 from datetime import date, timedelta
 
 from utils.fundamental_screen import classify_fundamental_tier
-from utils.kite_instrument_map import get_cached_instrument_token
+from utils.kite_instrument_map import get_cached_instrument_token, get_cached_kite_name
+from utils.job_progress import report as report_progress
 
 SHORTLIST_SOURCE = 'auto_fundamental_shortlist'
 # How stale a stock_fundamentals snapshot can be and still count for
@@ -21,21 +22,39 @@ def _pick_canonical_listing(db, qualifying_rows):
     Prefers whichever listing actually has a resolved Kite instrument
     token (see utils/kite_instrument_map.py) -- that's the one that can
     actually get price data through /stocks/sync. Falls back to NSE if
-    both or neither resolve. Returns a single row."""
+    both or neither resolve.
+
+    The winning row's company_name is also swapped for Kite's own name for
+    that listing when one is on record (_apply_kite_name below) -- our
+    NSE and BSE source lists don't agree on 'Ltd' vs 'Limited' etc. for
+    the same company, which otherwise makes the exact same stock look
+    like two different names depending on which exchange happened to
+    win. Returns a single row."""
     if len(qualifying_rows) == 1:
-        return qualifying_rows[0]
+        return _apply_kite_name(db, qualifying_rows[0])
 
     with_kite_token = [
         r for r in qualifying_rows
         if get_cached_instrument_token(db, r['symbol'], r['exchange']) is not None
     ]
     if len(with_kite_token) == 1:
-        return with_kite_token[0]
+        return _apply_kite_name(db, with_kite_token[0])
 
     nse_rows = [r for r in qualifying_rows if r['exchange'] == 'NSE']
     if nse_rows:
-        return nse_rows[0]
-    return qualifying_rows[0]
+        return _apply_kite_name(db, nse_rows[0])
+    return _apply_kite_name(db, qualifying_rows[0])
+
+
+def _apply_kite_name(db, row):
+    """Overrides row['company_name'] with Kite's own name for this listing,
+    when one is on record -- falls back to leaving the original
+    stock_universe name untouched if this listing was never matched to a
+    Kite instrument (see get_cached_kite_name)."""
+    kite_name = get_cached_kite_name(db, row['symbol'], row['exchange'])
+    if kite_name:
+        return {**row, 'company_name': kite_name}
+    return row
 
 
 def run_fundamental_shortlist(db):
@@ -71,6 +90,11 @@ def run_fundamental_shortlist(db):
     counts toward 'passed'/tier breakdown (it did qualify fundamentally)
     but not toward what actually gets watchlisted -- see 'deduped' in the
     returned summary.
+
+    Every row written also has its name normalized to Kite's own naming
+    (via _apply_kite_name) when that listing has a Kite match on record,
+    so the same company never shows as 'Ltd' in one place and 'Limited'
+    in another just because our NSE/BSE source lists don't agree.
 
     Returns a summary including a golden/silver breakdown, how many
     passing candidates were the losing side of an ISIN duplicate
@@ -137,7 +161,9 @@ def run_fundamental_shortlist(db):
     qualifying_by_isin = {}  # isin -> list of (row, tier); None-ISIN rows never grouped
     ungrouped_qualifying = []  # rows with no ISIN on record -- can't be deduped, always kept
 
-    for row in candidates:
+    for i, row in enumerate(candidates):
+        report_progress(i + 1, len(candidates))
+
         universe_id = row['universe_id']
         previous = _previous_snapshot(universe_id, row['snapshot_date'])
 
@@ -159,7 +185,7 @@ def run_fundamental_shortlist(db):
         if isin:
             qualifying_by_isin.setdefault(isin, []).append(row_with_tier)
         else:
-            ungrouped_qualifying.append(row_with_tier)
+            ungrouped_qualifying.append(_apply_kite_name(db, row_with_tier))
 
     to_watchlist = list(ungrouped_qualifying)
     deduped = 0
@@ -246,7 +272,7 @@ def get_golden_cross_not_qualified(db):
         if isin:
             by_isin.setdefault(isin, []).append(row)
         else:
-            ungrouped.append(row)
+            ungrouped.append(_apply_kite_name(db, row))
 
     deduped_rows = list(ungrouped)
     for isin, rows_for_isin in by_isin.items():

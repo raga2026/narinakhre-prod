@@ -28,11 +28,12 @@ class FakeShortlistDB:
     exact SQL run_fundamental_shortlist() issues, matching the FakeDB
     pattern used elsewhere in this suite (e.g. test_market_cap_filter.py)."""
 
-    def __init__(self, universe_rows, fundamentals_rows, watchlist_rows, kite_map=None):
+    def __init__(self, universe_rows, fundamentals_rows, watchlist_rows, kite_map=None, kite_names=None):
         self.universe = universe_rows
         self.fundamentals = fundamentals_rows
         self.watchlist = {(w['symbol'], w['exchange']): w for w in watchlist_rows}
         self.kite_map = kite_map or {}  # (symbol, exchange) -> instrument_token
+        self.kite_names = kite_names or {}  # (symbol, exchange) -> Kite's own company name
         self.previous_snapshot_query_count = 0
 
     def execute(self, sql, params=None):
@@ -71,6 +72,11 @@ class FakeShortlistDB:
             symbol, exchange = params
             token = self.kite_map.get((symbol, exchange))
             return FakeCursor([{'kite_instrument_token': token}] if token else [])
+
+        if normalized.startswith('SELECT matched_name FROM stock_kite_instrument_map'):
+            symbol, exchange = params
+            name = self.kite_names.get((symbol, exchange))
+            return FakeCursor([{'matched_name': name}] if name else [])
 
         if normalized.startswith('SELECT universe_id, promoter_holding_pct, fii_holding_pct, snapshot_date'):
             # Batched replacement for the old one-query-per-candidate lookup
@@ -356,15 +362,71 @@ def test_existing_duplicate_pair_self_heals_on_rerun():
     assert active[0] == ('ACME', 'NSE')  # NSE wins by default (no kite_map set)
 
 
+def test_dedup_winner_display_name_comes_from_kite_not_the_source_list():
+    # Universe rows disagree ('Ltd' vs 'Limited') -- the winner's name in
+    # the watchlist should come from Kite's own naming, not whichever
+    # source list happened to win the exchange tiebreak.
+    universe = [
+        {'id': 1, 'symbol': 'ACME', 'exchange': 'NSE', 'company_name': 'Acme Ltd', 'is_scrape_eligible': True, 'isin': 'INE000000001'},
+        {'id': 2, 'symbol': '500001', 'exchange': 'BSE', 'company_name': 'Acme Limited', 'is_scrape_eligible': True, 'isin': 'INE000000001'},
+    ]
+    fundamentals = [
+        {'universe_id': 1, 'snapshot_date': '2026-08-10', **PASSING_FUNDAMENTALS},
+        {'universe_id': 2, 'snapshot_date': '2026-08-10', **PASSING_FUNDAMENTALS},
+    ]
+    db = FakeShortlistDB(
+        universe, fundamentals, watchlist_rows=[],
+        kite_names={('ACME', 'NSE'): 'ACME India Ltd'},  # Kite's canonical spelling
+    )
+
+    run_fundamental_shortlist(db)
+
+    assert db.watchlist[('ACME', 'NSE')]['name'] == 'ACME India Ltd'
+
+
+def test_single_listing_name_also_uses_kite_name_when_available():
+    # Not a duplicate at all -- still gets the Kite-sourced name, so naming
+    # is consistent across the whole watchlist, not just for dedup cases.
+    universe = [
+        {'id': 1, 'symbol': 'SOLO', 'exchange': 'NSE', 'company_name': 'Solo Co Ltd', 'is_scrape_eligible': True, 'isin': None},
+    ]
+    fundamentals = [
+        {'universe_id': 1, 'snapshot_date': '2026-08-10', **PASSING_FUNDAMENTALS},
+    ]
+    db = FakeShortlistDB(
+        universe, fundamentals, watchlist_rows=[],
+        kite_names={('SOLO', 'NSE'): 'Solo Company Limited'},
+    )
+
+    run_fundamental_shortlist(db)
+
+    assert db.watchlist[('SOLO', 'NSE')]['name'] == 'Solo Company Limited'
+
+
+def test_name_falls_back_to_universe_name_without_a_kite_match():
+    universe = [
+        {'id': 1, 'symbol': 'UNMATCHED', 'exchange': 'NSE', 'company_name': 'Unmatched Co Ltd', 'is_scrape_eligible': True, 'isin': None},
+    ]
+    fundamentals = [
+        {'universe_id': 1, 'snapshot_date': '2026-08-10', **PASSING_FUNDAMENTALS},
+    ]
+    db = FakeShortlistDB(universe, fundamentals, watchlist_rows=[])  # no kite_names at all
+
+    run_fundamental_shortlist(db)
+
+    assert db.watchlist[('UNMATCHED', 'NSE')]['name'] == 'Unmatched Co Ltd'
+
+
 # --- get_golden_cross_not_qualified ---------------------------------------
 
 class FakeGoldenCrossDB:
     """Minimal stand-in for app.py's SupabaseDB, just enough to run the
     exact SQL get_golden_cross_not_qualified() issues."""
 
-    def __init__(self, rows, kite_map=None):
+    def __init__(self, rows, kite_map=None, kite_names=None):
         self.rows = rows  # pre-joined rows, as if from the real query
         self.kite_map = kite_map or {}
+        self.kite_names = kite_names or {}
 
     def execute(self, sql, params=None):
         params = params or ()
@@ -377,6 +439,11 @@ class FakeGoldenCrossDB:
             symbol, exchange = params
             token = self.kite_map.get((symbol, exchange))
             return FakeCursor([{'kite_instrument_token': token}] if token else [])
+
+        if normalized.startswith('SELECT matched_name FROM stock_kite_instrument_map'):
+            symbol, exchange = params
+            name = self.kite_names.get((symbol, exchange))
+            return FakeCursor([{'matched_name': name}] if name else [])
 
         raise AssertionError(f'Unexpected SQL in test: {sql}')
 
@@ -434,6 +501,20 @@ def test_golden_cross_dedup_by_isin_keeps_only_one_listing():
 
     assert len(results) == 1
     assert results[0]['symbol'] == 'ACME'  # NSE wins by default, no kite_map set
+
+
+def test_golden_cross_dedup_winner_name_comes_from_kite():
+    rows = [
+        {'universe_id': 1, 'symbol': 'ACME', 'exchange': 'NSE', 'company_name': 'Acme Ltd', 'isin': 'INE1',
+         **GOLDEN_CROSS_INDICATORS, **{**PASSING_FUNDAMENTALS, 'roce_pct': -1}},
+        {'universe_id': 2, 'symbol': '500001', 'exchange': 'BSE', 'company_name': 'Acme Limited', 'isin': 'INE1',
+         **GOLDEN_CROSS_INDICATORS, **{**PASSING_FUNDAMENTALS, 'roce_pct': -1}},
+    ]
+    db = FakeGoldenCrossDB(rows, kite_names={('ACME', 'NSE'): 'ACME India Ltd'})
+
+    results = get_golden_cross_not_qualified(db)
+
+    assert results[0]['company_name'] == 'ACME India Ltd'
 
 
 def test_results_sorted_alphabetically_by_company_name():
