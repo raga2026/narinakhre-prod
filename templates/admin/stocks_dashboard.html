@@ -37,19 +37,39 @@
         <section class="bg-slate-800 rounded-2xl p-6 border-2 border-sky-500/50 mb-6" aria-labelledby="super-sync-heading">
             <h2 id="super-sync-heading" class="text-lg font-bold text-slate-200 mb-2">Super Sync</h2>
             <p class="text-slate-400 text-sm mb-3">
-                Runs every sync and calculation step below, in the right order, in one click -- Kite instrument map,
-                fundamentals, market cap filter, shortlist refresh, price sync, indicators, and the universe-wide versions
-                of both. Can take upwards of ten minutes; the smaller buttons further down still work individually if you
-                only need one step.
+                Runs every fast sync and calculation step in the right order, in one click -- Kite instrument map,
+                market cap filter, shortlist refresh, price sync, indicators, and the universe-wide versions of both.
+                Usually done within a couple of minutes. Doesn't include Screener.in fundamentals -- that refreshes on
+                its own automatic schedule, see "Fundamentals data" below.
             </p>
             <form method="POST" action="{{ url_for('stocks_super_sync') }}"
                   data-job-form data-job-name="super_sync" data-job-label="Super Sync">
                 <button type="submit" class="stocks-btn py-3 px-8 rounded-2xl font-bold text-lg transition hover:opacity-90">
-                    Super Sync -- update everything
+                    Super Sync -- update everything (fast)
                 </button>
             </form>
         </section>
+        {% endif %}
 
+        <section class="bg-slate-800 rounded-2xl p-6 border border-sky-500/20 mb-6" aria-labelledby="fundamentals-heading">
+            <h2 id="fundamentals-heading" class="text-lg font-bold text-slate-200 mb-2">Fundamentals data</h2>
+            <p class="text-slate-400 text-sm">
+                Last synced: {{ fundamentals_last_synced_ist or 'not yet run' }}
+            </p>
+            <details class="mt-3">
+                <summary class="text-sky-400 hover:text-sky-300 cursor-pointer text-sm">Why is there no button here?</summary>
+                <p class="text-slate-400 text-sm mt-2">
+                    PE, EPS, ROCE, and every other fundamental come from scraping Screener.in one company at a time --
+                    a slow, rate-sensitive process. It refreshes automatically in the background, a small batch each day,
+                    cycling through every eligible company roughly once every 15 days. This is deliberately not something
+                    you can click to run on demand: running it more often than that risks getting throttled or blocked by
+                    Screener.in for everyone. If you need to check when a specific company's fundamentals were last
+                    refreshed, see its company detail page.
+                </p>
+            </details>
+        </section>
+
+        {% if role == 'super_admin' %}
         <section class="bg-slate-800 rounded-2xl p-6 border border-sky-500/20 mb-6" aria-labelledby="kite-heading">
             <h2 id="kite-heading" class="text-lg font-bold text-slate-200 mb-2">Kite connection</h2>
             <p role="status" aria-live="polite"
@@ -69,20 +89,30 @@
         </section>
         {% endif %}
 
-        <section class="bg-slate-800 rounded-2xl p-6 border border-sky-500/20 mb-6" aria-labelledby="sync-heading">
-            <h2 id="sync-heading" class="text-lg font-bold text-slate-200 mb-2">Data sync</h2>
+        <section class="bg-slate-800 rounded-2xl p-6 border border-sky-500/20 mb-6" aria-labelledby="suggestions-heading">
+            <h2 id="suggestions-heading" class="text-lg font-bold text-slate-200 mb-2">Daily suggestions</h2>
+            <p class="text-slate-400 text-sm mb-3">Generates today's suggestions from the current watchlist/indicators/fundamentals, then emails everyone on the recipient list.</p>
+            <form method="POST" action="{{ url_for('stocks_suggestions_send_daily_email') }}"
+                  data-job-form data-job-name="suggestion_email" data-job-label="Generate and send today's email">
+                <button type="submit" class="stocks-btn py-3 px-6 rounded-2xl font-bold transition hover:opacity-90">
+                    Generate and send today's email
+                </button>
+            </form>
+        </section>
+
+        <details class="bg-slate-800 rounded-2xl p-6 border border-sky-500/20 mb-6">
+            <summary class="text-lg font-bold text-slate-200 cursor-pointer">Advanced: run individual sync steps</summary>
+            <p class="text-slate-400 text-sm mt-3 mb-4">
+                Super Sync above already runs all of these together, in order. Use these only if you need to re-run just
+                one step on its own -- for example after fixing a Kite session, or to isolate which step is failing.
+            </p>
+
+            <h3 class="text-slate-200 font-semibold mb-2">Data sync</h3>
             <p class="text-slate-400 text-sm mb-3">Pulls the latest daily candle for every active watchlist symbol.</p>
             <form method="POST" action="{{ url_for('admin_stocks_sync') }}" class="inline-block mr-3"
                   data-job-form data-job-name="price_sync" data-job-label="Sync now">
                 <button type="submit" class="stocks-btn py-3 px-6 rounded-2xl font-bold transition hover:opacity-90">
                     Sync now
-                </button>
-            </form>
-            <p class="text-slate-400 text-sm mt-4 mb-3">Fetches PE/PEG/EPS and other fundamentals from Screener.in for every active symbol -- meant to run weekly, not daily.</p>
-            <form method="POST" action="{{ url_for('admin_stocks_fundamentals_sync') }}" class="inline-block"
-                  data-job-form data-job-name="fundamentals_sync" data-job-label="Fetch fundamentals">
-                <button type="submit" class="stocks-btn py-3 px-6 rounded-2xl font-bold transition hover:opacity-90">
-                    Fetch fundamentals
                 </button>
             </form>
             <p class="text-slate-400 text-sm mt-4 mb-3">Matches Kite's own instrument list against our companies by name, so price sync can use Kite's real ID instead of guessing -- run this if "Sync now" reports symbols Kite has no quote for. Not a daily task.</p>
@@ -92,10 +122,8 @@
                     Sync Kite instrument map
                 </button>
             </form>
-        </section>
 
-        <section class="bg-slate-800 rounded-2xl p-6 border border-sky-500/20 mb-6" aria-labelledby="universe-scan-heading">
-            <h2 id="universe-scan-heading" class="text-lg font-bold text-slate-200 mb-2">Universe-wide scan</h2>
+            <h3 class="text-slate-200 font-semibold mt-6 mb-2">Universe-wide scan</h3>
             <p class="text-slate-400 text-sm mb-3">
                 Pulls daily prices for all ~1,067 scrape-eligible companies (not just the watchlist) -- takes several minutes.
                 Run this before "Calculate indicators (universe)" below.
@@ -116,10 +144,8 @@
                     Calculate indicators (universe)
                 </button>
             </form>
-        </section>
 
-        <section class="bg-slate-800 rounded-2xl p-6 border border-sky-500/20 mb-6" aria-labelledby="shortlist-heading">
-            <h2 id="shortlist-heading" class="text-lg font-bold text-slate-200 mb-2">Watchlist shortlist</h2>
+            <h3 class="text-slate-200 font-semibold mt-6 mb-2">Watchlist shortlist</h3>
             <p class="text-slate-400 text-sm mb-3">Re-evaluates every scrape-eligible company's latest fundamentals against the screening criteria and updates the watchlist accordingly. Also runs automatically each morning before market open.</p>
             <form method="POST" action="{{ url_for('stocks_watchlist_refresh_shortlist') }}"
                   data-job-form data-job-name="shortlist_refresh" data-job-label="Refresh shortlist">
@@ -127,18 +153,7 @@
                     Refresh shortlist
                 </button>
             </form>
-        </section>
-
-        <section class="bg-slate-800 rounded-2xl p-6 border border-sky-500/20 mb-6" aria-labelledby="suggestions-heading">
-            <h2 id="suggestions-heading" class="text-lg font-bold text-slate-200 mb-2">Daily suggestions</h2>
-            <p class="text-slate-400 text-sm mb-3">Generates today's suggestions from the current watchlist/indicators/fundamentals, then emails everyone on the recipient list.</p>
-            <form method="POST" action="{{ url_for('stocks_suggestions_send_daily_email') }}"
-                  data-job-form data-job-name="suggestion_email" data-job-label="Generate and send today's email">
-                <button type="submit" class="stocks-btn py-3 px-6 rounded-2xl font-bold transition hover:opacity-90">
-                    Generate and send today's email
-                </button>
-            </form>
-        </section>
+        </details>
 
         <div class="bg-slate-800 rounded-2xl p-6 border border-sky-500/20">
             <p class="mt-4">

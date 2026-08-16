@@ -1,7 +1,7 @@
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-from utils.fundamentals_ingestion import FUNDAMENTALS_COLUMNS, sync_fundamentals
+from utils.fundamentals_ingestion import FUNDAMENTALS_COLUMNS, sync_fundamentals_rotation
 from utils.screener_client import ScreenerParseError, fetch_fundamentals
 
 FIXTURE_PATH = Path(__file__).resolve().parent / 'fixtures' / 'screener_sample.html'
@@ -19,26 +19,35 @@ class FakeCursor:
 
 
 class FakeDB:
-    def __init__(self, watchlist_rows):
-        self.watchlist_rows = watchlist_rows
-        self.fundamentals = {}  # (watchlist_id, snapshot_date) -> row dict
+    """Minimal stand-in for the exact SQL sync_fundamentals_rotation()
+    issues -- rotation is the only Screener.in scraping this app does now
+    (see ROTATION_BATCH_SIZE's comment), so this is the sole coverage for
+    the scraping loop's failure handling."""
+
+    def __init__(self, universe_rows):
+        self.universe_rows = universe_rows
+        self.fundamentals = {}  # (universe_id, snapshot_date) -> row dict
+        self.last_fetch_stamped = set()  # universe_ids that got last_fundamentals_fetch updated
 
     def execute(self, sql, params=None):
         params = params or ()
         normalized = ' '.join(sql.split())
 
-        if normalized.startswith('SELECT id, symbol, exchange FROM stock_watchlist'):
-            rows = [r for r in self.watchlist_rows if r['is_active'] == 1]
-            return FakeCursor(rows)
+        if normalized.startswith('SELECT u.id AS universe_id, u.symbol, u.exchange, w.id AS watchlist_id'):
+            return FakeCursor(self.universe_rows)
 
         if normalized.startswith('INSERT INTO stock_fundamentals'):
-            # sync_fundamentals() always calls with watchlist_id set (never
-            # universe_id), so params are (watchlist_id, universe_id,
-            # snapshot_date, *FUNDAMENTALS_COLUMNS values) -- see
-            # _upsert_fundamentals_snapshot() in fundamentals_ingestion.py.
-            watchlist_id, universe_id, snapshot_date = params[:3]
-            data_values = params[3:]
-            self.fundamentals[(watchlist_id, snapshot_date)] = dict(zip(FUNDAMENTALS_COLUMNS, data_values))
+            # universe_id-only path (no watchlist_id in these fixtures), so
+            # params are (universe_id, snapshot_date, *FUNDAMENTALS_COLUMNS
+            # values) -- see _upsert_fundamentals_snapshot().
+            universe_id, snapshot_date = params[:2]
+            data_values = params[2:]
+            self.fundamentals[(universe_id, snapshot_date)] = dict(zip(FUNDAMENTALS_COLUMNS, data_values))
+            return FakeCursor([])
+
+        if normalized.startswith('UPDATE stock_universe SET last_fundamentals_fetch'):
+            (universe_id,) = params
+            self.last_fetch_stamped.add(universe_id)
             return FakeCursor([])
 
         raise AssertionError(f'Unexpected SQL in test: {sql}')
@@ -75,12 +84,12 @@ def test_fetch_fundamentals_raises_on_404_instead_of_returning_garbage():
             pass
 
 
-def test_sync_fundamentals_skips_one_parse_failure_without_stopping_batch():
-    watchlist = [
-        {'id': 1, 'symbol': 'BADCO', 'exchange': 'NSE', 'is_active': 1},
-        {'id': 2, 'symbol': 'GOODCO', 'exchange': 'NSE', 'is_active': 1},
+def test_sync_fundamentals_rotation_skips_one_parse_failure_without_stopping_batch():
+    universe = [
+        {'universe_id': 1, 'symbol': 'BADCO', 'exchange': 'NSE', 'watchlist_id': None},
+        {'universe_id': 2, 'symbol': 'GOODCO', 'exchange': 'NSE', 'watchlist_id': None},
     ]
-    db = FakeDB(watchlist)
+    db = FakeDB(universe)
 
     good_data = {
         'pe_ratio': 20.0, 'eps': 10.0, 'roe': 15.0,
@@ -93,10 +102,13 @@ def test_sync_fundamentals_skips_one_parse_failure_without_stopping_batch():
         good_data,
     ])
 
-    summary = sync_fundamentals(db, fetch_fn=fetch_fn)
+    summary = sync_fundamentals_rotation(db, fetch_fn=fetch_fn)
 
-    assert summary['watchlist_count'] == 2
-    assert summary['inserted'] == 1
+    assert summary['batch_size'] == 2
+    assert summary['scraped'] == 1
     assert summary['failed'] == 1
     assert summary['failures'][0]['symbol'] == 'BADCO'
     assert len(db.fundamentals) == 1
+    # The failed symbol's last_fundamentals_fetch must NOT be stamped, so
+    # it stays near the front of the next run's stalest-first queue.
+    assert db.last_fetch_stamped == {2}

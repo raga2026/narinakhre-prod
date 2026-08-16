@@ -73,9 +73,15 @@ FUNDAMENTALS_COLUMNS = [
 ]
 
 # How many of the scrape-eligible stock_universe rows to refresh per
-# rotation run. At 1,067 eligible companies, 300/day cycles the full set
-# roughly every 4 days.
-ROTATION_BATCH_SIZE = 300
+# rotation run. This is the ONLY Screener.in scraping this app does --
+# there used to also be a separate weekly whole-watchlist sync_fundamentals()
+# job (both an admin-clickable button and its own cron), removed in favour
+# of this single mechanism. Screener.in scraping is slow and rate-sensitive,
+# so it's deliberately never admin-triggerable -- see the "Fundamentals
+# data" section of the Stocks dashboard, which shows a last-synced time but
+# has no button. At ~1,067 eligible companies, 75/day cycles the full set
+# roughly every 15 days.
+ROTATION_BATCH_SIZE = 75
 
 
 def initialize_fundamentals_table_if_needed(client):
@@ -133,56 +139,17 @@ def _upsert_fundamentals_snapshot(db, snapshot_date, data, watchlist_id=None, un
     db.commit()
 
 
-def sync_fundamentals(db, fetch_fn=None):
-    """Fetches Screener.in fundamentals for every active stock_watchlist row
-    and upserts one snapshot per symbol per day into stock_fundamentals.
-    Meant to run weekly (see /stocks/fundamentals/sync and
-    /cron/stocks-fundamentals-sync in app.py), not on every price sync --
-    fundamentals don't move day to day. fetch_fn defaults to
-    screener_client.fetch_fundamentals; tests pass a stub instead."""
-    fetch = fetch_fn or fetch_fundamentals
-
-    watchlist_rows = db.execute(
-        'SELECT id, symbol, exchange FROM stock_watchlist WHERE is_active=1'
-    ).fetchall()
-
-    today = date.today().isoformat()
-    inserted = 0
-    failed = 0
-    failures = []
-
-    for i, row in enumerate(watchlist_rows):
-        watchlist_id = row['id']
-        symbol = row['symbol']
-
-        try:
-            data = fetch(symbol)
-            _upsert_fundamentals_snapshot(db, today, data, watchlist_id=watchlist_id)
-            inserted += 1
-        except Exception as exc:
-            failed += 1
-            failures.append({'symbol': symbol, 'error': str(exc)})
-            print(f'Fundamentals sync failed for {symbol}: {exc}')
-
-        report_progress(i + 1, len(watchlist_rows))
-
-    return {
-        'watchlist_count': len(watchlist_rows),
-        'inserted': inserted,
-        'failed': failed,
-        'failures': failures,
-    }
-
-
 def sync_fundamentals_rotation(db, fetch_fn=None, batch_size=ROTATION_BATCH_SIZE):
     """Daily rotation over the full scrape-eligible universe (stock_universe
     WHERE is_scrape_eligible=true) -- picks the batch_size stalest rows
     (oldest last_fundamentals_fetch first, NULLs -- never fetched -- first
-    of all) each run. Upserts into stock_fundamentals via the same
-    _upsert_fundamentals_snapshot() sync_fundamentals() uses (LEFT JOINed
-    against stock_watchlist so a company that's in both sets keeps one
-    unified row), then stamps stock_universe.last_fundamentals_fetch so the
-    next run picks up where this one left off.
+    of all) each run. Upserts into stock_fundamentals via
+    _upsert_fundamentals_snapshot() (LEFT JOINed against stock_watchlist so
+    a company that's in both sets keeps one unified row -- this covers
+    watchlisted companies too, not just the wider universe, so there's no
+    separate watchlist-only scrape job needed), then stamps
+    stock_universe.last_fundamentals_fetch so the next run picks up where
+    this one left off.
 
     Per-symbol failures log and continue, and deliberately do NOT update
     last_fundamentals_fetch for that row -- a failed fetch stays near the

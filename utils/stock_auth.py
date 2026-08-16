@@ -23,10 +23,9 @@ def _generate_simple_password():
 
 def has_valid_cron_secret(request_headers, secret):
     """Checks the X-Cron-Secret header against secret using constant-time
-    comparison -- the exact same check /cron/stocks-fundamentals-sync does
-    inline in app.py, extracted here only so /admin/stocks/sync (and its
-    test) can reuse it without duplicating the hmac call by hand. Returns
-    False if secret is empty/unset, same as the inline version."""
+    comparison -- shared by every Stocks cron-triggered route in app.py so
+    none of them duplicate the hmac call by hand. Returns False if secret
+    is empty/unset."""
     if not secret:
         return False
     provided = request_headers.get('X-Cron-Secret', '')

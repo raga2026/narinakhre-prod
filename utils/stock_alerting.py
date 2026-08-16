@@ -233,6 +233,20 @@ def alert_job_missed(db, source, expected_by):
         print(f'alert_job_missed itself failed for {source}: {type(e).__name__}: {e}')
 
 
+def get_last_success_at(db, source):
+    """Returns stock_job_runs.last_success_at for source (a timezone-aware
+    datetime), or None if it's never recorded a successful run. Read-only
+    counterpart to record_job_success -- used by the Stocks dashboard to
+    show "Last synced: ..." for jobs that run on a cron schedule only (e.g.
+    fundamentals_rotation), which have no admin-triggered button to poll
+    for a live result."""
+    row = db.execute(
+        'SELECT last_success_at FROM stock_job_runs WHERE source=?',
+        (source,)
+    ).fetchone()
+    return _parse_timestamp(row['last_success_at']) if row and row.get('last_success_at') else None
+
+
 def record_job_success(db, source):
     """Upserts last_success_at=NOW() for source into stock_job_runs --
     called on the success path of every cron-triggered route (in addition

@@ -16,8 +16,6 @@ def test_all_steps_run_in_the_documented_order():
 
     with patch('utils.super_sync.KiteClient', return_value=MagicMock()), \
          patch('utils.super_sync.sync_kite_instrument_map', side_effect=_tracked('kite_instrument_map_sync', {})), \
-         patch('utils.super_sync.sync_fundamentals', side_effect=_tracked('fundamentals_sync', {})), \
-         patch('utils.super_sync.sync_fundamentals_rotation', side_effect=_tracked('fundamentals_rotation', {})), \
          patch('utils.super_sync.refresh_market_cap_filter', side_effect=_tracked('market_cap_filter', {})), \
          patch('utils.super_sync.run_fundamental_shortlist', side_effect=_tracked('shortlist_refresh', {})), \
          patch('utils.super_sync.sync_daily_data', side_effect=_tracked('price_sync', {})), \
@@ -38,8 +36,6 @@ def test_a_failing_step_does_not_stop_the_rest():
 
     with patch('utils.super_sync.KiteClient', return_value=MagicMock()), \
          patch('utils.super_sync.sync_kite_instrument_map', side_effect=RuntimeError('Kite session expired')), \
-         patch('utils.super_sync.sync_fundamentals', return_value={'inserted': 3}), \
-         patch('utils.super_sync.sync_fundamentals_rotation', return_value={'scraped': 5}), \
          patch('utils.super_sync.refresh_market_cap_filter', return_value={}), \
          patch('utils.super_sync.run_fundamental_shortlist', return_value={'passed': 2}), \
          patch('utils.super_sync.sync_daily_data', side_effect=RuntimeError('No Kite session')), \
@@ -57,13 +53,21 @@ def test_a_failing_step_does_not_stop_the_rest():
     assert by_step['price_sync']['status'] == 'error'
     # Everything after the failures still ran.
     assert by_step['indicator_calc_universe']['status'] == 'ok'
-    assert by_step['fundamentals_sync']['status'] == 'ok'
-    assert by_step['fundamentals_sync']['summary'] == {'inserted': 3}
+    assert by_step['shortlist_refresh']['status'] == 'ok'
+    assert by_step['shortlist_refresh']['summary'] == {'passed': 2}
 
 
-def test_all_nine_steps_are_present():
-    assert len(SUPER_SYNC_STEPS) == 9
-    assert len(set(SUPER_SYNC_STEPS)) == 9  # no accidental duplicates
+def test_all_seven_steps_are_present():
+    assert len(SUPER_SYNC_STEPS) == 7
+    assert len(set(SUPER_SYNC_STEPS)) == 7  # no accidental duplicates
+
+
+def test_fundamentals_scraping_is_never_part_of_super_sync():
+    # The whole point of splitting these apart: Super Sync is admin-
+    # triggered, and Screener.in scraping must never be triggerable by an
+    # admin action -- see the module docstring.
+    assert 'fundamentals_sync' not in SUPER_SYNC_STEPS
+    assert 'fundamentals_rotation' not in SUPER_SYNC_STEPS
 
 
 def test_every_step_has_a_human_readable_label():
@@ -78,8 +82,6 @@ def test_progress_reports_a_step_label_before_each_step_runs():
     try:
         with patch('utils.super_sync.KiteClient', return_value=MagicMock()), \
              patch('utils.super_sync.sync_kite_instrument_map', return_value={}), \
-             patch('utils.super_sync.sync_fundamentals', return_value={}), \
-             patch('utils.super_sync.sync_fundamentals_rotation', return_value={}), \
              patch('utils.super_sync.refresh_market_cap_filter', return_value={}), \
              patch('utils.super_sync.run_fundamental_shortlist', return_value={}), \
              patch('utils.super_sync.sync_daily_data', return_value={}), \
@@ -91,5 +93,5 @@ def test_progress_reports_a_step_label_before_each_step_runs():
         job_progress.clear()
 
     assert len(reports) == len(SUPER_SYNC_STEPS)
-    assert reports[0] == (0, 9, 'Step 1 of 9: Syncing Kite instrument map')
-    assert reports[-1] == (8, 9, 'Step 9 of 9: Calculating indicators (universe)')
+    assert reports[0] == (0, 7, 'Step 1 of 7: Syncing Kite instrument map')
+    assert reports[-1] == (6, 7, 'Step 7 of 7: Calculating indicators (universe)')

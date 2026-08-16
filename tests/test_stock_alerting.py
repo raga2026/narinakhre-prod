@@ -8,6 +8,7 @@ from utils.stock_alerting import (
     JOB_EXPECTATIONS,
     alert_job_error,
     check_missed_jobs,
+    get_last_success_at,
     send_zeptomail_stocks_email,
 )
 
@@ -67,6 +68,17 @@ class FakeAlertingDB:
 
     def commit(self):
         pass
+
+
+def test_get_last_success_at_returns_none_when_never_recorded():
+    db = FakeAlertingDB()
+    assert get_last_success_at(db, 'fundamentals_rotation') is None
+
+
+def test_get_last_success_at_returns_parsed_datetime():
+    db = FakeAlertingDB(job_runs={'fundamentals_rotation': '2026-08-01T05:30:00+00:00'})
+    result = get_last_success_at(db, 'fundamentals_rotation')
+    assert result == RealDatetime(2026, 8, 1, 5, 30, tzinfo=timezone.utc)
 
 
 def test_alert_job_error_sends_email_on_first_failure():

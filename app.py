@@ -68,7 +68,6 @@ from utils.kite_postback import (
 )
 from utils.fundamentals_ingestion import (
     initialize_fundamentals_table_if_needed,
-    sync_fundamentals,
     sync_fundamentals_rotation,
 )
 from utils.stock_universe import (
@@ -97,6 +96,7 @@ from utils.stock_alerting import (
     alert_job_error,
     record_job_success,
     check_missed_jobs,
+    get_last_success_at,
 )
 from utils.suggestion_engine import (
     initialize_stock_suggestions_table_if_needed,
@@ -203,9 +203,11 @@ SUPPORT_FROM_EMAIL = os.environ.get('SMTP_support_EMAIL_FROM', 'support-noreply@
 # Unset by default so the endpoint stays disabled (returns 403) until an
 # admin deliberately sets the same value here and on the cron service.
 WEEKLY_REPORT_CRON_SECRET = os.environ.get('WEEKLY_REPORT_CRON_SECRET', '')
-# Same pattern, for the weekly Stocks fundamentals sync -- see
-# /cron/stocks-fundamentals-sync and .github/workflows/stocks-fundamentals-sync.yml
-# (a scheduled GitHub Actions workflow, not a Render Cron Job).
+# Same pattern, shared by every Stocks cron-triggered route (see
+# has_valid_cron_secret in utils/stock_auth.py) -- price sync, indicator
+# calc, market cap filter, the fundamentals rotation scrape, etc. Each is
+# triggered by its own scheduled GitHub Actions workflow
+# (.github/workflows/stocks-*.yml), not a Render Cron Job.
 STOCKS_FUNDAMENTALS_CRON_SECRET = os.environ.get('STOCKS_FUNDAMENTALS_CRON_SECRET', '')
 RAZORPAY_KEY_ID = os.environ.get('RAZORPAY_KEY_ID')
 RAZORPAY_KEY_SECRET = os.environ.get('RAZORPAY_KEY_SECRET')
@@ -6721,7 +6723,6 @@ _LEGACY_STOCKS_ROUTES = [
     ('/admin/stocks/kite/login', 'stocks_kite_login', ['GET'], 301),
     ('/admin/stocks/kite/callback', 'stocks_kite_callback', ['GET'], 301),
     ('/admin/stocks/kite/postback', 'stocks_kite_postback', ['POST'], 308),
-    ('/admin/stocks/fundamentals/sync', 'admin_stocks_fundamentals_sync', ['POST'], 308),
     ('/admin/stocks/watchlist', 'stocks_watchlist', ['GET'], 301),
     ('/admin/stocks/login', 'stocks_admin_login', ['GET', 'POST'], 308),
     ('/admin/stocks/logout', 'stocks_admin_logout', ['GET'], 301),
@@ -6779,9 +6780,9 @@ def admin_stocks_sync():
     session (manual trigger from the browser, e.g. the dashboard's "Sync
     now" button) or a valid X-Cron-Secret header (a scheduled GitHub Actions
     workflow) -- either one is sufficient. Same header name, env var, and
-    hmac.compare_digest() check /cron/stocks-fundamentals-sync already uses,
-    just added here as a second accepted path rather than replacing the
-    session check @stocks_login_required did.
+    check has_valid_cron_secret() uses everywhere else in this file, just
+    added here as a second accepted path rather than replacing the session
+    check @stocks_login_required did.
 
     Session-triggered runs happen on a background thread, not inline --
     see _dispatch_stocks_job / utils/background_jobs.py."""
@@ -6842,15 +6843,18 @@ def stocks_sync_universe():
 @app.route('/stocks/super-sync', methods=['POST'])
 @stocks_role_required('super_admin')
 def stocks_super_sync():
-    """Runs every sync/calculation step in one click, in dependency order
-    -- see utils/super_sync.py for exactly what and in what order. The
-    individual buttons on the dashboard (Sync now, Fetch fundamentals,
-    Sync Kite instrument map, Refresh shortlist, Sync prices (universe),
-    Calculate indicators (universe), etc.) still exist for running just
-    one step on its own; this is a convenience wrapper, not a
-    replacement. super_admin only, and always backgrounded -- a full run
-    covers everything including the ~1,067-symbol universe sync, so it
-    can take upwards of ten minutes."""
+    """Runs every FAST sync/calculation step in one click, in dependency
+    order -- see utils/super_sync.py for exactly what and in what order.
+    Deliberately excludes Screener.in fundamentals scraping, which runs on
+    its own automatic cron schedule and is never admin-triggerable at all
+    -- see /stocks/fundamentals/rotation-sync and the dashboard's
+    "Fundamentals data" section. The individual buttons under the
+    dashboard's "Advanced" section (Sync now, Sync Kite instrument map,
+    Refresh shortlist, Sync prices (universe), Calculate indicators
+    (universe), etc.) still exist for running just one step on its own;
+    this is a convenience wrapper, not a replacement. super_admin only, and
+    always backgrounded -- a full run covers everything including the
+    ~1,067-symbol universe sync, so it can still take several minutes."""
     db = get_db()
     access_token = get_kite_access_token(db)
     if not access_token:
@@ -7238,30 +7242,24 @@ def stocks_kite_postback():
     return jsonify({'status': 'ok'})
 
 
-@app.route('/stocks/fundamentals/sync', methods=['POST'])
-@stocks_login_required
-def admin_stocks_fundamentals_sync():
-    """Manual trigger for the weekly fundamentals fetch (Screener.in) --
-    see utils/fundamentals_ingestion.py. Unlike the price sync this doesn't
-    need a Kite session, just network access to Screener. Browser-only (no
-    cron secret path here, @stocks_login_required already guarantees a
-    session), so this always runs on a background thread -- see
-    _dispatch_stocks_job / utils/background_jobs.py."""
-    db = get_db()
-    return _dispatch_stocks_job(db, is_cron=False, job_name='fundamentals_sync', job_fn=sync_fundamentals)
-
-
 @app.route('/stocks/fundamentals/rotation-sync', methods=['POST'])
 def stocks_fundamentals_rotation_sync():
-    """Daily rotation over the full scrape-eligible stock_universe set (see
-    utils/fundamentals_ingestion.sync_fundamentals_rotation) -- refreshes
-    the 300 stalest companies each run, cycling the ~1,067-company eligible
-    set roughly every 4 days. Same dual auth as /stocks/sync: a valid
-    X-Cron-Secret header (the daily GitHub Actions workflow) or an active
-    Stocks login session, either sufficient."""
-    if not has_valid_cron_secret(request.headers, STOCKS_FUNDAMENTALS_CRON_SECRET) \
-            and not session.get('stocks_admin_id'):
-        return redirect(url_for('stocks_admin_login'))
+    """The only Screener.in scraping this app does -- daily rotation over
+    the full scrape-eligible stock_universe set (see
+    utils/fundamentals_ingestion.sync_fundamentals_rotation), refreshing
+    the ROTATION_BATCH_SIZE stalest companies each run so the full
+    ~1,067-company eligible set cycles roughly every 15 days.
+
+    Deliberately cron-secret only, unlike most other /stocks/ routes --
+    there is intentionally no dashboard button and no admin-session path
+    here. Screener.in scraping is slow (one HTTP request per company) and
+    rate-sensitive; an admin being able to trigger it on demand risks
+    someone re-running it far more often than the 15-day cadence this was
+    sized for, which is exactly what this route is meant to prevent. See
+    the Stocks dashboard's "Fundamentals data" section, which shows a
+    last-synced time but no button."""
+    if not has_valid_cron_secret(request.headers, STOCKS_FUNDAMENTALS_CRON_SECRET):
+        return jsonify({'status': 'error', 'message': 'Unauthorized'}), 403
 
     db = get_db()
     try:
@@ -7271,25 +7269,6 @@ def stocks_fundamentals_rotation_sync():
         alert_job_error(db, 'fundamentals_rotation', str(e))
         return jsonify({'status': 'error', 'message': str(e)}), 500
     record_job_success(db, 'fundamentals_rotation')
-    return jsonify({'status': 'ok', **summary})
-
-
-@app.route('/cron/stocks-fundamentals-sync', methods=['POST'])
-def cron_stocks_fundamentals_sync():
-    """Triggered by a scheduled GitHub Actions workflow (see
-    .github/workflows/stocks-fundamentals-sync.yml) once a week. Not under
-    /admin/ and not @stocks_login_required -- the workflow has no browser
-    session, so this checks a shared secret header instead, same pattern as
-    /cron/weekly-report."""
-    provided = request.headers.get('X-Cron-Secret', '')
-    if not STOCKS_FUNDAMENTALS_CRON_SECRET or not hmac.compare_digest(provided, STOCKS_FUNDAMENTALS_CRON_SECRET):
-        return jsonify({'status': 'error', 'message': 'Unauthorized'}), 403
-    db = get_db()
-    try:
-        summary = sync_fundamentals(db)
-    except Exception as e:
-        app.logger.error(f'Fundamentals cron sync failed: {e}')
-        return jsonify({'status': 'error', 'message': str(e)}), 500
     return jsonify({'status': 'ok', **summary})
 
 
@@ -7623,11 +7602,23 @@ def stocks_change_password():
 def stocks_admin_dashboard():
     db = get_db()
     kite_status = get_kite_session_status(db)
+
+    # Read-only -- fundamentals_rotation has no admin-triggerable button
+    # (see /stocks/fundamentals/rotation-sync), so this is purely
+    # informational: when the automatic, cron-only 15-day-cadence scrape
+    # last actually completed.
+    fundamentals_last_synced = get_last_success_at(db, 'fundamentals_rotation')
+    fundamentals_last_synced_ist = (
+        fundamentals_last_synced.astimezone(IST).strftime('%d %b %Y, %I:%M %p IST')
+        if fundamentals_last_synced else None
+    )
+
     return render_template(
         'admin/stocks_dashboard.html',
         username=session.get('stocks_admin_username'),
         role=session.get('stocks_admin_role'),
         kite_status=kite_status,
+        fundamentals_last_synced_ist=fundamentals_last_synced_ist,
     )
 
 
