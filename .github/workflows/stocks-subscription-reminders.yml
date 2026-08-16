@@ -1,0 +1,28 @@
+name: Stocks subscription expiry reminders
+
+on:
+  schedule:
+    # 04:00 UTC daily = 09:30 IST. Runs every day including weekends/holidays
+    # -- billing is a calendar-day thing, not a trading-day thing (unlike
+    # stocks-suggestions-email.yml). Triggers POST
+    # /stocks/subscriptions/send-expiry-reminders, which emails anyone whose
+    # paid access lapses within the next few days (see
+    # utils/stocks_subscription.find_expiring_subscribers).
+    - cron: '0 4 * * *'
+  workflow_dispatch: {}  # lets you trigger it manually from the Actions tab
+
+jobs:
+  remind:
+    runs-on: ubuntu-latest
+    steps:
+      - name: POST to /stocks/subscriptions/send-expiry-reminders
+        run: |
+          status=$(curl -s -o /tmp/response.txt -w "%{http_code}" --max-time 120 -X POST \
+            -H "X-Cron-Secret: ${{ secrets.STOCKS_FUNDAMENTALS_CRON_SECRET }}" \
+            https://narinakhre.com/stocks/subscriptions/send-expiry-reminders)
+          echo "HTTP status: $status"
+          cat /tmp/response.txt
+          if [ "$status" != "200" ]; then
+            echo "Request failed"
+            exit 1
+          fi

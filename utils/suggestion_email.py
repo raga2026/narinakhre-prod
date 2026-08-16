@@ -28,10 +28,11 @@ def send_viewer_welcome_email(email, name, password):
     subject = 'Nari Nakhre Stocks — your login'
     text_body = (
         f'Hi {greeting},\n\n'
-        f"You've been added as a viewer on Nari Nakhre Stocks. Each day (when the "
-        f"screening criteria are met), you'll get up to a few stock suggestions by "
-        f"email -- buy price, target sell price, stop-loss, and how long to hold. "
-        f"You can also log in anytime to see today's suggestions and your full "
+        f"You've been added as a viewer on Nari Nakhre Stocks. On days a stock "
+        f"clears the screening bar, you'll get a single Pick of the Day by email -- "
+        f"NNS Score, buy price, target sell price, stop-loss, and timing. The same "
+        f"stock isn't repeated for 30 days unless the recommendation genuinely "
+        f"changes. You can also log in anytime to see today's pick and your full "
         f"history.\n\n"
         f'Login: {STOCKS_LOGIN_URL}\n'
         f'Username: {email}\n'
@@ -42,10 +43,11 @@ def send_viewer_welcome_email(email, name, password):
     )
     html_body = (
         f'<p>Hi {greeting},</p>'
-        f"<p>You've been added as a viewer on Nari Nakhre Stocks. Each day (when the "
-        f"screening criteria are met), you'll get up to a few stock suggestions by "
-        f"email -- buy price, target sell price, stop-loss, and how long to hold. "
-        f"You can also log in anytime to see today's suggestions and your full "
+        f"<p>You've been added as a viewer on Nari Nakhre Stocks. On days a stock "
+        f"clears the screening bar, you'll get a single Pick of the Day by email -- "
+        f"NNS Score, buy price, target sell price, stop-loss, and timing. The same "
+        f"stock isn't repeated for 30 days unless the recommendation genuinely "
+        f"changes. You can also log in anytime to see today's pick and your full "
         f"history.</p>"
         f'<p><a href="{STOCKS_LOGIN_URL}">{STOCKS_LOGIN_URL}</a><br>'
         f'Username: {email}<br>'
@@ -58,6 +60,86 @@ def send_viewer_welcome_email(email, name, password):
         to_email=email, to_name=greeting, subject=subject,
         textbody=text_body, htmlbody=html_body, sender_name='Nari Nakhre Stocks',
     )
+
+def send_subscription_welcome_email(email, name, current_period_end_label):
+    """Sent right after a self-serve Nari Nakhre Stocks signup's first
+    Razorpay payment is verified (see app.py's /stocks/subscribe/verify) --
+    unlike send_viewer_welcome_email above, there's no password to disclose
+    here: a self-serve account either set its own password at signup, or
+    has none at all (a Google-only signup, see utils/stock_auth.py's
+    create_pending_google_subscriber). current_period_end_label is a
+    pre-formatted date string (see app.py), not a raw datetime -- keeps
+    this module free of date-formatting/timezone concerns."""
+    greeting = name or email
+    subject = 'Welcome to Nari Nakhre Stocks -- payment confirmed'
+    text_body = (
+        f'Hi {greeting},\n\n'
+        f"Your Rs 299/month subscription is active. On days a stock clears our "
+        f"screening bar, you'll get a single Pick of the Day by email -- NNS "
+        f"Score, buy price, target sell price, stop-loss, and the reasoning "
+        f"behind it. The same stock isn't repeated for 30 days unless the "
+        f"recommendation genuinely changes.\n\n"
+        f'Your subscription renews automatically on {current_period_end_label} -- '
+        f"we'll email you a reminder a few days before, and you can cancel "
+        f"anytime from your account.\n\n"
+        f'Login: {STOCKS_LOGIN_URL}\n\n'
+        f'{DISCLAIMER}\n'
+    )
+    html_body = (
+        f'<p>Hi {greeting},</p>'
+        f"<p>Your Rs 299/month subscription is active. On days a stock clears our "
+        f"screening bar, you'll get a single Pick of the Day by email -- NNS "
+        f"Score, buy price, target sell price, stop-loss, and the reasoning "
+        f"behind it. The same stock isn't repeated for 30 days unless the "
+        f"recommendation genuinely changes.</p>"
+        f'<p>Your subscription renews automatically on <strong>{current_period_end_label}</strong> -- '
+        f"we'll email you a reminder a few days before, and you can cancel "
+        f"anytime from your account.</p>"
+        f'<p><a href="{STOCKS_LOGIN_URL}">{STOCKS_LOGIN_URL}</a></p>'
+        f'<p style="color:#64748b;font-size:0.85em;margin-top:16px;">{DISCLAIMER}</p>'
+    )
+    return send_zeptomail_stocks_email(
+        to_email=email, to_name=greeting, subject=subject,
+        textbody=text_body, htmlbody=html_body, sender_name='Nari Nakhre Stocks',
+    )
+
+
+def send_subscription_expiry_reminder_email(email, name, current_period_end_label, is_renewing):
+    """Sent a few days before subscription_current_period_end (see app.py's
+    /stocks/subscriptions/send-expiry-reminders and
+    utils/stocks_subscription.find_expiring_subscribers). is_renewing tells
+    an upcoming auto-charge (subscription_status='active') apart from
+    access that's actually ending because it was already cancelled
+    (subscription_status='cancelled') -- same trigger, opposite news, so
+    the copy has to say something different in each case rather than one
+    generic 'your subscription is expiring' line that would be misleading
+    for whichever case it doesn't match."""
+    greeting = name or email
+    if is_renewing:
+        subject = f'Nari Nakhre Stocks -- renews on {current_period_end_label}'
+        headline = (
+            f"Your Nari Nakhre Stocks subscription will auto-renew on "
+            f"{current_period_end_label} for Rs 299. No action needed if you'd "
+            f"like to continue -- this is just a heads-up before the charge."
+        )
+    else:
+        subject = f'Nari Nakhre Stocks -- access ends {current_period_end_label}'
+        headline = (
+            f"Your Nari Nakhre Stocks access ends on {current_period_end_label} "
+            f"(your subscription was cancelled and won't auto-renew). "
+            f"Resubscribe anytime before then to keep it uninterrupted."
+        )
+    text_body = f'Hi {greeting},\n\n{headline}\n\nLogin: {STOCKS_LOGIN_URL}\n\n{DISCLAIMER}\n'
+    html_body = (
+        f'<p>Hi {greeting},</p><p>{headline}</p>'
+        f'<p><a href="{STOCKS_LOGIN_URL}">{STOCKS_LOGIN_URL}</a></p>'
+        f'<p style="color:#64748b;font-size:0.85em;margin-top:16px;">{DISCLAIMER}</p>'
+    )
+    return send_zeptomail_stocks_email(
+        to_email=email, to_name=greeting, subject=subject,
+        textbody=text_body, htmlbody=html_body, sender_name='Nari Nakhre Stocks',
+    )
+
 
 # DEPRECATED as of the viewer-role migration -- recipients now live as
 # role='viewer' rows in stocks_admin_users (utils/stock_auth.py), which
@@ -93,48 +175,73 @@ def list_recipients(db):
     ).fetchall()
 
 
-def _tier_label(s):
-    """'Golden' or 'Silver (PE x, OPM y%)' beside a suggestion, or None for
-    suggestions that predate the fundamental_tier column. Silver always
-    shows its PE/OPM values inline -- those are exactly the two metrics that
-    let it in on the softer second-level filter (see
-    fundamental_screen.classify_fundamental_tier), so the reader can see
-    why, not just that."""
-    tier = s.get('fundamental_tier')
-    if tier == 'golden':
-        return 'Golden'
-    if tier == 'silver':
-        pe = s.get('pe_at_suggestion')
-        opm = s.get('opm_at_suggestion')
-        pe_str = f'{pe:.2f}' if pe is not None else '—'
-        opm_str = f'{opm:.0f}%' if opm is not None else '—'
-        return f'Silver (PE {pe_str}, OPM {opm_str})'
-    return None
+def _nns_badge(s):
+    """'Golden 8.3' / 'Silver 6.4' / 'Bronze 4.2' -- the NNS Score (see
+    utils/nns_score.py) and its tier, the PRIMARY ranking shown for each
+    suggestion. '—' for suggestions that predate the NNS Score column."""
+    tier = s.get('nns_tier')
+    score = s.get('nns_score')
+    if not tier or score is None:
+        return '—'
+    return f'{tier.capitalize()} {score}'
+
+
+def _fundamentals_note(s):
+    """Supplementary '(PE x, OPM y%)' context for a silver-tier watchlist
+    stock -- those are exactly the two metrics that let it onto the
+    watchlist via the softer second-level filter (see
+    fundamental_screen.classify_fundamental_tier), separate from (and a
+    different scale than) the NNS Score/tier above. None for golden-tier
+    or suggestions that predate the fundamental_tier column."""
+    if s.get('fundamental_tier') != 'silver':
+        return None
+    pe = s.get('pe_at_suggestion')
+    opm = s.get('opm_at_suggestion')
+    pe_str = f'{pe:.2f}' if pe is not None else '—'
+    opm_str = f'{opm:.0f}%' if opm is not None else '—'
+    return f'watchlisted on the silver criteria: PE {pe_str}, OPM {opm_str}'
 
 
 def _build_email_content(suggestions, today_label):
     """Returns (subject, textbody, htmlbody). Always produces a real email,
     even with zero suggestions -- a silent "nothing sent" looks identical
-    to the job having crashed, from a recipient's side."""
+    to the job having crashed, from a recipient's side.
+
+    "Pick of the Day" -- suggestion_engine.generate_daily_suggestions()
+    sends at most TOP_N_SUGGESTIONS (1) per day, and never repeats the same
+    stock within SUGGESTION_REPEAT_WINDOW_DAYS (30) unless the
+    recommendation has genuinely changed since (see _is_genuine_change) --
+    so most days this is exactly one pick, occasionally zero (every
+    eligible candidate is on cooldown with nothing new to say, or none
+    clear the NNS Score floor at all). Still iterates over `suggestions`
+    as a list rather than hard-assuming exactly one, so this doesn't break
+    if that policy ever changes."""
     if not suggestions:
-        subject = f'Nari Nakhre Stocks — No suggestions today ({today_label})'
+        subject = f'Nari Nakhre Stocks — No Pick of the Day ({today_label})'
         text_body = (
-            f'No stocks met the suggestion criteria today ({today_label}).\n\n'
+            f'No stock met the Pick of the Day criteria today ({today_label}).\n\n'
             f'{DISCLAIMER}\n'
         )
         html_body = (
-            f'<p>No stocks met the suggestion criteria today ({today_label}).</p>'
+            f'<p>No stock met the Pick of the Day criteria today ({today_label}).</p>'
             f'<p style="color:#64748b;font-size:0.85em;">{DISCLAIMER}</p>'
         )
         return subject, text_body, html_body
 
-    subject = f"Nari Nakhre Stocks — {len(suggestions)} suggestion{'s' if len(suggestions) != 1 else ''} for {today_label}"
+    if len(suggestions) == 1:
+        subject = f"Nari Nakhre Stocks — Pick of the Day: {suggestions[0]['symbol']} ({today_label})"
+    else:
+        subject = f"Nari Nakhre Stocks — {len(suggestions)} Picks of the Day for {today_label}"
 
-    text_lines = [f'Today\'s suggestions ({today_label}):', '']
+    # Already NNS Score-ranked highest first -- see
+    # suggestion_engine.get_suggestions' ORDER BY s.score DESC.
+    heading = "Today's Pick of the Day" if len(suggestions) == 1 else "Today's Picks of the Day"
+    text_lines = [f'{heading} ({today_label}):', '']
     html_rows = []
     for s in suggestions:
-        tier_label = _tier_label(s)
-        tier_suffix = f' — {tier_label}' if tier_label else ''
+        badge = _nns_badge(s)
+        fundamentals_note = _fundamentals_note(s)
+        fundamentals_suffix = f' ({fundamentals_note})' if fundamentals_note else ''
         # A pattern-based suggestion (see suggestion_engine.generate_daily_suggestions
         # / utils.price_pattern.compute_suggestion_pricing) shows the cited
         # pattern_note INSTEAD OF a "hold N days" figure -- chart-pattern
@@ -143,25 +250,25 @@ def _build_email_content(suggestions, today_label):
         # ever a fixed internal default in that case, not shown here.
         timing_text = s['pattern_note'] if s.get('pattern_name') else f"Hold {s['holding_period_days']} days."
         text_lines.append(
-            f"{s['symbol']} ({s['exchange']}){tier_suffix}: Buy {s['buy_price']}, "
+            f"{s['symbol']} ({s['exchange']}) — NNS Score {badge}{fundamentals_suffix}: Buy {s['buy_price']}, "
             f"Target {s['target_sell_price']}, Stop-loss {s['stop_loss_price']}. "
             f"{timing_text} {s['rationale']}"
         )
         text_lines.append('')
         html_rows.append(
             f"<tr><td>{s['symbol']} ({s['exchange']})</td>"
-            f"<td>{tier_label or '—'}</td>"
+            f"<td>{badge}</td>"
             f"<td>{s['buy_price']}</td><td>{s['target_sell_price']}</td>"
             f"<td>{s['stop_loss_price']}</td><td>{timing_text}</td>"
-            f"<td>{s['rationale']}</td></tr>"
+            f"<td>{s['rationale']}{' — ' + fundamentals_note if fundamentals_note else ''}</td></tr>"
         )
     text_lines.append(DISCLAIMER)
     text_body = '\n'.join(text_lines)
 
     html_body = (
-        '<p>Today\'s suggestions:</p>'
+        f'<p>{heading}:</p>'
         '<table border="1" cellpadding="6" cellspacing="0">'
-        '<tr><th>Symbol</th><th>Tier</th><th>Buy</th><th>Target</th><th>Stop-loss</th><th>Timing</th><th>Rationale</th></tr>'
+        '<tr><th>Symbol</th><th>NNS Score</th><th>Buy</th><th>Target</th><th>Stop-loss</th><th>Timing</th><th>Rationale</th></tr>'
         + ''.join(html_rows) +
         '</table>'
         f'<p style="color:#64748b;font-size:0.85em;margin-top:16px;">{DISCLAIMER}</p>'

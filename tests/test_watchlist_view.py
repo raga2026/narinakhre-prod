@@ -1,4 +1,4 @@
-from utils.watchlist_view import enrich_and_sort_watchlist_rows
+from utils.watchlist_view import enrich_and_sort_watchlist_rows, redact_recommendation_signals
 
 GOOD_INDICATORS = {'cross_status': 'golden_cross', 'volume_trend': 'confirming', 'rsi_14': 50}
 
@@ -80,3 +80,37 @@ def test_does_not_mutate_input_rows():
     original_keys = set(row.keys())
     enrich_and_sort_watchlist_rows([row])
     assert set(row.keys()) == original_keys  # no is_recommended/pe_note leaked into the original dict
+
+
+# --- redact_recommendation_signals ------------------------------------------
+
+def test_can_view_signals_true_returns_rows_unchanged():
+    rows = [_row('AAA'), {**_row('BBB'), 'is_recommended': True}]
+    result = redact_recommendation_signals(rows, can_view_signals=True)
+    assert result == rows
+    assert result[0] is rows[0]  # same objects, not even copied
+
+
+def test_can_view_signals_false_strips_cross_status_and_is_recommended():
+    rows = [{**_row('AAA'), 'is_recommended': True, 'pe_ratio': 20}]
+    result = redact_recommendation_signals(rows, can_view_signals=False)
+    assert 'cross_status' not in result[0]
+    assert 'is_recommended' not in result[0]
+    # Everything else stays -- this is redaction, not a full data wipe.
+    assert result[0]['pe_ratio'] == 20
+    assert result[0]['symbol'] == 'AAA'
+
+
+def test_redaction_does_not_mutate_input_rows():
+    row = _row('ORIG')
+    original_keys = set(row.keys())
+    redact_recommendation_signals([row], can_view_signals=False)
+    assert set(row.keys()) == original_keys
+
+
+def test_redaction_leaves_volume_trend_visible():
+    # volume_trend is raw data, not itself "the golden cross" or "the
+    # recommendation" -- only cross_status/is_recommended are redacted.
+    rows = [_row('AAA')]
+    result = redact_recommendation_signals(rows, can_view_signals=False)
+    assert 'volume_trend' in result[0]

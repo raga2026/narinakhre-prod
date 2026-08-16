@@ -9,7 +9,7 @@ import smtplib
 import requests
 import razorpay
 import pyotp
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from functools import wraps
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
@@ -36,11 +36,31 @@ from utils.stock_auth import (
     list_viewers,
     create_viewer_account,
     toggle_viewer_active,
+    toggle_viewer_pro,
     delete_viewer_account,
     change_own_password,
     migrate_email_recipients_to_viewers,
     has_valid_cron_secret,
     legacy_stocks_redirect,
+    find_stocks_account_by_google_sub,
+    find_stocks_account_by_username,
+    link_google_sub,
+    create_pending_google_subscriber,
+)
+from utils.stocks_subscription import (
+    SUBSCRIPTION_TOTAL_COUNT_MONTHS,
+    create_pending_subscriber,
+    attach_razorpay_subscription,
+    activate_subscription,
+    record_recurring_charge,
+    mark_subscription_cancelled,
+    mark_subscription_halted,
+    find_expiring_subscribers,
+    mark_reminder_sent,
+    has_stocks_access,
+    days_until,
+    verify_subscription_payment_signature,
+    verify_webhook_signature,
 )
 from utils.kite_client import KiteClient
 from utils.kite_instrument_map import (
@@ -76,7 +96,7 @@ from utils.stock_universe import (
 )
 from utils.stock_shortlist import run_fundamental_shortlist, get_golden_cross_not_qualified
 from utils.fundamental_screen import get_metric_note
-from utils.watchlist_view import enrich_and_sort_watchlist_rows
+from utils.watchlist_view import enrich_and_sort_watchlist_rows, redact_recommendation_signals
 from utils.price_pattern import (
     compute_day_change,
     compute_52_week_range,
@@ -109,7 +129,10 @@ from utils.suggestion_email import (
     initialize_stocks_email_recipients_table_if_needed,
     send_daily_suggestions_email,
     send_viewer_welcome_email,
+    send_subscription_welcome_email,
+    send_subscription_expiry_reminder_email,
 )
+from utils.trading_calendar import is_trading_day
 import auth_providers
 import io
 from PIL import Image as PILImage
@@ -215,6 +238,22 @@ ADMIN_USERNAME = os.environ.get('ADMIN_USERNAME', '')
 ADMIN_PASSWORD = os.environ.get('ADMIN_PASSWORD', '')
 ADMIN_TOTP_SECRET = os.environ.get('ADMIN_TOTP_SECRET', '')
 razorpay_client = razorpay.Client(auth=(os.environ.get("RAZORPAY_KEY_ID"), os.environ.get("RAZORPAY_KEY_SECRET")))
+# Nari Nakhre Stocks self-serve subscription (see utils/stocks_subscription.py,
+# /stocks/signup, /stocks/subscribe/verify, /stocks/razorpay/webhook) --
+# reuses the SAME Razorpay account/keys as the storefront's one-time-order
+# checkout above, just against the Subscriptions API instead of Orders.
+# RAZORPAY_STOCKS_PLAN_ID is a one-time setup value (the Rs 299/month Plan
+# object's id, created once via razorpay_client.plan.create -- see the
+# setup script, not created automatically on every app start since Plan
+# creation has no natural idempotency check and would otherwise spam a new
+# duplicate Plan into the account on every deploy). RAZORPAY_WEBHOOK_SECRET
+# is a DIFFERENT secret than RAZORPAY_KEY_SECRET above -- it's whatever you
+# set when adding the webhook URL in the Razorpay dashboard (Settings ->
+# Webhooks), and must match exactly or every webhook signature check fails.
+RAZORPAY_STOCKS_PLAN_ID = os.environ.get('RAZORPAY_STOCKS_PLAN_ID', '')
+RAZORPAY_WEBHOOK_SECRET = os.environ.get('RAZORPAY_WEBHOOK_SECRET', '')
+STOCKS_SUBSCRIPTION_PRICE_PAISE = 29900  # Rs 299.00
+STOCKS_SUBSCRIPTION_PRICE_DISPLAY = 'Rs 299'
 
 # Auth providers are pluggable -- see auth_providers/base.py. Adding another
 # login option later (e.g. Facebook) means adding auth_providers/facebook.py
@@ -6990,6 +7029,15 @@ def stocks_suggestions_send_daily_email():
     db = get_db()
 
     def _job(job_db):
+        if not is_trading_day():
+            # Market's closed today (weekend/NSE holiday) -- nothing new to
+            # recommend, so skip generation and the email entirely. Still
+            # record success: stocks-check-missed-jobs.yml runs every day
+            # with no weekday/holiday exception of its own, and "correctly
+            # skipped because the market is shut" is the expected outcome
+            # today, not a missed job.
+            record_job_success(job_db, 'suggestion_email')
+            return {'status': 'skipped', 'reason': 'not a trading day'}
         try:
             generate_daily_suggestions(job_db)
             summary = send_daily_suggestions_email(job_db)
@@ -7476,7 +7524,8 @@ def stocks_company_detail(watchlist_id):
 
     suggestion_history = db.execute(
         '''SELECT suggestion_date, buy_price, target_sell_price, stop_loss_price,
-                  holding_period_days, pattern_name, pattern_note, score, fundamental_tier, status, rationale
+                  holding_period_days, pattern_name, pattern_note, score AS nns_score, nns_tier,
+                  pe_at_suggestion, opm_at_suggestion, fundamental_tier, status, rationale
            FROM stock_suggestions WHERE watchlist_id=?
            ORDER BY suggestion_date DESC LIMIT 20''',
         (watchlist_id,)
@@ -7487,6 +7536,204 @@ def stocks_company_detail(watchlist_id):
         company=company, recent_prices=recent_prices, suggestion_history=suggestion_history,
         sparkline_svg=sparkline_svg, sparkline_summary=sparkline_summary, backtest=backtest,
         rounding_pattern=rounding_pattern,
+    )
+
+
+def _can_view_watchlist_signals():
+    """True for staff (super_admin/child_admin) and any viewer whose
+    can_view_watchlist flag was granted at account creation -- same
+    permission stocks_watchlist_access_required (utils/stock_auth.py)
+    gates entry to /stocks/watchlist with, reused here to gate DATA
+    (golden-cross status, the recommended flag) rather than PAGE ACCESS:
+    /stocks/universe and /stocks/universe/<id> are open to every logged-in
+    Stocks user, but only show the buy-signal layer to this group -- see
+    utils.watchlist_view.redact_recommendation_signals."""
+    role = session.get('stocks_admin_role')
+    return role in ('super_admin', 'child_admin') or (role == 'viewer' and session.get('stocks_can_view_watchlist'))
+
+
+UNIVERSE_LIST_PAGE_SIZE = 50
+
+
+@app.route('/stocks/universe', methods=['GET'])
+@stocks_login_required
+def stocks_universe_list():
+    """Every scrape-eligible company (~1,067), not just the ~80-company
+    watchlist -- alphabetical by company name, with an optional ?q= search
+    (matches company name or symbol, case-insensitive) and simple ?page=
+    pagination (UNIVERSE_LIST_PAGE_SIZE per page). Open to every logged-in
+    Stocks user regardless of role or the can_view_watchlist flag -- unlike
+    /stocks/watchlist, which viewers need that flag for. Golden-cross
+    status is still gated, though: see _can_view_watchlist_signals /
+    redact_recommendation_signals -- everyone gets the underlying numbers
+    (price, PE, OPM, RSI), only staff and flagged viewers get the
+    buy-signal layer on top."""
+    db = get_db()
+    query = (request.args.get('q') or '').strip()
+    page = max(1, request.args.get('page', 1, type=int))
+    offset = (page - 1) * UNIVERSE_LIST_PAGE_SIZE
+    can_view_signals = _can_view_watchlist_signals()
+
+    where_sql = 'WHERE u.is_scrape_eligible = true'
+    params = []
+    if query:
+        where_sql += ' AND (u.company_name ILIKE ? OR u.symbol ILIKE ?)'
+        like_query = f'%{query}%'
+        params += [like_query, like_query]
+
+    total = db.execute(
+        f'SELECT COUNT(*) AS c FROM stock_universe u {where_sql}', tuple(params)
+    ).fetchone()['c']
+
+    rows = db.execute(
+        f'''SELECT u.id AS universe_id, u.symbol, u.exchange, u.company_name, u.industry,
+                   f.pe_ratio, f.opm_pct,
+                   i.rsi_14, i.cross_status,
+                   d.close AS latest_price
+            FROM stock_universe u
+            LEFT JOIN stock_fundamentals f ON f.universe_id = u.id
+                AND f.snapshot_date = (SELECT MAX(f2.snapshot_date) FROM stock_fundamentals f2 WHERE f2.universe_id = u.id)
+            LEFT JOIN stock_indicators i ON i.universe_id = u.id
+                AND i.calc_date = (SELECT MAX(i2.calc_date) FROM stock_indicators i2 WHERE i2.universe_id = u.id)
+            LEFT JOIN stock_daily_data d ON d.universe_id = u.id
+                AND d.trade_date = (SELECT MAX(d2.trade_date) FROM stock_daily_data d2 WHERE d2.universe_id = u.id)
+            {where_sql}
+            ORDER BY u.company_name ASC
+            LIMIT ? OFFSET ?''',
+        tuple(params) + (UNIVERSE_LIST_PAGE_SIZE, offset)
+    ).fetchall()
+    rows = redact_recommendation_signals(rows, can_view_signals)
+
+    total_pages = max(1, -(-total // UNIVERSE_LIST_PAGE_SIZE))  # ceil division
+
+    return render_template(
+        'admin/stocks_universe_list.html',
+        rows=rows, query=query, page=page, total=total, total_pages=total_pages,
+        can_view_signals=can_view_signals,
+    )
+
+
+@app.route('/stocks/universe/<int:universe_id>', methods=['GET'])
+@stocks_login_required
+def stocks_universe_detail(universe_id):
+    """Same read-only detail view as /stocks/company/<watchlist_id> (day
+    change, 52-week range, price sparkline, RSI backtest, rounding
+    pattern, fundamentals, technicals, recent prices), but for ANY
+    scrape-eligible universe company, not just the ~80 on the watchlist --
+    see stocks_universe_list for who can reach this and why. No
+    "Suggestion history" section here: suggestions are only ever generated
+    for watchlist companies (see suggestion_engine.py), so a universe-only
+    company never has any. Golden-cross status and the recommended flag
+    are only included for _can_view_watchlist_signals()."""
+    db = get_db()
+    can_view_signals = _can_view_watchlist_signals()
+
+    company = db.execute(
+        '''SELECT u.id AS universe_id, u.symbol, u.exchange, u.company_name AS name, u.industry,
+                  f.pe_ratio, f.peg_ratio, f.eps, f.market_cap, f.roe, f.debt_to_equity,
+                  f.earnings_growth_pct, f.sector_avg_pe, f.price_to_book, f.opm_pct,
+                  f.roce_pct, f.roa_pct, f.current_ratio, f.tol_by_tnw,
+                  f.promoter_holding_pct, f.fii_holding_pct, f.public_holding_pct,
+                  f.quarterly_profit_growth_pct, f.quarterly_revenue_growth_pct,
+                  f.free_cash_flow, f.snapshot_date AS fundamentals_date,
+                  i.ma_5, i.ma_21, i.ma_50, i.ma_200, i.rsi_14, i.volume_avg_20d,
+                  i.cross_status, i.volume_trend, i.calc_date AS indicators_date,
+                  d.close AS latest_price, d.trade_date AS price_date
+           FROM stock_universe u
+           LEFT JOIN stock_fundamentals f ON f.universe_id = u.id
+               AND f.snapshot_date = (
+                   SELECT MAX(f2.snapshot_date) FROM stock_fundamentals f2 WHERE f2.universe_id = u.id
+               )
+           LEFT JOIN stock_indicators i ON i.universe_id = u.id
+               AND i.calc_date = (
+                   SELECT MAX(i2.calc_date) FROM stock_indicators i2 WHERE i2.universe_id = u.id
+               )
+           LEFT JOIN stock_daily_data d ON d.universe_id = u.id
+               AND d.trade_date = (
+                   SELECT MAX(d2.trade_date) FROM stock_daily_data d2 WHERE d2.universe_id = u.id
+               )
+           WHERE u.id = ?''',
+        (universe_id,)
+    ).fetchone()
+    if not company:
+        flash('No such company.', 'error')
+        return redirect(url_for('stocks_universe_list'))
+
+    previous_fundamentals = db.execute(
+        '''SELECT pe_ratio, peg_ratio, eps, opm_pct, roce_pct, roa_pct, price_to_book,
+                  promoter_holding_pct, fii_holding_pct, quarterly_profit_growth_pct,
+                  quarterly_revenue_growth_pct, snapshot_date
+           FROM stock_fundamentals
+           WHERE universe_id=? AND snapshot_date < ?
+           ORDER BY snapshot_date DESC LIMIT 1''',
+        (universe_id, company.get('fundamentals_date') or date.today().isoformat())
+    ).fetchone() or {}
+
+    previous_indicators = db.execute(
+        '''SELECT rsi_14, ma_5, ma_21, ma_50, ma_200, calc_date
+           FROM stock_indicators
+           WHERE universe_id=? AND calc_date < ?
+           ORDER BY calc_date DESC LIMIT 1''',
+        (universe_id, company.get('indicators_date') or date.today().isoformat())
+    ).fetchone() or {}
+
+    company = {
+        **company,
+        'pe_note': get_metric_note('pe_ratio', company.get('pe_ratio')),
+        'opm_note': get_metric_note('opm_pct', company.get('opm_pct')),
+        'is_recommended': passes_hard_filters(company),
+        'trends': {
+            field: trend_note(company.get(field), previous_fundamentals.get(field))
+            for field in ('pe_ratio', 'peg_ratio', 'eps', 'opm_pct', 'roce_pct', 'roa_pct',
+                          'price_to_book', 'promoter_holding_pct', 'fii_holding_pct',
+                          'quarterly_profit_growth_pct', 'quarterly_revenue_growth_pct')
+        },
+        'fundamentals_trend_as_of': previous_fundamentals.get('snapshot_date'),
+        'rsi_trend': trend_note(company.get('rsi_14'), previous_indicators.get('rsi_14')),
+        'indicators_trend_as_of': previous_indicators.get('calc_date'),
+    }
+
+    price_history = db.execute(
+        '''SELECT trade_date, close, high, low, volume FROM stock_daily_data
+           WHERE universe_id=? ORDER BY trade_date DESC LIMIT 250''',
+        (universe_id,)
+    ).fetchall()
+
+    closes_desc = [p['close'] for p in price_history if p.get('close') is not None]
+    day_change = compute_day_change(closes_desc)
+    week52_high, week52_low = compute_52_week_range(
+        [p.get('high') for p in price_history], [p.get('low') for p in price_history]
+    )
+    company['day_change'] = day_change
+    company['week52_high'] = week52_high
+    company['week52_low'] = week52_low
+
+    closes_oldest_first = list(reversed(closes_desc))
+    sparkline_svg = build_price_sparkline_svg(closes_oldest_first)
+    sparkline_summary = None
+    if len(closes_oldest_first) >= 2:
+        period_change_pct = round(
+            (closes_oldest_first[-1] - closes_oldest_first[0]) / closes_oldest_first[0] * 100, 2
+        ) if closes_oldest_first[0] else None
+        sparkline_summary = {
+            'days': len(closes_oldest_first),
+            'start_price': closes_oldest_first[0],
+            'end_price': closes_oldest_first[-1],
+            'change_pct': period_change_pct,
+        }
+
+    backtest = backtest_rsi_zone_outcomes(closes_oldest_first, company.get('rsi_14'))
+    rounding_pattern = detect_rounding_pattern(closes_oldest_first)
+    recent_prices = price_history[:15]
+
+    if not can_view_signals:
+        company = redact_recommendation_signals([company], can_view_signals=False)[0]
+
+    return render_template(
+        'admin/stocks_universe_detail.html',
+        company=company, recent_prices=recent_prices,
+        sparkline_svg=sparkline_svg, sparkline_summary=sparkline_summary, backtest=backtest,
+        rounding_pattern=rounding_pattern, can_view_signals=can_view_signals,
     )
 
 
@@ -7501,7 +7748,23 @@ def stocks_my_suggestions():
     db = get_db()
     start_date = (date.today() - timedelta(days=HOLDING_PERIOD_DAYS)).isoformat()
     suggestions = get_suggestions(db, start_date=start_date)
-    return render_template('admin/stocks_my_suggestions.html', suggestions=suggestions)
+
+    subscription_row = db.execute(
+        'SELECT subscription_status, subscription_current_period_end FROM stocks_admin_users WHERE id=?',
+        (session.get('stocks_admin_id'),)
+    ).fetchone()
+    subscription_period_end_label = None
+    if subscription_row and subscription_row.get('subscription_status') in ('active', 'cancelled', 'halted') \
+            and subscription_row.get('subscription_current_period_end'):
+        end_value = subscription_row['subscription_current_period_end']
+        end_dt = datetime.fromisoformat(str(end_value).replace('Z', '+00:00')) if isinstance(end_value, str) else end_value
+        subscription_period_end_label = end_dt.strftime('%d %b %Y')
+
+    return render_template(
+        'admin/stocks_my_suggestions.html', suggestions=suggestions,
+        subscription_status=subscription_row.get('subscription_status') if subscription_row else None,
+        subscription_period_end_label=subscription_period_end_label,
+    )
 
 
 @app.route('/stocks/my/history', methods=['GET'])
@@ -7516,6 +7779,351 @@ def stocks_my_history():
     db = get_db()
     suggestions = get_suggestions(db)
     return render_template('admin/stocks_my_history.html', suggestions=suggestions)
+
+
+@app.route('/stocks', methods=['GET'])
+def stocks_landing():
+    """Public marketing/info page for Nari Nakhre Stocks -- no login
+    required, unlike every other /stocks/* route. Purely informational
+    (what the product is, how the NNS Score works, pricing); "Get Started"
+    leads to /stocks/signup (self-serve Razorpay subscription), "Login"
+    leads to /stocks/login for existing accounts."""
+    return render_template('admin/stocks_landing.html')
+
+
+def _render_stocks_checkout(admin_id, email, name):
+    """Creates a fresh Razorpay subscription for admin_id and renders the
+    Checkout page for it -- shared by /stocks/signup (password path) and
+    /stocks/auth/google/callback (Google path), and also re-run any time a
+    lapsed (halted/cancelled-and-expired) paid account needs to renew.
+    Always creates a NEW Razorpay subscription rather than trying to reuse
+    a previous never-completed one -- simpler and safer than working out
+    whether an old subscription_id is still in a usable state, at the cost
+    of leaving an occasional harmless unauthorized subscription sitting in
+    the Razorpay dashboard for an abandoned signup attempt (those never
+    charge anything, since Razorpay only bills after Checkout actually
+    authorizes one).
+
+    Returns a Flask response (either the checkout page, or a redirect back
+    to signup with a flashed error if Razorpay itself isn't reachable/
+    configured)."""
+    if not RAZORPAY_STOCKS_PLAN_ID:
+        app.logger.error('RAZORPAY_STOCKS_PLAN_ID is not set -- cannot start a Stocks subscription checkout.')
+        flash('Sign-ups are temporarily unavailable. Please try again shortly.', 'error')
+        return redirect(url_for('stocks_landing'))
+
+    try:
+        subscription = razorpay_client.subscription.create({
+            'plan_id': RAZORPAY_STOCKS_PLAN_ID,
+            'total_count': SUBSCRIPTION_TOTAL_COUNT_MONTHS,
+            'customer_notify': 1,
+            'notes': {'stocks_admin_id': str(admin_id)},
+        })
+    except Exception as e:
+        app.logger.error(f'Razorpay subscription.create failed for admin_id={admin_id}: {e}')
+        flash('Could not start checkout right now. Please try again shortly.', 'error')
+        return redirect(url_for('stocks_landing'))
+
+    db = get_db()
+    attach_razorpay_subscription(db, admin_id, None, subscription['id'])
+    session['stocks_pending_signup_id'] = admin_id
+    session.modified = True
+
+    return render_template(
+        'admin/stocks_checkout.html',
+        razorpay_key_id=RAZORPAY_KEY_ID,
+        subscription_id=subscription['id'],
+        prefill_name=name or '',
+        prefill_email=email,
+        price_display=STOCKS_SUBSCRIPTION_PRICE_DISPLAY,
+    )
+
+
+@app.route('/stocks/signup', methods=['GET', 'POST'])
+def stocks_signup():
+    """Self-serve paid signup -- collects name/email/password, then hands
+    off to _render_stocks_checkout for the actual Razorpay Checkout step.
+    The account row itself is created up front (subscription_status=
+    'pending', is_active=0) so /stocks/subscribe/verify has something to
+    activate once payment succeeds; see utils/stocks_subscription.py.
+
+    Same bot-defense stack as the storefront's /contact form (honeypot +
+    timing trap + IP rate limit + reCAPTCHA) -- a spam submission here
+    would otherwise create a real (if never-authorized) Razorpay
+    subscription object, not just a wasted DB row."""
+    if request.method == 'GET':
+        return render_template('admin/stocks_signup.html', recaptcha_site_key=RECAPTCHA_SITE_KEY, form_rendered_at=time.time())
+
+    if (request.form.get('system_verification_token') or '').strip():
+        app.logger.warning(f'Bot caught on stocks signup (honeypot): {request.form.get("email")}')
+        return redirect(url_for('stocks_landing'))
+    if contact_form_is_bot(request.form.get('form_rendered_at')):
+        app.logger.warning(f'Bot caught on stocks signup (timing): {request.form.get("email")}')
+        return redirect(url_for('stocks_landing'))
+    client_ip = request.remote_addr or 'unknown'
+    if contact_ip_is_rate_limited(client_ip):
+        flash('Please wait a moment before trying again.', 'error')
+        return render_template('admin/stocks_signup.html', recaptcha_site_key=RECAPTCHA_SITE_KEY, form_rendered_at=time.time()), 429
+    if not verify_recaptcha(request.form.get('recaptcha_token'), remote_ip=client_ip, expected_action='stocks_signup'):
+        app.logger.warning(f'Bot caught on stocks signup (recaptcha): {request.form.get("email")}')
+        flash('Please try again.', 'error')
+        return render_template('admin/stocks_signup.html', recaptcha_site_key=RECAPTCHA_SITE_KEY, form_rendered_at=time.time()), 401
+
+    name = (request.form.get('name') or '').strip()
+    email = (request.form.get('email') or '').strip().lower()
+    password = request.form.get('password') or ''
+    confirm_password = request.form.get('confirm_password') or ''
+
+    if not EMAIL_RE.match(email):
+        flash('Please enter a valid email address.', 'error')
+        return render_template('admin/stocks_signup.html', recaptcha_site_key=RECAPTCHA_SITE_KEY, form_rendered_at=time.time()), 400
+    if password != confirm_password:
+        flash('Passwords do not match.', 'error')
+        return render_template('admin/stocks_signup.html', recaptcha_site_key=RECAPTCHA_SITE_KEY, form_rendered_at=time.time()), 400
+
+    db = get_db()
+    row, error = create_pending_subscriber(db, email, name, password)
+    if error and error != 'existing':
+        flash(error, 'error')
+        return render_template('admin/stocks_signup.html', recaptcha_site_key=RECAPTCHA_SITE_KEY, form_rendered_at=time.time()), 400
+
+    if error == 'existing':
+        if has_stocks_access(row.get('is_pro'), row.get('subscription_status'), row.get('subscription_current_period_end')):
+            flash('You already have an account -- please log in.', 'info')
+            return redirect(url_for('stocks_admin_login'))
+        # Pending (never completed checkout) or lapsed (halted/expired
+        # cancelled) -- send them back through checkout rather than
+        # refusing the signup outright.
+
+    return _render_stocks_checkout(row['id'], email, name)
+
+
+@app.route('/stocks/subscribe/verify', methods=['POST'])
+def stocks_subscribe_verify():
+    """Called by stocks_checkout.html's Razorpay Checkout success handler
+    (fetch, not a form submit) right after the FIRST payment on a new
+    subscription succeeds. This is only ever the fast path for that first
+    payment -- every later renewal happens directly between Razorpay and
+    the customer's bank/UPI app with no browser involved at all, so it's
+    /stocks/razorpay/webhook (not this route) that's the source of truth
+    for renewals. session['stocks_pending_signup_id'] (set by
+    _render_stocks_checkout) is what ties this callback back to the right
+    account -- the request body's razorpay_subscription_id is only trusted
+    once it's confirmed to match what that account itself has on file."""
+    admin_id = session.get('stocks_pending_signup_id')
+    if not admin_id:
+        return jsonify({'status': 'error', 'message': 'Signup session expired, please sign up again.'}), 400
+
+    payload = request.get_json(silent=True) or {}
+    razorpay_payment_id = (payload.get('razorpay_payment_id') or '').strip()
+    razorpay_subscription_id = (payload.get('razorpay_subscription_id') or '').strip()
+    razorpay_signature = (payload.get('razorpay_signature') or '').strip()
+    if not razorpay_payment_id or not razorpay_subscription_id or not razorpay_signature:
+        return jsonify({'status': 'error', 'message': 'Incomplete payment confirmation.'}), 400
+
+    if not verify_subscription_payment_signature(razorpay_payment_id, razorpay_subscription_id, razorpay_signature, RAZORPAY_KEY_SECRET):
+        app.logger.warning(f'Stocks subscription payment signature verification failed for admin_id={admin_id}')
+        return jsonify({'status': 'error', 'message': 'Payment verification failed.'}), 400
+
+    db = get_db()
+    row = db.execute(
+        'SELECT id, username, name, can_view_watchlist, must_change_password, razorpay_subscription_id '
+        'FROM stocks_admin_users WHERE id=?',
+        (admin_id,)
+    ).fetchone()
+    if not row or row.get('razorpay_subscription_id') != razorpay_subscription_id:
+        app.logger.warning(f'Stocks subscription id mismatch for admin_id={admin_id}')
+        return jsonify({'status': 'error', 'message': 'Payment verification failed.'}), 400
+
+    try:
+        subscription = razorpay_client.subscription.fetch(razorpay_subscription_id)
+        current_end_ts = subscription.get('current_end')
+    except Exception as e:
+        app.logger.warning(f'Razorpay subscription.fetch failed after verified payment (admin_id={admin_id}): {e}')
+        current_end_ts = None
+    if current_end_ts:
+        current_period_end = datetime.fromtimestamp(current_end_ts, tz=timezone.utc)
+    else:
+        # Never block activation just because the follow-up fetch hiccuped
+        # -- the payment signature itself is already verified. The webhook
+        # will correct this to the real date on the very next charge.
+        current_period_end = datetime.now(timezone.utc) + timedelta(days=30)
+
+    activate_subscription(db, admin_id, current_period_end)
+    session.pop('stocks_pending_signup_id', None)
+
+    session['stocks_admin_id'] = row['id']
+    session['stocks_admin_username'] = row['username']
+    session['stocks_admin_role'] = 'viewer'
+    session['stocks_can_view_watchlist'] = bool(row.get('can_view_watchlist'))
+    session['stocks_must_change_password'] = bool(row.get('must_change_password'))
+    session.modified = True
+
+    try:
+        period_end_label = current_period_end.strftime('%d %b %Y')
+        send_subscription_welcome_email(row['username'], row.get('name'), period_end_label)
+    except Exception as e:
+        app.logger.warning(f'Subscription welcome email failed for {row["username"]}: {e}')
+
+    redirect_url = url_for('stocks_change_password') if session['stocks_must_change_password'] else url_for('stocks_my_suggestions')
+    return jsonify({'status': 'ok', 'redirect': redirect_url})
+
+
+@app.route('/stocks/auth/google/login', methods=['GET'])
+def stocks_google_login():
+    """Mirrors the storefront's /auth/google/login (see google_login above)
+    against stocks_admin_users instead of the storefront's users table --
+    same GoogleAuthProvider, same Authlib handshake, just a different
+    redirect_uri/callback and a different table on the other end."""
+    provider = auth_providers.get_auth_provider('google')
+    redirect_uri = url_for('stocks_google_callback', _external=True)
+    return redirect(provider.get_auth_url(redirect_uri))
+
+
+@app.route('/stocks/auth/google/callback', methods=['GET'])
+def stocks_google_callback():
+    """Handles both sign-in (an existing account, matched by google_sub or
+    by email) and sign-up (no matching account at all) in one callback --
+    Google doesn't distinguish the two ahead of time, so neither does this
+    route. A brand-new or lapsed account still has to go through
+    _render_stocks_checkout exactly like the password signup path; Google
+    only replaces the password step, not the payment step (see is_pro for
+    the one case where payment is skipped entirely)."""
+    provider = auth_providers.get_auth_provider('google')
+    try:
+        token = provider.exchange_code()
+        userinfo = provider.get_user_info(token)
+    except Exception as e:
+        app.logger.warning(f'Stocks Google OAuth callback failed: {e}')
+        flash('Sign-in was cancelled or failed. Please try again.', 'error')
+        return redirect(url_for('stocks_landing'))
+
+    google_sub = userinfo.get('sub')
+    name = userinfo.get('name') or ''
+    email = (userinfo.get('email') or '').strip().lower()
+    if not google_sub or not email:
+        app.logger.warning('Stocks Google callback missing sub/email claim; aborting.')
+        flash('Sign-in was cancelled or failed. Please try again.', 'error')
+        return redirect(url_for('stocks_landing'))
+
+    db = get_db()
+    row = find_stocks_account_by_google_sub(db, google_sub)
+    if not row:
+        existing = find_stocks_account_by_username(db, email)
+        if existing:
+            link_google_sub(db, existing['id'], google_sub)
+            row = existing
+        else:
+            row = create_pending_google_subscriber(db, email, name, google_sub)
+
+    if row.get('is_active') and has_stocks_access(row.get('is_pro'), row.get('subscription_status'), row.get('subscription_current_period_end')):
+        session['stocks_admin_id'] = row['id']
+        session['stocks_admin_username'] = row['username']
+        session['stocks_admin_role'] = 'viewer'
+        session['stocks_can_view_watchlist'] = bool(row.get('can_view_watchlist'))
+        session['stocks_must_change_password'] = bool(row.get('must_change_password'))
+        session.modified = True
+        if session['stocks_must_change_password']:
+            return redirect(url_for('stocks_change_password'))
+        return redirect(url_for('stocks_my_suggestions'))
+
+    return _render_stocks_checkout(row['id'], email, name)
+
+
+@app.route('/stocks/razorpay/webhook', methods=['POST'])
+def stocks_razorpay_webhook():
+    """Razorpay calls this directly (no browser, no session) for every
+    subscription lifecycle event -- most importantly 'subscription.charged'
+    on every renewal, which is the ONLY way this app finds out a recurring
+    payment succeeded (see _render_stocks_checkout/stocks_subscribe_verify's
+    docstrings for why: Checkout only comes back to the browser for a
+    subscription's first payment, never later ones). Must read the raw
+    request body for signature verification -- request.get_json() would
+    re-parse/re-serialize it, and Razorpay's signature covers the exact
+    bytes they sent, not a semantically-equivalent re-encoding of them.
+
+    Always returns 200 once the signature itself checks out, even if
+    handling a recognized event then fails internally -- Razorpay retries
+    on any non-2xx response, and a handler bug retrying forever helps no
+    one; the failure is logged for manual follow-up instead."""
+    raw_body = request.get_data()
+    signature = request.headers.get('X-Razorpay-Signature', '')
+    if not RAZORPAY_WEBHOOK_SECRET or not verify_webhook_signature(raw_body, signature, RAZORPAY_WEBHOOK_SECRET):
+        app.logger.warning('Razorpay webhook signature verification failed or RAZORPAY_WEBHOOK_SECRET unset')
+        return jsonify({'status': 'invalid signature'}), 400
+
+    payload = request.get_json(silent=True) or {}
+    event = payload.get('event', '')
+    db = get_db()
+
+    try:
+        entity = payload.get('payload', {}).get('subscription', {}).get('entity', {})
+        subscription_id = entity.get('id')
+        if event == 'subscription.charged' and subscription_id and entity.get('current_end'):
+            current_period_end = datetime.fromtimestamp(entity['current_end'], tz=timezone.utc)
+            record_recurring_charge(db, subscription_id, current_period_end)
+        elif event in ('subscription.cancelled', 'subscription.completed') and subscription_id:
+            mark_subscription_cancelled(db, subscription_id)
+        elif event == 'subscription.halted' and subscription_id:
+            mark_subscription_halted(db, subscription_id)
+    except Exception as e:
+        app.logger.error(f'Razorpay webhook handling failed for event={event}: {e}')
+
+    return jsonify({'status': 'ok'}), 200
+
+
+@app.route('/stocks/subscriptions/send-expiry-reminders', methods=['POST'])
+def stocks_subscriptions_send_expiry_reminders():
+    """Daily cron-triggered: emails anyone whose paid access is about to
+    lapse within REMINDER_WINDOW_DAYS -- either an upcoming auto-renewal
+    charge (subscription_status='active') or access actually ending
+    (subscription_status='cancelled', no renewal coming). Same dual auth
+    as every other Stocks cron route. Unlike the Pick of the Day email,
+    this is NOT gated on is_trading_day() -- billing runs on calendar days,
+    not trading days."""
+    is_cron = has_valid_cron_secret(request.headers, STOCKS_FUNDAMENTALS_CRON_SECRET)
+    if not is_cron and not session.get('stocks_admin_id'):
+        return redirect(url_for('stocks_admin_login'))
+
+    db = get_db()
+
+    def _job(job_db):
+        try:
+            rows = find_expiring_subscribers(job_db)
+            sent = 0
+            for row in rows:
+                period_end = row['subscription_current_period_end']
+                if isinstance(period_end, str):
+                    period_end_dt = datetime.fromisoformat(period_end.replace('Z', '+00:00'))
+                else:
+                    period_end_dt = period_end
+                period_end_label = period_end_dt.strftime('%d %b %Y')
+                ok, _detail = send_subscription_expiry_reminder_email(
+                    row['username'], row.get('name'), period_end_label,
+                    is_renewing=(row['subscription_status'] == 'active'),
+                )
+                if ok:
+                    mark_reminder_sent(job_db, row['id'], period_end)
+                    sent += 1
+            summary = {'checked': len(rows), 'sent': sent}
+        except Exception as e:
+            app.logger.error(f'Subscription expiry reminders failed: {e}')
+            alert_job_error(job_db, 'subscription_reminders', str(e))
+            raise
+        record_job_success(job_db, 'subscription_reminders')
+        return summary
+
+    return _dispatch_stocks_job(db, is_cron, 'subscription_reminders', _job)
+
+
+@app.route('/stocks/users/<int:viewer_id>/toggle-pro', methods=['POST'])
+@stocks_role_required('super_admin', 'child_admin')
+def stocks_users_toggle_pro(viewer_id):
+    """Comps (or un-comps) a viewer's full access independent of any
+    Razorpay subscription -- see has_stocks_access/toggle_viewer_pro. Same
+    role gate as the rest of /stocks/users."""
+    toggle_viewer_pro(get_db(), viewer_id)
+    return redirect(url_for('stocks_users_manage'))
 
 
 @app.route('/stocks/login', methods=['GET', 'POST'])

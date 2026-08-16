@@ -2,6 +2,7 @@ from datetime import date, timedelta
 
 from utils.suggestion_engine import (
     HOLDING_PERIOD_DAYS,
+    SUGGESTION_REPEAT_WINDOW_DAYS,
     TOP_N_SUGGESTIONS,
     generate_daily_suggestions,
     passes_hard_filters,
@@ -11,13 +12,21 @@ from utils.suggestion_engine import (
 
 GOOD_INDICATORS = {'cross_status': 'golden_cross', 'volume_trend': 'confirming', 'rsi_14': 50}
 
+# Comfortably clears NNS_BRONZE_MIN (4.0) on every sub-score by default --
+# individual tests override specific fields to compare candidates against
+# each other or push one below the bronze floor.
+GOOD_FUNDAMENTALS = {
+    'pe_ratio': 20, 'peg_ratio': 0.3, 'opm_pct': 32, 'roce_pct': 20, 'roa_pct': 12,
+    'quarterly_profit_growth_pct': 20, 'quarterly_revenue_growth_pct': 20,
+    'price_to_book': 4,
+}
 
-def _candidate(watchlist_id, symbol, peg_ratio, quarterly_profit_growth_pct, opm_pct, roce_pct, **overrides):
+
+def _candidate(watchlist_id, symbol, **overrides):
     row = {
         'watchlist_id': watchlist_id, 'symbol': symbol, 'exchange': 'NSE',
-        'peg_ratio': peg_ratio, 'quarterly_profit_growth_pct': quarterly_profit_growth_pct,
-        'opm_pct': opm_pct, 'roce_pct': roce_pct,
-        'pe_ratio': 20, 'latest_close': 100.0, 'fundamental_tier': 'golden',
+        'latest_close': 100.0, 'fundamental_tier': 'golden',
+        **GOOD_FUNDAMENTALS,
         **GOOD_INDICATORS,
     }
     row.update(overrides)
@@ -26,9 +35,10 @@ def _candidate(watchlist_id, symbol, peg_ratio, quarterly_profit_growth_pct, opm
 
 def test_scoring_picks_the_objectively_better_candidate():
     # BETTER is strictly better on every metric: lower PEG, higher growth,
-    # higher OPM, higher ROCE. Must score higher regardless of order.
-    worse = _candidate(1, 'WORSE', peg_ratio=1.5, quarterly_profit_growth_pct=8, opm_pct=15, roce_pct=10)
-    better = _candidate(2, 'BETTER', peg_ratio=0.5, quarterly_profit_growth_pct=20, opm_pct=35, roce_pct=25)
+    # higher OPM, higher ROCE. Must score higher regardless of order. WORSE
+    # still clears the NNS_BRONZE_MIN floor -- weaker, not disqualified.
+    worse = _candidate(1, 'WORSE', peg_ratio=0.9, quarterly_profit_growth_pct=11, opm_pct=26, roce_pct=10, roa_pct=5)
+    better = _candidate(2, 'BETTER', peg_ratio=0.1, quarterly_profit_growth_pct=30, opm_pct=40, roce_pct=25, roa_pct=15)
 
     scored = score_candidates([worse, better])
 
@@ -38,11 +48,10 @@ def test_scoring_picks_the_objectively_better_candidate():
 
 def test_candidate_failing_rsi_range_excluded_even_with_great_score():
     # Excellent fundamentals, but RSI is way outside the 40-65 window.
-    great_but_overbought = _candidate(
-        1, 'OVERBOUGHT', peg_ratio=0.3, quarterly_profit_growth_pct=30, opm_pct=40, roce_pct=30,
-        rsi_14=85,
+    great_but_overbought = _candidate(1, 'OVERBOUGHT', rsi_14=85)
+    mediocre_but_in_range = _candidate(
+        2, 'INRANGE', peg_ratio=0.9, quarterly_profit_growth_pct=11, opm_pct=26, roce_pct=10, roa_pct=5,
     )
-    mediocre_but_in_range = _candidate(2, 'INRANGE', peg_ratio=1.2, quarterly_profit_growth_pct=10, opm_pct=18, roce_pct=12)
 
     assert passes_hard_filters(great_but_overbought) is False
     assert passes_hard_filters(mediocre_but_in_range) is True
@@ -55,19 +64,30 @@ def test_candidate_failing_rsi_range_excluded_even_with_great_score():
 
 
 def test_hard_filters_check_cross_status_and_volume_trend_too():
-    death_cross = _candidate(1, 'DEATHX', peg_ratio=0.5, quarterly_profit_growth_pct=20, opm_pct=30, roce_pct=20,
-                              cross_status='death_cross')
-    diverging_volume = _candidate(2, 'DIVERGE', peg_ratio=0.5, quarterly_profit_growth_pct=20, opm_pct=30, roce_pct=20,
-                                   volume_trend='diverging')
+    death_cross = _candidate(1, 'DEATHX', cross_status='death_cross')
+    diverging_volume = _candidate(2, 'DIVERGE', volume_trend='diverging')
 
     assert passes_hard_filters(death_cross) is False
     assert passes_hard_filters(diverging_volume) is False
 
 
+def test_below_bronze_floor_is_excluded_even_if_hard_filters_pass():
+    # Passes cross_status/volume_trend/RSI, but every fundamental is at
+    # rock bottom -- shouldn't be suggested just to fill a quota.
+    weak = _candidate(
+        1, 'WEAK', pe_ratio=None, peg_ratio=5.0, opm_pct=0, roce_pct=0, roa_pct=0,
+        quarterly_profit_growth_pct=0, quarterly_revenue_growth_pct=0, price_to_book=999,
+    )
+    assert passes_hard_filters(weak) is True
+
+    assert select_top_suggestions([weak]) == []
+    assert score_candidates([weak]) == []
+
+
 def test_top_n_selection_respects_top_n_suggestions_with_more_candidates():
     candidates = [
-        _candidate(i, f'SYM{i}', peg_ratio=1.0 - i * 0.1, quarterly_profit_growth_pct=10 + i,
-                   opm_pct=20 + i, roce_pct=15 + i)
+        _candidate(i, f'SYM{i}', peg_ratio=max(0.05, 0.5 - i * 0.05), quarterly_profit_growth_pct=15 + i,
+                   opm_pct=25 + i, roce_pct=15 + i, roa_pct=8 + i)
         for i in range(5)
     ]
 
@@ -114,29 +134,35 @@ class FakeSuggestionDB:
         if normalized.startswith('SELECT w.id AS watchlist_id, w.symbol, w.exchange'):
             return FakeCursor(self.candidate_rows)
 
-        if normalized.startswith("SELECT id FROM stock_suggestions WHERE watchlist_id=? AND status='pending'"):
+        if normalized.startswith('SELECT score, target_sell_price, pattern_name FROM stock_suggestions'):
             watchlist_id, cutoff = params
             matches = [
                 s for s in self.suggestions
                 if s['watchlist_id'] == watchlist_id and s['status'] == 'pending' and s['suggestion_date'] >= cutoff
             ]
-            return FakeCursor([{'id': 1}] if matches else [])
+            matches.sort(key=lambda s: s['suggestion_date'], reverse=True)
+            return FakeCursor(matches[:1])
 
         if normalized.startswith('SELECT close FROM stock_daily_data WHERE watchlist_id=?'):
             watchlist_id, _lookback_days = params
             closes = self.price_history.get(watchlist_id, [])
             return FakeCursor([{'close': c} for c in reversed(closes)])  # DESC, like the real query
 
+        if normalized.startswith('SELECT universe_id, promoter_holding_pct, fii_holding_pct, snapshot_date'):
+            return FakeCursor([])  # no candidate in these tests sets universe_id
+
         if normalized.startswith('INSERT INTO stock_suggestions'):
             (watchlist_id, suggestion_date, buy_price, target_sell_price, stop_loss_price,
              holding_period_days, rsi_at_suggestion, pe_at_suggestion, peg_at_suggestion,
-             opm_at_suggestion, fundamental_tier, pattern_name, pattern_note, score, rationale) = params
+             opm_at_suggestion, fundamental_tier, pattern_name, pattern_note, nns_score, nns_tier,
+             rationale) = params
             self.suggestions.append({
                 'watchlist_id': watchlist_id, 'suggestion_date': suggestion_date,
                 'status': 'pending', 'buy_price': buy_price, 'target_sell_price': target_sell_price,
                 'stop_loss_price': stop_loss_price,
                 'opm_at_suggestion': opm_at_suggestion, 'fundamental_tier': fundamental_tier,
                 'pattern_name': pattern_name, 'pattern_note': pattern_note,
+                'score': nns_score, 'nns_score': nns_score, 'nns_tier': nns_tier,
             })
             return FakeCursor([])
 
@@ -146,24 +172,80 @@ class FakeSuggestionDB:
         pass
 
 
-def test_no_duplicate_suggestion_for_symbol_with_existing_open_one():
-    candidates = [_candidate(1, 'ALREADYOPEN', peg_ratio=0.5, quarterly_profit_growth_pct=20, opm_pct=30, roce_pct=20)]
-    recent_date = (date.today() - timedelta(days=2)).isoformat()
+def test_unchanged_recommendation_within_repeat_window_is_not_resent():
+    # Nothing about the candidate changes between the two calls -- the
+    # second one (simulating a later day, same stock still topping the
+    # rankings) must NOT re-send it as a "fresh" pick.
+    candidates = [_candidate(1, 'STABLE')]
+    db = FakeSuggestionDB(candidates)
+
+    first = generate_daily_suggestions(db)
+    assert len(first['created']) == 1
+
+    second = generate_daily_suggestions(db)
+    assert second['created'] == []
+    assert second['skipped_duplicates'] == ['STABLE']
+    assert len(db.suggestions) == 1  # still just the one row
+
+
+def test_existing_suggestion_older_than_the_repeat_window_can_be_resent():
+    candidates = [_candidate(1, 'STALE')]
+    old_date = (date.today() - timedelta(days=SUGGESTION_REPEAT_WINDOW_DAYS + 1)).isoformat()
     db = FakeSuggestionDB(
         candidates,
-        existing_suggestions=[{'watchlist_id': 1, 'status': 'pending', 'suggestion_date': recent_date}],
+        existing_suggestions=[{
+            'watchlist_id': 1, 'status': 'pending', 'suggestion_date': old_date,
+            'score': 5.0, 'target_sell_price': 999.0, 'pattern_name': None,
+        }],
     )
 
     summary = generate_daily_suggestions(db)
 
-    assert summary['created'] == []
-    assert summary['skipped_duplicates'] == ['ALREADYOPEN']
-    # Still only the one pre-existing row -- nothing new inserted.
-    assert len(db.suggestions) == 1
+    assert len(summary['created']) == 1
+    assert summary['skipped_duplicates'] == []
+
+
+def test_genuine_nns_score_change_allows_a_resend_within_the_window():
+    candidates = [_candidate(1, 'IMPROVED')]
+    recent_date = (date.today() - timedelta(days=2)).isoformat()
+    db = FakeSuggestionDB(
+        candidates,
+        existing_suggestions=[{
+            # Old score is far below whatever this strong candidate scores
+            # today -- clears NNS_SCORE_CHANGE_THRESHOLD easily.
+            'watchlist_id': 1, 'status': 'pending', 'suggestion_date': recent_date,
+            'score': 1.0, 'target_sell_price': 105.0, 'pattern_name': None,
+        }],
+    )
+
+    summary = generate_daily_suggestions(db)
+
+    assert len(summary['created']) == 1
+    assert summary['skipped_duplicates'] == []
+
+
+def test_fallthrough_to_next_candidate_when_the_top_one_is_on_cooldown():
+    # WINNER is the higher-scoring candidate but already has an unchanged,
+    # recent suggestion -- RUNNERUP should get today's single pick instead
+    # of the day going out with zero picks.
+    winner = _candidate(1, 'WINNER', peg_ratio=0.1, quarterly_profit_growth_pct=30, opm_pct=40, roce_pct=25, roa_pct=15)
+    runnerup = _candidate(2, 'RUNNERUP')
+    db = FakeSuggestionDB([winner, runnerup])
+
+    # First call establishes WINNER's suggestion.
+    first = generate_daily_suggestions(db)
+    assert first['created'][0]['symbol'] == 'WINNER'
+
+    # Second call: WINNER hasn't changed, so it's on cooldown -- RUNNERUP
+    # should be picked instead, and only one suggestion goes out.
+    second = generate_daily_suggestions(db)
+    assert len(second['created']) == 1
+    assert second['created'][0]['symbol'] == 'RUNNERUP'
+    assert 'WINNER' in second['skipped_duplicates']
 
 
 def test_new_suggestion_created_when_no_open_one_exists():
-    candidates = [_candidate(1, 'FRESH', peg_ratio=0.5, quarterly_profit_growth_pct=20, opm_pct=30, roce_pct=20)]
+    candidates = [_candidate(1, 'FRESH')]
     db = FakeSuggestionDB(candidates)
 
     summary = generate_daily_suggestions(db)
@@ -172,6 +254,18 @@ def test_new_suggestion_created_when_no_open_one_exists():
     assert summary['created'][0]['symbol'] == 'FRESH'
     assert summary['skipped_duplicates'] == []
     assert len(db.suggestions) == 1
+
+
+def test_nns_score_and_tier_are_stored_on_the_suggestion():
+    candidates = [_candidate(1, 'SCORED')]
+    db = FakeSuggestionDB(candidates)
+
+    generate_daily_suggestions(db)
+
+    suggestion = db.suggestions[0]
+    assert suggestion['nns_score'] is not None
+    assert suggestion['nns_score'] >= 4.0  # cleared the bronze floor, or it wouldn't have been suggested
+    assert suggestion['nns_tier'] in ('golden', 'silver', 'bronze')
 
 
 def _ramp_series(waypoints):
@@ -190,8 +284,7 @@ CONFIRMED_HS_BOTTOM_SERIES = _ramp_series([
 
 
 def test_no_pattern_in_short_history_falls_back_to_flat_percentages():
-    candidates = [_candidate(1, 'FLATPCT', peg_ratio=0.5, quarterly_profit_growth_pct=20, opm_pct=30, roce_pct=20,
-                              latest_close=100.0)]
+    candidates = [_candidate(1, 'FLATPCT', latest_close=100.0)]
     db = FakeSuggestionDB(candidates)  # no price_history entry -- too short for any pattern
 
     generate_daily_suggestions(db)
@@ -205,8 +298,7 @@ def test_no_pattern_in_short_history_falls_back_to_flat_percentages():
 
 def test_confirmed_chart_pattern_drives_pricing_and_note_instead_of_flat_percentages():
     latest_close = CONFIRMED_HS_BOTTOM_SERIES[-1]
-    candidates = [_candidate(1, 'PATTERNED', peg_ratio=0.5, quarterly_profit_growth_pct=20, opm_pct=30, roce_pct=20,
-                              latest_close=latest_close)]
+    candidates = [_candidate(1, 'PATTERNED', latest_close=latest_close)]
     db = FakeSuggestionDB(candidates, price_history={1: CONFIRMED_HS_BOTTOM_SERIES})
 
     summary = generate_daily_suggestions(db)
@@ -224,14 +316,20 @@ def test_watchlist_fundamental_tier_and_opm_carry_through_to_the_suggestion():
     # A silver-tier watchlist stock should insert as a silver suggestion,
     # with opm_at_suggestion snapshotted alongside it -- same reasoning as
     # pe_at_suggestion/peg_at_suggestion already snapshotting their values.
-    candidates = [_candidate(
-        1, 'SILVERSTOCK', peg_ratio=0.5, quarterly_profit_growth_pct=20, opm_pct=18, roce_pct=20,
-        fundamental_tier='silver',
-    )]
+    candidates = [_candidate(1, 'SILVERSTOCK', fundamental_tier='silver')]
     db = FakeSuggestionDB(candidates)
 
     generate_daily_suggestions(db)
 
     assert len(db.suggestions) == 1
     assert db.suggestions[0]['fundamental_tier'] == 'silver'
-    assert db.suggestions[0]['opm_at_suggestion'] == 18
+    assert db.suggestions[0]['opm_at_suggestion'] == 32
+
+
+def test_only_one_pick_of_the_day_goes_out_even_with_many_great_candidates():
+    candidates = [_candidate(i, f'SYM{i}') for i in range(5)]
+    db = FakeSuggestionDB(candidates)
+
+    summary = generate_daily_suggestions(db)
+
+    assert len(summary['created']) == TOP_N_SUGGESTIONS == 1

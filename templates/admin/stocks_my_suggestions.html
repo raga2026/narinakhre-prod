@@ -15,6 +15,7 @@
         .badge { display:inline-flex; align-items:center; padding:3px 11px; border-radius:999px; font-size:0.72rem; font-weight:700; white-space: nowrap; }
         .badge-golden { background:#78350f; color:#fef3c7; }
         .badge-silver { background:#334155; color:#e2e8f0; }
+        .badge-bronze { background:#7c2d12; color:#fed7aa; }
         .hero { background: linear-gradient(135deg, rgba(8,145,178,0.25) 0%, rgba(14,165,233,0.08) 100%); border: 1px solid rgba(14,165,233,0.25); border-radius: 1.25rem; padding: 1.75rem; }
     </style>
 </head>
@@ -39,13 +40,28 @@
             <h2 class="text-xl font-bold text-slate-100">Welcome back{{ ', ' ~ session.stocks_admin_username if session.stocks_admin_username }}</h2>
             <p class="text-slate-300 text-sm mt-2">
                 {% if suggestions %}
-                    You have {{ suggestions | length }} suggestion{{ 's' if suggestions | length != 1 }} from the last 10 days below.
+                    {{ suggestions | length }} Pick{{ 's' if suggestions | length != 1 }} of the Day from the last 10 days, below --
+                    at most one per day, never the same stock again within 30 days unless the recommendation genuinely changes.
                 {% else %}
-                    No stocks have met the suggestion criteria in the last 10 days -- check back after the next screening run.
+                    No Pick of the Day in the last 10 days -- check back after the next screening run.
                 {% endif %}
             </p>
+            {% if subscription_period_end_label %}
+            <p class="text-slate-400 text-sm mt-3">
+                {% if subscription_status == 'active' %}
+                    Your subscription renews on <strong class="text-slate-200">{{ subscription_period_end_label }}</strong>.
+                {% elif subscription_status == 'cancelled' %}
+                    Your subscription is cancelled -- access ends <strong class="text-slate-200">{{ subscription_period_end_label }}</strong>.
+                {% elif subscription_status == 'halted' %}
+                    Your last renewal payment failed -- access ended <strong class="text-slate-200">{{ subscription_period_end_label }}</strong>.
+                    <a href="{{ url_for('stocks_signup') }}" class="text-sky-400 underline">Renew now</a>.
+                {% endif %}
+            </p>
+            {% endif %}
             <p class="text-slate-400 text-sm mt-3">
                 <a href="{{ url_for('stocks_my_history') }}" class="text-sky-400 hover:text-sky-300 underline">View full history</a>
+                &nbsp;·&nbsp;
+                <a href="{{ url_for('stocks_universe_list') }}" class="text-sky-400 hover:text-sky-300 underline">Browse all companies</a>
                 {% if session.stocks_can_view_watchlist %}
                 &nbsp;·&nbsp;
                 <a href="{{ url_for('stocks_watchlist') }}" class="text-sky-400 hover:text-sky-300 underline">View watchlist</a>
@@ -56,13 +72,15 @@
         <div class="bg-slate-800 rounded-2xl p-6 border border-sky-500/20 overflow-x-auto">
             <table>
                 <caption class="text-left text-slate-400 text-sm mb-3">
-                    Suggestions from the last 10 days. Read-only -- there's nothing to execute or edit here.
+                    Pick(s) of the Day from the last 10 days. NNS Score is a 0-10 composite of every screened
+                    fundamental and technical parameter (see the company page for the full breakdown). Read-only --
+                    there's nothing to execute or edit here.
                 </caption>
                 <thead>
                     <tr>
                         <th scope="col">Company</th>
                         <th scope="col">Date</th>
-                        <th scope="col">Tier</th>
+                        <th scope="col">NNS Score</th>
                         <th scope="col">Buy</th>
                         <th scope="col">Target</th>
                         <th scope="col">Stop-loss</th>
@@ -77,11 +95,12 @@
                         <th scope="row">{{ s.symbol }} ({{ s.exchange }})</th>
                         <td>{{ s.suggestion_date }}</td>
                         <td>
-                            {% if s.fundamental_tier == 'golden' %}
-                                <span class="badge badge-golden">Golden</span>
-                            {% elif s.fundamental_tier == 'silver' %}
-                                <span class="badge badge-silver">Silver (PE {{ '%.2f'|format(s.pe_at_suggestion) if s.pe_at_suggestion is not none else '—' }}, OPM {{ '%.0f'|format(s.opm_at_suggestion) if s.opm_at_suggestion is not none else '—' }}%)</span>
+                            {% if s.nns_tier %}
+                                <span class="badge badge-{{ s.nns_tier }}">{{ s.nns_tier | title }} {{ s.nns_score }}</span>
                             {% else %}—
+                            {% endif %}
+                            {% if s.fundamental_tier == 'silver' %}
+                                <span class="text-slate-400 text-sm" style="display:block;">PE {{ '%.2f'|format(s.pe_at_suggestion) if s.pe_at_suggestion is not none else '—' }}, OPM {{ '%.0f'|format(s.opm_at_suggestion) if s.opm_at_suggestion is not none else '—' }}%</span>
                             {% endif %}
                         </td>
                         <td>{{ s.buy_price }}</td>
@@ -99,7 +118,7 @@
                     </tr>
                     {% else %}
                     <tr>
-                        <td colspan="9" class="text-slate-400">No suggestions in the last 10 days.</td>
+                        <td colspan="9" class="text-slate-400">No Pick of the Day in the last 10 days.</td>
                     </tr>
                     {% endfor %}
                 </tbody>

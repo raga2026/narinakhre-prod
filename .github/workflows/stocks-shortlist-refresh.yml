@@ -8,6 +8,16 @@ on:
     # stock_watchlist, so this needs to update it first, not after, or
     # they'd be working off yesterday's watchlist all day.
     - cron: '45 23 * * *'
+    # 06:00 UTC = 11:30 IST -- a SECOND run, 30 minutes after
+    # stocks-fundamentals-rotation-sync.yml (05:30 UTC = 11:00 IST, comfortably
+    # enough time for that day's ~75-company batch to finish scraping).
+    # Without this, a company whose fundamentals happen to get refreshed
+    # AFTER the 05:15 IST run wouldn't have its watchlist membership
+    # re-evaluated against that fresh data until the FOLLOWING day's 05:15
+    # run -- a real gap this closes same-day, on top of (not instead of)
+    # the early run above, which still needs to keep happening before
+    # market open for the reason explained there.
+    - cron: '0 6 * * *'
   workflow_dispatch: {}  # lets you trigger it manually from the Actions tab
 
 jobs:

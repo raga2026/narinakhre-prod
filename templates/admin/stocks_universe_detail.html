@@ -17,11 +17,6 @@
         .badge-no_clear_trend  { background:#e2e8f0; color:#475569; }
         .badge-recommended     { background:#166534; color:#dcfce7; }
         .badge-not-recommended { background:#1e293b; color:#94a3b8; border:1px solid rgba(148,163,184,0.3); }
-        .badge-golden           { background:#78350f; color:#fef3c7; }
-        .badge-silver           { background:#334155; color:#e2e8f0; }
-        .badge-up   { background:#166534; color:#dcfce7; }
-        .badge-down { background:#7f1d1d; color:#fecaca; }
-        .badge-flat { background:#334155; color:#cbd5e1; }
         .metric-note { font-size: 0.75rem; color: #94a3b8; display: block; margin-top: 2px; }
         .stat-card { background: #1e293b; border: 1px solid rgba(14,165,233,0.15); border-radius: 1rem; padding: 1.1rem 1.25rem; }
         .stat-label { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.04em; color: #7dd3fc; font-weight: 600; }
@@ -35,20 +30,18 @@
 <body class="min-h-screen p-8">
     <div class="max-w-4xl mx-auto">
         <div class="flex items-center justify-between mb-2">
-            <a href="{{ url_for('stocks_watchlist') }}" class="text-sm text-slate-400 hover:text-sky-400 underline">&larr; Back to watchlist</a>
+            <a href="{{ url_for('stocks_universe_list') }}" class="text-sm text-slate-400 hover:text-sky-400 underline">&larr; Back to all companies</a>
         </div>
 
         <div class="flex flex-wrap items-center justify-between gap-3 mb-6 mt-2">
             <div>
                 <h1 class="text-3xl font-extrabold stocks-accent font-serif">{{ company.name or company.symbol }}</h1>
-                <p class="text-slate-400 text-sm mt-1">{{ company.symbol }} &middot; {{ company.exchange }}</p>
+                <p class="text-slate-400 text-sm mt-1">
+                    {{ company.symbol }} &middot; {{ company.exchange }}{% if company.industry %} &middot; {{ company.industry }}{% endif %}
+                </p>
             </div>
+            {% if can_view_signals %}
             <div class="flex gap-2 flex-wrap">
-                {% if company.fundamental_tier == 'golden' %}
-                    <span class="badge badge-golden">Golden tier</span>
-                {% elif company.fundamental_tier == 'silver' %}
-                    <span class="badge badge-silver">Silver tier</span>
-                {% endif %}
                 {% if company.cross_status %}
                     <span class="badge badge-{{ company.cross_status }}">{{ company.cross_status.replace('_', ' ') | title }}</span>
                 {% endif %}
@@ -58,6 +51,7 @@
                     <span class="badge badge-not-recommended">Not currently recommended</span>
                 {% endif %}
             </div>
+            {% endif %}
         </div>
 
         {% with messages = get_flashed_messages(with_categories=true) %}
@@ -267,7 +261,7 @@
             </div>
         </div>
 
-        <div class="section-card mb-6">
+        <div class="section-card">
             <h2 class="text-lg font-bold text-slate-200 mb-4">Recent prices</h2>
             <div class="overflow-x-auto">
                 <table>
@@ -288,54 +282,6 @@
                         </tr>
                         {% else %}
                         <tr><td colspan="3" class="text-slate-400">No price history yet.</td></tr>
-                        {% endfor %}
-                    </tbody>
-                </table>
-            </div>
-        </div>
-
-        <div class="section-card">
-            <h2 class="text-lg font-bold text-slate-200 mb-4">Suggestion history</h2>
-            <div class="overflow-x-auto">
-                <table>
-                    <caption class="text-left text-slate-400 text-sm mb-3">Every past buy suggestion for this company, most recent first.</caption>
-                    <thead>
-                        <tr>
-                            <th scope="col">Date</th>
-                            <th scope="col">NNS Score</th>
-                            <th scope="col">Buy</th>
-                            <th scope="col">Target</th>
-                            <th scope="col">Stop-loss</th>
-                            <th scope="col">Timing</th>
-                            <th scope="col">Outcome</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {% for s in suggestion_history %}
-                        <tr>
-                            <th scope="row">{{ s.suggestion_date }}</th>
-                            <td>
-                                {% if s.nns_tier %}{{ s.nns_tier | title }} {{ s.nns_score }}
-                                {% else %}—
-                                {% endif %}
-                                {% if s.fundamental_tier == 'silver' %}
-                                    <span class="metric-note">PE {{ '%.2f'|format(s.pe_at_suggestion) if s.pe_at_suggestion is not none else '—' }}, OPM {{ '%.0f'|format(s.opm_at_suggestion) if s.opm_at_suggestion is not none else '—' }}%</span>
-                                {% endif %}
-                            </td>
-                            <td>{{ '₹%.2f'|format(s.buy_price) if s.buy_price is not none else '—' }}</td>
-                            <td>{{ '₹%.2f'|format(s.target_sell_price) if s.target_sell_price is not none else '—' }}</td>
-                            <td>{{ '₹%.2f'|format(s.stop_loss_price) if s.stop_loss_price is not none else '—' }}</td>
-                            <td>
-                                {% if s.pattern_name %}
-                                    <span class="metric-note" style="display:inline;">{{ s.pattern_note }}</span>
-                                {% else %}
-                                    {{ s.holding_period_days }} days
-                                {% endif %}
-                            </td>
-                            <td>{{ s.status | title }}</td>
-                        </tr>
-                        {% else %}
-                        <tr><td colspan="7" class="text-slate-400">No suggestions have been made for this company yet.</td></tr>
                         {% endfor %}
                     </tbody>
                 </table>

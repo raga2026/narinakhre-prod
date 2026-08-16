@@ -7,6 +7,8 @@ from functools import wraps
 from flask import flash, redirect, request, session, url_for
 from werkzeug.security import check_password_hash, generate_password_hash
 
+from utils.stocks_subscription import has_stocks_access
+
 # Letters/digits only, and the commonly-confused ones (0/O, 1/l/I) dropped --
 # these are emailed in plaintext to a small trusted circle (see
 # create_viewer_account) and sometimes read aloud or typed by hand, so a
@@ -100,6 +102,57 @@ STOCKS_AUTH_ALTER_SQL = [
     'ALTER TABLE stocks_admin_users ADD COLUMN IF NOT EXISTS must_change_password INTEGER',
     "UPDATE stocks_admin_users SET must_change_password=1 WHERE role='viewer' AND must_change_password IS NULL",
     'UPDATE stocks_admin_users SET must_change_password=0 WHERE must_change_password IS NULL',
+    # Self-serve paid subscribers (see utils/stocks_subscription.py and
+    # app.py's /stocks/signup, /stocks/subscribe/verify, /stocks/razorpay/webhook)
+    # -- a role='viewer' row same as an admin-created one, just with these
+    # extra columns populated. 'none' means "not a paid account" (every
+    # viewer created via /stocks/users stays 'none' forever) so the login
+    # subscription check in authenticate_stocks_admin only ever applies to
+    # rows that actually went through Razorpay.
+    "ALTER TABLE stocks_admin_users ADD COLUMN IF NOT EXISTS subscription_status TEXT "
+    "DEFAULT 'none' CHECK (subscription_status IN ('none', 'pending', 'active', 'cancelled', 'halted'))",
+    'ALTER TABLE stocks_admin_users ADD COLUMN IF NOT EXISTS razorpay_customer_id TEXT',
+    'ALTER TABLE stocks_admin_users ADD COLUMN IF NOT EXISTS razorpay_subscription_id TEXT',
+    # When the current paid period ends -- for 'active' this is the next
+    # auto-renewal date; for 'cancelled' it's the date access actually
+    # stops (Razorpay's own cancellation still honours whatever period was
+    # already paid for, see mark_subscription_cancelled).
+    'ALTER TABLE stocks_admin_users ADD COLUMN IF NOT EXISTS subscription_current_period_end TIMESTAMPTZ',
+    # Dedups the expiry-reminder cron (see find_expiring_subscribers) --
+    # compared against subscription_current_period_end itself, not a fixed
+    # cooldown window, so a renewed subscription's NEXT expiry can still
+    # trigger a fresh reminder later.
+    'ALTER TABLE stocks_admin_users ADD COLUMN IF NOT EXISTS subscription_reminder_sent_for TIMESTAMPTZ',
+    # Free-of-charge full access, independent of subscription_status
+    # entirely -- see has_stocks_access in utils/stocks_subscription.py,
+    # which short-circuits to True whenever this is set, before it even
+    # looks at subscription_status. DEFAULT 1 (not the NULL-sentinel +
+    # backfill pattern used elsewhere in this file) deliberately -- Postgres
+    # applies a column's DEFAULT to every existing row too, not just future
+    # ones, so this single ALTER retroactively marks every account that
+    # already existed pro (per instruction -- nobody who already had access
+    # should suddenly need to pay) with no separate backfill UPDATE needed,
+    # and with no gap where a freshly-seeded super_admin (see
+    # _seed_super_admin, whose INSERT doesn't mention this column at all)
+    # could land on NULL between this ALTER running and a later backfill.
+    # Every self-serve signup path explicitly overrides this default to 0
+    # at INSERT time instead (see create_pending_subscriber in
+    # utils/stocks_subscription.py and create_pending_google_subscriber
+    # below) -- only manually-added/admin accounts stay pro by default.
+    'ALTER TABLE stocks_admin_users ADD COLUMN IF NOT EXISTS is_pro INTEGER DEFAULT 1',
+    # Sign in/up with Google (see app.py's /stocks/auth/google/login and
+    # /stocks/auth/google/callback) -- reuses the same GoogleAuthProvider
+    # already wired up for the storefront's own Google login
+    # (auth_providers/google.py), just against this table instead of the
+    # storefront's users table. UNIQUE so two accounts can never end up
+    # claiming the same Google identity.
+    'ALTER TABLE stocks_admin_users ADD COLUMN IF NOT EXISTS google_sub TEXT UNIQUE',
+    # A Google-only signup never sets a password at all -- relaxed from the
+    # original NOT NULL (every row before Google sign-in existed had one:
+    # the bootstrap super_admin, admin-created child admins/viewers, and
+    # self-serve email/password signups all still set one, this only
+    # affects new Google-only rows).
+    'ALTER TABLE stocks_admin_users ALTER COLUMN password_hash DROP NOT NULL',
 ]
 
 
@@ -151,15 +204,27 @@ def _seed_super_admin(client):
 def authenticate_stocks_admin(db, username, password):
     """Returns the stocks_admin_users row on success, else None. db is
     app.py's get_db() -- unlike the startup-time init above, this always
-    runs inside a request."""
+    runs inside a request.
+
+    For a self-serve paid account (subscription_status != 'none', see
+    utils/stocks_subscription.py), also requires subscription_is_current --
+    a 'pending' row (signed up, checkout never completed) or 'halted' row
+    (Razorpay gave up retrying a failed renewal) is refused login even with
+    the right password. Every other role/account is untouched by this
+    check (subscription_status defaults to 'none', which always passes)."""
     row = db.execute(
-        'SELECT id, username, password_hash, role, is_active, can_view_watchlist, must_change_password '
+        'SELECT id, username, password_hash, role, is_active, can_view_watchlist, must_change_password, '
+        'is_pro, subscription_status, subscription_current_period_end '
         'FROM stocks_admin_users WHERE username=?',
         (username,)
     ).fetchone()
     if not row or not row['is_active']:
         return None
+    if not row.get('password_hash'):
+        return None  # Google-only account -- has no password to check against at all
     if not check_password_hash(row['password_hash'], password):
+        return None
+    if not has_stocks_access(row.get('is_pro'), row.get('subscription_status'), row.get('subscription_current_period_end')):
         return None
     return row
 
@@ -297,7 +362,8 @@ def toggle_child_admin_active(db, admin_id):
 
 def list_viewers(db):
     return db.execute(
-        "SELECT id, username, name, is_active, can_view_watchlist, must_change_password, created_at "
+        "SELECT id, username, name, is_active, can_view_watchlist, must_change_password, is_pro, "
+        "subscription_status, subscription_current_period_end, created_at "
         "FROM stocks_admin_users WHERE role='viewer' ORDER BY created_at DESC"
     ).fetchall()
 
@@ -342,8 +408,8 @@ def create_viewer_account(db, email, name, created_by_id, can_view_watchlist=Fal
     password_hash = generate_password_hash(password)
     db.execute(
         '''INSERT INTO stocks_admin_users
-               (username, password_hash, role, name, created_by, can_view_watchlist, must_change_password)
-           VALUES (?, ?, 'viewer', ?, ?, ?, 1)''',
+               (username, password_hash, role, name, created_by, can_view_watchlist, must_change_password, is_pro)
+           VALUES (?, ?, 'viewer', ?, ?, ?, 1, 1)''',
         (email, password_hash, (name or '').strip() or None, created_by_id, 1 if can_view_watchlist else 0)
     )
     db.commit()
@@ -394,6 +460,77 @@ def toggle_viewer_active(db, admin_id):
     )
     db.commit()
     return True
+
+
+def toggle_viewer_pro(db, admin_id):
+    """Flips is_pro for a viewer row only -- lets a super_admin/child_admin
+    comp a self-serve signup full access without going through Razorpay at
+    all (see has_stocks_access in utils/stocks_subscription.py), or revoke
+    that comp later. Same role-safety pattern as toggle_viewer_active:
+    never touches a row that isn't actually role='viewer'."""
+    row = db.execute(
+        'SELECT id, role, is_pro FROM stocks_admin_users WHERE id=?', (admin_id,)
+    ).fetchone()
+    if not row or row['role'] != 'viewer':
+        return False
+    new_status = 0 if row['is_pro'] else 1
+    db.execute(
+        'UPDATE stocks_admin_users SET is_pro=?, updated_at=NOW() WHERE id=?',
+        (new_status, admin_id)
+    )
+    db.commit()
+    return True
+
+
+def find_stocks_account_by_google_sub(db, google_sub):
+    return db.execute(
+        'SELECT id, username, name, role, is_active, can_view_watchlist, must_change_password, '
+        'is_pro, subscription_status, subscription_current_period_end, razorpay_subscription_id '
+        'FROM stocks_admin_users WHERE google_sub=?',
+        (google_sub,)
+    ).fetchone()
+
+
+def find_stocks_account_by_username(db, username):
+    return db.execute(
+        'SELECT id, username, name, role, is_active, can_view_watchlist, must_change_password, '
+        'is_pro, subscription_status, subscription_current_period_end, razorpay_subscription_id, google_sub '
+        'FROM stocks_admin_users WHERE username=?',
+        (username,)
+    ).fetchone()
+
+
+def link_google_sub(db, admin_id, google_sub):
+    """Backfills google_sub onto an account that already existed under this
+    email (an admin-created viewer, or one that originally signed up with a
+    password) the first time they use 'Sign in with Google' -- so the same
+    person doesn't end up with two separate accounts under one email."""
+    db.execute(
+        'UPDATE stocks_admin_users SET google_sub=?, updated_at=NOW() WHERE id=?',
+        (google_sub, admin_id)
+    )
+    db.commit()
+
+
+def create_pending_google_subscriber(db, email, name, google_sub):
+    """Brand-new self-serve signup via 'Sign up with Google' -- no password
+    at all (password_hash stays NULL; see the relaxed NOT NULL constraint
+    in STOCKS_AUTH_ALTER_SQL and authenticate_stocks_admin's check for a
+    missing password_hash). Same pending/unpaid shape as
+    utils.stocks_subscription.create_pending_subscriber's email/password
+    version: is_active=0, subscription_status='pending', is_pro=0 -- the
+    caller (app.py's Google callback) still has to send this account
+    through Razorpay checkout before it can log in. Returns the new row."""
+    email = (email or '').strip().lower()
+    db.execute(
+        '''INSERT INTO stocks_admin_users
+               (username, password_hash, role, name, is_active, must_change_password,
+                subscription_status, is_pro, google_sub)
+           VALUES (?, NULL, 'viewer', ?, 0, 0, 'pending', 0, ?)''',
+        (email, (name or '').strip() or None, google_sub)
+    )
+    db.commit()
+    return find_stocks_account_by_google_sub(db, google_sub)
 
 
 def delete_viewer_account(db, admin_id):

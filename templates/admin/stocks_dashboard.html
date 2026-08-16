@@ -90,12 +90,12 @@
         {% endif %}
 
         <section class="bg-slate-800 rounded-2xl p-6 border border-sky-500/20 mb-6" aria-labelledby="suggestions-heading">
-            <h2 id="suggestions-heading" class="text-lg font-bold text-slate-200 mb-2">Daily suggestions</h2>
-            <p class="text-slate-400 text-sm mb-3">Generates today's suggestions from the current watchlist/indicators/fundamentals, then emails everyone on the recipient list.</p>
+            <h2 id="suggestions-heading" class="text-lg font-bold text-slate-200 mb-2">Pick of the Day</h2>
+            <p class="text-slate-400 text-sm mb-3">Picks today's single top-ranked stock (by NNS Score) from the current watchlist/indicators/fundamentals, then emails everyone on the recipient list -- never the same stock again within 30 days unless the recommendation genuinely changes, so this can send nothing some days.</p>
             <form method="POST" action="{{ url_for('stocks_suggestions_send_daily_email') }}"
-                  data-job-form data-job-name="suggestion_email" data-job-label="Generate and send today's email">
+                  data-job-form data-job-name="suggestion_email" data-job-label="Generate and send Pick of the Day">
                 <button type="submit" class="stocks-btn py-3 px-6 rounded-2xl font-bold transition hover:opacity-90">
-                    Generate and send today's email
+                    Generate and send Pick of the Day
                 </button>
             </form>
         </section>
@@ -158,6 +158,9 @@
         <div class="bg-slate-800 rounded-2xl p-6 border border-sky-500/20">
             <p class="mt-4">
                 <a href="{{ url_for('stocks_watchlist') }}" class="text-sky-400 hover:text-sky-300 underline">View watchlist</a>
+            </p>
+            <p class="mt-2">
+                <a href="{{ url_for('stocks_universe_list') }}" class="text-sky-400 hover:text-sky-300 underline">Browse all companies</a>
             </p>
             {% if role == 'super_admin' %}
             <p class="mt-2">

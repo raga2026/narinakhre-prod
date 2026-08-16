@@ -31,7 +31,14 @@ IST = timezone(timedelta(hours=5, minutes=30))
 #   shortlist_refresh      23:45 UTC = 05:15 IST -> expect done by 06:00 IST
 #                          (fast DB-only job, no scraping -- runs first, so
 #                          stock_watchlist is current before price_sync and
-#                          indicator_calc read it; before market open 09:15 IST)
+#                          indicator_calc read it; before market open 09:15 IST.
+#                          Also runs a SECOND time at 06:00 UTC = 11:30 IST,
+#                          just after fundamentals_rotation below finishes, to
+#                          pick up that day's freshly-scraped fundamentals
+#                          same-day rather than waiting for tomorrow's early
+#                          run -- only the early run above is alerted on here,
+#                          since that's the one the market-open pipeline
+#                          actually depends on.)
 #   price_sync             00:30 UTC = 06:00 IST -> expect done by 07:00 IST
 #   indicator_calc         01:15 UTC = 06:45 IST -> expect done by 08:00 IST
 #                          (runs after price_sync, needs that day's prices)
@@ -45,11 +52,18 @@ IST = timezone(timedelta(hours=5, minutes=30))
 #                          alerting task -- added stocks-market-cap-filter.yml
 #                          alongside it so there's actually something to
 #                          check against)
+#   subscription_reminders 04:00 UTC = 09:30 IST -> expect done by 10:30 IST
+#                          (billing-related, not price/market-data-related --
+#                          runs every day including weekends/holidays, unlike
+#                          suggestion_email above which skips non-trading days;
+#                          see utils/trading_calendar.py and
+#                          stocks-subscription-reminders.yml)
 JOB_EXPECTATIONS = {
     'shortlist_refresh': {'expected_by_ist_hour': 6, 'label': '6 AM IST'},
     'price_sync': {'expected_by_ist_hour': 7, 'label': '7 AM IST'},
     'indicator_calc': {'expected_by_ist_hour': 8, 'label': '8 AM IST'},
     'suggestion_email': {'expected_by_ist_hour': 9, 'label': '9 AM IST'},
+    'subscription_reminders': {'expected_by_ist_hour': 11, 'label': '11 AM IST'},
     'fundamentals_rotation': {'expected_by_ist_hour': 12, 'label': '12 PM IST'},
     'market_cap_filter': {'expected_by_ist_hour': 13, 'label': '1 PM IST'},
 }

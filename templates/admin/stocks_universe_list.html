@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>All Companies - Nari Nakhre Stocks</title>
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+    <style>
+        body { background: #0f172a; color: #f8fafc; }
+        .stocks-accent { color: #0ea5e9; }
+        table { border-collapse: collapse; width: 100%; }
+        th, td { text-align: left; padding: 0.6rem 0.9rem; border-bottom: 1px solid rgba(14, 165, 233, 0.15); }
+        th { color: #7dd3fc; font-weight: 600; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.03em; }
+        tbody tr:hover { background: rgba(14, 165, 233, 0.06); }
+        .badge { display:inline-flex; align-items:center; padding:3px 11px; border-radius:999px; font-size:0.72rem; font-weight:700; white-space: nowrap; }
+        .badge-golden_cross    { background:#dcfce7; color:#15803d; }
+        .badge-death_cross     { background:#fee2e2; color:#b91c1c; }
+        .badge-no_clear_trend  { background:#e2e8f0; color:#475569; }
+        .search-input { background:#0f172a; border:1px solid rgba(14,165,233,0.3); color:#f8fafc; border-radius:0.75rem; padding:0.6rem 1rem; width:100%; max-width: 24rem; }
+        .page-link { padding: 6px 14px; border-radius: 999px; font-size: 0.85rem; font-weight: 600; border: 1px solid rgba(14,165,233,0.3); color: #7dd3fc; }
+        .page-link[aria-disabled="true"] { opacity: 0.4; pointer-events: none; }
+    </style>
+</head>
+<body class="min-h-screen p-8">
+    <div class="max-w-5xl mx-auto">
+        <div class="flex items-center justify-between mb-6">
+            <div>
+                <h1 class="text-2xl font-extrabold stocks-accent font-serif">All Companies</h1>
+                <p class="text-slate-400 text-sm mt-1">
+                    {{ total }} scrape-eligible compan{{ 'y' if total == 1 else 'ies' }}, A-Z
+                    {% if not can_view_signals %}&middot; golden-cross status and recommendations aren't shown on this view{% endif %}
+                </p>
+            </div>
+            {% if session.stocks_admin_role == 'viewer' %}
+            <a href="{{ url_for('stocks_my_suggestions') }}" class="text-sm text-slate-400 hover:text-sky-400 underline">Back to my suggestions</a>
+            {% else %}
+            <a href="{{ url_for('stocks_admin_dashboard') }}" class="text-sm text-slate-400 hover:text-sky-400 underline">Back to dashboard</a>
+            {% endif %}
+        </div>
+
+        <form method="GET" action="{{ url_for('stocks_universe_list') }}" class="mb-6" role="search">
+            <label for="universe-search" class="text-slate-300 text-sm mb-2 block">Search by company name or symbol</label>
+            <div class="flex gap-2 flex-wrap">
+                <input type="search" id="universe-search" name="q" value="{{ query }}" class="search-input"
+                       placeholder="e.g. Reliance, TCS, INFY">
+                <button type="submit" class="stocks-btn py-2 px-6 rounded-2xl font-bold text-sm" style="background: linear-gradient(90deg, #0891b2 0%, #0ea5e9 100%); color: white;">
+                    Search
+                </button>
+                {% if query %}
+                <a href="{{ url_for('stocks_universe_list') }}" class="text-sm text-slate-400 hover:text-sky-400 underline self-center">Clear</a>
+                {% endif %}
+            </div>
+        </form>
+
+        <div class="bg-slate-800 rounded-2xl p-6 border border-sky-500/20 overflow-x-auto">
+            <table>
+                <caption class="sr-only">All scrape-eligible companies</caption>
+                <thead>
+                    <tr>
+                        <th scope="col">Name</th>
+                        <th scope="col">Symbol</th>
+                        <th scope="col">Exchange</th>
+                        <th scope="col">Price</th>
+                        <th scope="col">P/E</th>
+                        <th scope="col">OPM</th>
+                        <th scope="col">RSI (14)</th>
+                        {% if can_view_signals %}
+                        <th scope="col">Cross</th>
+                        {% endif %}
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for row in rows %}
+                    <tr>
+                        <th scope="row">
+                            <a class="text-slate-100 underline decoration-slate-500 hover:text-sky-400" href="{{ url_for('stocks_universe_detail', universe_id=row.universe_id) }}">{{ row.company_name or row.symbol }}</a>
+                        </th>
+                        <td>{{ row.symbol }}</td>
+                        <td>{{ row.exchange }}</td>
+                        <td>{{ '₹%.2f'|format(row.latest_price) if row.latest_price is not none else '—' }}</td>
+                        <td>{{ '%.2fx'|format(row.pe_ratio) if row.pe_ratio is not none else '—' }}</td>
+                        <td>{{ '%.0f%%'|format(row.opm_pct) if row.opm_pct is not none else '—' }}</td>
+                        <td>{{ row.rsi_14 if row.rsi_14 is not none else '—' }}</td>
+                        {% if can_view_signals %}
+                        <td>
+                            {% if row.cross_status %}
+                                <span class="badge badge-{{ row.cross_status }}">{{ row.cross_status.replace('_', ' ') | title }}</span>
+                            {% else %}—
+                            {% endif %}
+                        </td>
+                        {% endif %}
+                    </tr>
+                    {% else %}
+                    <tr>
+                        <td colspan="8" class="text-slate-400">No companies match "{{ query }}".</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+
+        {% if total_pages > 1 %}
+        <nav aria-label="Pagination" class="flex gap-2 mt-6 items-center flex-wrap">
+            <a class="page-link" {% if page <= 1 %}aria-disabled="true"{% endif %}
+               href="{{ url_for('stocks_universe_list', q=query, page=page-1) }}">&larr; Previous</a>
+            <span class="text-slate-400 text-sm">Page {{ page }} of {{ total_pages }}</span>
+            <a class="page-link" {% if page >= total_pages %}aria-disabled="true"{% endif %}
+               href="{{ url_for('stocks_universe_list', q=query, page=page+1) }}">Next &rarr;</a>
+        </nav>
+        {% endif %}
+    </div>
+</body>
+</html>

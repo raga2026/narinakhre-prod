@@ -5,11 +5,34 @@ used elsewhere in this codebase (e.g. fundamental_screen.py vs stock_shortlist.p
 from datetime import date, timedelta
 
 from utils.price_pattern import compute_suggestion_pricing
+from utils.nns_score import NNS_BRONZE_MIN, compute_nns_score, nns_tier
+from utils.stock_shortlist import _compute_industry_benchmarks
 
-TOP_N_SUGGESTIONS = 3
+# At most this many suggestions go out per day -- "Pick of the Day", not a
+# fixed quota to fill regardless of quality (see score_candidates, which
+# excludes anything that doesn't clear at least NNS_BRONZE_MIN -- a day can
+# still yield zero).
+TOP_N_SUGGESTIONS = 1
 HOLDING_PERIOD_DAYS = 10
 TARGET_MULTIPLIER = 1.05   # +5%, used as the fallback when no chart pattern applies -- see compute_suggestion_pricing
 STOP_LOSS_MULTIPLIER = 0.97  # -3%, same fallback role
+
+# The SAME stock isn't picked again within this many days of its last
+# still-open suggestion, UNLESS the recommendation has genuinely changed
+# since then (see _is_genuine_change) -- otherwise a stock that just
+# keeps ranking #1 for weeks would get re-announced as "Pick of the Day"
+# every single day, which isn't a fresh recommendation, just a repeat.
+SUGGESTION_REPEAT_WINDOW_DAYS = 30
+
+# Thresholds for "genuinely changed" (see _is_genuine_change) -- both are
+# deliberately not tiny: an NNS Score wobbling by 0.2 points day to day
+# from routine data noise, or a target price drifting 1% with the stock's
+# own price, isn't a new call, it's the same call restated. A change in
+# which chart pattern (if any) the price/stop-loss is now based on always
+# counts, regardless of these thresholds, since that's a change in the
+# underlying reasoning, not just a number moving.
+NNS_SCORE_CHANGE_THRESHOLD = 1.0        # points, out of 10
+TARGET_PRICE_CHANGE_THRESHOLD_PCT = 3.0  # %
 
 # How far back to pull daily closes for pattern detection (see
 # utils.price_pattern.detect_head_and_shoulders/detect_rounding_pattern) --
@@ -20,19 +43,6 @@ STOP_LOSS_MULTIPLIER = 0.97  # -3%, same fallback role
 PATTERN_LOOKBACK_DAYS = 900
 
 RSI_MIN, RSI_MAX = 40, 65
-
-# Equal weighting (25% each) across four fundamentals metrics -- the
-# simplest, most transparent scheme absent any specific guidance on
-# relative importance between them. PEG is inverted (lower raw PEG scores
-# higher) since lower PEG is better; the other three are used as-is since
-# higher is better for each. Documented here rather than tuned/hidden so
-# the scoring is inspectable, not a black box.
-SCORE_WEIGHTS = {
-    'peg_ratio': 0.25,
-    'quarterly_profit_growth_pct': 0.25,
-    'opm_pct': 0.25,
-    'roce_pct': 0.25,
-}
 
 STOCK_SUGGESTIONS_TABLE_SQL = [
     '''CREATE TABLE IF NOT EXISTS stock_suggestions (
@@ -78,6 +88,17 @@ STOCK_SUGGESTIONS_ALTER_SQL = [
     # reliably predict timing, so none is stored.
     'ALTER TABLE stock_suggestions ADD COLUMN IF NOT EXISTS pattern_name TEXT',
     'ALTER TABLE stock_suggestions ADD COLUMN IF NOT EXISTS pattern_note TEXT',
+    # nns_tier: golden/silver/bronze from the NNS Score (see
+    # utils/nns_score.py's compute_nns_score/nns_tier) -- separate from
+    # fundamental_tier above, which reflects watchlist MEMBERSHIP
+    # eligibility (classify_fundamental_tier's own golden/silver), not this
+    # suggestion's overall composite ranking. The existing `score` column
+    # (NUMERIC(6,4), plenty of room for 0-10 with one decimal) now holds
+    # the NNS Score itself rather than the older 0-1 four-metric score it
+    # originally stored -- same column, redefined meaning, since a
+    # suggestion only ever needs the one current "the score".
+    "ALTER TABLE stock_suggestions ADD COLUMN IF NOT EXISTS nns_tier TEXT "
+    "CHECK (nns_tier IS NULL OR nns_tier IN ('golden', 'silver', 'bronze'))",
 ]
 
 
@@ -101,52 +122,51 @@ def passes_hard_filters(candidate):
     )
 
 
-def _normalize(values):
-    """Min-max normalize a list of values to [0, 1]. Returns 0.5 for every
-    value when they're all equal (avoids a divide-by-zero, and a field
-    that doesn't vary across the candidate pool shouldn't swing anyone's
-    score either direction)."""
-    lo, hi = min(values), max(values)
-    if hi == lo:
-        return [0.5] * len(values)
-    return [(v - lo) / (hi - lo) for v in values]
+def score_candidates(candidates, previous_snapshots_by_watchlist=None, industry_benchmarks_by_industry=None):
+    """Scores each candidate with its NNS Score (see
+    utils.nns_score.compute_nns_score -- 0-10, one decimal, ten
+    equally-weighted quantified sub-scores). previous_snapshots_by_watchlist
+    ({watchlist_id: previous stock_fundamentals row}) and
+    industry_benchmarks_by_industry ({industry: {'pe_ratio','price_to_book'}})
+    are optional batched lookups a caller with DB access can supply (see
+    generate_daily_suggestions) -- omitted (the common case in a plain unit
+    test), every candidate's holding-trend sub-score is 0 and PE/price-to-book
+    fall back to the flat bands, same as compute_nns_score's own defaults.
 
-
-def score_candidates(candidates):
-    """Scores each candidate 0-1 using SCORE_WEIGHTS over four normalized
-    fundamentals metrics (peg_ratio, quarterly_profit_growth_pct, opm_pct,
-    roce_pct -- all required to be present and numeric on every candidate).
-    Returns [(candidate, score), ...] sorted highest score first. Does NOT
-    apply passes_hard_filters -- callers are expected to filter first (see
-    select_top_suggestions)."""
-    peg_norm = _normalize([c['peg_ratio'] for c in candidates])
-    profit_growth_norm = _normalize([c['quarterly_profit_growth_pct'] for c in candidates])
-    opm_norm = _normalize([c['opm_pct'] for c in candidates])
-    roce_norm = _normalize([c['roce_pct'] for c in candidates])
+    Returns [(candidate, score), ...] sorted highest score first,
+    EXCLUDING anything that doesn't reach at least NNS_BRONZE_MIN --
+    passing the hard filters gets a candidate INTO consideration here, not
+    automatically a suggestion (see passes_hard_filters / nns_tier). Does
+    NOT apply passes_hard_filters itself -- callers are expected to filter
+    first (see select_top_suggestions)."""
+    previous_snapshots_by_watchlist = previous_snapshots_by_watchlist or {}
+    industry_benchmarks_by_industry = industry_benchmarks_by_industry or {}
 
     scored = []
-    for i, candidate in enumerate(candidates):
-        score = (
-            SCORE_WEIGHTS['peg_ratio'] * (1 - peg_norm[i])
-            + SCORE_WEIGHTS['quarterly_profit_growth_pct'] * profit_growth_norm[i]
-            + SCORE_WEIGHTS['opm_pct'] * opm_norm[i]
-            + SCORE_WEIGHTS['roce_pct'] * roce_norm[i]
-        )
-        scored.append((candidate, round(score, 4)))
+    for candidate in candidates:
+        previous = previous_snapshots_by_watchlist.get(candidate.get('watchlist_id'))
+        benchmarks = industry_benchmarks_by_industry.get(candidate.get('industry'))
+        score, _breakdown = compute_nns_score(candidate, previous, benchmarks)
+        if score < NNS_BRONZE_MIN:
+            continue
+        scored.append((candidate, score))
 
     scored.sort(key=lambda pair: pair[1], reverse=True)
     return scored
 
 
-def select_top_suggestions(candidates, top_n=TOP_N_SUGGESTIONS):
-    """Filters candidates to hard-filter-passers, scores them, and returns
-    the top_n as [(candidate, score), ...], highest first. Returns fewer
-    than top_n (even zero) if fewer candidates pass the hard filters --
-    never pads with filter-failing candidates just to reach a count."""
+def select_top_suggestions(candidates, top_n=TOP_N_SUGGESTIONS, previous_snapshots_by_watchlist=None,
+                            industry_benchmarks_by_industry=None):
+    """Filters candidates to hard-filter-passers, scores them (see
+    score_candidates), and returns the top_n as [(candidate, score), ...],
+    highest first. Returns fewer than top_n (even zero) if fewer candidates
+    pass the hard filters or clear the NNS_BRONZE_MIN scoring floor --
+    never pads with filter-failing or below-bronze candidates just to
+    reach a count."""
     eligible = [c for c in candidates if passes_hard_filters(c)]
     if not eligible:
         return []
-    return score_candidates(eligible)[:top_n]
+    return score_candidates(eligible, previous_snapshots_by_watchlist, industry_benchmarks_by_industry)[:top_n]
 
 
 def _build_rationale(candidate):
@@ -199,6 +219,31 @@ def _build_pattern_note(pattern_name, pattern_research):
     )
 
 
+def _is_genuine_change(existing_recent, new_nns_score, new_pricing):
+    """True if today's would-be suggestion for a stock differs meaningfully
+    from the most recent still-open ('pending') one within
+    SUGGESTION_REPEAT_WINDOW_DAYS -- see that constant and the two
+    threshold constants above for what counts. existing_recent is a
+    {'score', 'target_sell_price', 'pattern_name'} row (the columns
+    generate_daily_suggestions itself just wrote last time); new_pricing is
+    this run's compute_suggestion_pricing() result. A None old score/target
+    (a pre-NNS-Score row from before this existed) always counts as
+    changed -- there's nothing meaningful to compare against."""
+    if existing_recent.get('pattern_name') != new_pricing.get('pattern_name'):
+        return True
+
+    old_score = existing_recent.get('score')
+    if old_score is None or abs(new_nns_score - old_score) >= NNS_SCORE_CHANGE_THRESHOLD:
+        return True
+
+    old_target = existing_recent.get('target_sell_price')
+    new_target = new_pricing.get('target_sell_price')
+    if not old_target or new_target is None:
+        return True
+    pct_change = abs(new_target - old_target) / old_target * 100
+    return pct_change >= TARGET_PRICE_CHANGE_THRESHOLD_PCT
+
+
 def _fetch_price_history(db, watchlist_id, lookback_days=PATTERN_LOOKBACK_DAYS):
     """Closing prices, oldest first, for pattern detection (see
     utils.price_pattern.compute_suggestion_pricing) -- capped at
@@ -217,11 +262,14 @@ def _fetch_candidates(db):
     fundamentals_cutoff = (date.today() - timedelta(days=20)).isoformat()
     return db.execute(
         '''SELECT w.id AS watchlist_id, w.symbol, w.exchange, w.fundamental_tier,
+                  u.id AS universe_id, u.industry,
                   i.rsi_14, i.cross_status, i.volume_trend,
-                  f.pe_ratio, f.peg_ratio, f.opm_pct, f.roce_pct,
-                  f.quarterly_profit_growth_pct,
+                  f.pe_ratio, f.peg_ratio, f.opm_pct, f.roce_pct, f.roa_pct,
+                  f.quarterly_profit_growth_pct, f.quarterly_revenue_growth_pct,
+                  f.price_to_book, f.promoter_holding_pct, f.fii_holding_pct, f.snapshot_date,
                   d.close AS latest_close
            FROM stock_watchlist w
+           LEFT JOIN stock_universe u ON u.symbol = w.symbol AND u.exchange = w.exchange
            JOIN stock_indicators i ON i.watchlist_id = w.id AND i.calc_date = ?
            JOIN stock_fundamentals f ON f.watchlist_id = w.id
                AND f.snapshot_date = (
@@ -235,6 +283,44 @@ def _fetch_candidates(db):
            WHERE w.is_active = 1''',
         (today, fundamentals_cutoff)
     ).fetchall()
+
+
+def _fetch_previous_snapshots(db, candidates):
+    """{watchlist_id: previous stock_fundamentals row} for NNS Score's
+    promoter/FII holding-trend sub-score (see utils.nns_score.compute_nns_score)
+    -- one batched query covering every candidate's universe_id at once,
+    not a query per candidate (same N+1-avoidance reasoning, and the exact
+    same "first snapshot strictly older than the current one" matching
+    logic, as stock_shortlist.py's own previous-snapshot batching -- see
+    that module's docstring for the live incident that pattern was built
+    to fix). This candidate pool is much smaller (already hard-filtered),
+    but there's no reason to reintroduce a per-row query here either.
+    Candidates with no universe_id (LEFT JOIN didn't match) are skipped --
+    nothing to look up, holding_trend just scores 0 for them."""
+    universe_ids = [c['universe_id'] for c in candidates if c.get('universe_id') is not None]
+    if not universe_ids:
+        return {}
+    ids_sql = ','.join(str(int(uid)) for uid in universe_ids)
+    all_snapshots = db.execute(
+        f'''SELECT universe_id, promoter_holding_pct, fii_holding_pct, snapshot_date
+            FROM stock_fundamentals
+            WHERE universe_id IN ({ids_sql})
+            ORDER BY universe_id, snapshot_date DESC'''
+    ).fetchall()
+    snapshots_by_universe = {}
+    for snap in all_snapshots:
+        snapshots_by_universe.setdefault(snap['universe_id'], []).append(snap)
+
+    previous_by_watchlist = {}
+    for candidate in candidates:
+        universe_id = candidate.get('universe_id')
+        if universe_id is None:
+            continue
+        for snap in snapshots_by_universe.get(universe_id, []):
+            if snap['snapshot_date'] < candidate['snapshot_date']:
+                previous_by_watchlist[candidate['watchlist_id']] = snap
+                break
+    return previous_by_watchlist
 
 
 def get_suggestions(db, start_date=None, end_date=None):
@@ -260,7 +346,7 @@ def get_suggestions(db, start_date=None, end_date=None):
                    s.rsi_at_suggestion, s.pe_at_suggestion, s.peg_at_suggestion,
                    s.opm_at_suggestion, s.fundamental_tier,
                    s.pattern_name, s.pattern_note,
-                   s.score, s.rationale, s.status
+                   s.score AS nns_score, s.nns_tier, s.rationale, s.status
             FROM stock_suggestions s
             JOIN stock_watchlist w ON w.id = s.watchlist_id
             {where_clause}
@@ -272,14 +358,20 @@ def get_suggestions(db, start_date=None, end_date=None):
 def generate_daily_suggestions(db):
     """Builds the candidate pool (active watchlist joined to today's
     indicators and each symbol's latest fundamentals snapshot within 20
-    days), applies the hard filters and scoring (see select_top_suggestions),
-    and inserts a stock_suggestions row for each of the top TOP_N_SUGGESTIONS
-    -- skipping (not backfilling from the next-best candidate) any symbol
-    that already has an open (status='pending') suggestion from within the
-    last HOLDING_PERIOD_DAYS. That means a symbol being skipped here can
-    result in fewer than TOP_N_SUGGESTIONS new suggestions on a given day,
-    by design -- this is meant to avoid re-suggesting a stock that's
-    already an active pending call.
+    days), applies the hard filters and NNS Score ranking (see
+    utils.nns_score.compute_nns_score), and works down that ranked list
+    looking for the single "Pick of the Day" (TOP_N_SUGGESTIONS -- see its
+    definition) to insert as a stock_suggestions row.
+
+    A candidate is SKIPPED, falling through to the next-ranked one, if it
+    already has an open (status='pending') suggestion from within the last
+    SUGGESTION_REPEAT_WINDOW_DAYS (30) that hasn't genuinely changed since
+    (see _is_genuine_change) -- the same stock topping the rankings for
+    weeks straight shouldn't get re-announced as a "fresh" pick every day.
+    A day can still end up with zero picks if every eligible candidate is
+    on cooldown with nothing new to say, or none clear NNS_BRONZE_MIN at
+    all -- this is meant to keep sends to only genuinely fresh, good picks,
+    never a forced daily quota.
 
     buy/target/stop-loss come from compute_suggestion_pricing()
     (utils/price_pattern.py), which prefers a confirmed chart pattern
@@ -287,52 +379,60 @@ def generate_daily_suggestions(db):
     PATTERN_LOOKBACK_DAYS of this stock's own price history, falling back
     to the flat TARGET_MULTIPLIER/STOP_LOSS_MULTIPLIER percentages when no
     pattern applies. holding_period_days stays the flat HOLDING_PERIOD_DAYS
-    default in EVERY row regardless (it's only ever used internally, for
-    the open-suggestion dedup cutoff above) -- when a pattern was used,
-    pattern_name/pattern_note are set instead, and it's pattern_note (not
-    holding_period_days) that the email/viewer pages show for those, since
-    chart-pattern shape doesn't reliably predict timing the way a fixed
-    number of days would misleadingly imply."""
+    default in EVERY row regardless (it's only ever used as a fallback
+    display value) -- when a pattern was used, pattern_name/pattern_note
+    are set instead, and it's pattern_note (not holding_period_days) that
+    the email/viewer pages show for those, since chart-pattern shape
+    doesn't reliably predict timing the way a fixed number of days would
+    misleadingly imply."""
     candidates = _fetch_candidates(db)
-    top = select_top_suggestions(candidates, top_n=TOP_N_SUGGESTIONS)
+    previous_snapshots_by_watchlist = _fetch_previous_snapshots(db, candidates)
+    industry_benchmarks_by_industry = _compute_industry_benchmarks(candidates)
+    eligible = [c for c in candidates if passes_hard_filters(c)]
+    ranked = score_candidates(eligible, previous_snapshots_by_watchlist, industry_benchmarks_by_industry)
 
     today = date.today().isoformat()
-    open_suggestion_cutoff = (date.today() - timedelta(days=HOLDING_PERIOD_DAYS)).isoformat()
+    repeat_window_cutoff = (date.today() - timedelta(days=SUGGESTION_REPEAT_WINDOW_DAYS)).isoformat()
 
     created = []
     skipped_duplicates = []
 
-    for candidate, score in top:
-        watchlist_id = candidate['watchlist_id']
+    for candidate, nns_score in ranked:
+        if len(created) >= TOP_N_SUGGESTIONS:
+            break
 
-        existing_open = db.execute(
-            '''SELECT id FROM stock_suggestions
-               WHERE watchlist_id=? AND status='pending' AND suggestion_date >= ?
-               LIMIT 1''',
-            (watchlist_id, open_suggestion_cutoff)
-        ).fetchone()
-        if existing_open:
-            skipped_duplicates.append(candidate['symbol'])
-            continue
+        watchlist_id = candidate['watchlist_id']
 
         price_history = _fetch_price_history(db, watchlist_id)
         pricing = compute_suggestion_pricing(
             price_history, candidate['latest_close'], TARGET_MULTIPLIER, STOP_LOSS_MULTIPLIER
         )
+
+        existing_recent = db.execute(
+            '''SELECT score, target_sell_price, pattern_name FROM stock_suggestions
+               WHERE watchlist_id=? AND status='pending' AND suggestion_date >= ?
+               ORDER BY suggestion_date DESC LIMIT 1''',
+            (watchlist_id, repeat_window_cutoff)
+        ).fetchone()
+        if existing_recent and not _is_genuine_change(existing_recent, nns_score, pricing):
+            skipped_duplicates.append(candidate['symbol'])
+            continue
+
         buy_price = pricing['buy_price']
         target_sell_price = pricing['target_sell_price']
         stop_loss_price = pricing['stop_loss_price']
         pattern_name = pricing['pattern_name']
         pattern_note = _build_pattern_note(pattern_name, pricing['pattern_research'])
         rationale = _build_rationale(candidate)
+        tier = nns_tier(nns_score)
 
         db.execute(
             '''INSERT INTO stock_suggestions
                    (watchlist_id, suggestion_date, buy_price, target_sell_price,
                     stop_loss_price, holding_period_days, rsi_at_suggestion,
                     pe_at_suggestion, peg_at_suggestion, opm_at_suggestion,
-                    fundamental_tier, pattern_name, pattern_note, score, rationale, status)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')
+                    fundamental_tier, pattern_name, pattern_note, score, nns_tier, rationale, status)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')
                ON CONFLICT (watchlist_id, suggestion_date) DO UPDATE SET
                    buy_price = EXCLUDED.buy_price,
                    target_sell_price = EXCLUDED.target_sell_price,
@@ -345,16 +445,17 @@ def generate_daily_suggestions(db):
                    pattern_name = EXCLUDED.pattern_name,
                    pattern_note = EXCLUDED.pattern_note,
                    score = EXCLUDED.score,
+                   nns_tier = EXCLUDED.nns_tier,
                    rationale = EXCLUDED.rationale''',
             (watchlist_id, today, buy_price, target_sell_price, stop_loss_price,
              HOLDING_PERIOD_DAYS, candidate['rsi_14'], candidate['pe_ratio'],
              candidate['peg_ratio'], candidate['opm_pct'], candidate.get('fundamental_tier'),
-             pattern_name, pattern_note, score, rationale)
+             pattern_name, pattern_note, nns_score, tier, rationale)
         )
         db.commit()
         created.append({
-            'symbol': candidate['symbol'], 'buy_price': buy_price, 'score': score,
-            'pattern_name': pattern_name,
+            'symbol': candidate['symbol'], 'buy_price': buy_price, 'nns_score': nns_score,
+            'nns_tier': tier, 'pattern_name': pattern_name,
         })
 
     return {

@@ -10,6 +10,7 @@ from utils.stock_auth import (
     stocks_login_required,
     stocks_role_required,
     stocks_watchlist_access_required,
+    toggle_viewer_pro,
 )
 
 
@@ -41,12 +42,13 @@ class FakeViewerDB:
             matches = [r for r in self.rows if r['username'] == username]
             return FakeCursor(matches[:1])
 
-        if normalized.startswith('INSERT INTO stocks_admin_users (username, password_hash, role, name, created_by, can_view_watchlist, must_change_password)'):
+        if normalized.startswith('INSERT INTO stocks_admin_users (username, password_hash, role, name, created_by, can_view_watchlist, must_change_password, is_pro)'):
             username, password_hash, name, created_by, can_view_watchlist = params
             self.rows.append({
                 'id': self._next_id, 'username': username, 'password_hash': password_hash,
                 'role': 'viewer', 'name': name, 'created_by': created_by,
                 'is_active': 1, 'can_view_watchlist': can_view_watchlist, 'must_change_password': 1,
+                'is_pro': 1, 'subscription_status': 'none', 'subscription_current_period_end': None,
                 'created_at': '2026-08-17',
             })
             self._next_id += 1
@@ -57,10 +59,16 @@ class FakeViewerDB:
             matches = [r for r in self.rows if r['username'] == username]
             return FakeCursor(matches[:1])
 
-        if normalized.startswith("SELECT id, username, name, is_active, can_view_watchlist, must_change_password, created_at FROM stocks_admin_users WHERE role='viewer'"):
+        if normalized.startswith("SELECT id, username, name, is_active, can_view_watchlist, must_change_password, is_pro, "
+                                  "subscription_status, subscription_current_period_end, created_at FROM stocks_admin_users WHERE role='viewer'"):
             matches = [r for r in self.rows if r['role'] == 'viewer']
             matches.sort(key=lambda r: r['created_at'], reverse=True)
             return FakeCursor(matches)
+
+        if normalized.startswith('SELECT id, role, is_pro FROM stocks_admin_users WHERE id=?'):
+            admin_id, = params
+            matches = [r for r in self.rows if r['id'] == admin_id]
+            return FakeCursor(matches[:1])
 
         if normalized.startswith('SELECT id, role FROM stocks_admin_users WHERE id=?'):
             admin_id, = params
@@ -78,6 +86,13 @@ class FakeViewerDB:
                 if r['id'] == admin_id:
                     r['password_hash'] = password_hash
                     r['must_change_password'] = 0
+            return FakeCursor([])
+
+        if normalized.startswith('UPDATE stocks_admin_users SET is_pro=?, updated_at=NOW() WHERE id=?'):
+            new_status, admin_id = params
+            for r in self.rows:
+                if r['id'] == admin_id:
+                    r['is_pro'] = new_status
             return FakeCursor([])
 
         raise AssertionError(f'Unexpected SQL in test: {sql}')
@@ -122,6 +137,42 @@ def test_list_viewers_includes_can_view_watchlist():
 
     viewers = {v['username']: v['can_view_watchlist'] for v in list_viewers(db)}
     assert viewers == {'a@example.com': 1, 'b@example.com': 0}
+
+
+def test_create_viewer_account_is_pro_by_default():
+    # Manually-added viewers get full free access -- only self-serve/Google
+    # signups (utils/stocks_subscription.create_pending_subscriber,
+    # utils/stock_auth.create_pending_google_subscriber) start as not-pro.
+    db = FakeViewerDB()
+    row, _, _ = create_viewer_account(db, 'a@example.com', 'A', created_by_id=1)
+    assert db.rows[0]['is_pro'] == 1
+
+
+def test_toggle_viewer_pro_flips_the_flag():
+    db = FakeViewerDB()
+    create_viewer_account(db, 'a@example.com', 'A', created_by_id=1)
+    admin_id = db.rows[0]['id']
+
+    assert toggle_viewer_pro(db, admin_id) is True
+    assert db.rows[0]['is_pro'] == 0
+
+    assert toggle_viewer_pro(db, admin_id) is True
+    assert db.rows[0]['is_pro'] == 1
+
+
+def test_toggle_viewer_pro_returns_false_for_nonexistent_id():
+    db = FakeViewerDB()
+    assert toggle_viewer_pro(db, 999) is False
+
+
+def test_toggle_viewer_pro_never_touches_a_non_viewer_role():
+    db = FakeViewerDB(rows=[{
+        'id': 1, 'username': 'boss', 'password_hash': 'x', 'role': 'super_admin',
+        'name': None, 'created_by': None, 'is_active': 1, 'can_view_watchlist': 0,
+        'is_pro': 0, 'created_at': '2026-01-01',
+    }])
+    assert toggle_viewer_pro(db, 1) is False
+    assert db.rows[0]['is_pro'] == 0
 
 
 def test_delete_viewer_account_removes_the_row():

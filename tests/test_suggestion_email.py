@@ -46,7 +46,7 @@ def test_no_suggestions_today_still_sends_an_email_not_nothing():
     mock_send.assert_called_once()
     kwargs = mock_send.call_args.kwargs
     assert kwargs['to_email'] == 'friend@example.com'
-    assert 'no suggestions' in kwargs['subject'].lower()
+    assert 'no pick of the day' in kwargs['subject'].lower()
     assert DISCLAIMER in kwargs['textbody']
     assert DISCLAIMER in kwargs['htmlbody']
 
@@ -83,12 +83,13 @@ def test_email_sent_to_every_active_recipient_and_includes_disclaimer():
     assert summary['sent'] == 2
 
 
-def test_golden_suggestion_shows_golden_label_without_pe_or_opm():
+def test_golden_nns_suggestion_shows_score_and_tier_without_pe_or_opm():
     db = FakeEmailDB(
         suggestion_rows=[
             {'symbol': 'GLD', 'exchange': 'NSE', 'buy_price': 100.0, 'target_sell_price': 105.0,
              'stop_loss_price': 97.0, 'holding_period_days': 10, 'rationale': 'Golden cross with confirming volume',
-             'fundamental_tier': 'golden', 'pe_at_suggestion': 20.0, 'opm_at_suggestion': 30.0},
+             'fundamental_tier': 'golden', 'pe_at_suggestion': 20.0, 'opm_at_suggestion': 30.0,
+             'nns_score': 8.7, 'nns_tier': 'golden'},
         ],
         recipient_rows=[{'email': 'a@example.com', 'name': 'A'}],
     )
@@ -98,20 +99,21 @@ def test_golden_suggestion_shows_golden_label_without_pe_or_opm():
 
     textbody = mock_send.call_args.kwargs['textbody']
     htmlbody = mock_send.call_args.kwargs['htmlbody']
-    assert 'GLD (NSE) — Golden:' in textbody
-    assert '<td>Golden</td>' in htmlbody
-    # Golden suggestions don't need their PE/OPM called out -- that's what
-    # distinguishes them from silver ones.
+    assert 'GLD (NSE) — NNS Score Golden 8.7:' in textbody
+    assert '<td>Golden 8.7</td>' in htmlbody
+    # Golden (fundamental_tier) suggestions don't need PE/OPM called out --
+    # that's specifically what distinguishes a silver watchlist pick.
     assert 'PE 20' not in textbody
     assert 'OPM 30' not in textbody
 
 
-def test_silver_suggestion_shows_silver_label_with_pe_and_opm_values():
+def test_silver_nns_suggestion_shows_fundamentals_note_with_pe_and_opm_values():
     db = FakeEmailDB(
         suggestion_rows=[
             {'symbol': 'SLV', 'exchange': 'NSE', 'buy_price': 50.0, 'target_sell_price': 52.5,
              'stop_loss_price': 48.5, 'holding_period_days': 10, 'rationale': 'Golden cross with confirming volume',
-             'fundamental_tier': 'silver', 'pe_at_suggestion': 32.1, 'opm_at_suggestion': 18.0},
+             'fundamental_tier': 'silver', 'pe_at_suggestion': 32.1, 'opm_at_suggestion': 18.0,
+             'nns_score': 6.4, 'nns_tier': 'silver'},
         ],
         recipient_rows=[{'email': 'a@example.com', 'name': 'A'}],
     )
@@ -121,13 +123,14 @@ def test_silver_suggestion_shows_silver_label_with_pe_and_opm_values():
 
     textbody = mock_send.call_args.kwargs['textbody']
     htmlbody = mock_send.call_args.kwargs['htmlbody']
-    assert 'SLV (NSE) — Silver (PE 32.10, OPM 18%):' in textbody
-    assert 'Silver (PE 32.10, OPM 18%)' in htmlbody
+    assert 'SLV (NSE) — NNS Score Silver 6.4 (watchlisted on the silver criteria: PE 32.10, OPM 18%):' in textbody
+    assert 'watchlisted on the silver criteria: PE 32.10, OPM 18%' in htmlbody
 
 
-def test_suggestion_predating_tier_column_shows_no_tier_label():
-    # An old suggestion row from before fundamental_tier existed -- no key
-    # at all, not just None. Must not crash, and shows no tier text.
+def test_suggestion_predating_nns_score_shows_a_placeholder_not_a_crash():
+    # An old suggestion row from before the NNS Score columns existed -- no
+    # keys at all, not just None. Must not crash, and shows a plain
+    # placeholder instead of fabricating a score.
     db = FakeEmailDB(
         suggestion_rows=[
             {'symbol': 'OLD', 'exchange': 'NSE', 'buy_price': 10.0, 'target_sell_price': 10.5,
@@ -140,7 +143,7 @@ def test_suggestion_predating_tier_column_shows_no_tier_label():
         send_daily_suggestions_email(db)
 
     textbody = mock_send.call_args.kwargs['textbody']
-    assert 'OLD (NSE):' in textbody  # no " — ..." tier suffix at all
+    assert 'OLD (NSE) — NNS Score —:' in textbody
 
 
 def test_pattern_based_suggestion_shows_pattern_note_instead_of_hold_days():

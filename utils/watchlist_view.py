@@ -5,6 +5,25 @@ in this codebase (e.g. fundamental_screen.py vs stock_shortlist.py)."""
 from utils.fundamental_screen import get_metric_note
 from utils.suggestion_engine import passes_hard_filters
 
+# Fields that reveal the buy-signal layer (golden/death cross, and
+# anything derived from it) -- stripped by redact_recommendation_signals
+# for viewers without can_view_watchlist permission on /stocks/universe and
+# /stocks/universe/<id>, which (unlike /stocks/watchlist) every logged-in
+# Stocks user can browse. volume_trend is deliberately NOT included here --
+# it's raw data, not itself "the golden cross" or "the recommendation", so
+# it stays visible.
+_SIGNAL_FIELDS = ('cross_status', 'is_recommended')
+
+
+def redact_recommendation_signals(rows, can_view_signals):
+    """Strips _SIGNAL_FIELDS from each row when can_view_signals is False
+    -- returns rows unchanged (same objects, not even copied) when True, so
+    callers that already have full permission pay no extra cost. Returns a
+    new list of new dicts when redacting, never mutates the input rows."""
+    if can_view_signals:
+        return rows
+    return [{k: v for k, v in dict(row).items() if k not in _SIGNAL_FIELDS} for row in rows]
+
 
 def enrich_and_sort_watchlist_rows(rows, cross_filter=None):
     """Applies the golden-cross-only filter (cross_filter == 'golden'),
