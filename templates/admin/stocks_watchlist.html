@@ -33,8 +33,13 @@
             <div>
                 <h1 class="text-2xl font-extrabold stocks-accent font-serif">Watchlist</h1>
                 <p class="text-slate-400 text-sm mt-1">
-                    {{ rows | length }} compan{{ 'y' if rows | length == 1 else 'ies' }} shown
-                    {% if cross_filter == 'golden' %}&middot; golden cross only{% endif %}
+                    {% if cross_filter == 'golden_not_qualified' %}
+                        {{ golden_not_qualified | length }} compan{{ 'y' if golden_not_qualified | length == 1 else 'ies' }} shown
+                        &middot; golden cross, not fundamentally qualified
+                    {% else %}
+                        {{ rows | length }} compan{{ 'y' if rows | length == 1 else 'ies' }} shown
+                        {% if cross_filter == 'golden' %}&middot; golden cross only{% endif %}
+                    {% endif %}
                 </p>
             </div>
             {% if session.stocks_admin_role == 'viewer' %}
@@ -54,15 +59,64 @@
         {% endif %}
         {% endwith %}
 
-        <nav aria-label="Filter watchlist by cross-over status" class="flex gap-2 mb-6">
+        <nav aria-label="Filter watchlist by cross-over status" class="flex gap-2 mb-6 flex-wrap">
             <a href="{{ url_for('stocks_watchlist') }}"
                class="filter-pill {{ 'active' if cross_filter == 'all' }}"
                {% if cross_filter == 'all' %}aria-current="page"{% endif %}>All companies</a>
             <a href="{{ url_for('stocks_watchlist', filter='golden') }}"
                class="filter-pill {{ 'active' if cross_filter == 'golden' }}"
                {% if cross_filter == 'golden' %}aria-current="page"{% endif %}>Golden cross only</a>
+            {% if session.stocks_admin_role in ('super_admin', 'child_admin') %}
+            <a href="{{ url_for('stocks_watchlist', filter='golden_not_qualified') }}"
+               class="filter-pill {{ 'active' if cross_filter == 'golden_not_qualified' }}"
+               {% if cross_filter == 'golden_not_qualified' %}aria-current="page"{% endif %}>Golden cross, not yet qualified</a>
+            {% endif %}
         </nav>
 
+        {% if cross_filter == 'golden_not_qualified' %}
+        <div class="bg-slate-800 rounded-2xl p-6 border border-sky-500/20 overflow-x-auto">
+            <table>
+                <caption class="text-left text-slate-400 text-sm mb-3">
+                    Companies across the full scrape-eligible universe currently showing a golden cross technically,
+                    but excluded from the watchlist fundamentally -- with the specific reasons why. Run "Sync (universe)"
+                    and "Calculate indicators (universe)" on the dashboard to keep this current.
+                </caption>
+                <thead>
+                    <tr>
+                        <th scope="col">Company</th>
+                        <th scope="col">RSI (14)</th>
+                        <th scope="col">MA 5 / 21 / 50 / 200</th>
+                        <th scope="col">Why it doesn't qualify</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for c in golden_not_qualified %}
+                    <tr>
+                        <th scope="row">{{ c.company_name or c.symbol }} <span class="metric-note">{{ c.symbol }} &middot; {{ c.exchange }}</span></th>
+                        <td>{{ c.rsi_14 if c.rsi_14 is not none else '—' }}</td>
+                        <td>
+                            {{ c.ma_5 if c.ma_5 is not none else '—' }} /
+                            {{ c.ma_21 if c.ma_21 is not none else '—' }} /
+                            {{ c.ma_50 if c.ma_50 is not none else '—' }} /
+                            {{ c.ma_200 if c.ma_200 is not none else '—' }}
+                        </td>
+                        <td>
+                            {% if c.failed_criteria %}
+                                {{ c.failed_criteria | join(', ') }}
+                            {% else %}
+                                Fundamentals data is stale or wasn't screened this run -- may actually qualify once re-screened.
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% else %}
+                    <tr>
+                        <td colspan="4" class="text-slate-400">No golden-cross companies outside the watchlist right now.</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
         <div class="bg-slate-800 rounded-2xl p-6 border border-sky-500/20 overflow-x-auto">
             {% if session.stocks_admin_role == 'viewer' %}
             {# Simplified table: name, price, cross-over, recommended -- sorted recommended-first (see the route). #}
@@ -84,7 +138,7 @@
                         <th scope="row">
                             <a class="company-link" href="{{ url_for('stocks_company_detail', watchlist_id=row.id) }}">{{ row.name or row.symbol }}</a>
                         </th>
-                        <td>{{ row.latest_price if row.latest_price is not none else '—' }}</td>
+                        <td>{{ '₹%.2f'|format(row.latest_price) if row.latest_price is not none else '—' }}</td>
                         <td>
                             {% if row.cross_status %}
                                 <span class="badge badge-{{ row.cross_status }}">{{ row.cross_status.replace('_', ' ') | title }}</span>
@@ -139,17 +193,17 @@
                         <td>{{ row.symbol }}</td>
                         <td>{{ row.exchange }}</td>
                         <td>{{ 'Active' if row.is_active else 'Inactive' }}</td>
-                        <td>{{ row.latest_price if row.latest_price is not none else '—' }}</td>
+                        <td>{{ '₹%.2f'|format(row.latest_price) if row.latest_price is not none else '—' }}</td>
                         <td>
-                            {{ row.pe_ratio if row.pe_ratio is not none else '—' }}
+                            {{ '%.2fx'|format(row.pe_ratio) if row.pe_ratio is not none else '—' }}
                             {% if row.pe_note %}<span class="metric-note">{{ row.pe_note }}</span>{% endif %}
                         </td>
-                        <td>{{ row.peg_ratio if row.peg_ratio is not none else '—' }}</td>
+                        <td>{{ '%.2fx'|format(row.peg_ratio) if row.peg_ratio is not none else '—' }}</td>
                         <td>
-                            {{ row.opm_pct if row.opm_pct is not none else '—' }}
+                            {{ '%.2f%%'|format(row.opm_pct) if row.opm_pct is not none else '—' }}
                             {% if row.opm_note %}<span class="metric-note">{{ row.opm_note }}</span>{% endif %}
                         </td>
-                        <td>{{ row.eps if row.eps is not none else '—' }}</td>
+                        <td>{{ '₹%.2f'|format(row.eps) if row.eps is not none else '—' }}</td>
                         <td>{{ row.snapshot_date or '—' }}</td>
                         <td>{{ row.rsi_14 if row.rsi_14 is not none else '—' }}</td>
                         <td>
@@ -176,6 +230,7 @@
             </table>
             {% endif %}
         </div>
+        {% endif %}
     </div>
 </body>
 </html>

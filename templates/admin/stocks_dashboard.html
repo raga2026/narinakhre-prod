@@ -78,6 +78,30 @@
             </form>
         </section>
 
+        <section class="bg-slate-800 rounded-2xl p-6 border border-sky-500/20 mb-6" aria-labelledby="universe-scan-heading">
+            <h2 id="universe-scan-heading" class="text-lg font-bold text-slate-200 mb-2">Universe-wide scan</h2>
+            <p class="text-slate-400 text-sm mb-3">
+                Pulls daily prices for all ~1,067 scrape-eligible companies (not just the watchlist) -- takes several minutes.
+                Run this before "Calculate indicators (universe)" below.
+            </p>
+            <form method="POST" action="{{ url_for('stocks_sync_universe') }}" class="inline-block mr-3"
+                  data-job-form data-job-name="price_sync_universe" data-job-label="Sync prices (universe)">
+                <button type="submit" class="stocks-btn py-3 px-6 rounded-2xl font-bold transition hover:opacity-90">
+                    Sync prices (universe)
+                </button>
+            </form>
+            <p class="text-slate-400 text-sm mt-4 mb-3">
+                Computes moving averages (5/21/50/200-day), RSI, and cross-over status for every company with universe-wide
+                price data -- this is what powers "Golden cross, not yet qualified" on the watchlist page.
+            </p>
+            <form method="POST" action="{{ url_for('stocks_indicators_calculate_universe') }}" class="inline-block"
+                  data-job-form data-job-name="indicator_calc_universe" data-job-label="Calculate indicators (universe)">
+                <button type="submit" class="stocks-btn py-3 px-6 rounded-2xl font-bold transition hover:opacity-90">
+                    Calculate indicators (universe)
+                </button>
+            </form>
+        </section>
+
         <section class="bg-slate-800 rounded-2xl p-6 border border-sky-500/20 mb-6" aria-labelledby="shortlist-heading">
             <h2 id="shortlist-heading" class="text-lg font-bold text-slate-200 mb-2">Watchlist shortlist</h2>
             <p class="text-slate-400 text-sm mb-3">Re-evaluates every scrape-eligible company's latest fundamentals against the screening criteria and updates the watchlist accordingly. Also runs automatically each morning before market open.</p>

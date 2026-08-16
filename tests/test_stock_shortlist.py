@@ -1,4 +1,4 @@
-from utils.stock_shortlist import SHORTLIST_SOURCE, run_fundamental_shortlist
+from utils.stock_shortlist import SHORTLIST_SOURCE, get_golden_cross_not_qualified, run_fundamental_shortlist
 
 
 class FakeCursor:
@@ -28,10 +28,11 @@ class FakeShortlistDB:
     exact SQL run_fundamental_shortlist() issues, matching the FakeDB
     pattern used elsewhere in this suite (e.g. test_market_cap_filter.py)."""
 
-    def __init__(self, universe_rows, fundamentals_rows, watchlist_rows):
+    def __init__(self, universe_rows, fundamentals_rows, watchlist_rows, kite_map=None):
         self.universe = universe_rows
         self.fundamentals = fundamentals_rows
         self.watchlist = {(w['symbol'], w['exchange']): w for w in watchlist_rows}
+        self.kite_map = kite_map or {}  # (symbol, exchange) -> instrument_token
 
     def execute(self, sql, params=None):
         params = params or ()
@@ -44,7 +45,7 @@ class FakeShortlistDB:
                     w['is_active'] = 0
             return FakeCursor([])
 
-        if normalized.startswith('SELECT u.id AS universe_id, u.symbol, u.exchange, u.company_name'):
+        if normalized.startswith('SELECT u.id AS universe_id, u.symbol, u.exchange, u.company_name, u.isin'):
             (cutoff,) = params
             rows = []
             for u in self.universe:
@@ -58,9 +59,14 @@ class FakeShortlistDB:
                     continue
                 rows.append({
                     'universe_id': u['id'], 'symbol': u['symbol'], 'exchange': u['exchange'],
-                    'company_name': u['company_name'], **latest,
+                    'company_name': u['company_name'], 'isin': u.get('isin'), **latest,
                 })
             return FakeCursor(rows)
+
+        if normalized.startswith('SELECT kite_instrument_token FROM stock_kite_instrument_map'):
+            symbol, exchange = params
+            token = self.kite_map.get((symbol, exchange))
+            return FakeCursor([{'kite_instrument_token': token}] if token else [])
 
         if normalized.startswith('SELECT promoter_holding_pct, fii_holding_pct'):
             universe_id, before_date = params
@@ -206,3 +212,205 @@ def test_opm_below_silver_floor_stays_excluded_not_silver():
     assert summary['failed'] == 1
     assert summary['failed_criteria_counts'] == {'OPM': 1}
     assert ('TOOLOWOPM', 'NSE') not in db.watchlist
+
+
+# --- ISIN-based NSE/BSE dedup ---------------------------------------------
+
+def test_same_company_on_nse_and_bse_only_watchlists_one_listing():
+    # Same ISIN, both qualify -- must not end up watchlisted twice under
+    # two different symbols for what's really one company.
+    universe = [
+        {'id': 1, 'symbol': 'ACME', 'exchange': 'NSE', 'company_name': 'Acme Ltd', 'is_scrape_eligible': True, 'isin': 'INE000000001'},
+        {'id': 2, 'symbol': '500001', 'exchange': 'BSE', 'company_name': 'Acme Limited', 'is_scrape_eligible': True, 'isin': 'INE000000001'},
+    ]
+    fundamentals = [
+        {'universe_id': 1, 'snapshot_date': '2026-08-10', **PASSING_FUNDAMENTALS},
+        {'universe_id': 2, 'snapshot_date': '2026-08-10', **PASSING_FUNDAMENTALS},
+    ]
+    db = FakeShortlistDB(universe, fundamentals, watchlist_rows=[])
+
+    summary = run_fundamental_shortlist(db)
+
+    assert summary['evaluated'] == 2
+    assert summary['golden'] == 2  # both individually qualified fundamentally
+    assert summary['passed'] == 2  # 'passed' tracks fundamental qualification, same as golden+silver
+    assert summary['deduped'] == 1  # ...but only one of those two actually gets watchlisted
+    active_rows = [w for w in db.watchlist.values() if w['is_active'] == 1]
+    assert len(active_rows) == 1
+
+
+def test_dedup_prefers_the_listing_with_a_resolved_kite_token():
+    universe = [
+        {'id': 1, 'symbol': 'ACME', 'exchange': 'NSE', 'company_name': 'Acme Ltd', 'is_scrape_eligible': True, 'isin': 'INE000000001'},
+        {'id': 2, 'symbol': '500001', 'exchange': 'BSE', 'company_name': 'Acme Limited', 'is_scrape_eligible': True, 'isin': 'INE000000001'},
+    ]
+    fundamentals = [
+        {'universe_id': 1, 'snapshot_date': '2026-08-10', **PASSING_FUNDAMENTALS},
+        {'universe_id': 2, 'snapshot_date': '2026-08-10', **PASSING_FUNDAMENTALS},
+    ]
+    # Only the BSE listing has a working Kite price link -- it should win
+    # even though NSE would otherwise be the default tiebreak.
+    db = FakeShortlistDB(universe, fundamentals, watchlist_rows=[], kite_map={('500001', 'BSE'): 999})
+
+    run_fundamental_shortlist(db)
+
+    assert ('500001', 'BSE') in db.watchlist and db.watchlist[('500001', 'BSE')]['is_active'] == 1
+    assert ('ACME', 'NSE') not in db.watchlist
+
+
+def test_dedup_defaults_to_nse_when_neither_or_both_have_a_kite_token():
+    universe = [
+        {'id': 1, 'symbol': 'ACME', 'exchange': 'NSE', 'company_name': 'Acme Ltd', 'is_scrape_eligible': True, 'isin': 'INE000000001'},
+        {'id': 2, 'symbol': '500001', 'exchange': 'BSE', 'company_name': 'Acme Limited', 'is_scrape_eligible': True, 'isin': 'INE000000001'},
+    ]
+    fundamentals = [
+        {'universe_id': 1, 'snapshot_date': '2026-08-10', **PASSING_FUNDAMENTALS},
+        {'universe_id': 2, 'snapshot_date': '2026-08-10', **PASSING_FUNDAMENTALS},
+    ]
+    db = FakeShortlistDB(universe, fundamentals, watchlist_rows=[])  # no kite_map entries at all
+
+    run_fundamental_shortlist(db)
+
+    assert ('ACME', 'NSE') in db.watchlist and db.watchlist[('ACME', 'NSE')]['is_active'] == 1
+    assert ('500001', 'BSE') not in db.watchlist
+
+
+def test_companies_without_an_isin_are_never_grouped_together():
+    # Two genuinely different companies that both happen to have no ISIN
+    # on record must not be treated as duplicates of each other.
+    universe = [
+        {'id': 1, 'symbol': 'ONE', 'exchange': 'NSE', 'company_name': 'One Ltd', 'is_scrape_eligible': True, 'isin': None},
+        {'id': 2, 'symbol': 'TWO', 'exchange': 'NSE', 'company_name': 'Two Ltd', 'is_scrape_eligible': True, 'isin': ''},
+    ]
+    fundamentals = [
+        {'universe_id': 1, 'snapshot_date': '2026-08-10', **PASSING_FUNDAMENTALS},
+        {'universe_id': 2, 'snapshot_date': '2026-08-10', **PASSING_FUNDAMENTALS},
+    ]
+    db = FakeShortlistDB(universe, fundamentals, watchlist_rows=[])
+
+    summary = run_fundamental_shortlist(db)
+
+    assert summary['deduped'] == 0
+    assert summary['passed'] == 2
+    assert ('ONE', 'NSE') in db.watchlist and db.watchlist[('ONE', 'NSE')]['is_active'] == 1
+    assert ('TWO', 'NSE') in db.watchlist and db.watchlist[('TWO', 'NSE')]['is_active'] == 1
+
+
+def test_existing_duplicate_pair_self_heals_on_rerun():
+    # Mirrors the real bug found live: both listings were already active
+    # in the watchlist from a previous (pre-dedup) run. A fresh run must
+    # collapse them down to one, deactivating the loser -- not leave both
+    # active just because they were already there.
+    universe = [
+        {'id': 1, 'symbol': 'ACME', 'exchange': 'NSE', 'company_name': 'Acme Ltd', 'is_scrape_eligible': True, 'isin': 'INE000000001'},
+        {'id': 2, 'symbol': '500001', 'exchange': 'BSE', 'company_name': 'Acme Limited', 'is_scrape_eligible': True, 'isin': 'INE000000001'},
+    ]
+    fundamentals = [
+        {'universe_id': 1, 'snapshot_date': '2026-08-10', **PASSING_FUNDAMENTALS},
+        {'universe_id': 2, 'snapshot_date': '2026-08-10', **PASSING_FUNDAMENTALS},
+    ]
+    watchlist = [
+        {'symbol': 'ACME', 'exchange': 'NSE', 'name': 'Acme Ltd', 'is_active': 1, 'source': SHORTLIST_SOURCE},
+        {'symbol': '500001', 'exchange': 'BSE', 'name': 'Acme Limited', 'is_active': 1, 'source': SHORTLIST_SOURCE},
+    ]
+    db = FakeShortlistDB(universe, fundamentals, watchlist)
+
+    run_fundamental_shortlist(db)
+
+    active = [key for key, w in db.watchlist.items() if w['is_active'] == 1]
+    assert len(active) == 1
+    assert active[0] == ('ACME', 'NSE')  # NSE wins by default (no kite_map set)
+
+
+# --- get_golden_cross_not_qualified ---------------------------------------
+
+class FakeGoldenCrossDB:
+    """Minimal stand-in for app.py's SupabaseDB, just enough to run the
+    exact SQL get_golden_cross_not_qualified() issues."""
+
+    def __init__(self, rows, kite_map=None):
+        self.rows = rows  # pre-joined rows, as if from the real query
+        self.kite_map = kite_map or {}
+
+    def execute(self, sql, params=None):
+        params = params or ()
+        normalized = ' '.join(sql.split())
+
+        if normalized.startswith('SELECT u.id AS universe_id, u.symbol, u.exchange, u.company_name, u.isin, i.cross_status'):
+            return FakeCursor(self.rows)
+
+        if normalized.startswith('SELECT kite_instrument_token FROM stock_kite_instrument_map'):
+            symbol, exchange = params
+            token = self.kite_map.get((symbol, exchange))
+            return FakeCursor([{'kite_instrument_token': token}] if token else [])
+
+        raise AssertionError(f'Unexpected SQL in test: {sql}')
+
+    def commit(self):
+        pass
+
+
+GOLDEN_CROSS_INDICATORS = {'cross_status': 'golden_cross', 'rsi_14': 55, 'ma_5': 101, 'ma_21': 100, 'ma_50': 95, 'ma_200': 90}
+
+
+def test_golden_cross_company_failing_fundamentals_reports_why():
+    row = {
+        'universe_id': 1, 'symbol': 'FAILSFUND', 'exchange': 'NSE', 'company_name': 'Fails Fund Ltd', 'isin': 'INE1',
+        **GOLDEN_CROSS_INDICATORS,
+        **{**PASSING_FUNDAMENTALS, 'roce_pct': -1},  # fails ROCE
+    }
+    db = FakeGoldenCrossDB([row])
+
+    results = get_golden_cross_not_qualified(db)
+
+    assert len(results) == 1
+    assert results[0]['symbol'] == 'FAILSFUND'
+    assert 'ROCE' in results[0]['failed_criteria']
+
+
+def test_golden_cross_company_missing_fundamentals_data_reports_all_as_failed():
+    # LEFT JOINed fundamentals -- a company with no fundamentals snapshot
+    # at all still shows up (it IS golden cross), just with every
+    # fundamental field None/missing.
+    row = {
+        'universe_id': 1, 'symbol': 'NOFUND', 'exchange': 'NSE', 'company_name': 'No Fund Ltd', 'isin': None,
+        **GOLDEN_CROSS_INDICATORS,
+        'pe_ratio': None, 'peg_ratio': None, 'eps': None, 'opm_pct': None, 'roce_pct': None, 'roa_pct': None,
+        'price_to_book': None, 'promoter_holding_pct': None, 'fii_holding_pct': None,
+        'quarterly_profit_growth_pct': None, 'quarterly_revenue_growth_pct': None,
+    }
+    db = FakeGoldenCrossDB([row])
+
+    results = get_golden_cross_not_qualified(db)
+
+    assert len(results) == 1
+    assert len(results[0]['failed_criteria']) > 0
+
+
+def test_golden_cross_dedup_by_isin_keeps_only_one_listing():
+    rows = [
+        {'universe_id': 1, 'symbol': 'ACME', 'exchange': 'NSE', 'company_name': 'Acme Ltd', 'isin': 'INE1',
+         **GOLDEN_CROSS_INDICATORS, **{**PASSING_FUNDAMENTALS, 'roce_pct': -1}},
+        {'universe_id': 2, 'symbol': '500001', 'exchange': 'BSE', 'company_name': 'Acme Limited', 'isin': 'INE1',
+         **GOLDEN_CROSS_INDICATORS, **{**PASSING_FUNDAMENTALS, 'roce_pct': -1}},
+    ]
+    db = FakeGoldenCrossDB(rows)
+
+    results = get_golden_cross_not_qualified(db)
+
+    assert len(results) == 1
+    assert results[0]['symbol'] == 'ACME'  # NSE wins by default, no kite_map set
+
+
+def test_results_sorted_alphabetically_by_company_name():
+    rows = [
+        {'universe_id': 1, 'symbol': 'ZED', 'exchange': 'NSE', 'company_name': 'Zebra Ltd', 'isin': 'INE1',
+         **GOLDEN_CROSS_INDICATORS, **{**PASSING_FUNDAMENTALS, 'roce_pct': -1}},
+        {'universe_id': 2, 'symbol': 'ALP', 'exchange': 'NSE', 'company_name': 'Alpha Ltd', 'isin': 'INE2',
+         **GOLDEN_CROSS_INDICATORS, **{**PASSING_FUNDAMENTALS, 'roce_pct': -1}},
+    ]
+    db = FakeGoldenCrossDB(rows)
+
+    results = get_golden_cross_not_qualified(db)
+
+    assert [r['symbol'] for r in results] == ['ALP', 'ZED']

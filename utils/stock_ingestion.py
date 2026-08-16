@@ -1,3 +1,4 @@
+import time
 from datetime import date, timedelta
 
 from utils.kite_client import KiteClient
@@ -56,12 +57,32 @@ STOCK_WATCHLIST_ALTER_SQL = [
     "CHECK (fundamental_tier IS NULL OR fundamental_tier IN ('golden', 'silver'))",
 ]
 
+# Same watchlist_id/universe_id duality as stock_fundamentals (see
+# utils/fundamentals_ingestion.py's STOCK_FUNDAMENTALS_ALTER_SQL comment for
+# the full reasoning) -- sync_daily_data_universe below covers the full
+# ~1,067-company scrape-eligible stock_universe set so technical indicators
+# (golden cross etc.) can be computed for companies that were never
+# fundamentally shortlisted, not just the ~80 that made stock_watchlist.
+STOCK_DAILY_DATA_ALTER_SQL = [
+    'ALTER TABLE stock_daily_data ALTER COLUMN watchlist_id DROP NOT NULL',
+    'ALTER TABLE stock_daily_data ADD COLUMN IF NOT EXISTS universe_id BIGINT REFERENCES stock_universe(id)',
+    '''CREATE UNIQUE INDEX IF NOT EXISTS stock_daily_data_universe_trade_date_uniq
+       ON stock_daily_data (universe_id, trade_date) WHERE universe_id IS NOT NULL''',
+]
+
+# How many Kite historical-data calls per second sync_daily_data_universe
+# allows itself -- Kite's documented rate limit is roughly 3/sec for this
+# endpoint; the existing watchlist-scoped sync_daily_data never needed
+# this (only ~80 symbols, comfortably under any burst allowance), but a
+# ~1,067-symbol run without pacing would get throttled partway through.
+UNIVERSE_SYNC_DELAY_SECONDS = 0.35
+
 
 def initialize_stock_tables_if_needed(client):
     """Create stock_watchlist / stock_daily_data if they don't exist yet.
     Call once at app startup, same as app.py's initialize_database_if_needed()
     -- idempotent, existing data is never touched."""
-    for sql in STOCK_TABLES_SQL + STOCK_WATCHLIST_ALTER_SQL:
+    for sql in STOCK_TABLES_SQL + STOCK_WATCHLIST_ALTER_SQL + STOCK_DAILY_DATA_ALTER_SQL:
         try:
             client.rpc('execute_sql', {'query': sql}).execute()
         except Exception as e:
@@ -167,6 +188,123 @@ def sync_daily_data(db, kite_client=None):
 
     return {
         'watchlist_count': len(watchlist_rows),
+        'inserted': inserted,
+        'failed': failed,
+        'failures': failures,
+        'zero_candles': zero_candles,
+    }
+
+
+def _upsert_daily_candle(db, trade_date, candle, watchlist_id=None, universe_id=None):
+    """Upserts one stock_daily_data row, keyed by whichever identity
+    applies -- same dual-path reasoning as
+    fundamentals_ingestion._upsert_fundamentals_snapshot: when a company is
+    both watchlisted and in the scrape-eligible universe, the row is keyed
+    by watchlist_id (the original identity) with universe_id also stamped
+    on it, so the same company's price history doesn't fragment across two
+    row identities depending on which sync last touched it. When only
+    universe_id is available, the row is keyed by universe_id instead."""
+    if watchlist_id is None and universe_id is None:
+        raise ValueError('_upsert_daily_candle requires watchlist_id and/or universe_id')
+
+    if watchlist_id is not None:
+        db.execute(
+            '''INSERT INTO stock_daily_data (watchlist_id, universe_id, trade_date, open, high, low, close, volume)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+               ON CONFLICT (watchlist_id, trade_date) DO UPDATE SET
+                   universe_id = EXCLUDED.universe_id,
+                   open = EXCLUDED.open, high = EXCLUDED.high, low = EXCLUDED.low,
+                   close = EXCLUDED.close, volume = EXCLUDED.volume''',
+            (watchlist_id, universe_id, trade_date, candle['open'], candle['high'],
+             candle['low'], candle['close'], candle['volume'])
+        )
+    else:
+        db.execute(
+            '''INSERT INTO stock_daily_data (universe_id, trade_date, open, high, low, close, volume)
+               VALUES (?, ?, ?, ?, ?, ?, ?)
+               ON CONFLICT (universe_id, trade_date) WHERE universe_id IS NOT NULL DO UPDATE SET
+                   open = EXCLUDED.open, high = EXCLUDED.high, low = EXCLUDED.low,
+                   close = EXCLUDED.close, volume = EXCLUDED.volume''',
+            (universe_id, trade_date, candle['open'], candle['high'],
+             candle['low'], candle['close'], candle['volume'])
+        )
+    db.commit()
+
+
+def sync_daily_data_universe(db, kite_client=None, sleep_seconds=UNIVERSE_SYNC_DELAY_SECONDS):
+    """Same job as sync_daily_data, but over the full scrape-eligible
+    stock_universe set (~1,067 companies) instead of just the ~80-company
+    watchlist -- this is what lets technical indicators (golden cross etc.)
+    get computed for a company that hasn't been fundamentally shortlisted
+    yet, see stock_indicators.run_indicator_calculation_universe.
+
+    LEFT JOINed against stock_watchlist so a company that's in both sets
+    keeps one unified stock_daily_data row (see _upsert_daily_candle)
+    rather than fragmenting its price history across two row identities.
+
+    Paced with a short sleep between Kite calls (sleep_seconds) to stay
+    under Kite's historical-data rate limit across ~1,067 sequential
+    requests -- sync_daily_data never needed this at ~80 symbols. Meant to
+    run as a background job (see app.py) given how long a full run takes."""
+    kite_client = kite_client or KiteClient()
+
+    rows = db.execute(
+        '''SELECT u.id AS universe_id, u.symbol, u.exchange, w.id AS watchlist_id
+           FROM stock_universe u
+           LEFT JOIN stock_watchlist w ON w.symbol = u.symbol AND w.exchange = u.exchange AND w.is_active = 1
+           WHERE u.is_scrape_eligible = true'''
+    ).fetchall()
+
+    today = date.today()
+    inserted = 0
+    failed = 0
+    failures = []
+    zero_candles = []
+
+    for i, row in enumerate(rows):
+        universe_id = row['universe_id']
+        watchlist_id = row.get('watchlist_id')
+        symbol = row['symbol']
+        exchange = row['exchange']
+
+        try:
+            latest = db.execute(
+                'SELECT MAX(trade_date) AS last_date FROM stock_daily_data WHERE universe_id=?',
+                (universe_id,)
+            ).fetchone()
+            last_date = _parse_last_date(latest['last_date'] if latest else None)
+
+            from_date = (last_date + timedelta(days=1)) if last_date else (today - timedelta(days=BACKFILL_DAYS))
+            if from_date > today:
+                continue
+
+            instrument_token = get_cached_instrument_token(db, symbol, exchange)
+            candles = kite_client.fetch_daily_candles(
+                symbol, exchange, from_date, today, instrument_token=instrument_token
+            )
+
+            if not candles:
+                zero_candles.append({
+                    'symbol': symbol, 'exchange': exchange,
+                    'from_date': from_date.isoformat(), 'to_date': today.isoformat(),
+                })
+
+            for candle in candles:
+                trade_date = candle['trade_date']
+                trade_date = trade_date.isoformat() if hasattr(trade_date, 'isoformat') else trade_date
+                _upsert_daily_candle(db, trade_date, candle, watchlist_id=watchlist_id, universe_id=universe_id)
+                inserted += 1
+
+        except Exception as exc:
+            failed += 1
+            failures.append({'symbol': symbol, 'exchange': exchange, 'error': str(exc)})
+            print(f'Universe stock sync failed for {exchange}:{symbol}: {exc}')
+
+        if sleep_seconds and i < len(rows) - 1:
+            time.sleep(sleep_seconds)
+
+    return {
+        'universe_count': len(rows),
         'inserted': inserted,
         'failed': failed,
         'failures': failures,

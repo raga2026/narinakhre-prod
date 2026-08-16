@@ -2,7 +2,7 @@
 here -- see utils/stock_indicators.py for how this gets applied over
 stock_daily_data and stored in stock_indicators."""
 
-DEFAULT_MA_WINDOWS = (21, 50, 200)
+DEFAULT_MA_WINDOWS = (5, 21, 50, 200)
 
 
 def calculate_moving_averages(prices, windows=DEFAULT_MA_WINDOWS):

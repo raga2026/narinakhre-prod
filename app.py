@@ -23,7 +23,7 @@ from supabase import create_client, Client as SupabaseClient
 
 from utils.shipping_manager import get_shipping_provider, ShiprocketProvider
 from utils.credential_crypto import encrypt_credentials, decrypt_credentials
-from utils.stock_ingestion import initialize_stock_tables_if_needed, sync_daily_data
+from utils.stock_ingestion import initialize_stock_tables_if_needed, sync_daily_data, sync_daily_data_universe
 from utils.stock_auth import (
     initialize_stocks_auth_if_needed,
     authenticate_stocks_admin,
@@ -75,12 +75,20 @@ from utils.stock_universe import (
     initialize_stock_universe_table_if_needed,
     refresh_market_cap_filter,
 )
-from utils.stock_shortlist import run_fundamental_shortlist
+from utils.stock_shortlist import run_fundamental_shortlist, get_golden_cross_not_qualified
 from utils.fundamental_screen import get_metric_note
 from utils.watchlist_view import enrich_and_sort_watchlist_rows
+from utils.price_pattern import (
+    compute_day_change,
+    compute_52_week_range,
+    trend_note,
+    build_price_sparkline_svg,
+    backtest_rsi_zone_outcomes,
+)
 from utils.stock_indicators import (
     initialize_stock_indicators_table_if_needed,
     run_indicator_calculation,
+    run_indicator_calculation_universe,
 )
 from utils.stock_alerting import (
     initialize_stock_alerting_tables_if_needed,
@@ -6800,6 +6808,35 @@ def admin_stocks_sync():
     return _dispatch_stocks_job(db, is_cron, 'price_sync', _job)
 
 
+@app.route('/stocks/sync/universe', methods=['POST'])
+def stocks_sync_universe():
+    """Same as /stocks/sync, but pulls daily candles for the full
+    ~1,067-company scrape-eligible stock_universe set instead of just the
+    watchlist -- see utils/stock_ingestion.sync_daily_data_universe. This
+    is what technical indicators need before
+    /stocks/indicators/calculate/universe can find golden-cross companies
+    outside the watchlist. Takes several minutes (paced to respect Kite's
+    rate limit across ~1,067 calls), so this always runs as a background
+    job regardless of trigger -- see _dispatch_stocks_job. Same dual auth
+    as /stocks/sync."""
+    is_cron = has_valid_cron_secret(request.headers, STOCKS_FUNDAMENTALS_CRON_SECRET)
+    if not is_cron and not session.get('stocks_admin_id'):
+        return redirect(url_for('stocks_admin_login'))
+
+    db = get_db()
+    access_token = get_kite_access_token(db)
+    if not access_token:
+        return jsonify({
+            'status': 'error',
+            'message': 'No Kite session yet -- a super_admin must log in via /admin/stocks/kite/login first.'
+        }), 400
+
+    def _job(job_db):
+        return sync_daily_data_universe(job_db, kite_client=KiteClient(access_token=access_token))
+
+    return _dispatch_stocks_job(db, is_cron=False, job_name='price_sync_universe', job_fn=_job)
+
+
 @app.route('/stocks/kite/sync-instrument-map', methods=['POST'])
 def stocks_kite_sync_instrument_map():
     """Manual trigger for matching Kite's full NSE+BSE instrument list
@@ -7069,6 +7106,24 @@ def stocks_indicators_calculate():
     return jsonify({'status': 'ok', **summary})
 
 
+@app.route('/stocks/indicators/calculate/universe', methods=['POST'])
+def stocks_indicators_calculate_universe():
+    """Same as /stocks/indicators/calculate, but over the full scrape-
+    eligible stock_universe set -- see
+    utils/stock_indicators.run_indicator_calculation_universe. Requires
+    /stocks/sync/universe to have already populated stock_daily_data for
+    these companies. Always backgrounded regardless of trigger, same
+    reasoning as /stocks/sync/universe -- see _dispatch_stocks_job."""
+    is_cron = has_valid_cron_secret(request.headers, STOCKS_FUNDAMENTALS_CRON_SECRET)
+    if not is_cron and not session.get('stocks_admin_id'):
+        return redirect(url_for('stocks_admin_login'))
+
+    db = get_db()
+    return _dispatch_stocks_job(
+        db, is_cron=False, job_name='indicator_calc_universe', job_fn=run_indicator_calculation_universe
+    )
+
+
 @app.route('/stocks/alerts/check-missed-jobs', methods=['POST'])
 def stocks_alerts_check_missed_jobs():
     """Checks stock_job_runs for each cron-triggered route and emails an
@@ -7233,8 +7288,27 @@ def stocks_watchlist():
     fundamentals numbers to decide whether to act on it.
 
     ?filter=golden narrows the list to golden_cross rows only, for either
-    audience -- the "view only golden cross companies" option."""
+    audience -- the "view only golden cross companies" option.
+    ?filter=golden_not_qualified switches entirely to
+    get_golden_cross_not_qualified()'s list instead -- golden-cross
+    companies from the full scrape-eligible universe (not just the
+    watchlist) that are excluded fundamentally, with the specific reasons
+    why. Staff only (super_admin/child_admin); a viewer with
+    can_view_watchlist granted only sees the watchlist itself, not this
+    universe-wide diagnostic view."""
     db = get_db()
+    cross_filter = request.args.get('filter')
+
+    if cross_filter == 'golden_not_qualified':
+        if session.get('stocks_admin_role') not in ('super_admin', 'child_admin'):
+            flash('You do not have access to that view.', 'error')
+            return redirect(url_for('stocks_watchlist'))
+        golden_not_qualified = get_golden_cross_not_qualified(db)
+        return render_template(
+            'admin/stocks_watchlist.html', rows=[], cross_filter=cross_filter,
+            golden_not_qualified=golden_not_qualified
+        )
+
     rows = db.execute(
         '''SELECT w.id, w.symbol, w.exchange, w.name, w.is_active, w.fundamental_tier,
                   f.pe_ratio, f.peg_ratio, f.eps, f.opm_pct, f.snapshot_date,
@@ -7256,7 +7330,6 @@ def stocks_watchlist():
            ORDER BY w.symbol'''
     ).fetchall()
 
-    cross_filter = request.args.get('filter')
     rows = enrich_and_sort_watchlist_rows(rows, cross_filter=cross_filter)
 
     return render_template(
@@ -7269,7 +7342,22 @@ def stocks_watchlist():
 def stocks_company_detail(watchlist_id):
     """Full fundamentals + technicals + recent price/suggestion history for
     one watchlist company -- the drill-down every row on /stocks/watchlist
-    links to. Same access as the watchlist itself. Read-only."""
+    links to. Same access as the watchlist itself. Read-only.
+
+    Also computes (see utils/price_pattern.py, no DB access there):
+      - day change % vs the previous close, and the 52-week high/low
+      - a per-parameter trend (Increasing/Decreasing/Unchanged) for every
+        fundamental and technical figure that has a prior snapshot to
+        compare against -- fundamentals compare against the previous
+        quarterly snapshot (that's the real reporting cadence; there's no
+        daily shareholding data to compare against instead), technicals
+        against the previous day's calc
+      - an inline price sparkline (decorative -- the real trend info is in
+        the adjacent text, for screen readers)
+      - a transparent historical backtest of what happened, in this
+        stock's own price history, after past days with a similar RSI
+        zone -- explicitly not a forecast, see backtest_rsi_zone_outcomes's
+        docstring."""
     db = get_db()
     company = db.execute(
         '''SELECT w.id, w.symbol, w.exchange, w.name, w.is_active, w.fundamental_tier,
@@ -7279,7 +7367,7 @@ def stocks_company_detail(watchlist_id):
                   f.promoter_holding_pct, f.fii_holding_pct, f.public_holding_pct,
                   f.quarterly_profit_growth_pct, f.quarterly_revenue_growth_pct,
                   f.free_cash_flow, f.snapshot_date AS fundamentals_date,
-                  i.ma_21, i.ma_50, i.ma_200, i.rsi_14, i.volume_avg_20d,
+                  i.ma_5, i.ma_21, i.ma_50, i.ma_200, i.rsi_14, i.volume_avg_20d,
                   i.cross_status, i.volume_trend, i.calc_date AS indicators_date,
                   d.close AS latest_price, d.trade_date AS price_date
            FROM stock_watchlist w
@@ -7302,18 +7390,74 @@ def stocks_company_detail(watchlist_id):
         flash('No such company in the watchlist.', 'error')
         return redirect(url_for('stocks_watchlist'))
 
+    previous_fundamentals = db.execute(
+        '''SELECT pe_ratio, peg_ratio, eps, opm_pct, roce_pct, roa_pct, price_to_book,
+                  promoter_holding_pct, fii_holding_pct, quarterly_profit_growth_pct,
+                  quarterly_revenue_growth_pct, snapshot_date
+           FROM stock_fundamentals
+           WHERE watchlist_id=? AND snapshot_date < ?
+           ORDER BY snapshot_date DESC LIMIT 1''',
+        (watchlist_id, company.get('fundamentals_date') or date.today().isoformat())
+    ).fetchone() or {}
+
+    previous_indicators = db.execute(
+        '''SELECT rsi_14, ma_5, ma_21, ma_50, ma_200, calc_date
+           FROM stock_indicators
+           WHERE watchlist_id=? AND calc_date < ?
+           ORDER BY calc_date DESC LIMIT 1''',
+        (watchlist_id, company.get('indicators_date') or date.today().isoformat())
+    ).fetchone() or {}
+
     company = {
         **company,
         'pe_note': get_metric_note('pe_ratio', company.get('pe_ratio')),
         'opm_note': get_metric_note('opm_pct', company.get('opm_pct')),
         'is_recommended': passes_hard_filters(company),
+        'trends': {
+            field: trend_note(company.get(field), previous_fundamentals.get(field))
+            for field in ('pe_ratio', 'peg_ratio', 'eps', 'opm_pct', 'roce_pct', 'roa_pct',
+                          'price_to_book', 'promoter_holding_pct', 'fii_holding_pct',
+                          'quarterly_profit_growth_pct', 'quarterly_revenue_growth_pct')
+        },
+        'fundamentals_trend_as_of': previous_fundamentals.get('snapshot_date'),
+        'rsi_trend': trend_note(company.get('rsi_14'), previous_indicators.get('rsi_14')),
+        'indicators_trend_as_of': previous_indicators.get('calc_date'),
     }
 
-    recent_prices = db.execute(
-        '''SELECT trade_date, close, volume FROM stock_daily_data
-           WHERE watchlist_id=? ORDER BY trade_date DESC LIMIT 15''',
+    # 250 trading days covers the 200-day MA plus margin, and comfortably
+    # spans a 52-week window even accounting for market holidays.
+    price_history = db.execute(
+        '''SELECT trade_date, close, high, low, volume FROM stock_daily_data
+           WHERE watchlist_id=? ORDER BY trade_date DESC LIMIT 250''',
         (watchlist_id,)
     ).fetchall()
+
+    closes_desc = [p['close'] for p in price_history if p.get('close') is not None]
+    day_change = compute_day_change(closes_desc)
+    week52_high, week52_low = compute_52_week_range(
+        [p.get('high') for p in price_history], [p.get('low') for p in price_history]
+    )
+    company['day_change'] = day_change
+    company['week52_high'] = week52_high
+    company['week52_low'] = week52_low
+
+    closes_oldest_first = list(reversed(closes_desc))
+    sparkline_svg = build_price_sparkline_svg(closes_oldest_first)
+    sparkline_summary = None
+    if len(closes_oldest_first) >= 2:
+        period_change_pct = round(
+            (closes_oldest_first[-1] - closes_oldest_first[0]) / closes_oldest_first[0] * 100, 2
+        ) if closes_oldest_first[0] else None
+        sparkline_summary = {
+            'days': len(closes_oldest_first),
+            'start_price': closes_oldest_first[0],
+            'end_price': closes_oldest_first[-1],
+            'change_pct': period_change_pct,
+        }
+
+    backtest = backtest_rsi_zone_outcomes(closes_oldest_first, company.get('rsi_14'))
+
+    recent_prices = price_history[:15]
 
     suggestion_history = db.execute(
         '''SELECT suggestion_date, buy_price, target_sell_price, stop_loss_price,
@@ -7325,7 +7469,8 @@ def stocks_company_detail(watchlist_id):
 
     return render_template(
         'admin/stocks_company_detail.html',
-        company=company, recent_prices=recent_prices, suggestion_history=suggestion_history
+        company=company, recent_prices=recent_prices, suggestion_history=suggestion_history,
+        sparkline_svg=sparkline_svg, sparkline_summary=sparkline_summary, backtest=backtest,
     )
 
 

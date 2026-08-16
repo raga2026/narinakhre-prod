@@ -1,7 +1,7 @@
 from datetime import date, timedelta
 from unittest.mock import MagicMock
 
-from utils.stock_ingestion import BACKFILL_DAYS, sync_daily_data
+from utils.stock_ingestion import BACKFILL_DAYS, sync_daily_data, sync_daily_data_universe
 
 
 class FakeCursor:
@@ -163,3 +163,113 @@ def test_unmapped_symbol_passes_none_instrument_token():
 
     _, kwargs = mock_kite.fetch_daily_candles.call_args
     assert kwargs['instrument_token'] is None
+
+
+class FakeUniverseDB:
+    """Minimal stand-in for app.py's SupabaseDB, just enough to run the
+    exact SQL sync_daily_data_universe() issues. daily_data is keyed by
+    (universe_id, trade_date) or (watchlist_id, trade_date) matching
+    whichever identity the real ON CONFLICT target would be."""
+
+    def __init__(self, universe_rows, instrument_map=None):
+        self.universe_rows = universe_rows  # each: {universe_id, symbol, exchange, watchlist_id (optional)}
+        self.daily_data = {}
+        self.instrument_map = instrument_map or {}
+
+    def execute(self, sql, params=None):
+        params = params or ()
+        normalized = ' '.join(sql.split())
+
+        if normalized.startswith('SELECT u.id AS universe_id, u.symbol, u.exchange, w.id AS watchlist_id'):
+            return FakeCursor(self.universe_rows)
+
+        if normalized.startswith('SELECT MAX(trade_date) AS last_date FROM stock_daily_data WHERE universe_id=?'):
+            universe_id = params[0]
+            dates = [d for (uid, d) in self.daily_data if uid == universe_id]
+            return FakeCursor([{'last_date': max(dates) if dates else None}])
+
+        if normalized.startswith('SELECT kite_instrument_token FROM stock_kite_instrument_map'):
+            symbol, exchange = params
+            token = self.instrument_map.get((symbol, exchange))
+            return FakeCursor([{'kite_instrument_token': token}] if token else [])
+
+        if normalized.startswith('INSERT INTO stock_daily_data (watchlist_id, universe_id, trade_date'):
+            watchlist_id, universe_id, trade_date, o, h, l, c, v = params
+            self.daily_data[(universe_id, trade_date)] = {
+                'watchlist_id': watchlist_id, 'open': o, 'high': h, 'low': l, 'close': c, 'volume': v,
+            }
+            return FakeCursor([])
+
+        if normalized.startswith('INSERT INTO stock_daily_data (universe_id, trade_date'):
+            universe_id, trade_date, o, h, l, c, v = params
+            self.daily_data[(universe_id, trade_date)] = {
+                'watchlist_id': None, 'open': o, 'high': h, 'low': l, 'close': c, 'volume': v,
+            }
+            return FakeCursor([])
+
+        raise AssertionError(f'Unexpected SQL in test: {sql}')
+
+    def commit(self):
+        pass
+
+
+def test_sync_daily_data_universe_covers_the_full_universe_not_just_watchlist():
+    universe = [
+        {'universe_id': 1, 'symbol': 'RELIANCE', 'exchange': 'NSE', 'watchlist_id': 10},  # watchlisted too
+        {'universe_id': 2, 'symbol': 'OBSCURE', 'exchange': 'BSE', 'watchlist_id': None},  # not watchlisted
+    ]
+    db = FakeUniverseDB(universe)
+
+    candle_date = date(2026, 8, 10)
+    mock_kite = MagicMock()
+    mock_kite.fetch_daily_candles.return_value = [
+        {'trade_date': candle_date, 'open': 1.0, 'high': 2.0, 'low': 0.5, 'close': 1.5, 'volume': 1000},
+    ]
+
+    summary = sync_daily_data_universe(db, kite_client=mock_kite, sleep_seconds=0)
+
+    assert summary['universe_count'] == 2
+    assert summary['inserted'] == 2
+    # Watchlisted company's row keeps both identities stamped.
+    assert db.daily_data[(1, candle_date.isoformat())]['watchlist_id'] == 10
+    # Universe-only company's row has no watchlist_id at all.
+    assert db.daily_data[(2, candle_date.isoformat())]['watchlist_id'] is None
+
+
+def test_sync_daily_data_universe_paces_calls_with_a_sleep(monkeypatch):
+    universe = [
+        {'universe_id': 1, 'symbol': 'A', 'exchange': 'NSE', 'watchlist_id': None},
+        {'universe_id': 2, 'symbol': 'B', 'exchange': 'NSE', 'watchlist_id': None},
+    ]
+    db = FakeUniverseDB(universe)
+    mock_kite = MagicMock()
+    mock_kite.fetch_daily_candles.return_value = []
+
+    sleeps = []
+    monkeypatch.setattr('utils.stock_ingestion.time.sleep', lambda s: sleeps.append(s))
+
+    sync_daily_data_universe(db, kite_client=mock_kite, sleep_seconds=0.35)
+
+    # One sleep between the two calls, not after the last one.
+    assert sleeps == [0.35]
+
+
+def test_sync_daily_data_universe_records_per_symbol_failure_without_stopping_batch():
+    universe = [
+        {'universe_id': 1, 'symbol': 'BAD', 'exchange': 'NSE', 'watchlist_id': None},
+        {'universe_id': 2, 'symbol': 'GOOD', 'exchange': 'NSE', 'watchlist_id': None},
+    ]
+    db = FakeUniverseDB(universe)
+
+    candle_date = date(2026, 8, 10)
+    mock_kite = MagicMock()
+    mock_kite.fetch_daily_candles.side_effect = [
+        RuntimeError('Kite API error'),
+        [{'trade_date': candle_date, 'open': 1.0, 'high': 2.0, 'low': 0.5, 'close': 1.5, 'volume': 1000}],
+    ]
+
+    summary = sync_daily_data_universe(db, kite_client=mock_kite, sleep_seconds=0)
+
+    assert summary['inserted'] == 1
+    assert summary['failed'] == 1
+    assert summary['failures'][0]['symbol'] == 'BAD'
