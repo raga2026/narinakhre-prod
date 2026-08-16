@@ -3,6 +3,7 @@ from utils.price_pattern import (
     build_price_sparkline_svg,
     compute_52_week_range,
     compute_day_change,
+    detect_rounding_pattern,
     rsi_zone,
     trend_note,
 )
@@ -163,3 +164,105 @@ def test_backtest_different_zone_than_history_returns_none_or_zero_matches():
     closes = [100.0] * 60
     result = backtest_rsi_zone_outcomes(closes, current_rsi=20)  # oversold zone requested
     assert result is None
+
+
+# --- detect_rounding_pattern -------------------------------------------------
+
+def _parabola(n, a, vertex_x, vertex_y):
+    return [a * (x - vertex_x) ** 2 + vertex_y for x in range(n)]
+
+
+def test_too_short_history_returns_none():
+    assert detect_rounding_pattern(_parabola(20, 0.05, 10, 100)) is None
+
+
+def test_clean_upward_curve_is_a_rounding_bottom_with_high_fit_quality():
+    closes = _parabola(100, a=0.05, vertex_x=50, vertex_y=80)
+    result = detect_rounding_pattern(closes)
+
+    assert result is not None
+    assert result['shape'] == 'rounding_bottom'
+    assert result['fit_quality'] >= 0.99  # a perfect noiseless parabola
+    assert result['days_analyzed'] == 100
+
+
+def test_clean_downward_curve_is_a_rounding_top():
+    closes = _parabola(100, a=-0.05, vertex_x=50, vertex_y=200)
+    result = detect_rounding_pattern(closes)
+
+    assert result is not None
+    assert result['shape'] == 'rounding_top'
+    assert result['fit_quality'] >= 0.99
+
+
+def test_vertex_well_before_the_end_is_the_past_recovering_phase():
+    # Vertex at day 20 of a 100-day window -- well past the "at the base"
+    # tolerance by day 99.
+    closes = _parabola(100, a=0.05, vertex_x=20, vertex_y=80)
+    result = detect_rounding_pattern(closes)
+
+    assert result['shape'] == 'rounding_bottom'
+    assert 'recovering' in result['phase']
+
+
+def test_vertex_near_the_end_is_the_at_base_phase():
+    closes = _parabola(100, a=0.05, vertex_x=97, vertex_y=80)
+    result = detect_rounding_pattern(closes)
+
+    assert 'flattening' in result['phase']
+
+
+def test_vertex_beyond_the_observed_window_is_not_yet_reached_phase():
+    # Vertex at day 500 -- way beyond the 100 days actually observed, so
+    # the whole window is still on the declining side.
+    closes = _parabola(100, a=0.05, vertex_x=500, vertex_y=80)
+    result = detect_rounding_pattern(closes)
+
+    assert result['shape'] == 'rounding_bottom'
+    assert 'has not formed yet' in result['phase']
+
+
+def test_above_neckline_true_when_price_recovered_past_the_start():
+    # Vertex early, so by day 99 price has climbed back above day 0's level.
+    closes = _parabola(100, a=0.05, vertex_x=10, vertex_y=50)
+    result = detect_rounding_pattern(closes)
+    assert result['current_price'] > result['neckline_price']
+    assert result['above_neckline'] is True
+
+
+def test_below_neckline_when_still_declining_toward_the_base():
+    closes = _parabola(100, a=0.05, vertex_x=500, vertex_y=50)  # still falling throughout
+    result = detect_rounding_pattern(closes)
+    assert result['current_price'] < result['neckline_price']
+    assert result['above_neckline'] is False
+
+
+def test_noisy_random_walk_does_not_produce_a_confident_rounding_call():
+    import random
+    rng = random.Random(42)
+    closes = [100.0]
+    for _ in range(99):
+        closes.append(closes[-1] + rng.uniform(-3, 3))
+    result = detect_rounding_pattern(closes)
+    # A genuine random walk shouldn't reliably fit a clean parabola -- if
+    # it happens to return a result at all, fit_quality must still reflect
+    # how noisy it is, never a false-confident near-1.0 reading.
+    if result is not None:
+        assert result['fit_quality'] < 0.99
+
+
+def test_straight_line_is_not_called_a_rounding_pattern():
+    closes = [100.0 + 0.5 * x for x in range(100)]  # perfectly linear growth
+    assert detect_rounding_pattern(closes) is None
+
+
+def test_flat_prices_return_none():
+    assert detect_rounding_pattern([100.0] * 100) is None
+
+
+def test_none_entries_are_filtered_before_fitting():
+    closes = _parabola(100, a=0.05, vertex_x=50, vertex_y=80)
+    with_gaps = [c if i % 10 != 0 else None for i, c in enumerate(closes)]
+    result = detect_rounding_pattern(with_gaps)
+    assert result is not None
+    assert result['days_analyzed'] == len([c for c in with_gaps if c is not None])

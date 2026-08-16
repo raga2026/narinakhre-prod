@@ -102,6 +102,34 @@ def run_fundamental_shortlist(db):
         (cutoff,)
     ).fetchall()
 
+    # Every candidate's promoter/FII holding-trend check needs that
+    # company's previous snapshot -- originally fetched with one query PER
+    # candidate (up to 1,067 round trips, ~3+ minutes against live
+    # Supabase). Fetched here as a single batched query instead, then
+    # matched up in Python -- this is what actually made a full run slow
+    # enough to plausibly get interrupted mid-way (see run_fundamental_shortlist's
+    # docstring: it deactivates everything before reactivating winners, so
+    # an interruption leaves the watchlist emptier than before, not
+    # unchanged).
+    previous_snapshots_by_universe = {}
+    universe_ids = [row['universe_id'] for row in candidates]
+    if universe_ids:
+        ids_sql = ','.join(str(int(uid)) for uid in universe_ids)
+        all_snapshots = db.execute(
+            f'''SELECT universe_id, promoter_holding_pct, fii_holding_pct, snapshot_date
+                FROM stock_fundamentals
+                WHERE universe_id IN ({ids_sql})
+                ORDER BY universe_id, snapshot_date DESC'''
+        ).fetchall()
+        for snap in all_snapshots:
+            previous_snapshots_by_universe.setdefault(snap['universe_id'], []).append(snap)
+
+    def _previous_snapshot(universe_id, current_snapshot_date):
+        for snap in previous_snapshots_by_universe.get(universe_id, []):
+            if snap['snapshot_date'] < current_snapshot_date:
+                return snap
+        return None
+
     golden = 0
     silver = 0
     failed = 0
@@ -111,14 +139,7 @@ def run_fundamental_shortlist(db):
 
     for row in candidates:
         universe_id = row['universe_id']
-
-        previous = db.execute(
-            '''SELECT promoter_holding_pct, fii_holding_pct
-               FROM stock_fundamentals
-               WHERE universe_id=? AND snapshot_date < ?
-               ORDER BY snapshot_date DESC LIMIT 1''',
-            (universe_id, row['snapshot_date'])
-        ).fetchone()
+        previous = _previous_snapshot(universe_id, row['snapshot_date'])
 
         tier, failed_criteria = classify_fundamental_tier(row, previous)
 

@@ -33,10 +33,14 @@ class FakeShortlistDB:
         self.fundamentals = fundamentals_rows
         self.watchlist = {(w['symbol'], w['exchange']): w for w in watchlist_rows}
         self.kite_map = kite_map or {}  # (symbol, exchange) -> instrument_token
+        self.previous_snapshot_query_count = 0
 
     def execute(self, sql, params=None):
         params = params or ()
         normalized = ' '.join(sql.split())
+
+        if normalized.startswith('SELECT universe_id, promoter_holding_pct, fii_holding_pct, snapshot_date'):
+            self.previous_snapshot_query_count += 1
 
         if normalized.startswith('UPDATE stock_watchlist SET is_active=0'):
             (source,) = params
@@ -67,6 +71,15 @@ class FakeShortlistDB:
             symbol, exchange = params
             token = self.kite_map.get((symbol, exchange))
             return FakeCursor([{'kite_instrument_token': token}] if token else [])
+
+        if normalized.startswith('SELECT universe_id, promoter_holding_pct, fii_holding_pct, snapshot_date'):
+            # Batched replacement for the old one-query-per-candidate lookup
+            # -- the real query embeds the universe_id list directly in the
+            # SQL text (not as ? params), so the fake just hands back every
+            # snapshot it has; run_fundamental_shortlist filters by date in
+            # Python, same as the real code path does.
+            rows = sorted(self.fundamentals, key=lambda f: (f['universe_id'], f['snapshot_date']), reverse=True)
+            return FakeCursor(rows)
 
         if normalized.startswith('SELECT promoter_holding_pct, fii_holding_pct'):
             universe_id, before_date = params
@@ -147,6 +160,27 @@ def test_shortlist_deactivates_no_longer_passing_and_protects_manual_rows():
     manual = db.watchlist[('MANUALCO', 'NSE')]
     assert manual['is_active'] == 1
     assert manual['source'] == 'manual'
+
+
+def test_previous_snapshot_lookup_is_batched_not_one_query_per_candidate():
+    # Regression guard: this used to be one query PER candidate (~3+
+    # minutes against live Supabase at real universe scale -- see the live
+    # incident this was found from). Must stay a single batched query
+    # regardless of how many candidates there are.
+    universe = [
+        {'id': i, 'symbol': f'SYM{i}', 'exchange': 'NSE', 'company_name': f'Company {i} Ltd',
+         'is_scrape_eligible': True, 'isin': f'INE{i:06d}'}
+        for i in range(1, 11)
+    ]
+    fundamentals = [
+        {'universe_id': i, 'snapshot_date': '2026-08-10', **PASSING_FUNDAMENTALS}
+        for i in range(1, 11)
+    ]
+    db = FakeShortlistDB(universe, fundamentals, watchlist_rows=[])
+
+    run_fundamental_shortlist(db)
+
+    assert db.previous_snapshot_query_count == 1
 
 
 def test_passing_company_not_previously_in_watchlist_gets_inserted():

@@ -169,6 +169,36 @@
         </div>
 
         <div class="section-card mb-6">
+            <h2 class="text-lg font-bold text-slate-200 mb-2">Rounding pattern -- shape, not a schedule</h2>
+            {% if rounding_pattern %}
+            <p class="text-slate-300 text-sm mb-3">
+                Fitting a curve to the last {{ rounding_pattern.days_analyzed }} trading days, the price shape looks like a
+                <strong>{{ 'rounding bottom' if rounding_pattern.shape == 'rounding_bottom' else 'rounding top' }}</strong>
+                (fit quality {{ rounding_pattern.fit_quality }} out of 1.0 -- higher means the curve matches the actual prices more closely).
+                Right now the stock is {{ rounding_pattern.phase }}.
+            </p>
+            <p class="text-slate-300 text-sm mb-3">
+                Neckline reference price (start of this window): ₹{{ '%.2f'|format(rounding_pattern.neckline_price) }}.
+                Current price: ₹{{ '%.2f'|format(rounding_pattern.current_price) }} --
+                {% if rounding_pattern.above_neckline %}
+                already back above the neckline.
+                {% else %}
+                still below the neckline.
+                {% endif %}
+            </p>
+            <p class="text-slate-500 text-xs">
+                This describes the shape of the chart so far -- it is not a prediction of what happens next. Rounding patterns
+                are known to play out over weeks to months, but there is no fixed schedule, and this shape can fail to complete
+                at any point. Do not treat this as a time estimate for when the stock will move.
+            </p>
+            {% else %}
+            <p class="text-slate-400 text-sm">
+                Not enough price history yet, or the recent price movement doesn't fit a clean rounding shape closely enough to call.
+            </p>
+            {% endif %}
+        </div>
+
+        <div class="section-card mb-6">
             <h2 class="text-lg font-bold text-slate-200 mb-4">Fundamentals</h2>
             <p class="text-slate-400 text-sm mb-4">
                 Most recent quarterly snapshot, {{ company.fundamentals_date or '—' }}

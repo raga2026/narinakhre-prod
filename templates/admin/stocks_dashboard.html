@@ -34,6 +34,22 @@
         <div id="job-status-region" role="status" aria-live="polite" class="mb-6"></div>
 
         {% if role == 'super_admin' %}
+        <section class="bg-slate-800 rounded-2xl p-6 border-2 border-sky-500/50 mb-6" aria-labelledby="super-sync-heading">
+            <h2 id="super-sync-heading" class="text-lg font-bold text-slate-200 mb-2">Super Sync</h2>
+            <p class="text-slate-400 text-sm mb-3">
+                Runs every sync and calculation step below, in the right order, in one click -- Kite instrument map,
+                fundamentals, market cap filter, shortlist refresh, price sync, indicators, and the universe-wide versions
+                of both. Can take upwards of ten minutes; the smaller buttons further down still work individually if you
+                only need one step.
+            </p>
+            <form method="POST" action="{{ url_for('stocks_super_sync') }}"
+                  data-job-form data-job-name="super_sync" data-job-label="Super Sync">
+                <button type="submit" class="stocks-btn py-3 px-8 rounded-2xl font-bold text-lg transition hover:opacity-90">
+                    Super Sync -- update everything
+                </button>
+            </form>
+        </section>
+
         <section class="bg-slate-800 rounded-2xl p-6 border border-sky-500/20 mb-6" aria-labelledby="kite-heading">
             <h2 id="kite-heading" class="text-lg font-bold text-slate-200 mb-2">Kite connection</h2>
             <p role="status" aria-live="polite"

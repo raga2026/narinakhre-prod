@@ -1,7 +1,12 @@
 from datetime import date, timedelta
 from unittest.mock import MagicMock
 
-from utils.stock_ingestion import BACKFILL_DAYS, sync_daily_data, sync_daily_data_universe
+from utils.stock_ingestion import (
+    BACKFILL_DAYS,
+    MIN_HISTORY_DAYS_BEFORE_INCREMENTAL_SYNC,
+    sync_daily_data,
+    sync_daily_data_universe,
+)
 
 
 class FakeCursor:
@@ -22,9 +27,9 @@ class FakeDB:
     in place instead of adding a row -- the same guarantee ON CONFLICT DO
     UPDATE gives against the real Postgres table."""
 
-    def __init__(self, watchlist_rows, instrument_map=None):
+    def __init__(self, watchlist_rows, instrument_map=None, existing_daily_data=None):
         self.watchlist_rows = watchlist_rows
-        self.daily_data = {}
+        self.daily_data = dict(existing_daily_data or {})
         self.instrument_map = instrument_map or {}  # {(symbol, exchange): token}
 
     def execute(self, sql, params=None):
@@ -35,10 +40,10 @@ class FakeDB:
             rows = [r for r in self.watchlist_rows if r['is_active'] == 1]
             return FakeCursor(rows)
 
-        if normalized.startswith('SELECT MAX(trade_date) AS last_date FROM stock_daily_data'):
+        if normalized.startswith('SELECT MAX(trade_date) AS last_date, COUNT(*) AS row_count FROM stock_daily_data'):
             watchlist_id = params[0]
             dates = [d for (wid, d) in self.daily_data if wid == watchlist_id]
-            return FakeCursor([{'last_date': max(dates) if dates else None}])
+            return FakeCursor([{'last_date': max(dates) if dates else None, 'row_count': len(dates)}])
 
         if normalized.startswith('SELECT kite_instrument_token FROM stock_kite_instrument_map'):
             symbol, exchange = params
@@ -165,15 +170,69 @@ def test_unmapped_symbol_passes_none_instrument_token():
     assert kwargs['instrument_token'] is None
 
 
+def test_brand_new_symbol_backfills_the_full_window():
+    watchlist = [{'id': 1, 'symbol': 'NEWCO', 'exchange': 'NSE', 'is_active': 1}]
+    db = FakeDB(watchlist)  # no existing rows at all
+    mock_kite = MagicMock()
+    mock_kite.fetch_daily_candles.return_value = []
+
+    sync_daily_data(db, kite_client=mock_kite)
+
+    args, _ = mock_kite.fetch_daily_candles.call_args
+    from_date_requested = args[2]
+    assert from_date_requested == date.today() - timedelta(days=BACKFILL_DAYS)
+
+
+def test_symbol_with_thin_history_gets_backfilled_again_not_just_one_day():
+    # This is the exact bug found live: a symbol synced back when
+    # BACKFILL_DAYS was 30 has ~30 rows -- nowhere near enough for a
+    # 200-day moving average -- and last_date+1 would only ever add one
+    # day per run, never catching up. Must re-request the full window.
+    watchlist = [{'id': 1, 'symbol': 'THIN', 'exchange': 'NSE', 'is_active': 1}]
+    existing = {(1, (date.today() - timedelta(days=i)).isoformat()): {} for i in range(1, 31)}
+    db = FakeDB(watchlist, existing_daily_data=existing)
+    assert len(db.daily_data) < MIN_HISTORY_DAYS_BEFORE_INCREMENTAL_SYNC
+
+    mock_kite = MagicMock()
+    mock_kite.fetch_daily_candles.return_value = []
+
+    sync_daily_data(db, kite_client=mock_kite)
+
+    args, _ = mock_kite.fetch_daily_candles.call_args
+    from_date_requested = args[2]
+    assert from_date_requested == date.today() - timedelta(days=BACKFILL_DAYS)
+
+
+def test_symbol_with_enough_history_only_asks_for_days_since_last_sync():
+    watchlist = [{'id': 1, 'symbol': 'ESTABLISHED', 'exchange': 'NSE', 'is_active': 1}]
+    # Most recent existing row is yesterday (i=1) -- from_date should be
+    # last_date + 1 day = today, not a full re-backfill.
+    existing = {
+        (1, (date.today() - timedelta(days=i)).isoformat()): {}
+        for i in range(1, MIN_HISTORY_DAYS_BEFORE_INCREMENTAL_SYNC + 20)
+    }
+    db = FakeDB(watchlist, existing_daily_data=existing)
+    assert len(db.daily_data) >= MIN_HISTORY_DAYS_BEFORE_INCREMENTAL_SYNC
+
+    mock_kite = MagicMock()
+    mock_kite.fetch_daily_candles.return_value = []
+
+    sync_daily_data(db, kite_client=mock_kite)
+
+    args, _ = mock_kite.fetch_daily_candles.call_args
+    from_date_requested = args[2]
+    assert from_date_requested == date.today()
+
+
 class FakeUniverseDB:
     """Minimal stand-in for app.py's SupabaseDB, just enough to run the
     exact SQL sync_daily_data_universe() issues. daily_data is keyed by
     (universe_id, trade_date) or (watchlist_id, trade_date) matching
     whichever identity the real ON CONFLICT target would be."""
 
-    def __init__(self, universe_rows, instrument_map=None):
+    def __init__(self, universe_rows, instrument_map=None, existing_daily_data=None):
         self.universe_rows = universe_rows  # each: {universe_id, symbol, exchange, watchlist_id (optional)}
-        self.daily_data = {}
+        self.daily_data = dict(existing_daily_data or {})
         self.instrument_map = instrument_map or {}
 
     def execute(self, sql, params=None):
@@ -183,10 +242,10 @@ class FakeUniverseDB:
         if normalized.startswith('SELECT u.id AS universe_id, u.symbol, u.exchange, w.id AS watchlist_id'):
             return FakeCursor(self.universe_rows)
 
-        if normalized.startswith('SELECT MAX(trade_date) AS last_date FROM stock_daily_data WHERE universe_id=?'):
+        if normalized.startswith('SELECT MAX(trade_date) AS last_date, COUNT(*) AS row_count FROM stock_daily_data WHERE universe_id=?'):
             universe_id = params[0]
             dates = [d for (uid, d) in self.daily_data if uid == universe_id]
-            return FakeCursor([{'last_date': max(dates) if dates else None}])
+            return FakeCursor([{'last_date': max(dates) if dates else None, 'row_count': len(dates)}])
 
         if normalized.startswith('SELECT kite_instrument_token FROM stock_kite_instrument_map'):
             symbol, exchange = params

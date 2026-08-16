@@ -4,10 +4,26 @@ from datetime import date, timedelta
 from utils.kite_client import KiteClient
 from utils.kite_instrument_map import get_cached_instrument_token
 
-# How far back to pull the first time a symbol has no rows yet in
-# stock_daily_data. Kept short since this is Phase 1 (ingestion only) --
-# nothing downstream needs deep history yet.
-BACKFILL_DAYS = 30
+# How far back (calendar days) to pull when a symbol doesn't have enough
+# history yet. 380 calendar days comfortably yields 250+ trading days once
+# weekends/holidays are excluded -- Kite only returns actual trading-day
+# candles in the requested range regardless of how wide it is, and it's
+# still exactly one API call either way, so there's no cost to asking wide.
+# Was 30 days (Phase 1's original "ingestion only, nothing downstream needs
+# deep history yet" reasoning) -- since raised, because MA_200 and the
+# 52-week range both need far more than 30 days of history to ever compute
+# at all, and a 30-day window meant they silently stayed None indefinitely.
+BACKFILL_DAYS = 380
+
+# Below this many existing rows, a symbol is treated as needing the full
+# BACKFILL_DAYS window again, regardless of what its last recorded
+# trade_date is -- otherwise a symbol that was already synced under the
+# old 30-day BACKFILL_DAYS would stay stuck at ~30 days of history forever
+# (from_date = last_date + 1 day only ever adds one day at a time going
+# forward). Upserting an overlapping date range is harmless (ON CONFLICT
+# DO UPDATE), so re-requesting days already on file costs nothing but the
+# one Kite call.
+MIN_HISTORY_DAYS_BEFORE_INCREMENTAL_SYNC = 200
 
 # Nari Nakhre Stocks -- Phase 1. Kept in its own function/file, separate from
 # the e-commerce schema in app.py's initialize_database_if_needed() -- same
@@ -97,6 +113,18 @@ def _parse_last_date(last_date):
     return last_date
 
 
+def _compute_from_date(last_date, row_count, today):
+    """Decides how far back to ask Kite for. Below
+    MIN_HISTORY_DAYS_BEFORE_INCREMENTAL_SYNC existing rows, always asks
+    for the full BACKFILL_DAYS window regardless of last_date -- otherwise
+    a symbol that already has some (but not enough) history would only
+    ever gain one day per sync going forward, never catching up to a
+    200-day moving average. Upserting the overlap is harmless."""
+    if row_count < MIN_HISTORY_DAYS_BEFORE_INCREMENTAL_SYNC:
+        return today - timedelta(days=BACKFILL_DAYS)
+    return (last_date + timedelta(days=1)) if last_date else (today - timedelta(days=BACKFILL_DAYS))
+
+
 def sync_daily_data(db, kite_client=None):
     """Fetch the latest daily candle (or backfill) for every active
     stock_watchlist row and upsert into stock_daily_data.
@@ -136,12 +164,13 @@ def sync_daily_data(db, kite_client=None):
 
         try:
             latest = db.execute(
-                'SELECT MAX(trade_date) AS last_date FROM stock_daily_data WHERE watchlist_id=?',
+                'SELECT MAX(trade_date) AS last_date, COUNT(*) AS row_count FROM stock_daily_data WHERE watchlist_id=?',
                 (watchlist_id,)
             ).fetchone()
             last_date = _parse_last_date(latest['last_date'] if latest else None)
+            row_count = (latest['row_count'] if latest else 0) or 0
 
-            from_date = (last_date + timedelta(days=1)) if last_date else (today - timedelta(days=BACKFILL_DAYS))
+            from_date = _compute_from_date(last_date, row_count, today)
             if from_date > today:
                 continue
 
@@ -269,12 +298,13 @@ def sync_daily_data_universe(db, kite_client=None, sleep_seconds=UNIVERSE_SYNC_D
 
         try:
             latest = db.execute(
-                'SELECT MAX(trade_date) AS last_date FROM stock_daily_data WHERE universe_id=?',
+                'SELECT MAX(trade_date) AS last_date, COUNT(*) AS row_count FROM stock_daily_data WHERE universe_id=?',
                 (universe_id,)
             ).fetchone()
             last_date = _parse_last_date(latest['last_date'] if latest else None)
+            row_count = (latest['row_count'] if latest else 0) or 0
 
-            from_date = (last_date + timedelta(days=1)) if last_date else (today - timedelta(days=BACKFILL_DAYS))
+            from_date = _compute_from_date(last_date, row_count, today)
             if from_date > today:
                 continue
 

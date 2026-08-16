@@ -170,3 +170,148 @@ def backtest_rsi_zone_outcomes(closes_oldest_first, current_rsi, forward_windows
         }
 
     return {'zone': zone, 'rsi': current_rsi, 'matched_occurrences': matched_occurrences, 'outcomes': summary}
+
+
+# --- Rounding pattern (rounding bottom / rounding top) ----------------------
+#
+# A rounding bottom (aka saucer) is a classic technical-analysis pattern: a
+# gradual, smooth U-shaped decline-then-recovery in price over an extended
+# period, considered a bullish reversal signal once price breaks back above
+# where the decline started (the "neckline"). A rounding top is the bearish
+# mirror image -- a smooth, gradual rise-then-decline. Both are well
+# documented as developing over WEEKS TO MONTHS with no fixed schedule --
+# there is no reliable way to say in advance how long one takes to
+# complete, and this deliberately does not invent a number. What can be
+# described honestly is the CURRENT shape and phase of the price series.
+
+ROUNDING_MIN_DAYS = 40
+# How well a quadratic curve must fit the price series (R^2, 0-1) before
+# it's called a genuine rounding shape rather than just noise that happens
+# to have a slight curve.
+ROUNDING_FIT_THRESHOLD = 0.5
+
+
+def _det3(m):
+    return (m[0][0] * (m[1][1] * m[2][2] - m[1][2] * m[2][1])
+            - m[0][1] * (m[1][0] * m[2][2] - m[1][2] * m[2][0])
+            + m[0][2] * (m[1][0] * m[2][1] - m[1][1] * m[2][0]))
+
+
+def _fit_quadratic(xs, ys):
+    """Least-squares fit of y = a*x^2 + b*x + c via the normal equations,
+    solved directly with Cramer's rule on the resulting 3x3 system -- no
+    numpy/scipy dependency, consistent with the rest of this app's
+    hand-rolled indicator math (see indicator_engine.py). Returns
+    (a, b, c), or None if the system is singular (degenerate input, e.g.
+    fewer than 3 distinct x values)."""
+    n = len(xs)
+    s0, s1 = n, sum(xs)
+    s2 = sum(x * x for x in xs)
+    s3 = sum(x ** 3 for x in xs)
+    s4 = sum(x ** 4 for x in xs)
+    t0 = sum(ys)
+    t1 = sum(x * y for x, y in zip(xs, ys))
+    t2 = sum(x * x * y for x, y in zip(xs, ys))
+
+    coefficient_matrix = [[s4, s3, s2], [s3, s2, s1], [s2, s1, s0]]
+    det = _det3(coefficient_matrix)
+    if abs(det) < 1e-9:
+        return None
+
+    a = _det3([[t2, s3, s2], [t1, s2, s1], [t0, s1, s0]]) / det
+    b = _det3([[s4, t2, s2], [s3, t1, s1], [s2, t0, s0]]) / det
+    c = _det3([[s4, s3, t2], [s3, s2, t1], [s2, s1, t0]]) / det
+    return a, b, c
+
+
+def _r_squared(xs, ys, a, b, c):
+    y_mean = sum(ys) / len(ys)
+    ss_tot = sum((y - y_mean) ** 2 for y in ys)
+    if ss_tot == 0:
+        return 1.0
+    ss_res = sum((y - (a * x * x + b * x + c)) ** 2 for x, y in zip(xs, ys))
+    return max(0.0, 1 - ss_res / ss_tot)
+
+
+def detect_rounding_pattern(closes_oldest_first):
+    """Fits a quadratic curve to the available closing-price history and
+    checks whether its shape resembles a rounding bottom (bullish, U
+    shaped) or rounding top (bearish, inverted-U). Describes the CURRENT
+    shape and phase only -- not a prediction of what happens next or when.
+
+    Needs at least ROUNDING_MIN_DAYS of history (a rounding pattern is
+    inherently a long-term formation; anything shorter is too noisy to
+    read this way). Returns None below that, if the fit is too poor
+    (R^2 below ROUNDING_FIT_THRESHOLD) to call it a genuine curve rather
+    than noise, or if the curve is degenerate (no fit / no meaningful
+    curvature).
+
+    Returns {'shape': 'rounding_bottom'|'rounding_top', 'fit_quality'
+    (R^2, 0-1), 'days_analyzed', 'phase', 'neckline_price' (price at the
+    start of the analyzed window), 'current_price', 'above_neckline'}."""
+    points = [c for c in closes_oldest_first if c is not None]
+    if len(points) < ROUNDING_MIN_DAYS:
+        return None
+
+    xs = list(range(len(points)))
+    fit = _fit_quadratic(xs, points)
+    if fit is None:
+        return None
+    a, b, c = fit
+
+    # Guards against floating-point noise on genuinely (near-)linear data
+    # producing a spuriously tiny nonzero 'a' -- R^2 alone doesn't catch
+    # this, since a near-zero quadratic term still fits a line just as
+    # well as the line itself. Requires the curvature to actually account
+    # for a meaningful share (>=1%) of the observed price range, not just
+    # be technically nonzero.
+    vertex_x = -b / (2 * a) if a else 0
+    price_range = max(points) - min(points)
+    quadratic_contribution = abs(a) * max((xs[0] - vertex_x) ** 2, (xs[-1] - vertex_x) ** 2)
+    if price_range == 0 or quadratic_contribution < 0.01 * price_range:
+        return None
+
+    r2 = _r_squared(xs, points, a, b, c)
+    if r2 < ROUNDING_FIT_THRESHOLD:
+        return None
+
+    shape = 'rounding_bottom' if a > 0 else 'rounding_top'
+    last_x = xs[-1]
+    neckline_price = points[0]
+    current_price = points[-1]
+
+    # Where "now" sits relative to the fitted vertex (the base of a bottom,
+    # or the peak of a top), in day-units rather than a ratio -- a ratio
+    # breaks down when the vertex falls before day 0 (a negative x).
+    tolerance_days = max(5, round(0.15 * len(points)))
+    if last_x < vertex_x - tolerance_days:
+        stage = 'not yet reached'
+    elif last_x > vertex_x + tolerance_days:
+        stage = 'past'
+    else:
+        stage = 'at'
+
+    if shape == 'rounding_bottom':
+        phase = {
+            'not yet reached': 'still declining -- the base has not formed yet within this window',
+            'at': 'flattening out near the base',
+            'past': 'recovering off the base',
+        }[stage]
+        above_neckline = current_price >= neckline_price
+    else:
+        phase = {
+            'not yet reached': 'still rising -- the top has not formed yet within this window',
+            'at': 'flattening out near the top',
+            'past': 'declining off the top',
+        }[stage]
+        above_neckline = current_price <= neckline_price  # "broken down" below the neckline, for a top
+
+    return {
+        'shape': shape,
+        'fit_quality': round(r2, 2),
+        'days_analyzed': len(points),
+        'phase': phase,
+        'neckline_price': neckline_price,
+        'current_price': current_price,
+        'above_neckline': above_neckline,
+    }

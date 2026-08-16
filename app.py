@@ -84,7 +84,9 @@ from utils.price_pattern import (
     trend_note,
     build_price_sparkline_svg,
     backtest_rsi_zone_outcomes,
+    detect_rounding_pattern,
 )
+from utils.super_sync import run_super_sync
 from utils.stock_indicators import (
     initialize_stock_indicators_table_if_needed,
     run_indicator_calculation,
@@ -6837,6 +6839,31 @@ def stocks_sync_universe():
     return _dispatch_stocks_job(db, is_cron=False, job_name='price_sync_universe', job_fn=_job)
 
 
+@app.route('/stocks/super-sync', methods=['POST'])
+@stocks_role_required('super_admin')
+def stocks_super_sync():
+    """Runs every sync/calculation step in one click, in dependency order
+    -- see utils/super_sync.py for exactly what and in what order. The
+    individual buttons on the dashboard (Sync now, Fetch fundamentals,
+    Sync Kite instrument map, Refresh shortlist, Sync prices (universe),
+    Calculate indicators (universe), etc.) still exist for running just
+    one step on its own; this is a convenience wrapper, not a
+    replacement. super_admin only, and always backgrounded -- a full run
+    covers everything including the ~1,067-symbol universe sync, so it
+    can take upwards of ten minutes."""
+    db = get_db()
+    access_token = get_kite_access_token(db)
+    if not access_token:
+        return jsonify({
+            'status': 'error',
+            'message': 'No Kite session yet -- a super_admin must log in via /admin/stocks/kite/login first.'
+        }), 400
+
+    return _dispatch_stocks_job(
+        db, is_cron=False, job_name='super_sync', job_fn=lambda job_db: run_super_sync(job_db, access_token)
+    )
+
+
 @app.route('/stocks/kite/sync-instrument-map', methods=['POST'])
 def stocks_kite_sync_instrument_map():
     """Manual trigger for matching Kite's full NSE+BSE instrument list
@@ -7456,6 +7483,7 @@ def stocks_company_detail(watchlist_id):
         }
 
     backtest = backtest_rsi_zone_outcomes(closes_oldest_first, company.get('rsi_14'))
+    rounding_pattern = detect_rounding_pattern(closes_oldest_first)
 
     recent_prices = price_history[:15]
 
@@ -7471,6 +7499,7 @@ def stocks_company_detail(watchlist_id):
         'admin/stocks_company_detail.html',
         company=company, recent_prices=recent_prices, suggestion_history=suggestion_history,
         sparkline_svg=sparkline_svg, sparkline_summary=sparkline_summary, backtest=backtest,
+        rounding_pattern=rounding_pattern,
     )
 
 
