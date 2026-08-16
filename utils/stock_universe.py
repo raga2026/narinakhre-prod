@@ -38,6 +38,13 @@ STOCK_UNIVERSE_TABLE_SQL = [
 STOCK_UNIVERSE_ALTER_SQL = [
     "ALTER TABLE stock_universe ADD COLUMN IF NOT EXISTS is_scrape_eligible BOOLEAN DEFAULT false",
     "ALTER TABLE stock_universe ADD COLUMN IF NOT EXISTS market_cap_band TEXT DEFAULT 'unknown'",
+    # Screener.in's sector/industry breadcrumb (see
+    # screener_client._parse_industry_classification), stamped here -- a
+    # company-level attribute, not a per-snapshot one -- whenever
+    # sync_fundamentals_rotation scrapes this company. NULL until first
+    # scraped. Feeds fundamental_screen.py's industry-relative PE/
+    # price-to-book screening (see stock_shortlist._compute_industry_benchmarks).
+    "ALTER TABLE stock_universe ADD COLUMN IF NOT EXISTS industry TEXT",
 ]
 
 

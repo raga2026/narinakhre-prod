@@ -1,8 +1,11 @@
 from utils.price_pattern import (
+    PATTERN_RESEARCH_CONTEXT,
     backtest_rsi_zone_outcomes,
     build_price_sparkline_svg,
     compute_52_week_range,
     compute_day_change,
+    compute_suggestion_pricing,
+    detect_head_and_shoulders,
     detect_rounding_pattern,
     rsi_zone,
     trend_note,
@@ -266,3 +269,201 @@ def test_none_entries_are_filtered_before_fitting():
     result = detect_rounding_pattern(with_gaps)
     assert result is not None
     assert result['days_analyzed'] == len([c for c in with_gaps if c is not None])
+
+
+# --- detect_head_and_shoulders -----------------------------------------------
+
+def _ramp_series(waypoints):
+    """waypoints: [(day, price), ...] sorted by day, starting at day 0.
+    Linearly interpolates between consecutive waypoints to build a full
+    daily closing-price list -- a simple, unambiguous way to construct a
+    synthetic shape (e.g. a clean head-and-shoulders) for testing against."""
+    series = []
+    for (d1, p1), (d2, p2) in zip(waypoints, waypoints[1:]):
+        for day in range(d1, d2):
+            frac = (day - d1) / (d2 - d1)
+            series.append(p1 + frac * (p2 - p1))
+    series.append(waypoints[-1][1])
+    return series
+
+
+CLEAN_HS_TOP = _ramp_series([
+    (0, 100), (20, 130),   # left shoulder
+    (35, 110),             # neckline point 1 (trough)
+    (55, 150),             # head
+    (70, 108),             # neckline point 2 (trough)
+    (90, 132),             # right shoulder
+    (110, 90),             # decline through the neckline -- confirms breakdown
+])
+
+CLEAN_HS_BOTTOM = _ramp_series([
+    (0, 100), (20, 70),    # left shoulder
+    (35, 90),              # neckline point 1 (peak)
+    (55, 50),              # head
+    (70, 92),              # neckline point 2 (peak)
+    (90, 68),              # right shoulder
+    (110, 110),            # rise through the neckline -- confirms breakout
+])
+
+
+def test_too_short_history_returns_none_for_hs():
+    assert detect_head_and_shoulders(CLEAN_HS_TOP[:30], kind='top') is None
+
+
+def test_clean_head_and_shoulders_top_is_detected():
+    result = detect_head_and_shoulders(CLEAN_HS_TOP, kind='top')
+
+    assert result is not None
+    assert result['kind'] == 'top'
+    assert result['head']['price'] == 150
+    assert result['left_shoulder']['price'] == 130
+    assert result['right_shoulder']['price'] == 132
+    assert result['breakout_confirmed'] is True
+    # Standard measured-move formula: target is below the neckline by the
+    # same distance the head sits above it.
+    assert result['measured_move_target'] < result['neckline_at_breakout']
+
+
+def test_clean_reverse_head_and_shoulders_bottom_is_detected():
+    result = detect_head_and_shoulders(CLEAN_HS_BOTTOM, kind='bottom')
+
+    assert result is not None
+    assert result['kind'] == 'bottom'
+    assert result['head']['price'] == 50
+    assert result['breakout_confirmed'] is True
+    assert result['measured_move_target'] > result['neckline_at_breakout']
+
+
+def test_hs_top_before_breakout_is_not_yet_confirmed():
+    # Stop right after the right shoulder forms, before price actually
+    # declines through the neckline.
+    no_breakout_yet = CLEAN_HS_TOP[:91]
+    result = detect_head_and_shoulders(no_breakout_yet, kind='top')
+
+    assert result is not None
+    assert result['breakout_confirmed'] is False
+
+
+def test_asymmetric_shoulders_are_rejected():
+    # Flat neckline at 100, head at 200 (head_to_neckline == 100). Left
+    # shoulder 190 is comfortably close enough to the head on its own
+    # (prominence 10 < the 15-point threshold, so prominence alone would
+    # pass) -- but paired with a right shoulder at just 130, the two
+    # shoulders differ by 60, over the 50-point symmetry tolerance. Not a
+    # real head-and-shoulders, just two unrelated peaks either side of a
+    # bigger one.
+    lopsided = _ramp_series([
+        (0, 100), (20, 190), (35, 100), (55, 200), (70, 100), (90, 130), (110, 90),
+    ])
+    assert detect_head_and_shoulders(lopsided, kind='top') is None
+
+
+def test_head_not_prominent_enough_is_rejected():
+    # Same flat 100 neckline and head at 200 (head_to_neckline == 100).
+    # Both shoulders sit at 186-188 -- only 2 points apart from each other
+    # (well within the 50-point symmetry tolerance) but just 12 points
+    # below the head, under the 15-point prominence threshold. Three
+    # near-equal peaks, not a genuine head-and-shoulders.
+    flat_head = _ramp_series([
+        (0, 100), (20, 188), (35, 100), (55, 200), (70, 100), (90, 186), (110, 90),
+    ])
+    assert detect_head_and_shoulders(flat_head, kind='top') is None
+
+
+def test_monotonic_series_has_no_head_and_shoulders():
+    closes = [100.0 + 0.5 * x for x in range(200)]
+    assert detect_head_and_shoulders(closes, kind='top') is None
+    assert detect_head_and_shoulders(closes, kind='bottom') is None
+
+
+def test_hs_top_wrong_kind_lookup_returns_none_for_a_bottom_shape():
+    # A clean reverse-H&S (bottom) shape shouldn't also register as a top.
+    assert detect_head_and_shoulders(CLEAN_HS_BOTTOM, kind='top') is None
+
+
+# --- PATTERN_RESEARCH_CONTEXT ------------------------------------------------
+
+def test_pattern_research_context_covers_every_detectable_pattern():
+    assert set(PATTERN_RESEARCH_CONTEXT.keys()) == {
+        'head_and_shoulders_top', 'head_and_shoulders_bottom', 'rounding_bottom', 'rounding_top',
+    }
+
+
+def test_pattern_research_context_entries_are_never_bare_numbers_without_a_source():
+    for entry in PATTERN_RESEARCH_CONTEXT.values():
+        assert entry.get('source')
+        assert 'typical_move_duration_days' in entry
+
+
+# --- compute_suggestion_pricing ----------------------------------------------
+
+ROUNDING_BOTTOM_CONFIRMED = _parabola(100, a=0.05, vertex_x=45, vertex_y=50)
+
+
+def test_confirmed_reverse_head_and_shoulders_drives_pricing():
+    latest_close = CLEAN_HS_BOTTOM[-1]
+    result = compute_suggestion_pricing(
+        CLEAN_HS_BOTTOM, latest_close, fallback_target_multiplier=1.05, fallback_stop_loss_multiplier=0.97
+    )
+
+    assert result['pattern_name'] == 'head_and_shoulders_bottom'
+    assert result['buy_price'] == latest_close
+    assert result['target_sell_price'] > latest_close
+    assert result['stop_loss_price'] < latest_close
+    assert result['pattern_research']['source']
+
+
+def test_confirmed_rounding_bottom_drives_pricing_when_no_hs_present():
+    latest_close = ROUNDING_BOTTOM_CONFIRMED[-1]
+    result = compute_suggestion_pricing(
+        ROUNDING_BOTTOM_CONFIRMED, latest_close, fallback_target_multiplier=1.05, fallback_stop_loss_multiplier=0.97
+    )
+
+    assert result['pattern_name'] == 'rounding_bottom'
+    assert result['buy_price'] == latest_close
+    assert result['target_sell_price'] > latest_close
+    assert result['stop_loss_price'] < latest_close
+
+
+def test_head_and_shoulders_takes_priority_over_rounding_when_both_present():
+    # CLEAN_HS_BOTTOM registers as a confirmed reverse H&S -- it should win
+    # even if the same series happened to also loosely fit a rounding shape.
+    latest_close = CLEAN_HS_BOTTOM[-1]
+    result = compute_suggestion_pricing(
+        CLEAN_HS_BOTTOM, latest_close, fallback_target_multiplier=1.05, fallback_stop_loss_multiplier=0.97
+    )
+    assert result['pattern_name'] == 'head_and_shoulders_bottom'
+
+
+def test_no_pattern_falls_back_to_flat_percentages():
+    flat = [100.0] * 950  # no shape at all
+    result = compute_suggestion_pricing(flat, 100.0, fallback_target_multiplier=1.05, fallback_stop_loss_multiplier=0.97)
+
+    assert result['pattern_name'] is None
+    assert result['pattern_research'] is None
+    assert result['buy_price'] == 100.0
+    assert result['target_sell_price'] == 105.0
+    assert result['stop_loss_price'] == 97.0
+
+
+def test_unconfirmed_head_and_shoulders_falls_back():
+    # Stop right after the right shoulder forms -- no breakout yet.
+    no_breakout_yet = CLEAN_HS_BOTTOM[:91]
+    latest_close = no_breakout_yet[-1]
+    result = compute_suggestion_pricing(
+        no_breakout_yet, latest_close, fallback_target_multiplier=1.05, fallback_stop_loss_multiplier=0.97
+    )
+
+    assert result['pattern_name'] is None
+    assert result['target_sell_price'] == round(latest_close * 1.05, 2)
+
+
+def test_no_time_estimate_is_ever_returned():
+    # The whole point of this feature: patterns drive price targets, never
+    # a fabricated day-count/holding-period prediction.
+    result = compute_suggestion_pricing(
+        CLEAN_HS_BOTTOM, CLEAN_HS_BOTTOM[-1], fallback_target_multiplier=1.05, fallback_stop_loss_multiplier=0.97
+    )
+    assert 'holding_period_days' not in result
+    assert 'estimated_days' not in result
+    assert 'wait_days' not in result

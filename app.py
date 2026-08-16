@@ -7476,7 +7476,7 @@ def stocks_company_detail(watchlist_id):
 
     suggestion_history = db.execute(
         '''SELECT suggestion_date, buy_price, target_sell_price, stop_loss_price,
-                  holding_period_days, score, fundamental_tier, status, rationale
+                  holding_period_days, pattern_name, pattern_note, score, fundamental_tier, status, rationale
            FROM stock_suggestions WHERE watchlist_id=?
            ORDER BY suggestion_date DESC LIMIT 20''',
         (watchlist_id,)

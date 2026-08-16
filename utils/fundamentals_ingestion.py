@@ -180,9 +180,13 @@ def sync_fundamentals_rotation(db, fetch_fn=None, batch_size=ROTATION_BATCH_SIZE
         try:
             data = fetch(symbol)
             _upsert_fundamentals_snapshot(db, today, data, watchlist_id=watchlist_id, universe_id=universe_id)
+            # COALESCE(?, industry): a parse miss (industry is None this
+            # fetch -- e.g. the breadcrumb was missing on this company's
+            # page) must not blank out a value already on record from an
+            # earlier successful scrape.
             db.execute(
-                'UPDATE stock_universe SET last_fundamentals_fetch = NOW() WHERE id=?',
-                (universe_id,)
+                'UPDATE stock_universe SET last_fundamentals_fetch = NOW(), industry = COALESCE(?, industry) WHERE id=?',
+                (data.get('industry'), universe_id)
             )
             db.commit()
             scraped += 1

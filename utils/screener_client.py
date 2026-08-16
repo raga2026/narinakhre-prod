@@ -244,6 +244,30 @@ def _parse_shareholding(soup):
     return result
 
 
+def _parse_industry_classification(soup):
+    """Screener shows a sector/industry breadcrumb near the top of every
+    company page as a run of <a title="..."> tags -- title is one of
+    'Broad Sector', 'Sector', 'Broad Industry', 'Industry' (broadest to most
+    specific), confirmed against a real fetched page while building this.
+    Returns the most granular level actually present -- 'Industry' if it's
+    there, else 'Broad Industry', else 'Sector', else 'Broad Sector', else
+    None if the breadcrumb is missing entirely (some company types may not
+    have one). Deliberately the finest available level rather than always
+    the broadest: two companies sharing a Sector can still trade at very
+    different typical valuations at the Industry level, which is what this
+    feeds into utils/fundamental_screen.py's industry-relative
+    price-to-book check for."""
+    levels = {}
+    for a in soup.find_all('a', title=True):
+        title = a.get('title')
+        if title in ('Broad Sector', 'Sector', 'Broad Industry', 'Industry'):
+            levels[title] = a.get_text(strip=True)
+    for level in ('Industry', 'Broad Industry', 'Sector', 'Broad Sector'):
+        if levels.get(level):
+            return levels[level]
+    return None
+
+
 def _parse_price_to_book(raw_ratios):
     """Current Price / Book Value -- both are top-ratios entries; Screener
     doesn't show a ready-made 'Price to Book' label there."""
@@ -310,5 +334,6 @@ def fetch_fundamentals(symbol):
         'free_cash_flow': _parse_free_cash_flow(soup),
         'sector_avg_pe': None,   # peers table is JS/AJAX-loaded, not in the static HTML
         'current_ratio': None,  # not derivable from Screener's simplified balance sheet
+        'industry': _parse_industry_classification(soup),
         **_parse_shareholding(soup),
     }

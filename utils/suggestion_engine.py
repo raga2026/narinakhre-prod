@@ -4,10 +4,20 @@ at the bottom is the only DB-orchestrating piece, mirroring the split already
 used elsewhere in this codebase (e.g. fundamental_screen.py vs stock_shortlist.py)."""
 from datetime import date, timedelta
 
+from utils.price_pattern import compute_suggestion_pricing
+
 TOP_N_SUGGESTIONS = 3
 HOLDING_PERIOD_DAYS = 10
-TARGET_MULTIPLIER = 1.05   # +5%
-STOP_LOSS_MULTIPLIER = 0.97  # -3%
+TARGET_MULTIPLIER = 1.05   # +5%, used as the fallback when no chart pattern applies -- see compute_suggestion_pricing
+STOP_LOSS_MULTIPLIER = 0.97  # -3%, same fallback role
+
+# How far back to pull daily closes for pattern detection (see
+# utils.price_pattern.detect_head_and_shoulders/detect_rounding_pattern) --
+# both patterns can take months to form, so a short lookback would miss
+# them entirely. ~900 calendar days is roughly 2.5 years, comfortably
+# covering even the slower-forming rounding-bottom case (published research
+# puts typical formation at 3-12 months -- see PATTERN_RESEARCH_CONTEXT).
+PATTERN_LOOKBACK_DAYS = 900
 
 RSI_MIN, RSI_MAX = 40, 65
 
@@ -57,6 +67,17 @@ STOCK_SUGGESTIONS_ALTER_SQL = [
     'ALTER TABLE stock_suggestions ADD COLUMN IF NOT EXISTS opm_at_suggestion NUMERIC(6,2)',
     "ALTER TABLE stock_suggestions ADD COLUMN IF NOT EXISTS fundamental_tier TEXT "
     "CHECK (fundamental_tier IS NULL OR fundamental_tier IN ('golden', 'silver'))",
+    # pattern_name/pattern_note: set only when compute_suggestion_pricing()
+    # (utils/price_pattern.py) found a confirmed chart pattern to base
+    # buy/target/stop-loss on instead of the flat percentage fallback --
+    # NULL means the flat fallback was used, same as before this existed.
+    # pattern_note is the full cited caveat sentence (hit rate, typical
+    # duration range, source) the email/viewer pages show INSTEAD OF a
+    # "hold N days" figure for these -- there's deliberately no
+    # pattern-specific day-count column: chart-pattern shape doesn't
+    # reliably predict timing, so none is stored.
+    'ALTER TABLE stock_suggestions ADD COLUMN IF NOT EXISTS pattern_name TEXT',
+    'ALTER TABLE stock_suggestions ADD COLUMN IF NOT EXISTS pattern_note TEXT',
 ]
 
 
@@ -137,6 +158,60 @@ def _build_rationale(candidate):
     return ', '.join(parts)
 
 
+_PATTERN_LABELS = {
+    'head_and_shoulders_bottom': 'a reverse head-and-shoulders pattern (confirmed breakout)',
+    'rounding_bottom': 'a rounding-bottom pattern (confirmed breakout)',
+}
+
+
+def _build_pattern_note(pattern_name, pattern_research):
+    """The sentence shown INSTEAD OF a 'hold N days' figure whenever
+    compute_suggestion_pricing() (utils/price_pattern.py) used a confirmed
+    chart pattern for this suggestion's target/stop-loss -- cites the
+    pattern's published hit rate and typical duration (general research on
+    the pattern TYPE, from PATTERN_RESEARCH_CONTEXT), explicitly stating
+    this isn't a per-stock timing prediction. Returns None when no pattern
+    was used (pattern_name/pattern_research both None) -- callers fall
+    back to the plain holding_period_days figure in that case."""
+    if not pattern_name or not pattern_research:
+        return None
+
+    label = _PATTERN_LABELS.get(pattern_name, pattern_name)
+    lo_days, hi_days = pattern_research['typical_move_duration_days']
+    duration = f'{round(lo_days / 30)}-{round(hi_days / 30)} months'
+
+    hit_rate = pattern_research.get('target_hit_rate_pct')
+    directional_rate = pattern_research.get('directional_hit_rate_pct')
+    if hit_rate is not None:
+        reliability = f'the full target has historically been reached about {hit_rate}% of the time'
+    elif directional_rate is not None:
+        reliability = f'price has historically continued in the predicted direction about {directional_rate}% of the time'
+    else:
+        reliability = 'published reliability figures for this exact pattern are limited'
+
+    return (
+        f'Target and stop-loss are based on {label} in this stock\'s own price history -- the target uses the '
+        f'standard measured-move formula (the head-to-neckline distance projected past the breakout). '
+        f'Per published technical-analysis research ({pattern_research["source"]}), {reliability}, with the full '
+        f'move typically taking about {duration} historically -- across many past instances at OTHER companies, '
+        f'not a prediction for this stock specifically. There is no reliable way to predict exact timing from '
+        f'chart shape alone.'
+    )
+
+
+def _fetch_price_history(db, watchlist_id, lookback_days=PATTERN_LOOKBACK_DAYS):
+    """Closing prices, oldest first, for pattern detection (see
+    utils.price_pattern.compute_suggestion_pricing) -- capped at
+    lookback_days most recent rows regardless of how much history exists."""
+    rows = db.execute(
+        '''SELECT close FROM stock_daily_data WHERE watchlist_id=?
+           ORDER BY trade_date DESC LIMIT ?''',
+        (watchlist_id, lookback_days)
+    ).fetchall()
+    closes_desc = [r['close'] for r in rows if r['close'] is not None]
+    return list(reversed(closes_desc))
+
+
 def _fetch_candidates(db):
     today = date.today().isoformat()
     fundamentals_cutoff = (date.today() - timedelta(days=20)).isoformat()
@@ -184,6 +259,7 @@ def get_suggestions(db, start_date=None, end_date=None):
                    s.target_sell_price, s.stop_loss_price, s.holding_period_days,
                    s.rsi_at_suggestion, s.pe_at_suggestion, s.peg_at_suggestion,
                    s.opm_at_suggestion, s.fundamental_tier,
+                   s.pattern_name, s.pattern_note,
                    s.score, s.rationale, s.status
             FROM stock_suggestions s
             JOIN stock_watchlist w ON w.id = s.watchlist_id
@@ -203,7 +279,20 @@ def generate_daily_suggestions(db):
     last HOLDING_PERIOD_DAYS. That means a symbol being skipped here can
     result in fewer than TOP_N_SUGGESTIONS new suggestions on a given day,
     by design -- this is meant to avoid re-suggesting a stock that's
-    already an active pending call."""
+    already an active pending call.
+
+    buy/target/stop-loss come from compute_suggestion_pricing()
+    (utils/price_pattern.py), which prefers a confirmed chart pattern
+    (reverse head-and-shoulders, then rounding bottom) found in the last
+    PATTERN_LOOKBACK_DAYS of this stock's own price history, falling back
+    to the flat TARGET_MULTIPLIER/STOP_LOSS_MULTIPLIER percentages when no
+    pattern applies. holding_period_days stays the flat HOLDING_PERIOD_DAYS
+    default in EVERY row regardless (it's only ever used internally, for
+    the open-suggestion dedup cutoff above) -- when a pattern was used,
+    pattern_name/pattern_note are set instead, and it's pattern_note (not
+    holding_period_days) that the email/viewer pages show for those, since
+    chart-pattern shape doesn't reliably predict timing the way a fixed
+    number of days would misleadingly imply."""
     candidates = _fetch_candidates(db)
     top = select_top_suggestions(candidates, top_n=TOP_N_SUGGESTIONS)
 
@@ -226,9 +315,15 @@ def generate_daily_suggestions(db):
             skipped_duplicates.append(candidate['symbol'])
             continue
 
-        buy_price = candidate['latest_close']
-        target_sell_price = round(buy_price * TARGET_MULTIPLIER, 2)
-        stop_loss_price = round(buy_price * STOP_LOSS_MULTIPLIER, 2)
+        price_history = _fetch_price_history(db, watchlist_id)
+        pricing = compute_suggestion_pricing(
+            price_history, candidate['latest_close'], TARGET_MULTIPLIER, STOP_LOSS_MULTIPLIER
+        )
+        buy_price = pricing['buy_price']
+        target_sell_price = pricing['target_sell_price']
+        stop_loss_price = pricing['stop_loss_price']
+        pattern_name = pricing['pattern_name']
+        pattern_note = _build_pattern_note(pattern_name, pricing['pattern_research'])
         rationale = _build_rationale(candidate)
 
         db.execute(
@@ -236,8 +331,8 @@ def generate_daily_suggestions(db):
                    (watchlist_id, suggestion_date, buy_price, target_sell_price,
                     stop_loss_price, holding_period_days, rsi_at_suggestion,
                     pe_at_suggestion, peg_at_suggestion, opm_at_suggestion,
-                    fundamental_tier, score, rationale, status)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')
+                    fundamental_tier, pattern_name, pattern_note, score, rationale, status)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')
                ON CONFLICT (watchlist_id, suggestion_date) DO UPDATE SET
                    buy_price = EXCLUDED.buy_price,
                    target_sell_price = EXCLUDED.target_sell_price,
@@ -247,15 +342,20 @@ def generate_daily_suggestions(db):
                    peg_at_suggestion = EXCLUDED.peg_at_suggestion,
                    opm_at_suggestion = EXCLUDED.opm_at_suggestion,
                    fundamental_tier = EXCLUDED.fundamental_tier,
+                   pattern_name = EXCLUDED.pattern_name,
+                   pattern_note = EXCLUDED.pattern_note,
                    score = EXCLUDED.score,
                    rationale = EXCLUDED.rationale''',
             (watchlist_id, today, buy_price, target_sell_price, stop_loss_price,
              HOLDING_PERIOD_DAYS, candidate['rsi_14'], candidate['pe_ratio'],
              candidate['peg_ratio'], candidate['opm_pct'], candidate.get('fundamental_tier'),
-             score, rationale)
+             pattern_name, pattern_note, score, rationale)
         )
         db.commit()
-        created.append({'symbol': candidate['symbol'], 'buy_price': buy_price, 'score': score})
+        created.append({
+            'symbol': candidate['symbol'], 'buy_price': buy_price, 'score': score,
+            'pattern_name': pattern_name,
+        })
 
     return {
         'candidates_evaluated': len(candidates),

@@ -306,12 +306,329 @@ def detect_rounding_pattern(closes_oldest_first):
         }[stage]
         above_neckline = current_price <= neckline_price  # "broken down" below the neckline, for a top
 
+    vertex_price = a * vertex_x * vertex_x + b * vertex_x + c
+
     return {
         'shape': shape,
         'fit_quality': round(r2, 2),
         'days_analyzed': len(points),
         'phase': phase,
         'neckline_price': neckline_price,
+        'vertex_price': round(vertex_price, 2),
         'current_price': current_price,
         'above_neckline': above_neckline,
+    }
+
+
+# --- Head-and-shoulders / reverse head-and-shoulders -------------------------
+#
+# A head-and-shoulders TOP is three peaks -- a lower left shoulder, a higher
+# head, a lower right shoulder roughly matching the left one -- with a
+# "neckline" connecting the two troughs between them; a break below the
+# neckline is the classic bearish reversal signal. A head-and-shoulders
+# BOTTOM (colloquially "reverse" or "inverse" head-and-shoulders) is the
+# mirror image built from troughs instead of peaks, bullish once price
+# breaks above the neckline.
+#
+# The MEASURED-MOVE price target below is a standard, mechanical
+# technical-analysis formula (project the head-to-neckline distance an
+# equal distance beyond the neckline breakout) -- not something invented
+# for this app. See PATTERN_RESEARCH_CONTEXT further down for how often
+# that target has actually been reached historically, and how long it took,
+# per Thomas Bulkowski's published pattern research (thepatternsite.com) --
+# always shown as general historical context for the pattern TYPE, never as
+# a claim about this specific stock.
+
+# A point counts as a swing high/low only if it's the most extreme value
+# within this many trading days on EACH side -- filters out single-day
+# noise while still catching multi-week swings. ~3 weeks each side.
+HS_EXTREMA_WINDOW_DAYS = 15
+
+# The two shoulders must be within this fraction of each other (relative to
+# the head's distance from the neckline) to count as "roughly symmetric" --
+# real shoulders are rarely identical, but wildly mismatched ones aren't a
+# head-and-shoulders, just two unrelated peaks either side of a bigger one.
+HS_SHOULDER_SYMMETRY_TOLERANCE = 0.5
+
+# The head must clear the higher of the two shoulders by at least this
+# fraction of the head-to-neckline distance -- guards against calling three
+# nearly-equal peaks a "head and shoulders" just because the middle one is
+# a fraction higher.
+HS_MIN_HEAD_PROMINENCE = 0.15
+
+HS_MIN_DAYS = 60
+
+
+def _find_local_extrema(points, window, kind):
+    """points: [(index, value), ...]. kind: 'max' finds swing highs, 'min'
+    finds swing lows. A point qualifies if it's the strict max/min among
+    every point within `window` positions on both sides (using array
+    position, not calendar days, but callers pass daily closes so the two
+    coincide). Returns the qualifying points in original order."""
+    extrema = []
+    n = len(points)
+    for i in range(n):
+        lo = max(0, i - window)
+        hi = min(n, i + window + 1)
+        neighborhood = [points[j][1] for j in range(lo, hi) if j != i]
+        if not neighborhood:
+            continue
+        value = points[i][1]
+        if kind == 'max' and value > max(neighborhood):
+            extrema.append(points[i])
+        elif kind == 'min' and value < min(neighborhood):
+            extrema.append(points[i])
+    return extrema
+
+
+def _neckline_value_at(index, point_a, point_b):
+    """Linear interpolation/extrapolation of the line through point_a and
+    point_b (each (index, value)), evaluated at `index` -- necklines are
+    often sloped, not flat, so this projects the actual line rather than
+    averaging the two endpoints."""
+    (x1, y1), (x2, y2) = point_a, point_b
+    if x2 == x1:
+        return (y1 + y2) / 2
+    slope = (y2 - y1) / (x2 - x1)
+    return y1 + slope * (index - x1)
+
+
+def detect_head_and_shoulders(closes_oldest_first, kind='top'):
+    """closes_oldest_first: closing prices, oldest first, ideally ~900 days
+    so a pattern that took months to form is actually visible. kind='top'
+    looks for a bearish head-and-shoulders (three peaks); kind='bottom'
+    looks for a bullish reverse head-and-shoulders (three troughs).
+
+    Finds swing highs/lows (see _find_local_extrema), takes the LAST three
+    (most recent candidate shoulder-head-shoulder), and requires: the head
+    is the most extreme of the three, by at least HS_MIN_HEAD_PROMINENCE of
+    the head-to-neckline distance; the two shoulders are within
+    HS_SHOULDER_SYMMETRY_TOLERANCE of each other. Returns None if there
+    isn't enough history, fewer than 3 swing points exist yet, or the most
+    recent 3 don't satisfy those checks -- this is a real (if imperfect)
+    geometric test, not a guarantee a human chartist would agree, and
+    doesn't claim to catch every valid pattern or reject every invalid one.
+
+    neckline is the line through the two troughs (kind='top') or peaks
+    (kind='bottom') BETWEEN the shoulders and head, projected to the most
+    recent day via _neckline_value_at -- a sloped neckline, not a flat
+    average. measured_move_target is the standard mechanical technical-
+    analysis formula: project the head-to-neckline distance an equal
+    distance beyond the neckline. See PATTERN_RESEARCH_CONTEXT for
+    published historical context on how often that target is actually
+    reached, and how long it has taken -- general research on the pattern
+    TYPE, not a claim about this stock.
+
+    Returns {'kind', 'left_shoulder', 'head', 'right_shoulder',
+    'neckline_at_head', 'neckline_at_breakout', 'measured_move_target',
+    'current_price', 'breakout_confirmed', 'days_since_head'} -- each of
+    left_shoulder/head/right_shoulder is {'index', 'price'}."""
+    points = [(i, c) for i, c in enumerate(closes_oldest_first) if c is not None]
+    if len(points) < HS_MIN_DAYS:
+        return None
+
+    extrema_kind = 'max' if kind == 'top' else 'min'
+    extrema = _find_local_extrema(points, HS_EXTREMA_WINDOW_DAYS, extrema_kind)
+    if len(extrema) < 3:
+        return None
+
+    left_shoulder, head, right_shoulder = extrema[-3], extrema[-2], extrema[-1]
+    ls_idx, ls_price = left_shoulder
+    h_idx, h_price = head
+    rs_idx, rs_price = right_shoulder
+
+    is_head_extreme = (h_price > ls_price and h_price > rs_price) if kind == 'top' \
+        else (h_price < ls_price and h_price < rs_price)
+    if not is_head_extreme:
+        return None
+
+    # Neckline points: the lowest trough (kind='top') / highest peak
+    # (kind='bottom') strictly between left_shoulder..head and head..right_shoulder.
+    between_ls_head = [p for p in points if ls_idx < p[0] < h_idx]
+    between_head_rs = [p for p in points if h_idx < p[0] < rs_idx]
+    if not between_ls_head or not between_head_rs:
+        return None
+    neckline_point_1 = min(between_ls_head, key=lambda p: p[1]) if kind == 'top' \
+        else max(between_ls_head, key=lambda p: p[1])
+    neckline_point_2 = min(between_head_rs, key=lambda p: p[1]) if kind == 'top' \
+        else max(between_head_rs, key=lambda p: p[1])
+
+    neckline_at_head = _neckline_value_at(h_idx, neckline_point_1, neckline_point_2)
+    head_to_neckline = abs(h_price - neckline_at_head)
+    if head_to_neckline == 0:
+        return None
+
+    shoulder_diff = abs(ls_price - rs_price)
+    if shoulder_diff > HS_SHOULDER_SYMMETRY_TOLERANCE * head_to_neckline:
+        return None
+
+    nearer_shoulder = max(ls_price, rs_price) if kind == 'top' else min(ls_price, rs_price)
+    prominence = abs(h_price - nearer_shoulder)
+    if prominence < HS_MIN_HEAD_PROMINENCE * head_to_neckline:
+        return None
+
+    last_idx, current_price = points[-1]
+    neckline_at_breakout = _neckline_value_at(last_idx, neckline_point_1, neckline_point_2)
+
+    if kind == 'top':
+        measured_move_target = neckline_at_breakout - head_to_neckline
+        breakout_confirmed = current_price < neckline_at_breakout
+    else:
+        measured_move_target = neckline_at_breakout + head_to_neckline
+        breakout_confirmed = current_price > neckline_at_breakout
+
+    return {
+        'kind': kind,
+        'left_shoulder': {'index': ls_idx, 'price': ls_price},
+        'head': {'index': h_idx, 'price': h_price},
+        'right_shoulder': {'index': rs_idx, 'price': rs_price},
+        'neckline_at_head': round(neckline_at_head, 2),
+        'neckline_at_breakout': round(neckline_at_breakout, 2),
+        'measured_move_target': round(measured_move_target, 2),
+        'current_price': current_price,
+        'breakout_confirmed': breakout_confirmed,
+        'days_since_head': last_idx - h_idx,
+    }
+
+
+# Published aggregate statistics on how these pattern TYPES have performed
+# historically across hundreds of real, past instances at OTHER companies --
+# general research context for the pattern, never a claim about this
+# specific stock's own future. Primarily Thomas Bulkowski's "Encyclopedia of
+# Chart Patterns" (thepatternsite.com), the most widely cited empirical
+# study of chart-pattern outcomes in technical-analysis literature; figures
+# below are secondary-sourced (aggregated from published summaries of that
+# research, not a direct read of the primary tables), and different study
+# vintages report somewhat different numbers (e.g. target-hit-rate for
+# head-and-shoulders has been reported anywhere from 51% to 83% depending on
+# sample/year) -- the more conservative, more recently reported figure is
+# used here. Rounding-bottom statistics vary more across sources than
+# head-and-shoulders, reflecting a smaller published sample. Always
+# presented alongside its source and hit-rate, never as a bare number, so
+# it can't be mistaken for a guarantee.
+PATTERN_RESEARCH_CONTEXT = {
+    'head_and_shoulders_top': {
+        'target_hit_rate_pct': 51,
+        'directional_hit_rate_pct': 81,
+        'typical_move_duration_days': (60, 90),
+        'source': "Thomas Bulkowski's Encyclopedia of Chart Patterns (thepatternsite.com) "
+                  "-- 431 patterns across 500 stocks, 1991-1996, with later updates",
+    },
+    'head_and_shoulders_bottom': {
+        'target_hit_rate_pct': 51,
+        'directional_hit_rate_pct': 95,
+        'typical_move_duration_days': (60, 90),
+        'source': "Thomas Bulkowski's Encyclopedia of Chart Patterns (thepatternsite.com)",
+    },
+    'rounding_bottom': {
+        # No separately published measured-move/target-hit-rate study for
+        # "rounding bottom" by that exact name -- the figures below are
+        # Bulkowski's cup-and-handle statistics instead (a rounding bottom
+        # is essentially a cup without the handle, and shares the same
+        # "rim-to-bottom depth projected from the breakout" measured-move
+        # logic; cup-and-handle is the far more heavily studied of the two
+        # in published TA research), used here as the closest defensible
+        # analogue rather than an invented number.
+        'target_hit_rate_pct': 61,
+        'directional_hit_rate_pct': 95,
+        'typical_move_duration_days': (90, 365),
+        'source': "Thomas Bulkowski's Encyclopedia of Chart Patterns, cup-and-handle "
+                  "statistics (bull-market patterns) used as the closest published "
+                  "analogue for rounding bottoms -- see the note above",
+    },
+    'rounding_top': {
+        'target_hit_rate_pct': None,
+        'directional_hit_rate_pct': None,
+        'typical_move_duration_days': (90, 365),
+        'source': "No separately published reliability figures found for rounding tops "
+                  "specifically -- shown for shape/phase context only, never used for a "
+                  "price target.",
+    },
+}
+
+
+# --- Pattern-based suggestion pricing ----------------------------------------
+#
+# Ties the detectors above into buy/target/stop-loss pricing for the daily
+# suggestion email (see suggestion_engine.py). Only ever applies a pattern
+# that is BULLISH and has already CONFIRMED its breakout (price has moved
+# through the neckline in the right direction) -- an unconfirmed pattern, a
+# bearish one, or a target/stop that doesn't make directional sense (target
+# at or below today's price, or stop at or above it) all fall through to
+# the plain percentage-based fallback, same as "no pattern found" would.
+#
+# Deliberately never derives a specific number of days to hold -- see
+# PATTERN_RESEARCH_CONTEXT's typical_move_duration_days for the general,
+# cited historical range instead. That's shown as research context on the
+# pattern TYPE, never as a per-stock forecast of how long THIS suggestion
+# will take.
+
+# How far below a bullish pattern's neckline the stop-loss sits -- a small
+# buffer below the breakout level, standard TA practice: a "breakout" that
+# falls back through its own neckline shortly after is generally treated as
+# failed/invalidated, not just noise.
+PATTERN_STOP_LOSS_BUFFER_PCT = 0.02
+
+
+def _pattern_pricing_from_head_and_shoulders(closes_oldest_first, latest_close):
+    hs = detect_head_and_shoulders(closes_oldest_first, kind='bottom')
+    if not hs or not hs['breakout_confirmed']:
+        return None
+    target = hs['measured_move_target']
+    stop_loss = round(hs['neckline_at_breakout'] * (1 - PATTERN_STOP_LOSS_BUFFER_PCT), 2)
+    if target <= latest_close or stop_loss >= latest_close:
+        return None
+    return {
+        'buy_price': latest_close, 'target_sell_price': target, 'stop_loss_price': stop_loss,
+        'pattern_name': 'head_and_shoulders_bottom',
+        'pattern_detail': hs,
+        'pattern_research': PATTERN_RESEARCH_CONTEXT['head_and_shoulders_bottom'],
+    }
+
+
+def _pattern_pricing_from_rounding_bottom(closes_oldest_first, latest_close):
+    rounding = detect_rounding_pattern(closes_oldest_first)
+    if not rounding or rounding['shape'] != 'rounding_bottom' or not rounding['above_neckline']:
+        return None
+    cup_depth = rounding['neckline_price'] - rounding['vertex_price']
+    if cup_depth <= 0:
+        return None
+    target = round(rounding['neckline_price'] + cup_depth, 2)
+    stop_loss = round(rounding['neckline_price'] * (1 - PATTERN_STOP_LOSS_BUFFER_PCT), 2)
+    if target <= latest_close or stop_loss >= latest_close:
+        return None
+    return {
+        'buy_price': latest_close, 'target_sell_price': target, 'stop_loss_price': stop_loss,
+        'pattern_name': 'rounding_bottom',
+        'pattern_detail': rounding,
+        'pattern_research': PATTERN_RESEARCH_CONTEXT['rounding_bottom'],
+    }
+
+
+def compute_suggestion_pricing(closes_oldest_first, latest_close, fallback_target_multiplier, fallback_stop_loss_multiplier):
+    """Tries a confirmed reverse head-and-shoulders first, then a confirmed
+    rounding bottom, falling back to the plain percentage method
+    (fallback_target_multiplier/fallback_stop_loss_multiplier applied to
+    latest_close) when neither is found, confirmed, or makes directional
+    sense. buy_price is always latest_close either way -- a pattern informs
+    the TARGET and STOP, not when to buy; the suggestion itself already
+    means "buy now."
+
+    Returns {'buy_price', 'target_sell_price', 'stop_loss_price',
+    'pattern_name': None|str, 'pattern_detail': None|dict,
+    'pattern_research': None|dict} -- pattern_research is the matching
+    PATTERN_RESEARCH_CONTEXT entry when a pattern was used, for the email
+    to cite (hit rate, typical duration, source) alongside the price."""
+    for finder in (_pattern_pricing_from_head_and_shoulders, _pattern_pricing_from_rounding_bottom):
+        result = finder(closes_oldest_first, latest_close)
+        if result:
+            return result
+
+    return {
+        'buy_price': latest_close,
+        'target_sell_price': round(latest_close * fallback_target_multiplier, 2),
+        'stop_loss_price': round(latest_close * fallback_stop_loss_multiplier, 2),
+        'pattern_name': None,
+        'pattern_detail': None,
+        'pattern_research': None,
     }

@@ -28,7 +28,7 @@ def test_row_passing_every_criterion_passes_with_no_failures():
 
 
 def test_row_failing_only_pe_fails_with_just_that_criterion():
-    row = {**PASSING_ROW, 'pe_ratio': 30}  # out of the 15-25 range, everything else still passes
+    row = {**PASSING_ROW, 'pe_ratio': 30}  # out of the fallback 15-25 range, everything else still passes
 
     passes, failed = evaluate_fundamentals(row, previous_fundamentals_row=None)
 
@@ -78,24 +78,6 @@ def test_flat_fii_holding_fails_since_it_must_strictly_increase():
     assert failed == ['FII holding trend']
 
 
-def test_premium_valuation_price_to_book_passes_without_failing():
-    row = {**PASSING_ROW, 'price_to_book': 20}  # in the 15-25 "premium valuation" band
-
-    passes, failed = evaluate_fundamentals(row, PASSING_PREVIOUS_ROW)
-
-    assert passes is True
-    assert failed == []
-
-
-def test_price_to_book_between_pass_and_premium_bands_fails():
-    row = {**PASSING_ROW, 'price_to_book': 10}  # neither 2-7 nor 15-25
-
-    passes, failed = evaluate_fundamentals(row, previous_fundamentals_row=None)
-
-    assert passes is False
-    assert failed == ['price-to-book range']
-
-
 def test_missing_required_field_fails_that_check():
     row = {**PASSING_ROW, 'roce_pct': None}
 
@@ -136,6 +118,170 @@ def test_negative_quarterly_growth_fails_same_as_any_other_sub_floor_value():
     assert 'quarterly revenue growth' in failed
 
 
+# --- price-to-book / PE: fallback bands (no trusted industry benchmark) ----
+# These apply whenever industry_benchmarks is omitted, None, or the
+# specific metric's benchmark is missing/has too small a sample -- see
+# MIN_INDUSTRY_SAMPLE_SIZE. Fallback price-to-book ceiling is 10, no floor;
+# fallback PE range is the original flat 15-25 (see fundamental_screen.py).
+
+def test_price_to_book_at_fallback_ceiling_passes():
+    row = {**PASSING_ROW, 'price_to_book': 10}
+
+    passes, failed = evaluate_fundamentals(row, previous_fundamentals_row=None)
+
+    assert passes is True
+    assert failed == []
+
+
+def test_price_to_book_above_fallback_ceiling_fails():
+    row = {**PASSING_ROW, 'price_to_book': 10.01}
+
+    passes, failed = evaluate_fundamentals(row, previous_fundamentals_row=None)
+
+    assert passes is False
+    assert failed == ['price-to-book range']
+
+
+def test_price_to_book_very_low_passes_fallback_since_there_is_no_floor():
+    # Cheap relative to nothing in particular (no industry data here) is
+    # still not penalized -- no floor on the fallback band either.
+    row = {**PASSING_ROW, 'price_to_book': 0.1}
+
+    passes, failed = evaluate_fundamentals(row, previous_fundamentals_row=None)
+
+    assert passes is True
+    assert failed == []
+
+
+def test_price_to_book_missing_fails_outright():
+    row = {**PASSING_ROW, 'price_to_book': None}
+
+    passes, failed = evaluate_fundamentals(row, previous_fundamentals_row=None)
+
+    assert passes is False
+    assert failed == ['price-to-book range']
+
+
+# --- price-to-book / PE: industry-relative bands ---------------------------
+
+def test_price_to_book_within_industry_ceiling_passes_even_above_fallback():
+    # 12 would fail the flat fallback ceiling (10), but this industry's
+    # companies average 10 -- 1.5x that is 15, so 12 passes when a trusted
+    # benchmark is available.
+    row = {**PASSING_ROW, 'price_to_book': 12}
+    benchmark = {'price_to_book': {'avg': 10, 'count': 5}, 'pe_ratio': None}
+
+    passes, failed = evaluate_fundamentals(row, previous_fundamentals_row=None, industry_benchmarks=benchmark)
+
+    assert passes is True
+    assert failed == []
+
+
+def test_price_to_book_above_industry_ceiling_fails():
+    row = {**PASSING_ROW, 'price_to_book': 16}  # > 10 * 1.5
+    benchmark = {'price_to_book': {'avg': 10, 'count': 5}, 'pe_ratio': None}
+
+    passes, failed = evaluate_fundamentals(row, previous_fundamentals_row=None, industry_benchmarks=benchmark)
+
+    assert passes is False
+    assert failed == ['price-to-book range']
+
+
+def test_price_to_book_far_below_industry_average_still_passes():
+    # No floor multiplier -- trading well under the industry average is a
+    # value signal for this screen, not a red flag.
+    row = {**PASSING_ROW, 'price_to_book': 0.5}
+    benchmark = {'price_to_book': {'avg': 10, 'count': 5}, 'pe_ratio': None}
+
+    passes, failed = evaluate_fundamentals(row, previous_fundamentals_row=None, industry_benchmarks=benchmark)
+
+    assert passes is True
+    assert failed == []
+
+
+def test_industry_benchmark_below_min_sample_size_falls_back_to_flat_band():
+    # Only 2 companies in this industry have price_to_book data -- below
+    # MIN_INDUSTRY_SAMPLE_SIZE (3), so the average isn't trusted and this
+    # falls back to the flat <=10 ceiling despite the (small-sample)
+    # industry average being high enough to otherwise pass 12.
+    row = {**PASSING_ROW, 'price_to_book': 12}
+    benchmark = {'price_to_book': {'avg': 10, 'count': 2}, 'pe_ratio': None}
+
+    passes, failed = evaluate_fundamentals(row, previous_fundamentals_row=None, industry_benchmarks=benchmark)
+
+    assert passes is False
+    assert failed == ['price-to-book range']
+
+
+def test_industry_benchmark_none_for_this_metric_falls_back_to_flat_band():
+    # This company's industry IS known and has a trusted PE benchmark, but
+    # no company in it has price_to_book data at all (benchmark is None for
+    # that specific metric) -- price-to-book still falls back independently.
+    row = {**PASSING_ROW, 'price_to_book': 12, 'pe_ratio': 20}
+    benchmark = {'price_to_book': None, 'pe_ratio': {'avg': 20, 'count': 5}}
+
+    passes, failed = evaluate_fundamentals(row, previous_fundamentals_row=None, industry_benchmarks=benchmark)
+
+    assert passes is False
+    assert failed == ['price-to-book range']
+
+
+def test_pe_within_industry_band_passes_even_outside_flat_fallback():
+    # PE 35 would fail the flat fallback (15-25), but this industry
+    # averages 30 -- 0.5x-1.5x that is 15-45, so 35 passes with a trusted
+    # benchmark (e.g. an IT-services-like industry that typically trades
+    # richer than the flat assumption).
+    row = {**PASSING_ROW, 'pe_ratio': 35}
+    benchmark = {'pe_ratio': {'avg': 30, 'count': 5}, 'price_to_book': None}
+
+    passes, failed = evaluate_fundamentals(row, previous_fundamentals_row=None, industry_benchmarks=benchmark)
+
+    assert passes is True
+    assert failed == []
+
+
+def test_pe_below_industry_floor_fails():
+    row = {**PASSING_ROW, 'pe_ratio': 14}  # < 30 * 0.5
+    benchmark = {'pe_ratio': {'avg': 30, 'count': 5}, 'price_to_book': None}
+
+    passes, failed = evaluate_fundamentals(row, previous_fundamentals_row=None, industry_benchmarks=benchmark)
+
+    assert passes is False
+    assert failed == ['PE range']
+
+
+def test_pe_above_industry_ceiling_fails():
+    row = {**PASSING_ROW, 'pe_ratio': 46}  # > 30 * 1.5
+    benchmark = {'pe_ratio': {'avg': 30, 'count': 5}, 'price_to_book': None}
+
+    passes, failed = evaluate_fundamentals(row, previous_fundamentals_row=None, industry_benchmarks=benchmark)
+
+    assert passes is False
+    assert failed == ['PE range']
+
+
+def test_missing_pe_fails_regardless_of_industry_benchmark():
+    row = {**PASSING_ROW, 'pe_ratio': None}
+    benchmark = {'pe_ratio': {'avg': 30, 'count': 5}, 'price_to_book': None}
+
+    passes, failed = evaluate_fundamentals(row, previous_fundamentals_row=None, industry_benchmarks=benchmark)
+
+    assert passes is False
+    assert failed == ['PE range']
+
+
+def test_no_industry_benchmarks_argument_at_all_behaves_like_empty_dict():
+    # Omitting the argument entirely (the common case for most existing
+    # call sites) must behave exactly like passing {} -- pure fallback
+    # bands for both metrics.
+    row = {**PASSING_ROW, 'pe_ratio': 20, 'price_to_book': 4}
+
+    passes, failed = evaluate_fundamentals(row, previous_fundamentals_row=None)
+
+    assert passes is True
+    assert failed == []
+
+
 # --- get_metric_note ---------------------------------------------------
 
 def test_get_metric_note_pe_within_ideal_range_returns_none():
@@ -146,7 +292,7 @@ def test_get_metric_note_pe_within_ideal_range_returns_none():
 
 def test_get_metric_note_pe_outside_ideal_range_returns_note():
     note = get_metric_note('pe_ratio', 30)
-    assert note == 'outside ideal 15-25 range — scored on a sliding scale, not hard-filtered'
+    assert note == 'outside the typical range for its industry — scored on a sliding scale, not hard-filtered'
     assert get_metric_note('pe_ratio', 5) == note  # same note regardless of direction
 
 
@@ -243,3 +389,16 @@ def test_classify_failure_on_unrelated_criterion_is_excluded_regardless_of_pe_op
 
     assert tier is None
     assert set(failed) == {'PE range', 'ROCE'}
+
+
+def test_classify_uses_industry_benchmark_when_given():
+    # PE 35 fails the flat fallback but passes within this industry's band
+    # -- classify_fundamental_tier must pass industry_benchmarks through to
+    # evaluate_fundamentals, not just accept it and ignore it.
+    row = {**PASSING_ROW, 'pe_ratio': 35}
+    benchmark = {'pe_ratio': {'avg': 30, 'count': 5}, 'price_to_book': None}
+
+    tier, failed = classify_fundamental_tier(row, previous_fundamentals_row=None, industry_benchmarks=benchmark)
+
+    assert tier == 'golden'
+    assert failed == []

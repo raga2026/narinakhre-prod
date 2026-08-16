@@ -135,17 +135,24 @@ def _build_email_content(suggestions, today_label):
     for s in suggestions:
         tier_label = _tier_label(s)
         tier_suffix = f' — {tier_label}' if tier_label else ''
+        # A pattern-based suggestion (see suggestion_engine.generate_daily_suggestions
+        # / utils.price_pattern.compute_suggestion_pricing) shows the cited
+        # pattern_note INSTEAD OF a "hold N days" figure -- chart-pattern
+        # shape doesn't reliably predict timing the way a specific
+        # day-count would misleadingly imply. holding_period_days is only
+        # ever a fixed internal default in that case, not shown here.
+        timing_text = s['pattern_note'] if s.get('pattern_name') else f"Hold {s['holding_period_days']} days."
         text_lines.append(
             f"{s['symbol']} ({s['exchange']}){tier_suffix}: Buy {s['buy_price']}, "
-            f"Target {s['target_sell_price']}, Stop-loss {s['stop_loss_price']}, "
-            f"Hold {s['holding_period_days']} days. {s['rationale']}"
+            f"Target {s['target_sell_price']}, Stop-loss {s['stop_loss_price']}. "
+            f"{timing_text} {s['rationale']}"
         )
         text_lines.append('')
         html_rows.append(
             f"<tr><td>{s['symbol']} ({s['exchange']})</td>"
             f"<td>{tier_label or '—'}</td>"
             f"<td>{s['buy_price']}</td><td>{s['target_sell_price']}</td>"
-            f"<td>{s['stop_loss_price']}</td><td>{s['holding_period_days']} days</td>"
+            f"<td>{s['stop_loss_price']}</td><td>{timing_text}</td>"
             f"<td>{s['rationale']}</td></tr>"
         )
     text_lines.append(DISCLAIMER)
@@ -154,7 +161,7 @@ def _build_email_content(suggestions, today_label):
     html_body = (
         '<p>Today\'s suggestions:</p>'
         '<table border="1" cellpadding="6" cellspacing="0">'
-        '<tr><th>Symbol</th><th>Tier</th><th>Buy</th><th>Target</th><th>Stop-loss</th><th>Hold</th><th>Rationale</th></tr>'
+        '<tr><th>Symbol</th><th>Tier</th><th>Buy</th><th>Target</th><th>Stop-loss</th><th>Timing</th><th>Rationale</th></tr>'
         + ''.join(html_rows) +
         '</table>'
         f'<p style="color:#64748b;font-size:0.85em;margin-top:16px;">{DISCLAIMER}</p>'

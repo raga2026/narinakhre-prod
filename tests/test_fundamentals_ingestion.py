@@ -28,6 +28,7 @@ class FakeDB:
         self.universe_rows = universe_rows
         self.fundamentals = {}  # (universe_id, snapshot_date) -> row dict
         self.last_fetch_stamped = set()  # universe_ids that got last_fundamentals_fetch updated
+        self.industry_stamped = {}  # universe_id -> industry value written
 
     def execute(self, sql, params=None):
         params = params or ()
@@ -46,8 +47,9 @@ class FakeDB:
             return FakeCursor([])
 
         if normalized.startswith('UPDATE stock_universe SET last_fundamentals_fetch'):
-            (universe_id,) = params
+            industry, universe_id = params
             self.last_fetch_stamped.add(universe_id)
+            self.industry_stamped[universe_id] = industry
             return FakeCursor([])
 
         raise AssertionError(f'Unexpected SQL in test: {sql}')
@@ -70,6 +72,33 @@ def test_parser_extracts_pe_eps_roe_debt_to_equity_from_sample_page():
     assert data['debt_to_equity'] == 0.35
     assert data['market_cap'] == 45230.0
     assert data['earnings_growth_pct'] == 22.0
+    assert data['price_to_book'] == 4.0
+    assert data['industry'] == 'Refineries & Marketing'
+
+
+def test_parser_falls_back_to_broader_classification_when_industry_missing():
+    import re
+    html = FIXTURE_PATH.read_text(encoding='utf-8')
+    # Drop the two most granular breadcrumb <a> levels, keep Sector/Broad Sector.
+    trimmed = re.sub(r'<a [^>]*title="(Broad Industry|Industry)"[^>]*>[^<]*</a>', '', html)
+    fake_response = MagicMock(status_code=200, text=trimmed)
+
+    with patch('utils.screener_client.requests.get', return_value=fake_response), \
+         patch('utils.screener_client.time.sleep'):
+        data = fetch_fundamentals('TESTCO')
+
+    assert data['industry'] == 'Oil, Gas & Consumable Fuels'  # Sector, since Industry/Broad Industry are gone
+
+
+def test_parser_industry_is_none_when_breadcrumb_entirely_absent():
+    html = '<html><body><ul id="top-ratios"><li class="flex flex-space-between"><span class="name">Stock P/E</span><span class="nowrap value"><span class="number">10</span></span></li></ul></body></html>'
+    fake_response = MagicMock(status_code=200, text=html)
+
+    with patch('utils.screener_client.requests.get', return_value=fake_response), \
+         patch('utils.screener_client.time.sleep'):
+        data = fetch_fundamentals('TESTCO')
+
+    assert data['industry'] is None
 
 
 def test_fetch_fundamentals_raises_on_404_instead_of_returning_garbage():
@@ -94,7 +123,7 @@ def test_sync_fundamentals_rotation_skips_one_parse_failure_without_stopping_bat
     good_data = {
         'pe_ratio': 20.0, 'eps': 10.0, 'roe': 15.0,
         'debt_to_equity': 0.5, 'market_cap': 1000.0,
-        'earnings_growth_pct': 10.0,
+        'earnings_growth_pct': 10.0, 'industry': 'Refineries & Marketing',
     }
 
     fetch_fn = MagicMock(side_effect=[
@@ -112,3 +141,6 @@ def test_sync_fundamentals_rotation_skips_one_parse_failure_without_stopping_bat
     # The failed symbol's last_fundamentals_fetch must NOT be stamped, so
     # it stays near the front of the next run's stalest-first queue.
     assert db.last_fetch_stamped == {2}
+    # Scraped industry gets stamped onto stock_universe alongside the fetch
+    # timestamp, feeding fundamental_screen.py's industry-relative PE/P-B.
+    assert db.industry_stamped[2] == 'Refineries & Marketing'

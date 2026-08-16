@@ -143,6 +143,28 @@ def test_suggestion_predating_tier_column_shows_no_tier_label():
     assert 'OLD (NSE):' in textbody  # no " — ..." tier suffix at all
 
 
+def test_pattern_based_suggestion_shows_pattern_note_instead_of_hold_days():
+    db = FakeEmailDB(
+        suggestion_rows=[
+            {'symbol': 'PTN', 'exchange': 'NSE', 'buy_price': 100.0, 'target_sell_price': 135.4,
+             'stop_loss_price': 92.4, 'holding_period_days': 10, 'rationale': 'Golden cross with confirming volume',
+             'pattern_name': 'head_and_shoulders_bottom',
+             'pattern_note': 'Target and stop-loss are based on a reverse head-and-shoulders pattern... '
+                              'There is no reliable way to predict exact timing from chart shape alone.'},
+        ],
+        recipient_rows=[{'email': 'a@example.com', 'name': 'A'}],
+    )
+
+    with patch('utils.suggestion_email.send_zeptomail_stocks_email', return_value=(True, 'ok')) as mock_send:
+        send_daily_suggestions_email(db)
+
+    textbody = mock_send.call_args.kwargs['textbody']
+    htmlbody = mock_send.call_args.kwargs['htmlbody']
+    assert 'no reliable way to predict exact timing' in textbody
+    assert 'no reliable way to predict exact timing' in htmlbody
+    assert 'Hold 10 days' not in textbody
+
+
 def test_a_failed_send_is_counted_without_stopping_the_rest():
     db = FakeEmailDB(
         suggestion_rows=[],

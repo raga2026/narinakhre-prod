@@ -1,4 +1,9 @@
-from utils.stock_shortlist import SHORTLIST_SOURCE, get_golden_cross_not_qualified, run_fundamental_shortlist
+from utils.stock_shortlist import (
+    SHORTLIST_SOURCE,
+    _compute_industry_benchmarks,
+    get_golden_cross_not_qualified,
+    run_fundamental_shortlist,
+)
 
 
 class FakeCursor:
@@ -64,7 +69,8 @@ class FakeShortlistDB:
                     continue
                 rows.append({
                     'universe_id': u['id'], 'symbol': u['symbol'], 'exchange': u['exchange'],
-                    'company_name': u['company_name'], 'isin': u.get('isin'), **latest,
+                    'company_name': u['company_name'], 'isin': u.get('isin'),
+                    'industry': u.get('industry'), **latest,
                 })
             return FakeCursor(rows)
 
@@ -417,6 +423,139 @@ def test_name_falls_back_to_universe_name_without_a_kite_match():
     assert db.watchlist[('UNMATCHED', 'NSE')]['name'] == 'Unmatched Co Ltd'
 
 
+# --- _compute_industry_benchmarks (pure function) --------------------------
+
+def test_compute_industry_benchmarks_averages_within_each_industry():
+    rows = [
+        {'industry': 'Software', 'pe_ratio': 30, 'price_to_book': 10},
+        {'industry': 'Software', 'pe_ratio': 40, 'price_to_book': 20},
+        {'industry': 'Banking', 'pe_ratio': 10, 'price_to_book': 2},
+    ]
+    benchmarks = _compute_industry_benchmarks(rows)
+
+    assert benchmarks['Software']['pe_ratio'] == {'avg': 35, 'count': 2}
+    assert benchmarks['Software']['price_to_book'] == {'avg': 15, 'count': 2}
+    assert benchmarks['Banking']['pe_ratio'] == {'avg': 10, 'count': 1}
+
+
+def test_compute_industry_benchmarks_skips_rows_with_no_industry():
+    rows = [
+        {'industry': None, 'pe_ratio': 30, 'price_to_book': 10},
+        {'pe_ratio': 40, 'price_to_book': 20},  # 'industry' key missing entirely
+    ]
+    assert _compute_industry_benchmarks(rows) == {}
+
+
+def test_compute_industry_benchmarks_a_missing_metric_does_not_pollute_the_other():
+    # One company has PE but no price_to_book; the other has both -- PE
+    # average shouldn't be dragged by a missing price_to_book value, or
+    # vice versa. Each metric's average only counts rows that actually
+    # have it.
+    rows = [
+        {'industry': 'Software', 'pe_ratio': 30, 'price_to_book': None},
+        {'industry': 'Software', 'pe_ratio': None, 'price_to_book': 10},
+    ]
+    benchmarks = _compute_industry_benchmarks(rows)
+
+    assert benchmarks['Software']['pe_ratio'] == {'avg': 30, 'count': 1}
+    assert benchmarks['Software']['price_to_book'] == {'avg': 10, 'count': 1}
+
+
+def test_compute_industry_benchmarks_industry_absent_when_nobody_has_either_metric():
+    # An industry with zero usable data for BOTH metrics never gets an
+    # entry at all -- callers do industry_benchmarks.get(industry), which
+    # returns None either way (same as an entry with both sub-keys None).
+    rows = [{'industry': 'Software', 'pe_ratio': None, 'price_to_book': None}]
+    benchmarks = _compute_industry_benchmarks(rows)
+
+    assert benchmarks.get('Software') is None
+
+
+def test_compute_industry_benchmarks_metric_is_none_when_only_that_one_is_missing():
+    # One company gives this industry a usable PE but no price_to_book --
+    # the industry entry exists (PE has data), but its price_to_book key
+    # is specifically None (no data for that metric alone).
+    rows = [{'industry': 'Software', 'pe_ratio': 30, 'price_to_book': None}]
+    benchmarks = _compute_industry_benchmarks(rows)
+
+    assert benchmarks['Software']['pe_ratio'] == {'avg': 30, 'count': 1}
+    assert benchmarks['Software']['price_to_book'] is None
+
+
+# --- industry-relative PE / price-to-book ----------------------------------
+
+def test_industry_benchmark_computed_from_this_runs_own_candidates_lets_a_company_pass():
+    # PE 35 fails the flat fallback (15-25) on its own, but four peers in
+    # the same industry (scraped this same run) average PE 30 -- 1.5x that
+    # is 45, so 35 passes once there's enough same-industry data to trust.
+    universe = [
+        {'id': 1, 'symbol': 'RICH', 'exchange': 'NSE', 'company_name': 'Rich Co Ltd',
+         'is_scrape_eligible': True, 'isin': None, 'industry': 'Software Services'},
+        {'id': 2, 'symbol': 'PEER1', 'exchange': 'NSE', 'company_name': 'Peer One Ltd',
+         'is_scrape_eligible': True, 'isin': None, 'industry': 'Software Services'},
+        {'id': 3, 'symbol': 'PEER2', 'exchange': 'NSE', 'company_name': 'Peer Two Ltd',
+         'is_scrape_eligible': True, 'isin': None, 'industry': 'Software Services'},
+        {'id': 4, 'symbol': 'PEER3', 'exchange': 'NSE', 'company_name': 'Peer Three Ltd',
+         'is_scrape_eligible': True, 'isin': None, 'industry': 'Software Services'},
+    ]
+    fundamentals = [
+        {'universe_id': 1, 'snapshot_date': '2026-08-10', **{**PASSING_FUNDAMENTALS, 'pe_ratio': 35}},
+        {'universe_id': 2, 'snapshot_date': '2026-08-10', **{**PASSING_FUNDAMENTALS, 'pe_ratio': 30}},
+        {'universe_id': 3, 'snapshot_date': '2026-08-10', **{**PASSING_FUNDAMENTALS, 'pe_ratio': 30}},
+        {'universe_id': 4, 'snapshot_date': '2026-08-10', **{**PASSING_FUNDAMENTALS, 'pe_ratio': 30}},
+    ]
+    db = FakeShortlistDB(universe, fundamentals, watchlist_rows=[])
+
+    summary = run_fundamental_shortlist(db)
+
+    assert summary['golden'] == 4  # RICH included, not merely silver-eligible for PE
+    rich = db.watchlist[('RICH', 'NSE')]
+    assert rich['is_active'] == 1
+    assert rich['fundamental_tier'] == 'golden'
+
+
+def test_industry_with_too_few_companies_falls_back_to_flat_pe_band():
+    # Only 2 companies share this industry -- below MIN_INDUSTRY_SAMPLE_SIZE
+    # (3), so PE 35 must fall back to the flat 15-25 band and fail, even
+    # though the (untrusted, small-sample) industry average would allow it.
+    universe = [
+        {'id': 1, 'symbol': 'RICH', 'exchange': 'NSE', 'company_name': 'Rich Co Ltd',
+         'is_scrape_eligible': True, 'isin': None, 'industry': 'Niche Industry'},
+        {'id': 2, 'symbol': 'PEER1', 'exchange': 'NSE', 'company_name': 'Peer One Ltd',
+         'is_scrape_eligible': True, 'isin': None, 'industry': 'Niche Industry'},
+    ]
+    fundamentals = [
+        {'universe_id': 1, 'snapshot_date': '2026-08-10', **{**PASSING_FUNDAMENTALS, 'pe_ratio': 35}},
+        {'universe_id': 2, 'snapshot_date': '2026-08-10', **PASSING_FUNDAMENTALS},  # pe_ratio 20, within flat fallback
+    ]
+    db = FakeShortlistDB(universe, fundamentals, watchlist_rows=[])
+
+    summary = run_fundamental_shortlist(db)
+
+    assert summary['golden'] == 1  # only PEER1
+    # RICH's PE 35 fails the flat fallback band (untrusted small-sample
+    # industry average doesn't apply) -- but PE range alone is
+    # silver-eligible, not an outright exclusion, so it's still watchlisted.
+    assert db.watchlist[('RICH', 'NSE')]['fundamental_tier'] == 'silver'
+    assert db.watchlist[('PEER1', 'NSE')]['fundamental_tier'] == 'golden'
+
+
+def test_company_with_no_industry_on_record_uses_flat_fallback_band():
+    universe = [
+        {'id': 1, 'symbol': 'NOIND', 'exchange': 'NSE', 'company_name': 'No Industry Ltd',
+         'is_scrape_eligible': True, 'isin': None},  # no 'industry' key at all -- never scraped
+    ]
+    fundamentals = [
+        {'universe_id': 1, 'snapshot_date': '2026-08-10', **PASSING_FUNDAMENTALS},  # pe_ratio 20, within flat band
+    ]
+    db = FakeShortlistDB(universe, fundamentals, watchlist_rows=[])
+
+    summary = run_fundamental_shortlist(db)
+
+    assert summary['golden'] == 1
+    assert db.watchlist[('NOIND', 'NSE')]['is_active'] == 1
+
+
 # --- get_golden_cross_not_qualified ---------------------------------------
 
 class FakeGoldenCrossDB:
@@ -432,7 +571,7 @@ class FakeGoldenCrossDB:
         params = params or ()
         normalized = ' '.join(sql.split())
 
-        if normalized.startswith('SELECT u.id AS universe_id, u.symbol, u.exchange, u.company_name, u.isin, i.cross_status'):
+        if normalized.startswith('SELECT u.id AS universe_id, u.symbol, u.exchange, u.company_name, u.isin, u.industry, i.cross_status'):
             return FakeCursor(self.rows)
 
         if normalized.startswith('SELECT kite_instrument_token FROM stock_kite_instrument_map'):

@@ -66,7 +66,7 @@
                         <th scope="col">Buy</th>
                         <th scope="col">Target</th>
                         <th scope="col">Stop-loss</th>
-                        <th scope="col">Hold</th>
+                        <th scope="col">Timing</th>
                         <th scope="col">Rationale</th>
                         <th scope="col">Status</th>
                     </tr>
@@ -87,7 +87,13 @@
                         <td>{{ s.buy_price }}</td>
                         <td>{{ s.target_sell_price }}</td>
                         <td>{{ s.stop_loss_price }}</td>
-                        <td>{{ s.holding_period_days }} days</td>
+                        <td>
+                            {% if s.pattern_name %}
+                                <span class="text-slate-400 text-sm">{{ s.pattern_note }}</span>
+                            {% else %}
+                                {{ s.holding_period_days }} days
+                            {% endif %}
+                        </td>
                         <td>{{ s.rationale }}</td>
                         <td>{{ s.status | title }}</td>
                     </tr>

@@ -57,6 +57,52 @@ def _apply_kite_name(db, row):
     return row
 
 
+def _compute_industry_benchmarks(rows):
+    """Groups rows (dicts with 'industry', 'pe_ratio', 'price_to_book') by
+    industry and computes each industry's average PE and average
+    price-to-book, plus how many companies contributed to each -- the
+    per-industry context utils.fundamental_screen's industry-relative PE/
+    price-to-book bands need (see its MIN_INDUSTRY_SAMPLE_SIZE). Computed
+    once per screening run from whatever candidates were already fetched --
+    no extra DB round trip, same batching reasoning as the previous-snapshot
+    lookup above.
+
+    A company missing 'industry' entirely (not yet scraped -- see
+    screener_client._parse_industry_classification) doesn't contribute to
+    any average. Within an industry, a company missing just PE or just
+    price-to-book contributes to whichever of the two it does have, not
+    both -- one company's missing PE shouldn't drag its industry's
+    price-to-book average down (or vice versa) by being silently treated
+    as zero.
+
+    Returns {industry: {'pe_ratio': {'avg','count'}|None,
+    'price_to_book': {'avg','count'}|None}}. A metric key is None when no
+    company in that industry has a value for it at all -- fundamental_screen.py's
+    benchmark.get('count', 0) check treats that the same as "no benchmark",
+    falling back to its flat band."""
+    pe_values_by_industry = {}
+    pb_values_by_industry = {}
+    for row in rows:
+        industry = row.get('industry')
+        if not industry:
+            continue
+        if row.get('pe_ratio') is not None:
+            pe_values_by_industry.setdefault(industry, []).append(row['pe_ratio'])
+        if row.get('price_to_book') is not None:
+            pb_values_by_industry.setdefault(industry, []).append(row['price_to_book'])
+
+    industries = set(pe_values_by_industry) | set(pb_values_by_industry)
+    benchmarks = {}
+    for industry in industries:
+        pe_values = pe_values_by_industry.get(industry)
+        pb_values = pb_values_by_industry.get(industry)
+        benchmarks[industry] = {
+            'pe_ratio': {'avg': sum(pe_values) / len(pe_values), 'count': len(pe_values)} if pe_values else None,
+            'price_to_book': {'avg': sum(pb_values) / len(pb_values), 'count': len(pb_values)} if pb_values else None,
+        }
+    return benchmarks
+
+
 def run_fundamental_shortlist(db):
     """Runs classify_fundamental_tier() against every scrape-eligible
     stock_universe company with a stock_fundamentals snapshot no older than
@@ -111,7 +157,7 @@ def run_fundamental_shortlist(db):
 
     cutoff = (date.today() - timedelta(days=MAX_SNAPSHOT_AGE_DAYS)).isoformat()
     candidates = db.execute(
-        '''SELECT u.id AS universe_id, u.symbol, u.exchange, u.company_name, u.isin,
+        '''SELECT u.id AS universe_id, u.symbol, u.exchange, u.company_name, u.isin, u.industry,
                   f.pe_ratio, f.peg_ratio, f.eps, f.opm_pct, f.roce_pct, f.roa_pct,
                   f.price_to_book, f.promoter_holding_pct, f.fii_holding_pct,
                   f.quarterly_profit_growth_pct, f.quarterly_revenue_growth_pct,
@@ -125,6 +171,13 @@ def run_fundamental_shortlist(db):
              AND f.snapshot_date >= ?''',
         (cutoff,)
     ).fetchall()
+
+    # Computed once from this run's own candidates, before classifying any
+    # of them -- every company's PE/price-to-book needs its industry's
+    # average already known to be screened against it. See
+    # _compute_industry_benchmarks and fundamental_screen.py's
+    # industry-relative bands.
+    industry_benchmarks = _compute_industry_benchmarks(candidates)
 
     # Every candidate's promoter/FII holding-trend check needs that
     # company's previous snapshot -- originally fetched with one query PER
@@ -167,7 +220,9 @@ def run_fundamental_shortlist(db):
         universe_id = row['universe_id']
         previous = _previous_snapshot(universe_id, row['snapshot_date'])
 
-        tier, failed_criteria = classify_fundamental_tier(row, previous)
+        tier, failed_criteria = classify_fundamental_tier(
+            row, previous, industry_benchmarks=industry_benchmarks.get(row.get('industry'))
+        )
 
         if not tier:
             failed += 1
@@ -247,7 +302,7 @@ def get_golden_cross_not_qualified(db):
     Returns a list of {universe_id, symbol, exchange, company_name,
     cross_status, rsi_14, ma_5, ma_21, ma_50, ma_200, failed_criteria}."""
     rows = db.execute(
-        '''SELECT u.id AS universe_id, u.symbol, u.exchange, u.company_name, u.isin,
+        '''SELECT u.id AS universe_id, u.symbol, u.exchange, u.company_name, u.isin, u.industry,
                   i.cross_status, i.rsi_14, i.ma_5, i.ma_21, i.ma_50, i.ma_200,
                   f.pe_ratio, f.peg_ratio, f.eps, f.opm_pct, f.roce_pct, f.roa_pct,
                   f.price_to_book, f.promoter_holding_pct, f.fii_holding_pct,
@@ -278,9 +333,14 @@ def get_golden_cross_not_qualified(db):
     for isin, rows_for_isin in by_isin.items():
         deduped_rows.append(_pick_canonical_listing(db, rows_for_isin))
 
+    industry_benchmarks = _compute_industry_benchmarks(rows)
+
     results = []
     for row in deduped_rows:
-        _tier, failed_criteria = classify_fundamental_tier(row, previous_fundamentals_row=None)
+        _tier, failed_criteria = classify_fundamental_tier(
+            row, previous_fundamentals_row=None,
+            industry_benchmarks=industry_benchmarks.get(row.get('industry'))
+        )
         results.append({**row, 'failed_criteria': failed_criteria})
 
     results.sort(key=lambda r: (r.get('company_name') or r['symbol']).lower())

@@ -96,11 +96,16 @@ class FakeSuggestionDB:
     """Minimal stand-in for app.py's SupabaseDB -- pre-seeded with the
     candidate rows _fetch_candidates() would have returned, so this tests
     generate_daily_suggestions()'s insert/dedup logic without needing to
-    replicate the real multi-table JOIN in Python."""
+    replicate the real multi-table JOIN in Python. price_history is
+    {watchlist_id: [closes, oldest-first]} -- defaults to empty per
+    watchlist_id, which is far too short for any pattern to be detected
+    (see compute_suggestion_pricing's fallback), so existing tests that
+    don't care about pattern pricing keep working unchanged."""
 
-    def __init__(self, candidate_rows, existing_suggestions=None):
+    def __init__(self, candidate_rows, existing_suggestions=None, price_history=None):
         self.candidate_rows = candidate_rows
         self.suggestions = existing_suggestions or []  # list of dicts: watchlist_id, status, suggestion_date
+        self.price_history = price_history or {}
 
     def execute(self, sql, params=None):
         params = params or ()
@@ -117,14 +122,21 @@ class FakeSuggestionDB:
             ]
             return FakeCursor([{'id': 1}] if matches else [])
 
+        if normalized.startswith('SELECT close FROM stock_daily_data WHERE watchlist_id=?'):
+            watchlist_id, _lookback_days = params
+            closes = self.price_history.get(watchlist_id, [])
+            return FakeCursor([{'close': c} for c in reversed(closes)])  # DESC, like the real query
+
         if normalized.startswith('INSERT INTO stock_suggestions'):
             (watchlist_id, suggestion_date, buy_price, target_sell_price, stop_loss_price,
              holding_period_days, rsi_at_suggestion, pe_at_suggestion, peg_at_suggestion,
-             opm_at_suggestion, fundamental_tier, score, rationale) = params
+             opm_at_suggestion, fundamental_tier, pattern_name, pattern_note, score, rationale) = params
             self.suggestions.append({
                 'watchlist_id': watchlist_id, 'suggestion_date': suggestion_date,
-                'status': 'pending', 'buy_price': buy_price,
+                'status': 'pending', 'buy_price': buy_price, 'target_sell_price': target_sell_price,
+                'stop_loss_price': stop_loss_price,
                 'opm_at_suggestion': opm_at_suggestion, 'fundamental_tier': fundamental_tier,
+                'pattern_name': pattern_name, 'pattern_note': pattern_note,
             })
             return FakeCursor([])
 
@@ -160,6 +172,52 @@ def test_new_suggestion_created_when_no_open_one_exists():
     assert summary['created'][0]['symbol'] == 'FRESH'
     assert summary['skipped_duplicates'] == []
     assert len(db.suggestions) == 1
+
+
+def _ramp_series(waypoints):
+    series = []
+    for (d1, p1), (d2, p2) in zip(waypoints, waypoints[1:]):
+        for day in range(d1, d2):
+            frac = (day - d1) / (d2 - d1)
+            series.append(p1 + frac * (p2 - p1))
+    series.append(waypoints[-1][1])
+    return series
+
+
+CONFIRMED_HS_BOTTOM_SERIES = _ramp_series([
+    (0, 100), (20, 70), (35, 90), (55, 50), (70, 92), (90, 68), (110, 110),
+])
+
+
+def test_no_pattern_in_short_history_falls_back_to_flat_percentages():
+    candidates = [_candidate(1, 'FLATPCT', peg_ratio=0.5, quarterly_profit_growth_pct=20, opm_pct=30, roce_pct=20,
+                              latest_close=100.0)]
+    db = FakeSuggestionDB(candidates)  # no price_history entry -- too short for any pattern
+
+    generate_daily_suggestions(db)
+
+    suggestion = db.suggestions[0]
+    assert suggestion['pattern_name'] is None
+    assert suggestion['pattern_note'] is None
+    assert suggestion['target_sell_price'] == 105.0
+    assert suggestion['stop_loss_price'] == 97.0
+
+
+def test_confirmed_chart_pattern_drives_pricing_and_note_instead_of_flat_percentages():
+    latest_close = CONFIRMED_HS_BOTTOM_SERIES[-1]
+    candidates = [_candidate(1, 'PATTERNED', peg_ratio=0.5, quarterly_profit_growth_pct=20, opm_pct=30, roce_pct=20,
+                              latest_close=latest_close)]
+    db = FakeSuggestionDB(candidates, price_history={1: CONFIRMED_HS_BOTTOM_SERIES})
+
+    summary = generate_daily_suggestions(db)
+
+    suggestion = db.suggestions[0]
+    assert suggestion['pattern_name'] == 'head_and_shoulders_bottom'
+    assert suggestion['pattern_note'] is not None
+    assert 'no reliable way to predict exact timing' in suggestion['pattern_note']
+    # Target came from the pattern's measured-move formula, not the flat +5%.
+    assert suggestion['target_sell_price'] != round(latest_close * 1.05, 2)
+    assert summary['created'][0]['pattern_name'] == 'head_and_shoulders_bottom'
 
 
 def test_watchlist_fundamental_tier_and_opm_carry_through_to_the_suggestion():

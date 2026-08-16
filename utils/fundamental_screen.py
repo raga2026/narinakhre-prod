@@ -3,37 +3,72 @@ Pure evaluation logic only -- no DB access here (see
 stock_shortlist.run_fundamental_shortlist for how this gets applied over
 stock_universe/stock_fundamentals and synced into stock_watchlist)."""
 
-PE_MIN, PE_MAX = 15, 25
 PEG_MAX = 1
 QUARTERLY_GROWTH_MIN = 10
 OPM_MIN_PCT = 25
 # Floor for OPM to still qualify for the 'silver' tier (see
 # classify_fundamental_tier below) -- below this, OPM fails outright same as
-# before this tiering existed. PE has no equivalent floor/ceiling: any
-# present (non-None) PE value outside [PE_MIN, PE_MAX] is silver-eligible.
+# before this tiering existed.
 OPM_SILVER_MIN_PCT = 15
-PRICE_TO_BOOK_PASS_MIN, PRICE_TO_BOOK_PASS_MAX = 2, 7
-# As given in the domain expert's notes. Worth flagging: this is an unusual
-# range for a price-to-book multiple -- most listed companies run well
-# under 10, and 15-25 mirrors the PE range above almost exactly, which
-# smells like it could be a copy/paste of the PE thresholds rather than a
-# deliberately chosen P/B range. Implemented literally as specified rather
-# than "corrected" silently; double-check this was actually intended.
-PRICE_TO_BOOK_PREMIUM_MIN, PRICE_TO_BOOK_PREMIUM_MAX = 15, 25
 
+# PE and price-to-book are screened against that company's OWN INDUSTRY
+# average (see utils/screener_client.py's _parse_industry_classification,
+# which scrapes Screener.in's sector/industry breadcrumb alongside every
+# other fundamental, and stock_shortlist._compute_industry_benchmarks,
+# which turns that into a per-industry average+count once per screening
+# run) rather than one flat number for every company on the exchange. A
+# single global PE or P/B band either rejects most of the market or lets
+# everything through -- what's "reasonable" for an IT services company
+# (routinely PE 25-40) is very different from a PSU bank (often PE under
+# 10), and the same is true of price-to-book across sectors.
+#
+# A company passes if its PE/price-to-book sits within
+# [floor_multiplier, ceiling_multiplier] times its industry's average.
+# Price-to-book has no floor multiplier (0 = no lower bound) -- trading
+# cheaper than industry peers is a value signal for this kind of screen,
+# not a red flag. PE keeps a floor: an unusually low PE relative to peers
+# can also reflect a problem the market has already priced in, not just a
+# bargain.
+PE_FLOOR_MULTIPLIER, PE_CEILING_MULTIPLIER = 0.5, 1.5
+PRICE_TO_BOOK_CEILING_MULTIPLIER = 1.5
 
-def _in_range(value, lo, hi):
-    return value is not None and lo <= value <= hi
+# An industry benchmark is only trusted once at least this many companies
+# in that same industry have fresh PE/price-to-book data this run --
+# below that, a single outlier could swing the "average" wildly, so
+# screening falls back to these flat bands instead. This is the ORIGINAL
+# global assumption, kept only as a safety net now (e.g. for a
+# newly-added or rarely-classified industry), not the primary rule.
+MIN_INDUSTRY_SAMPLE_SIZE = 3
+PE_FALLBACK_MIN, PE_FALLBACK_MAX = 15, 25
+PRICE_TO_BOOK_FALLBACK_MAX = 10
 
 
 def _positive(value):
     return value is not None and value > 0
 
 
-def evaluate_fundamentals(fundamentals_row, previous_fundamentals_row=None):
+def _passes_industry_band(value, benchmark, floor_multiplier, ceiling_multiplier, fallback_min, fallback_max):
+    """value: the company's own PE or price-to-book (may be None -- fails
+    outright, missing data never gets the benefit of the doubt). benchmark:
+    {'avg': float, 'count': int} for this company's industry, or None/{}
+    when there isn't one (no industry scraped yet) or it's None -- see
+    MIN_INDUSTRY_SAMPLE_SIZE. floor_multiplier=0 means no effective lower
+    bound (avg * 0 == 0, and these values are always positive when
+    present)."""
+    if value is None:
+        return False
+    if benchmark and benchmark.get('count', 0) >= MIN_INDUSTRY_SAMPLE_SIZE and benchmark.get('avg'):
+        avg = benchmark['avg']
+        return avg * floor_multiplier <= value <= avg * ceiling_multiplier
+    return fallback_min <= value <= fallback_max
+
+
+def evaluate_fundamentals(fundamentals_row, previous_fundamentals_row=None, industry_benchmarks=None):
     """Runs one stock_fundamentals snapshot against the domain expert's
     screening criteria:
-      - PE ratio in [15, 25]
+      - PE ratio within [0.5x, 1.5x] of its industry's average PE (falls
+        back to the flat [15, 25] band without a trusted industry
+        benchmark -- see PE_FALLBACK_MIN/MAX above)
       - PEG ratio < 1
       - Quarterly profit growth AND revenue growth >= 10%, no upper bound --
         growing faster than 10% should never be a reason to fail. Never
@@ -41,9 +76,9 @@ def evaluate_fundamentals(fundamentals_row, previous_fundamentals_row=None):
       - OPM >= 25%
       - ROCE and ROA both positive
       - EPS positive
-      - Price-to-book in [2, 7] passes; [15, 25] passes too but logs a
-        "premium valuation" note rather than being rejected (see the
-        PRICE_TO_BOOK_PREMIUM_* comment above); anything else fails
+      - Price-to-book no more than 1.5x its industry's average (falls back
+        to a flat <=10 ceiling without a trusted industry benchmark -- see
+        PRICE_TO_BOOK_FALLBACK_MAX above)
       - Promoter holding stable or increasing, and FII holding increasing
         -- both compare fundamentals_row against previous_fundamentals_row
         (that same company's prior snapshot). Pass previous_fundamentals_row=
@@ -57,14 +92,25 @@ def evaluate_fundamentals(fundamentals_row, previous_fundamentals_row=None):
     scraper couldn't derive it) fails that specific check -- missing data
     doesn't get the benefit of the doubt.
 
+    industry_benchmarks: optional {'pe_ratio': {'avg','count'}|None,
+    'price_to_book': {'avg','count'}|None} for this company's own industry
+    -- see stock_shortlist._compute_industry_benchmarks. Omitting it (or
+    passing None) falls back to the flat bands for both PE and
+    price-to-book, same as passing {}.
+
     Both row arguments are dict-like (support .get(key)) -- real
     stock_fundamentals rows and test fixtures alike.
 
     Returns (passes: bool, failed_criteria: list[str]). passes is True only
     when failed_criteria is empty."""
+    industry_benchmarks = industry_benchmarks or {}
     failed = []
 
-    if not _in_range(fundamentals_row.get('pe_ratio'), PE_MIN, PE_MAX):
+    pe_ratio = fundamentals_row.get('pe_ratio')
+    if not _passes_industry_band(
+        pe_ratio, industry_benchmarks.get('pe_ratio'),
+        PE_FLOOR_MULTIPLIER, PE_CEILING_MULTIPLIER, PE_FALLBACK_MIN, PE_FALLBACK_MAX
+    ):
         failed.append('PE range')
 
     peg_ratio = fundamentals_row.get('peg_ratio')
@@ -93,12 +139,10 @@ def evaluate_fundamentals(fundamentals_row, previous_fundamentals_row=None):
         failed.append('EPS')
 
     price_to_book = fundamentals_row.get('price_to_book')
-    if _in_range(price_to_book, PRICE_TO_BOOK_PASS_MIN, PRICE_TO_BOOK_PASS_MAX):
-        pass
-    elif _in_range(price_to_book, PRICE_TO_BOOK_PREMIUM_MIN, PRICE_TO_BOOK_PREMIUM_MAX):
-        print(f'Price-to-book {price_to_book} is in the premium-valuation range '
-              f'({PRICE_TO_BOOK_PREMIUM_MIN}-{PRICE_TO_BOOK_PREMIUM_MAX}) -- not auto-rejected.')
-    else:
+    if not _passes_industry_band(
+        price_to_book, industry_benchmarks.get('price_to_book'),
+        0, PRICE_TO_BOOK_CEILING_MULTIPLIER, 0, PRICE_TO_BOOK_FALLBACK_MAX
+    ):
         failed.append('price-to-book range')
 
     if previous_fundamentals_row is not None:
@@ -127,12 +171,18 @@ def get_metric_note(metric_name, value):
     'ideal' band but still made the cut via the silver tier (see
     classify_fundamental_tier) -- for display next to the value, not for
     screening logic. Returns None when there's nothing worth saying: the
-    value is within the ideal band, or missing. metric_name is 'pe_ratio'
-    or 'opm_pct'; any other name returns None."""
+    value is within the fallback ideal band, or missing.
+
+    Uses the flat fallback band (PE_FALLBACK_MIN/MAX), not any specific
+    company's industry benchmark -- this is display-layer code with no DB
+    access and no per-row industry context (see watchlist_view.py), so it
+    can only describe the general case, not "outside ITS industry's
+    average" precisely. metric_name is 'pe_ratio' or 'opm_pct'; any other
+    name returns None."""
     if metric_name == 'pe_ratio':
-        if value is None or PE_MIN <= value <= PE_MAX:
+        if value is None or PE_FALLBACK_MIN <= value <= PE_FALLBACK_MAX:
             return None
-        return f'outside ideal {PE_MIN}-{PE_MAX} range — scored on a sliding scale, not hard-filtered'
+        return 'outside the typical range for its industry — scored on a sliding scale, not hard-filtered'
 
     if metric_name == 'opm_pct':
         if value is None or value >= OPM_MIN_PCT:
@@ -144,7 +194,7 @@ def get_metric_note(metric_name, value):
     return None
 
 
-def classify_fundamental_tier(fundamentals_row, previous_fundamentals_row=None):
+def classify_fundamental_tier(fundamentals_row, previous_fundamentals_row=None, industry_benchmarks=None):
     """Runs evaluate_fundamentals() and sorts the result into a two-tier
     outcome for stock_shortlist.run_fundamental_shortlist():
       - 'golden': passes every criterion outright.
@@ -158,12 +208,15 @@ def classify_fundamental_tier(fundamentals_row, previous_fundamentals_row=None):
       - None: excluded -- fails on some other criterion, or PE/OPM data is
         missing, or OPM is below OPM_SILVER_MIN_PCT.
 
+    industry_benchmarks: passed straight through to evaluate_fundamentals --
+    see its docstring.
+
     Returns (tier, failed_criteria) -- failed_criteria is exactly what
     evaluate_fundamentals() returned, so run_fundamental_shortlist's
     failed_criteria_counts reporting (which only wants criteria that
     actually caused exclusion) keeps working: it should only be recorded
     for a None tier, never for 'silver'."""
-    passes, failed_criteria = evaluate_fundamentals(fundamentals_row, previous_fundamentals_row)
+    passes, failed_criteria = evaluate_fundamentals(fundamentals_row, previous_fundamentals_row, industry_benchmarks)
     if passes:
         return 'golden', failed_criteria
 
