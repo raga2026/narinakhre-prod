@@ -172,7 +172,6 @@
                         <th scope="col">Name</th>
                         <th scope="col">Symbol</th>
                         <th scope="col">Exchange</th>
-                        <th scope="col">Status</th>
                         <th scope="col">Price</th>
                         <th scope="col">P/E</th>
                         <th scope="col">PEG</th>
@@ -192,7 +191,6 @@
                         </th>
                         <td>{{ row.symbol }}</td>
                         <td>{{ row.exchange }}</td>
-                        <td>{{ 'Active' if row.is_active else 'Inactive' }}</td>
                         <td>{{ '₹%.2f'|format(row.latest_price) if row.latest_price is not none else '—' }}</td>
                         <td>
                             {{ '%.2fx'|format(row.pe_ratio) if row.pe_ratio is not none else '—' }}
@@ -223,7 +221,7 @@
                     </tr>
                     {% else %}
                     <tr>
-                        <td colspan="13" class="text-slate-400">No symbols in the watchlist yet.</td>
+                        <td colspan="12" class="text-slate-400">No symbols in the watchlist yet.</td>
                     </tr>
                     {% endfor %}
                 </tbody>

@@ -7301,7 +7301,14 @@ def stocks_watchlist():
     watchlist) that are excluded fundamentally, with the specific reasons
     why. Staff only (super_admin/child_admin); a viewer with
     can_view_watchlist granted only sees the watchlist itself, not this
-    universe-wide diagnostic view."""
+    universe-wide diagnostic view.
+
+    Only is_active=1 rows are shown -- stock_watchlist never deletes a row,
+    only deactivates it (see run_fundamental_shortlist), so without this
+    filter every company that ever fell out of the screen, plus every
+    pre-dedup duplicate NSE/BSE listing from before ISIN-based dedup
+    existed (see utils/stock_shortlist.py's _pick_canonical_listing), would
+    still show up here forever."""
     db = get_db()
     cross_filter = request.args.get('filter')
 
@@ -7333,6 +7340,7 @@ def stocks_watchlist():
                AND d.trade_date = (
                    SELECT MAX(d2.trade_date) FROM stock_daily_data d2 WHERE d2.watchlist_id = w.id
                )
+           WHERE w.is_active = 1
            ORDER BY w.symbol'''
     ).fetchall()
 
