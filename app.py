@@ -131,6 +131,7 @@ from utils.price_pattern import (
     build_price_sparkline_svg,
     backtest_rsi_zone_outcomes,
     detect_rounding_pattern,
+    compute_projection_targets,
 )
 from utils.super_sync import run_super_sync
 from utils.stock_indicators import (
@@ -7118,6 +7119,49 @@ def stocks_suggestions_send_daily_email():
     return _dispatch_stocks_job(db, is_cron, 'suggestion_email', _job)
 
 
+@app.route('/stocks/suggestions/resend', methods=['GET', 'POST'])
+@stocks_role_required('super_admin')
+def stocks_suggestions_resend():
+    """super_admin-only: re-sends a PAST day's recommendation email to
+    every active viewer, unchanged from however it looked that day (see
+    send_daily_suggestions_email's target_date param) -- for when a send
+    needs to go out again (e.g. a design fix, or a recipient who says they
+    never got it), without re-running the suggestion engine or affecting
+    today's picks at all. Runs synchronously (unlike the dashboard's other
+    job buttons) -- this is an occasional manual action sending a handful
+    of already-computed emails, not a slow sync job worth backgrounding."""
+    db = get_db()
+
+    if request.method == 'POST':
+        target_date = (request.form.get('suggestion_date') or '').strip()
+        if not target_date:
+            flash('Please choose a date to resend.', 'error')
+            return redirect(url_for('stocks_suggestions_resend'))
+        try:
+            summary = send_daily_suggestions_email(db, target_date=target_date)
+        except Exception as e:
+            app.logger.error(f'Manual suggestion resend failed for {target_date}: {e}')
+            flash(f'Resend failed: {e}', 'error')
+            return redirect(url_for('stocks_suggestions_resend'))
+
+        stock_word = 'stock' if summary['suggestion_count'] == 1 else 'stocks'
+        message = (
+            f"Resent {target_date}'s recommendations ({summary['suggestion_count']} {stock_word}) "
+            f"to {summary['sent']} of {summary['recipient_count']} recipients"
+            + (f", {summary['failed']} failed" if summary['failed'] else '') + '.'
+        )
+        flash(message, 'error' if summary['failed'] else 'info')
+        return redirect(url_for('stocks_suggestions_resend'))
+
+    dates = db.execute(
+        'SELECT DISTINCT suggestion_date FROM stock_suggestions ORDER BY suggestion_date DESC LIMIT 90'
+    ).fetchall()
+    return render_template(
+        'admin/stocks_suggestions_resend.html',
+        dates=[d['suggestion_date'] for d in dates],
+    )
+
+
 @app.route('/stocks/jobs/<job_name>/status', methods=['GET'])
 @stocks_login_required
 def stocks_job_status(job_name):
@@ -7946,6 +7990,25 @@ def stocks_universe_detail(universe_id):
     )
 
 
+def _annotate_suggestions_with_projection(suggestions):
+    """Adds a 'projection' key (see price_pattern.compute_projection_targets)
+    to each suggestion row -- this stock's own mid-period/long-term price
+    projection, grounded in whichever chart pattern actually drove its
+    target_sell_price when there is one. Mirrors what the daily email
+    already computes per suggestion (see suggestion_email.py's
+    _render_stock_card_html/_render_stock_card_text) so the viewer pages
+    (/stocks/my/suggestions, /stocks/my/history) show the same figures,
+    not just the email. Returns new dicts -- does not mutate the input rows."""
+    annotated = []
+    for row in suggestions:
+        row = dict(row)
+        row['projection'] = compute_projection_targets(
+            row.get('buy_price'), row.get('target_sell_price'), row.get('pattern_name')
+        )
+        annotated.append(row)
+    return annotated
+
+
 @app.route('/stocks/my/suggestions', methods=['GET'])
 @stocks_login_required
 def stocks_my_suggestions():
@@ -7956,7 +8019,7 @@ def stocks_my_suggestions():
     both use."""
     db = get_db()
     start_date = (date.today() - timedelta(days=HOLDING_PERIOD_DAYS)).isoformat()
-    suggestions = get_suggestions(db, start_date=start_date)
+    suggestions = _annotate_suggestions_with_projection(get_suggestions(db, start_date=start_date))
 
     subscription_row = db.execute(
         'SELECT subscription_status, subscription_current_period_end FROM stocks_admin_users WHERE id=?',
@@ -7986,7 +8049,7 @@ def stocks_my_history():
     status genuinely reads 'Pending' here rather than a fabricated
     result."""
     db = get_db()
-    suggestions = get_suggestions(db)
+    suggestions = _annotate_suggestions_with_projection(get_suggestions(db))
     return render_template('admin/stocks_my_history.html', suggestions=suggestions)
 
 

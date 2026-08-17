@@ -7,6 +7,8 @@ The backtest is explicitly NOT a prediction of future price -- it reports
 what actually happened, historically, after similar RSI conditions for
 THIS stock specifically, with the sample size always shown. A pattern seen
 twice means far less than one seen twenty times; this never hides that."""
+import math
+
 from utils.indicator_engine import calculate_rsi
 
 RSI_ZONES = (
@@ -631,4 +633,142 @@ def compute_suggestion_pricing(closes_oldest_first, latest_close, fallback_targe
         'pattern_name': None,
         'pattern_detail': None,
         'pattern_research': None,
+    }
+
+
+# --- Multi-horizon projected price (mid-period / long-term) -----------------
+#
+# Shown alongside every suggestion (see suggestion_email.py and the viewer
+# pages, /stocks/my/suggestions and /stocks/my/history) as a longer-range
+# companion to the near-term buy/target/stop-loss. Deliberately NOT a fixed
+# calendar grid applied identically to every stock -- each stock gets its
+# OWN mid-period/long-term checkpoints, taken from the SAME confirmed chart
+# pattern (head-and-shoulders bottom or rounding bottom) that already drove
+# its own target_sell_price whenever there is one, since different pattern
+# types have genuinely different published typical durations (a
+# head-and-shoulders move plays out over ~2-3 months; a rounding bottom over
+# anywhere from ~3 months to a year) -- collapsing both onto the same fixed
+# checkpoints would misrepresent one or the other. Only stocks with no
+# confirmed pattern (the flat-percentage fallback case) fall back to a
+# generic ~6-month/~1-year pair, for lack of any stock-specific duration to
+# use instead.
+
+# Generic mid-period/long-term checkpoints for a suggestion with no
+# confirmed pattern to ground a stock-specific duration in (the flat
+# +5%/-3% fallback -- see compute_suggestion_pricing). ~6 months / ~1 year,
+# deliberately NOT derived from any per-stock research.
+_FALLBACK_MID_PERIOD_DAYS = 182
+_FALLBACK_LONG_TERM_DAYS = 365
+
+# The sqrt-of-time scale for the 'extrapolated' (no-pattern) case is
+# anchored to this many days -- matches suggestion_engine.HOLDING_PERIOD_DAYS
+# (the holding period the flat fallback target is nominally based on). Not
+# imported from there directly: this module is lower-level (suggestion_engine
+# imports FROM price_pattern, not the other way), so the value is simply
+# kept in sync by convention/comment.
+_FALLBACK_PROJECTION_BASELINE_DAYS = 10
+
+
+def _humanize_days(days):
+    """'~75 days' -> '~2.5 months', '~365 days' -> '~1 year' -- a duration
+    genuinely specific to one stock's own pattern shouldn't be forced into
+    a generic 'Month 1 / Month 6' label; this renders whatever the actual
+    day count is, in whichever unit reads most naturally at that scale."""
+    days = round(days)
+    if days < 45:
+        return f'~{days} days'
+    if days >= 330:
+        unit_days, unit_name = 365, 'year'
+    else:
+        unit_days, unit_name = 30, 'month'
+    value = days / unit_days
+    rounded = round(value)
+    value_str = str(rounded) if abs(value - rounded) < 0.1 else f'{value:.1f}'
+    plural = '' if value_str == '1' else 's'
+    return f'~{value_str} {unit_name}{plural}'
+
+
+def compute_projection_targets(buy_price, target_sell_price, pattern_name):
+    """Projects price at two checkpoints -- a mid-period one and a
+    longer-term one -- each labeled with the ACTUAL duration it represents
+    for this specific stock (see _humanize_days), not a fixed calendar
+    point shared by every suggestion.
+
+    When pattern_name is a confirmed pattern compute_suggestion_pricing can
+    actually produce ('head_and_shoulders_bottom' or 'rounding_bottom'):
+    target_sell_price IS that pattern's own measured-move target (see
+    _pattern_pricing_from_head_and_shoulders/_pattern_pricing_from_rounding_bottom,
+    which set target_sell_price to exactly this). PATTERN_RESEARCH_CONTEXT's
+    published typical_move_duration_days=(lo, hi) for that pattern TYPE
+    (Bulkowski's research, already cited elsewhere in this module) becomes
+    THIS stock's own two checkpoints directly: the midpoint (lo+hi)/2 is
+    'mid_period', and hi itself is 'long_term' -- the point by which the
+    full move has typically played out historically, so 'long_term' shows
+    the target itself; before that, price is assumed to move toward it
+    proportionally (scaled by sqrt-of-time, the way an expected price move
+    typically scales -- not linearly, and never by compounding a
+    short-term rate, which would overshoot wildly at a long horizon).
+    Genuinely different pattern types get genuinely different checkpoints
+    this way (a head-and-shoulders' ~2-3 months vs a rounding bottom's
+    ~3-12 months) rather than being squeezed onto one shared timeline.
+    method='pattern' in the result, and 'source'/'directional_hit_rate_pct'
+    are carried through from PATTERN_RESEARCH_CONTEXT so callers can cite
+    them; a stock's own pattern occasionally implies a duration well past a
+    year for a slow-forming rounding bottom -- that's expected, not capped
+    to fit within any particular calendar horizon.
+
+    When pattern_name is None or unrecognized (the flat-percentage
+    fallback case -- by far the more common one, since a confirmed bullish
+    pattern is relatively rare): there is no stock-specific duration
+    research to ground this in, so it falls back to a generic ~6-month
+    mid-period / ~1-year long-term pair (_FALLBACK_MID_PERIOD_DAYS/
+    _FALLBACK_LONG_TERM_DAYS), scaled by sqrt-of-time from the near-term
+    target with no cap (unlike the pattern case, there's no researched
+    point at which to say the move is "typically" complete, so this keeps
+    growing across both checkpoints rather than flattening). method=
+    'extrapolated' in the result -- callers should visibly label this
+    differently from the pattern-grounded case (see suggestion_email.py),
+    since it's a plain mathematical projection, not backed by this stock's
+    own detected chart pattern.
+
+    Returns {'mid_period': {'days', 'label', 'price'}, 'long_term':
+    {'days', 'label', 'price'}, 'method': 'pattern'|'extrapolated',
+    'pattern_name', 'source', 'directional_hit_rate_pct'} --
+    source/directional_hit_rate_pct are None under 'extrapolated'. Returns
+    {} if buy_price/target_sell_price is missing or non-positive (nothing
+    to project from)."""
+    if not buy_price or not target_sell_price or buy_price <= 0:
+        return {}
+
+    research = PATTERN_RESEARCH_CONTEXT.get(pattern_name) if pattern_name else None
+    if research and research.get('typical_move_duration_days'):
+        lo_days, hi_days = research['typical_move_duration_days']
+        mid_days = (lo_days + hi_days) / 2
+        long_days = hi_days
+        method = 'pattern'
+        source = research.get('source')
+        directional_hit_rate_pct = research.get('directional_hit_rate_pct')
+    else:
+        mid_days = _FALLBACK_MID_PERIOD_DAYS
+        long_days = _FALLBACK_LONG_TERM_DAYS
+        method = 'extrapolated'
+        source = None
+        directional_hit_rate_pct = None
+
+    move = target_sell_price - buy_price
+
+    def price_at(days):
+        if method == 'pattern' and days >= long_days:
+            return round(target_sell_price, 2)
+        base_days = long_days if method == 'pattern' else _FALLBACK_PROJECTION_BASELINE_DAYS
+        fraction = math.sqrt(days / base_days)
+        return round(buy_price + move * fraction, 2)
+
+    return {
+        'mid_period': {'days': round(mid_days), 'label': _humanize_days(mid_days), 'price': price_at(mid_days)},
+        'long_term': {'days': round(long_days), 'label': _humanize_days(long_days), 'price': price_at(long_days)},
+        'method': method,
+        'pattern_name': pattern_name if method == 'pattern' else None,
+        'source': source,
+        'directional_hit_rate_pct': directional_hit_rate_pct,
     }

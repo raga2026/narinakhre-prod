@@ -1,9 +1,12 @@
+import math
+
 from utils.price_pattern import (
     PATTERN_RESEARCH_CONTEXT,
     backtest_rsi_zone_outcomes,
     build_price_sparkline_svg,
     compute_52_week_range,
     compute_day_change,
+    compute_projection_targets,
     compute_suggestion_pricing,
     detect_head_and_shoulders,
     detect_rounding_pattern,
@@ -467,3 +470,71 @@ def test_no_time_estimate_is_ever_returned():
     assert 'holding_period_days' not in result
     assert 'estimated_days' not in result
     assert 'wait_days' not in result
+
+
+# --- compute_projection_targets --------------------------------------------
+
+def test_no_pattern_falls_back_to_a_generic_six_month_one_year_pair():
+    result = compute_projection_targets(100.0, 105.0, None)
+    assert result['method'] == 'extrapolated'
+    assert result['pattern_name'] is None
+    assert result['source'] is None
+    assert result['mid_period']['days'] == 182
+    assert result['mid_period']['label'] == '~6 months'
+    assert result['long_term']['days'] == 365
+    assert result['long_term']['label'] == '~1 year'
+    # sqrt-of-time scaling from a 10-day baseline, never linear or compounded.
+    assert result['mid_period']['price'] == round(100.0 + 5.0 * math.sqrt(182 / 10), 2)
+    assert result['long_term']['price'] == round(100.0 + 5.0 * math.sqrt(365 / 10), 2)
+    # Uncapped -- keeps growing past mid_period, unlike the pattern case.
+    assert result['mid_period']['price'] < result['long_term']['price']
+
+
+def test_head_and_shoulders_pattern_uses_its_own_published_duration_not_the_generic_pair():
+    lo, hi = PATTERN_RESEARCH_CONTEXT['head_and_shoulders_bottom']['typical_move_duration_days']
+    result = compute_projection_targets(100.0, 130.0, 'head_and_shoulders_bottom')
+    assert result['method'] == 'pattern'
+    assert result['pattern_name'] == 'head_and_shoulders_bottom'
+    assert result['source'] == PATTERN_RESEARCH_CONTEXT['head_and_shoulders_bottom']['source']
+    assert result['mid_period']['days'] == round((lo + hi) / 2)
+    assert result['long_term']['days'] == hi
+    # The long-term checkpoint lands exactly on the pattern's own measured-
+    # move target (target_sell_price), not some further extrapolation of it.
+    assert result['long_term']['price'] == 130.0
+
+
+def test_rounding_bottom_gets_a_longer_period_than_head_and_shoulders():
+    # Different pattern types have genuinely different published durations
+    # -- this must not collapse both onto the same fixed checkpoints.
+    hs = compute_projection_targets(100.0, 130.0, 'head_and_shoulders_bottom')
+    rounding = compute_projection_targets(100.0, 130.0, 'rounding_bottom')
+    assert hs['long_term']['days'] != rounding['long_term']['days']
+    assert rounding['long_term']['days'] > hs['long_term']['days']
+
+
+def test_a_downward_pattern_move_scales_the_same_way():
+    result = compute_projection_targets(100.0, 70.0, 'head_and_shoulders_top')
+    assert result['method'] == 'pattern'
+    assert result['long_term']['price'] == 70.0
+    assert result['mid_period']['price'] > result['long_term']['price']
+
+
+def test_unrecognized_pattern_name_falls_back_to_extrapolated():
+    result = compute_projection_targets(100.0, 105.0, 'not_a_real_pattern')
+    assert result['method'] == 'extrapolated'
+
+
+def test_empty_when_inputs_are_missing_or_invalid():
+    assert compute_projection_targets(None, 105.0, None) == {}
+    assert compute_projection_targets(100.0, None, None) == {}
+    assert compute_projection_targets(0, 105.0, None) == {}
+    assert compute_projection_targets(-5, 105.0, None) == {}
+
+
+def test_humanized_labels_cover_days_months_and_years():
+    from utils.price_pattern import _humanize_days
+    assert _humanize_days(10) == '~10 days'
+    assert _humanize_days(30) == '~30 days'
+    assert _humanize_days(75) == '~2.5 months'
+    assert _humanize_days(365) == '~1 year'
+    assert _humanize_days(730) == '~2 years'

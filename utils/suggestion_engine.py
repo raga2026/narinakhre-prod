@@ -199,6 +199,13 @@ def _build_rationale(candidate, tier=None):
     return rationale
 
 
+# Multi-horizon projected price (1 month/6 months/1 year) moved to
+# utils/price_pattern.py's compute_projection_targets -- it needs
+# PATTERN_RESEARCH_CONTEXT and pattern_name to ground the projection in the
+# specific chart pattern that drove this suggestion's own target_sell_price
+# (when there is one), which live in that module, not this one.
+
+
 _PATTERN_LABELS = {
     'head_and_shoulders_bottom': 'a reverse head-and-shoulders pattern (confirmed breakout)',
     'rounding_bottom': 'a rounding-bottom pattern (confirmed breakout)',
@@ -375,7 +382,8 @@ def get_suggestions(db, start_date=None, end_date=None):
     where_clause = ('WHERE ' + ' AND '.join(conditions)) if conditions else ''
 
     return db.execute(
-        f'''SELECT w.id AS watchlist_id, w.symbol, w.exchange, s.suggestion_date, s.buy_price,
+        f'''SELECT w.id AS watchlist_id, w.symbol, w.exchange, w.name AS company_name,
+                   s.suggestion_date, s.buy_price,
                    s.target_sell_price, s.stop_loss_price, s.holding_period_days,
                    s.rsi_at_suggestion, s.pe_at_suggestion, s.peg_at_suggestion,
                    s.opm_at_suggestion, s.fundamental_tier,

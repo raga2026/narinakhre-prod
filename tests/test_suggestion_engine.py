@@ -351,4 +351,8 @@ def test_watchlist_fundamental_tier_and_opm_carry_through_to_the_suggestion():
     assert db.suggestions[0]['fundamental_tier'] == 'silver'
     assert db.suggestions[0]['opm_at_suggestion'] == 32
 
+# Multi-horizon projected price (1 month/6 months/1 year) is tested in
+# tests/test_price_pattern.py (utils.price_pattern.compute_projection_targets),
+# since it lives in that module now -- see that function's docstring.
+
 

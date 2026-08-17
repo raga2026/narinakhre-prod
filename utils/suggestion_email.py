@@ -1,7 +1,9 @@
 from datetime import date
 
 from utils.stock_alerting import send_zeptomail_stocks_email
+from utils.suggestion_chart import build_prediction_chart_data_uri
 from utils.suggestion_engine import get_suggestions
+from utils.price_pattern import compute_projection_targets
 
 DISCLAIMER = (
     "This is personal market analysis shared informally among friends, not "
@@ -9,7 +11,45 @@ DISCLAIMER = (
     "making any investment decision."
 )
 
+# Shown once per email whenever any suggestion has a projection attached
+# (see utils.price_pattern.compute_projection_targets) -- each stock's own
+# mid-period/long-term figures come from ITS OWN detected chart pattern
+# when one was confirmed (a genuinely different duration per pattern type),
+# or a generic extrapolation otherwise; this note explains that once rather
+# than repeating on every stock card.
+HORIZON_DISCLAIMER = (
+    "The mid-period and long-term figures on each stock are its OWN projection, "
+    "not a fixed calendar point shared by every stock: when a chart pattern "
+    "(head-and-shoulders, reverse head-and-shoulders, or rounding) was confirmed "
+    "for that stock, both figures come from that pattern's own published typical "
+    "time-to-target (see the note under each chart); otherwise they fall back to "
+    "a generic mathematical extrapolation (~6 months / ~1 year), marked "
+    "'extrapolated' and more speculative than a pattern-grounded projection."
+)
+
 STOCKS_LOGIN_URL = 'https://narinakhre.com/stocks/login'
+
+_TREND_BADGE_COLORS = {
+    'Highly Recommended': ('#dcfce7', '#15803d'),
+    'Recommended -- extra caution': ('#ffedd5', '#9a3412'),
+    'Recommended': ('#e2e8f0', '#334155'),
+}
+
+_PATTERN_DISPLAY_NAMES = {
+    'head_and_shoulders_bottom': 'reverse head-and-shoulders pattern',
+    'rounding_bottom': 'rounding-bottom pattern',
+}
+
+
+def _projection_method_note(projection):
+    """'based on the detected reverse head-and-shoulders pattern' or
+    'extrapolated -- no confirmed chart pattern', shown right under a
+    suggestion's mid-period/long-term figures so it's always clear which
+    of the two this particular stock's projection actually is."""
+    if projection.get('method') == 'pattern':
+        name = _PATTERN_DISPLAY_NAMES.get(projection.get('pattern_name'), 'confirmed chart pattern')
+        return f'based on the detected {name}'
+    return 'extrapolated -- no confirmed chart pattern for this stock'
 
 
 def send_viewer_welcome_email(email, name, password):
@@ -247,6 +287,142 @@ def _fundamentals_note(s):
     return f'watchlisted on the silver criteria: PE {pe_str}, OPM {opm_str}'
 
 
+def _capitalize_first(text):
+    """Uppercases just the first character, unlike str.capitalize() which
+    also lowercases the rest of the string -- fundamentals_note contains
+    'PE'/'OPM' abbreviations that must stay upper-case."""
+    return text[:1].upper() + text[1:] if text else text
+
+
+def _company_display_name(s):
+    """Company name if we have one, else the symbol -- stock_watchlist.name
+    isn't always populated (see get_suggestions' company_name column,
+    sourced from it), so this must never show blank/None in place of a
+    company that's still perfectly identifiable by its symbol."""
+    return s.get('company_name') or s['symbol']
+
+
+def _identity_suffix(s):
+    """The '(...)' identity shown next to the company name -- 'SYMBOL ·
+    EXCHANGE' normally, or just 'EXCHANGE' when _company_display_name
+    already fell back to the symbol itself, so the symbol isn't shown
+    twice back to back (e.g. 'GLD (GLD · NSE)')."""
+    if _company_display_name(s) == s['symbol']:
+        return s['exchange']
+    return f"{s['symbol']} · {s['exchange']}"
+
+
+def _timing_text(s):
+    """A pattern-based suggestion (see suggestion_engine.generate_daily_suggestions
+    / utils.price_pattern.compute_suggestion_pricing) shows the cited
+    pattern_note INSTEAD OF a "hold N days" figure -- chart-pattern shape
+    doesn't reliably predict timing the way a specific day-count would
+    misleadingly imply. holding_period_days is only ever a fixed internal
+    default in that case, not shown here."""
+    return s['pattern_note'] if s.get('pattern_name') else f"Hold {s['holding_period_days']} days."
+
+
+def _render_stock_card_text(s):
+    """Plain-text rendering of one suggestion -- a readable block rather
+    than a cramped single line, for text-only mail clients (the HTML
+    version below is what most recipients actually see)."""
+    trend = _trend_label(s)
+    fundamentals_note = _fundamentals_note(s)
+    projection = compute_projection_targets(s.get('buy_price'), s.get('target_sell_price'), s.get('pattern_name'))
+
+    lines = [
+        f"{_company_display_name(s)} ({_identity_suffix(s)}) — {trend}",
+    ]
+    if fundamentals_note:
+        lines.append(f'  {_capitalize_first(fundamentals_note)}')
+    lines.append(f"  Buy: Rs {s['buy_price']}   Stop-loss: Rs {s['stop_loss_price']}")
+    if projection:
+        mid, long_term = projection['mid_period'], projection['long_term']
+        lines.append(
+            f"  Projected price -- {mid['label']}: Rs {mid['price']:g} | "
+            f"{long_term['label']}: Rs {long_term['price']:g} ({_projection_method_note(projection)})"
+        )
+    lines.append(f'  {_timing_text(s)}')
+    lines.append(f'  Why: {s["rationale"]}')
+    return '\n'.join(lines)
+
+
+def _render_stock_card_html(s):
+    """Styled HTML rendering of one suggestion -- company name front and
+    center (not just the ticker symbol), a colored recommendation-strength
+    pill, buy/stop-loss called out as the two numbers that matter most for
+    acting today, this stock's own mid-period/long-term projection (see
+    utils.price_pattern.compute_projection_targets -- NOT the same fixed
+    calendar point for every stock), an embedded projection chart (see
+    suggestion_chart.build_prediction_chart_data_uri) when there's enough
+    data to draw one, and the reasoning set apart in its own highlighted
+    paragraph instead of packed into a table cell. Built with inline
+    styles and nested tables (not CSS classes/flex/grid) -- the only
+    layout approach that renders consistently across email clients,
+    Outlook's Word-based renderer included."""
+    trend = _trend_label(s)
+    badge_bg, badge_fg = _TREND_BADGE_COLORS.get(trend, _TREND_BADGE_COLORS['Recommended'])
+    fundamentals_note = _fundamentals_note(s)
+    projection = compute_projection_targets(s.get('buy_price'), s.get('target_sell_price'), s.get('pattern_name'))
+    chart_uri = build_prediction_chart_data_uri(s.get('buy_price'), projection, s.get('stop_loss_price'))
+
+    horizon_block = ''
+    if projection:
+        mid, long_term = projection['mid_period'], projection['long_term']
+        horizon_block = (
+            '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" '
+            'style="margin-top:14px;border-top:1px solid #e2e8f0;">'
+            '<tr style="border-top:1px solid #e2e8f0;">'
+            f'<td style="padding:6px 10px;color:#64748b;font-size:11px;text-transform:uppercase;letter-spacing:.03em;">{mid["label"]}</td>'
+            f'<td style="padding:6px 10px;color:#64748b;font-size:11px;text-transform:uppercase;letter-spacing:.03em;">{long_term["label"]}</td>'
+            '</tr><tr>'
+            f'<td style="padding:2px 10px 0;color:#0f172a;font-size:15px;font-weight:bold;">Rs {mid["price"]:g}</td>'
+            f'<td style="padding:2px 10px 0;color:#0f172a;font-size:15px;font-weight:bold;">Rs {long_term["price"]:g}</td>'
+            '</tr></table>'
+            f'<div style="margin-top:4px;color:#94a3b8;font-size:11px;">{_capitalize_first(_projection_method_note(projection))}</div>'
+        )
+
+    chart_block = ''
+    if chart_uri:
+        chart_block = (
+            f'<div style="margin-top:14px;"><img src="{chart_uri}" width="520" height="230" alt="'
+            f"Projected price chart for {_company_display_name(s)}: buy Rs {s.get('buy_price')} through its "
+            'mid-period and long-term projected price" '
+            'style="max-width:100%;height:auto;display:block;border:1px solid #e2e8f0;border-radius:8px;"></div>'
+        )
+
+    fundamentals_html = f'<div style="margin-top:6px;color:#64748b;font-size:12.5px;">{_capitalize_first(fundamentals_note)}</div>' if fundamentals_note else ''
+
+    return (
+        '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" '
+        'style="max-width:600px;margin:0 0 20px 0;border:1px solid #e2e8f0;border-radius:12px;'
+        'overflow:hidden;font-family:Arial,Helvetica,sans-serif;">'
+        '<tr><td style="background:#0f172a;padding:14px 18px;">'
+        '<table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr>'
+        f'<td style="color:#f8fafc;font-size:17px;font-weight:bold;">{_company_display_name(s)}</td>'
+        '<td align="right">'
+        f'<span style="display:inline-block;padding:4px 12px;border-radius:999px;font-size:12px;'
+        f'font-weight:bold;background:{badge_bg};color:{badge_fg};white-space:nowrap;">{trend}</span>'
+        '</td></tr></table>'
+        f'<div style="color:#94a3b8;font-size:12px;margin-top:2px;">{_identity_suffix(s)}</div>'
+        '</td></tr>'
+        '<tr><td style="padding:16px 18px;">'
+        '<table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr>'
+        '<td style="width:50%;"><div style="color:#64748b;font-size:11px;text-transform:uppercase;letter-spacing:.03em;">Buy</div>'
+        f'<div style="font-size:19px;font-weight:bold;color:#0f172a;">Rs {s["buy_price"]}</div></td>'
+        '<td style="width:50%;"><div style="color:#64748b;font-size:11px;text-transform:uppercase;letter-spacing:.03em;">Stop-loss</div>'
+        f'<div style="font-size:19px;font-weight:bold;color:#b91c1c;">Rs {s["stop_loss_price"]}</div></td>'
+        '</tr></table>'
+        f'{horizon_block}'
+        f'{chart_block}'
+        f'<div style="margin-top:14px;padding:12px 14px;background:#f8fafc;border-left:3px solid #0ea5e9;'
+        f'border-radius:4px;color:#334155;font-size:13px;line-height:1.5;">{s["rationale"]}</div>'
+        f'{fundamentals_html}'
+        f'<div style="margin-top:10px;color:#64748b;font-size:12.5px;">{_timing_text(s)}</div>'
+        '</td></tr></table>'
+    )
+
+
 def _build_email_content(suggestions, today_label):
     """Returns (subject, textbody, htmlbody). Always produces a real email,
     even with zero suggestions -- a silent "nothing sent" looks identical
@@ -262,7 +438,10 @@ def _build_email_content(suggestions, today_label):
     needed here to get that grouping. The raw NNS Score number itself is
     deliberately never shown here -- see _trend_label -- only the buy/
     target/stop-loss levels (the actual, concrete numbers that matter) and
-    a plain-language recommendation strength."""
+    a plain-language recommendation strength. Each stock is rendered as its
+    own card (see _render_stock_card_html/_render_stock_card_text) with the
+    company name up front, its own mid-period/long-term projection, and an embedded
+    projection chart when there's data to draw one."""
     if not suggestions:
         subject = f'Nari Nakhre Stocks — No Recommendations Today ({today_label})'
         text_body = (
@@ -276,53 +455,41 @@ def _build_email_content(suggestions, today_label):
         return subject, text_body, html_body
 
     if len(suggestions) == 1:
-        subject = f"Nari Nakhre Stocks — Today's Recommendation: {suggestions[0]['symbol']} ({today_label})"
+        subject = f"Nari Nakhre Stocks — Today's Recommendation: {_company_display_name(suggestions[0])} ({today_label})"
     else:
         subject = f"Nari Nakhre Stocks — {len(suggestions)} Recommendations for {today_label}"
 
     heading = "Today's Recommendation" if len(suggestions) == 1 else "Today's Recommendations"
+    any_horizon_targets = any(
+        compute_projection_targets(s.get('buy_price'), s.get('target_sell_price'), s.get('pattern_name'))
+        for s in suggestions
+    )
+
     text_lines = [f'{heading} ({today_label}):', '']
-    html_rows = []
     for s in suggestions:
-        trend = _trend_label(s)
-        fundamentals_note = _fundamentals_note(s)
-        fundamentals_suffix = f' ({fundamentals_note})' if fundamentals_note else ''
-        # A pattern-based suggestion (see suggestion_engine.generate_daily_suggestions
-        # / utils.price_pattern.compute_suggestion_pricing) shows the cited
-        # pattern_note INSTEAD OF a "hold N days" figure -- chart-pattern
-        # shape doesn't reliably predict timing the way a specific
-        # day-count would misleadingly imply. holding_period_days is only
-        # ever a fixed internal default in that case, not shown here.
-        timing_text = s['pattern_note'] if s.get('pattern_name') else f"Hold {s['holding_period_days']} days."
-        text_lines.append(
-            f"{s['symbol']} ({s['exchange']}) — {trend}{fundamentals_suffix}: Buy {s['buy_price']}, "
-            f"Target {s['target_sell_price']}, Stop-loss {s['stop_loss_price']}. "
-            f"{timing_text} {s['rationale']}"
-        )
+        text_lines.append(_render_stock_card_text(s))
         text_lines.append('')
-        html_rows.append(
-            f"<tr><td>{s['symbol']} ({s['exchange']})</td>"
-            f"<td>{trend}</td>"
-            f"<td>{s['buy_price']}</td><td>{s['target_sell_price']}</td>"
-            f"<td>{s['stop_loss_price']}</td><td>{timing_text}</td>"
-            f"<td>{s['rationale']}{' — ' + fundamentals_note if fundamentals_note else ''}</td></tr>"
-        )
+    if any_horizon_targets:
+        text_lines.append(HORIZON_DISCLAIMER)
+        text_lines.append('')
     text_lines.append(DISCLAIMER)
     text_body = '\n'.join(text_lines)
 
+    horizon_note_html = (
+        f'<p style="color:#64748b;font-size:0.8em;line-height:1.5;">{HORIZON_DISCLAIMER}</p>'
+        if any_horizon_targets else ''
+    )
     html_body = (
-        f'<p>{heading}:</p>'
-        '<table border="1" cellpadding="6" cellspacing="0">'
-        '<tr><th>Symbol</th><th>Recommendation</th><th>Buy</th><th>Target</th><th>Stop-loss</th><th>Timing</th><th>Rationale</th></tr>'
-        + ''.join(html_rows) +
-        '</table>'
-        f'<p style="color:#64748b;font-size:0.85em;margin-top:16px;">{DISCLAIMER}</p>'
+        f'<p style="font-family:Arial,Helvetica,sans-serif;font-size:16px;color:#0f172a;">{heading}:</p>'
+        + ''.join(_render_stock_card_html(s) for s in suggestions)
+        + horizon_note_html
+        + f'<p style="color:#64748b;font-size:0.85em;margin-top:16px;font-family:Arial,Helvetica,sans-serif;">{DISCLAIMER}</p>'
     )
     return subject, text_body, html_body
 
 
-def send_daily_suggestions_email(db):
-    """Fetches today's stock_suggestions rows via the shared
+def send_daily_suggestions_email(db, target_date=None):
+    """Fetches target_date's stock_suggestions rows via the shared
     suggestion_engine.get_suggestions() query and emails every active
     role='viewer' account in stocks_admin_users -- one send per recipient.
     Recipients now come from stocks_admin_users, NOT the deprecated
@@ -331,14 +498,24 @@ def send_daily_suggestions_email(db):
     stocks_admin_users has no separate email column, so the login
     "username" doubles as the recipient address (see create_viewer_account
     in utils/stock_auth.py). Always sends something, even with zero
-    suggestions today (see _build_email_content). Every email includes the
-    fixed disclaimer line, unmodified, per DISCLAIMER above."""
-    today = date.today().isoformat()
-    today_label = date.today().strftime('%d %b %Y')
+    suggestions on target_date (see _build_email_content). Every email
+    includes the fixed disclaimer line, unmodified, per DISCLAIMER above.
 
-    suggestions = get_suggestions(db, start_date=today, end_date=today)
+    target_date defaults to today (the normal daily-cron call site, see
+    app.py's /stocks/suggestions/send-daily-email) -- pass a date object or
+    an ISO 'YYYY-MM-DD' string to resend a past day's recommendations
+    instead (see app.py's /stocks/suggestions/resend, the super_admin-only
+    manual resend page)."""
+    if target_date is None:
+        target_date = date.today()
+    elif isinstance(target_date, str):
+        target_date = date.fromisoformat(target_date[:10])
+    date_iso = target_date.isoformat()
+    date_label = target_date.strftime('%d %b %Y')
 
-    subject, text_body, html_body = _build_email_content(suggestions, today_label)
+    suggestions = get_suggestions(db, start_date=date_iso, end_date=date_iso)
+
+    subject, text_body, html_body = _build_email_content(suggestions, date_label)
 
     recipients = db.execute(
         "SELECT username AS email, name FROM stocks_admin_users WHERE role='viewer' AND is_active=1"

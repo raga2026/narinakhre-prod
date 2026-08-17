@@ -18,11 +18,13 @@ class FakeEmailDB:
     def __init__(self, suggestion_rows, recipient_rows):
         self.suggestion_rows = suggestion_rows
         self.recipient_rows = recipient_rows
+        self.last_query_params = None
 
     def execute(self, sql, params=None):
         normalized = ' '.join(sql.split())
 
-        if normalized.startswith('SELECT w.id AS watchlist_id, w.symbol, w.exchange, s.suggestion_date, s.buy_price'):
+        if normalized.startswith('SELECT w.id AS watchlist_id, w.symbol, w.exchange, w.name AS company_name,'):
+            self.last_query_params = params
             return FakeCursor(self.suggestion_rows)
 
         if normalized.startswith("SELECT username AS email, name FROM stocks_admin_users WHERE role='viewer'"):
@@ -99,8 +101,8 @@ def test_golden_nns_suggestion_shows_highly_recommended_without_pe_or_opm():
 
     textbody = mock_send.call_args.kwargs['textbody']
     htmlbody = mock_send.call_args.kwargs['htmlbody']
-    assert 'GLD (NSE) — Highly Recommended:' in textbody
-    assert '<td>Highly Recommended</td>' in htmlbody
+    assert 'GLD (NSE) — Highly Recommended' in textbody
+    assert '>Highly Recommended<' in htmlbody
     # The raw NNS score number must never be shown to customers.
     assert '8.7' not in textbody
     assert '8.7' not in htmlbody
@@ -108,6 +110,31 @@ def test_golden_nns_suggestion_shows_highly_recommended_without_pe_or_opm():
     # that's specifically what distinguishes a silver watchlist pick.
     assert 'PE 20' not in textbody
     assert 'OPM 30' not in textbody
+
+
+def test_company_name_is_shown_when_known_falls_back_to_symbol_when_not():
+    db = FakeEmailDB(
+        suggestion_rows=[
+            {'symbol': 'GLD', 'exchange': 'NSE', 'company_name': 'Golden Traders Ltd', 'buy_price': 100.0,
+             'target_sell_price': 105.0, 'stop_loss_price': 97.0, 'holding_period_days': 10,
+             'rationale': 'Golden cross with confirming volume'},
+            {'symbol': 'NONAME', 'exchange': 'NSE', 'buy_price': 10.0, 'target_sell_price': 10.5,
+             'stop_loss_price': 9.7, 'holding_period_days': 10, 'rationale': 'Golden cross with confirming volume'},
+        ],
+        recipient_rows=[{'email': 'a@example.com', 'name': 'A'}],
+    )
+
+    with patch('utils.suggestion_email.send_zeptomail_stocks_email', return_value=(True, 'ok')) as mock_send:
+        send_daily_suggestions_email(db)
+
+    textbody = mock_send.call_args.kwargs['textbody']
+    htmlbody = mock_send.call_args.kwargs['htmlbody']
+    # A known company name is shown up front, with symbol/exchange alongside it.
+    assert 'Golden Traders Ltd (GLD · NSE)' in textbody
+    assert '>Golden Traders Ltd<' in htmlbody
+    # No company name on file -- falls back to the symbol, not shown twice.
+    assert 'NONAME (NSE)' in textbody
+    assert 'NONAME (NONAME · NSE)' not in textbody
 
 
 def test_silver_nns_suggestion_shows_fundamentals_note_with_pe_and_opm_values_and_no_score():
@@ -126,8 +153,9 @@ def test_silver_nns_suggestion_shows_fundamentals_note_with_pe_and_opm_values_an
 
     textbody = mock_send.call_args.kwargs['textbody']
     htmlbody = mock_send.call_args.kwargs['htmlbody']
-    assert 'SLV (NSE) — Highly Recommended (watchlisted on the silver criteria: PE 32.10, OPM 18%):' in textbody
-    assert 'watchlisted on the silver criteria: PE 32.10, OPM 18%' in htmlbody
+    assert 'SLV (NSE) — Highly Recommended' in textbody
+    assert 'Watchlisted on the silver criteria: PE 32.10, OPM 18%' in textbody
+    assert 'Watchlisted on the silver criteria: PE 32.10, OPM 18%' in htmlbody
     assert '6.4' not in textbody
     assert '6.4' not in htmlbody
 
@@ -148,7 +176,116 @@ def test_suggestion_predating_nns_score_falls_back_to_plain_recommended_not_a_cr
         send_daily_suggestions_email(db)
 
     textbody = mock_send.call_args.kwargs['textbody']
-    assert 'OLD (NSE) — Recommended:' in textbody
+    assert 'OLD (NSE) — Recommended' in textbody
+
+
+def test_suggestion_with_no_pattern_shows_generic_extrapolated_projection_and_a_chart():
+    db = FakeEmailDB(
+        suggestion_rows=[
+            {'symbol': 'GLD', 'exchange': 'NSE', 'buy_price': 100.0, 'target_sell_price': 105.0,
+             'stop_loss_price': 97.0, 'holding_period_days': 10, 'rationale': 'Golden cross with confirming volume'},
+        ],
+        recipient_rows=[{'email': 'a@example.com', 'name': 'A'}],
+    )
+
+    with patch('utils.suggestion_email.send_zeptomail_stocks_email', return_value=(True, 'ok')) as mock_send:
+        send_daily_suggestions_email(db)
+
+    textbody = mock_send.call_args.kwargs['textbody']
+    htmlbody = mock_send.call_args.kwargs['htmlbody']
+    # No confirmed pattern -- generic ~6 month / ~1 year fallback, clearly labeled.
+    assert '~6 months' in textbody and '~6 months' in htmlbody
+    assert '~1 year' in textbody and '~1 year' in htmlbody
+    assert 'extrapolated -- no confirmed chart pattern' in textbody
+    # A chart image is embedded inline as a data URI.
+    assert 'data:image/png;base64,' in htmlbody
+    # The disclaimer explaining the two methods appears once, not per-stock.
+    assert 'not a fixed calendar point' in textbody
+    assert textbody.count('not a fixed calendar point') == 1
+
+
+def test_suggestion_with_confirmed_pattern_shows_its_own_pattern_specific_projection():
+    # A pattern-based suggestion's own duration comes from that SPECIFIC
+    # pattern's published research (see PATTERN_RESEARCH_CONTEXT), not the
+    # generic ~6 month/~1 year fallback -- and the long-term figure lands
+    # exactly on the pattern's own measured-move target.
+    db = FakeEmailDB(
+        suggestion_rows=[
+            {'symbol': 'HNS', 'exchange': 'NSE', 'buy_price': 100.0, 'target_sell_price': 130.0,
+             'stop_loss_price': 95.0, 'holding_period_days': 10, 'rationale': 'Reverse head-and-shoulders confirmed',
+             'pattern_name': 'head_and_shoulders_bottom', 'pattern_note': 'Target and stop-loss are based on a reverse head-and-shoulders pattern...'},
+        ],
+        recipient_rows=[{'email': 'a@example.com', 'name': 'A'}],
+    )
+
+    with patch('utils.suggestion_email.send_zeptomail_stocks_email', return_value=(True, 'ok')) as mock_send:
+        send_daily_suggestions_email(db)
+
+    textbody = mock_send.call_args.kwargs['textbody']
+    htmlbody = mock_send.call_args.kwargs['htmlbody']
+    assert '~2.5 months' in textbody
+    assert '~3 months' in textbody
+    assert 'Rs 130' in textbody  # long-term figure is the pattern's own target, unchanged
+    assert 'based on the detected reverse head-and-shoulders pattern' in textbody
+    assert 'Based on the detected reverse head-and-shoulders pattern' in htmlbody
+    # This stock's own card isn't labeled as the generic extrapolated fallback.
+    assert 'extrapolated -- no confirmed chart pattern' not in textbody
+
+
+def test_rounding_bottom_suggestion_gets_a_different_period_than_head_and_shoulders():
+    db = FakeEmailDB(
+        suggestion_rows=[
+            {'symbol': 'RND', 'exchange': 'NSE', 'buy_price': 100.0, 'target_sell_price': 150.0,
+             'stop_loss_price': 92.0, 'holding_period_days': 10, 'rationale': 'Rounding bottom confirmed',
+             'pattern_name': 'rounding_bottom', 'pattern_note': 'Target and stop-loss are based on a rounding-bottom pattern...'},
+        ],
+        recipient_rows=[{'email': 'a@example.com', 'name': 'A'}],
+    )
+
+    with patch('utils.suggestion_email.send_zeptomail_stocks_email', return_value=(True, 'ok')) as mock_send:
+        send_daily_suggestions_email(db)
+
+    textbody = mock_send.call_args.kwargs['textbody']
+    assert '~7.6 months' in textbody
+    assert '~1 year' in textbody
+    assert 'based on the detected rounding-bottom pattern' in textbody
+
+
+def test_suggestion_missing_prices_gets_no_projection_or_chart():
+    # A row with no target_sell_price at all (defensive: shouldn't happen in
+    # practice, but compute_projection_targets/the chart builder must
+    # degrade gracefully rather than crash the whole email).
+    db = FakeEmailDB(
+        suggestion_rows=[
+            {'symbol': 'BAD', 'exchange': 'NSE', 'buy_price': 100.0, 'target_sell_price': None,
+             'stop_loss_price': 97.0, 'holding_period_days': 10, 'rationale': 'Golden cross with confirming volume'},
+        ],
+        recipient_rows=[{'email': 'a@example.com', 'name': 'A'}],
+    )
+
+    with patch('utils.suggestion_email.send_zeptomail_stocks_email', return_value=(True, 'ok')) as mock_send:
+        send_daily_suggestions_email(db)
+
+    htmlbody = mock_send.call_args.kwargs['htmlbody']
+    assert 'data:image/png;base64,' not in htmlbody
+
+
+def test_resend_uses_the_given_date_instead_of_today():
+    db = FakeEmailDB(
+        suggestion_rows=[
+            {'symbol': 'OLDPICK', 'exchange': 'NSE', 'buy_price': 40.0, 'target_sell_price': 42.0,
+             'stop_loss_price': 38.8, 'holding_period_days': 10, 'rationale': 'Golden cross with confirming volume'},
+        ],
+        recipient_rows=[{'email': 'a@example.com', 'name': 'A'}],
+    )
+
+    with patch('utils.suggestion_email.send_zeptomail_stocks_email', return_value=(True, 'ok')) as mock_send:
+        summary = send_daily_suggestions_email(db, target_date='2026-07-01')
+
+    assert summary['suggestion_count'] == 1
+    kwargs = mock_send.call_args.kwargs
+    assert '01 Jul 2026' in kwargs['subject']
+    assert db.last_query_params == ('2026-07-01', '2026-07-01')
 
 
 def test_pattern_based_suggestion_shows_pattern_note_instead_of_hold_days():

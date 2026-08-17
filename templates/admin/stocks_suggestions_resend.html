@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Resend Recommendations - NariNakhre</title>
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+    <style>
+        body { background: #0f172a; color: #f8fafc; }
+        .stocks-accent { color: #0ea5e9; }
+        .stocks-btn { background: linear-gradient(90deg, #0891b2 0%, #0ea5e9 100%); color: white; }
+        select { background: #1e293b; color: #f8fafc; border: 1px solid #334155; }
+    </style>
+</head>
+<body class="min-h-screen p-8">
+    <div class="max-w-2xl mx-auto">
+        <div class="flex items-center justify-between mb-8">
+            <div>
+                <h1 class="text-2xl font-extrabold stocks-accent font-serif">Resend Recommendations</h1>
+                <p class="text-slate-400 text-sm mt-1">Re-sends a past day's recommendation email to every active viewer.</p>
+            </div>
+            <a href="{{ url_for('stocks_admin_dashboard') }}" class="text-sm text-slate-400 hover:text-sky-400 underline">Back to dashboard</a>
+        </div>
+
+        {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+            <div class="mb-6" role="alert" aria-live="assertive">
+            {% for category, msg in messages %}
+                <div class="{{ 'bg-rose-900/40 text-rose-200 border border-rose-500/30' if category == 'error' else 'bg-sky-900/40 text-sky-200 border border-sky-500/30' }} rounded-xl p-3 mb-2 text-sm">{{ msg }}</div>
+            {% endfor %}
+            </div>
+        {% endif %}
+        {% endwith %}
+
+        <div class="bg-slate-800 rounded-2xl p-6 border border-sky-500/20">
+            {% if not dates %}
+                <p class="text-slate-400 text-sm">No recommendation emails have ever been generated yet -- nothing to resend.</p>
+            {% else %}
+                <p class="text-slate-400 text-sm mb-4">
+                    Choose a date below and it goes out again, exactly as it was generated that day (same stocks,
+                    prices, and reasoning) -- this does <strong class="text-slate-200">not</strong> re-run the
+                    suggestion engine or change today's own recommendations. Sent to every currently active viewer,
+                    not just whoever got it originally.
+                </p>
+                <form method="POST" action="{{ url_for('stocks_suggestions_resend') }}"
+                      onsubmit="return confirm('Resend this date\'s recommendations to every active viewer? This sends a real email to everyone.');">
+                    <label for="suggestion_date" class="block text-sm text-slate-300 mb-2">Date to resend</label>
+                    <select name="suggestion_date" id="suggestion_date" required
+                            class="rounded-xl px-4 py-3 w-full mb-4">
+                        {% for d in dates %}
+                            <option value="{{ d }}">{{ d }}</option>
+                        {% endfor %}
+                    </select>
+                    <button type="submit" class="stocks-btn py-3 px-6 rounded-2xl font-bold transition hover:opacity-90">
+                        Resend to all active viewers
+                    </button>
+                </form>
+            {% endif %}
+        </div>
+    </div>
+</body>
+</html>

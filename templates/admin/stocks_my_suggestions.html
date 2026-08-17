@@ -90,9 +90,9 @@
         <div class="card p-5 overflow-x-auto">
             <table>
                 <caption class="text-left text-gray-500 text-xs mb-3">
-                    Pick(s) of the Day from the last 10 days. NNS Score is a 0-10 composite of every screened
-                    fundamental and technical parameter (see the company page for the full breakdown). Read-only --
-                    there's nothing to execute or edit here.
+                    Recommendations from the last 10 days -- the same picks emailed to you. "Projected" shows this
+                    stock's own mid-period/long-term price projection, not a fixed calendar point shared by every
+                    stock (see the note under each one). Read-only -- there's nothing to execute or edit here.
                 </caption>
                 <thead>
                     <tr>
@@ -102,6 +102,7 @@
                         <th scope="col" class="num">Buy</th>
                         <th scope="col" class="num">Target</th>
                         <th scope="col" class="num">Stop-loss</th>
+                        <th scope="col">Projected</th>
                         <th scope="col">Timing</th>
                         <th scope="col">Rationale</th>
                         <th scope="col">Status</th>
@@ -127,6 +128,19 @@
                         <td class="num">{{ s.buy_price }}</td>
                         <td class="num up">{{ s.target_sell_price }}</td>
                         <td class="num down">{{ s.stop_loss_price }}</td>
+                        <td class="text-xs">
+                            {% if s.projection %}
+                                <div>{{ s.projection.mid_period.label }}: <strong class="text-gray-900">{{ s.projection.mid_period.price }}</strong></div>
+                                <div>{{ s.projection.long_term.label }}: <strong class="text-gray-900">{{ s.projection.long_term.price }}</strong></div>
+                                <div class="text-gray-400" style="margin-top:2px;">
+                                    {% if s.projection.method == 'pattern' %}Based on its own detected pattern
+                                    {% else %}Extrapolated -- no confirmed pattern
+                                    {% endif %}
+                                </div>
+                            {% else %}
+                                <span class="text-gray-400">—</span>
+                            {% endif %}
+                        </td>
                         <td>
                             {% if s.pattern_name %}
                                 <span class="text-gray-500 text-xs">{{ s.pattern_note }}</span>
@@ -139,7 +153,7 @@
                     </tr>
                     {% else %}
                     <tr>
-                        <td colspan="9" class="text-gray-400">No recommendations in the last 10 days.</td>
+                        <td colspan="10" class="text-gray-400">No recommendations in the last 10 days.</td>
                     </tr>
                     {% endfor %}
                 </tbody>
