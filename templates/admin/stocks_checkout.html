@@ -25,6 +25,9 @@
         <button type="button" id="stocks-pay-btn" class="btn">Pay {{ price_display }}</button>
         <div class="spinner" id="stocks-spinner"></div>
         <p class="error" id="stocks-checkout-error"></p>
+        <p class="error" id="stocks-checkout-login-link" style="display:none;">
+            <a href="{{ url_for('stocks_admin_login') }}" style="color:#38bdf8;">Try logging in &rarr;</a>
+        </p>
     </div>
 
     <script>
@@ -50,10 +53,19 @@
                     if (data.status === 'ok' && data.redirect) {
                         window.location.href = data.redirect;
                     } else {
-                        showError(data.message || 'Payment verification failed. Please contact support.');
+                        // Razorpay only calls this handler once IT considers the
+                        // payment successful -- so a failure past this point is
+                        // our own verification step, not a failed charge. The
+                        // webhook (the actual source of truth for activation,
+                        // see /stocks/razorpay/webhook) may still activate the
+                        // account moments later even though this browser-side
+                        // call didn't -- telling the customer to "contact
+                        // support" here was a dead end that made a very likely
+                        // temporary hiccup look like a lost payment.
+                        showPaymentReceivedButSetupPending(data.message);
                     }
                 }).catch(function() {
-                    showError('Payment verification failed. Please contact support.');
+                    showPaymentReceivedButSetupPending(null);
                 });
             },
             modal: {
@@ -69,6 +81,17 @@
             const el = document.getElementById('stocks-checkout-error');
             el.textContent = msg;
             el.style.display = 'block';
+        }
+
+        function showPaymentReceivedButSetupPending(serverMessage) {
+            document.getElementById('stocks-spinner').style.display = 'none';
+            document.getElementById('stocks-pay-btn').style.display = 'none';
+            const el = document.getElementById('stocks-checkout-error');
+            el.textContent = 'Your payment went through, but we hit a snag finishing setup here. '
+                + 'This usually resolves within a minute or two -- try logging in below. '
+                + (serverMessage ? '(' + serverMessage + ')' : '');
+            el.style.display = 'block';
+            document.getElementById('stocks-checkout-login-link').style.display = 'block';
         }
 
         const rzp = new Razorpay(options);

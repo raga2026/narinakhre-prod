@@ -30,6 +30,15 @@ HORIZON_DISCLAIMER = (
 STOCKS_LOGIN_URL = 'https://narinakhre.com/stocks/login'
 STOCKS_BASE_URL = 'https://narinakhre.com'
 
+# Where the site owner is notified of new paid signups/cancellations (see
+# send_admin_new_subscriber_email/send_admin_subscription_cancelled_email
+# below) -- a fixed address, not configurable per-account, since there's
+# only one owner. Sent via send_zeptomail_stocks_email, same as every other
+# Stocks email, so the "from" address is whatever SMTP_support_EMAIL_FROM
+# resolves to on Render (see utils/stock_alerting.py) -- point that env var
+# at support@narinakhre.com if it isn't already.
+STOCKS_ADMIN_NOTIFY_EMAIL = 'narinakhre@gmail.com'
+
 _TREND_BADGE_COLORS = {
     'Highly Recommended': ('#dcfce7', '#15803d'),
     'Recommended -- extra caution': ('#ffedd5', '#9a3412'),
@@ -140,7 +149,7 @@ def send_stop_loss_review_email(to_email, trade, pnl_amount, pnl_pct):
     )
 
 
-def send_subscription_welcome_email(email, name, current_period_end_label):
+def send_subscription_welcome_email(email, name, current_period_end_label, suggestions=None):
     """Sent right after a self-serve Nari Nakhre Stocks signup's first
     Razorpay payment is verified (see app.py's /stocks/subscribe/verify) --
     unlike send_viewer_welcome_email above, there's no password to disclose
@@ -148,10 +157,24 @@ def send_subscription_welcome_email(email, name, current_period_end_label):
     has none at all (a Google-only signup, see utils/stock_auth.py's
     create_pending_google_subscriber). current_period_end_label is a
     pre-formatted date string (see app.py), not a raw datetime -- keeps
-    this module free of date-formatting/timezone concerns."""
+    this module free of date-formatting/timezone concerns.
+
+    suggestions, when given a non-empty list (today's stock_suggestions
+    rows -- see get_suggestions), appends that day's actual recommendation
+    card(s) (see _render_stock_card_html/_render_stock_card_text) right in
+    this same email -- a brand-new subscriber sees today's pick(s)
+    immediately, in the welcome email itself, rather than only after
+    separately logging in. Omitted/empty (the default) sends the plain
+    welcome text alone -- e.g. a signup completed after that day's
+    suggestions already went out, or on a non-trading day with nothing to
+    show yet."""
     greeting = name or email
-    subject = 'Welcome to Nari Nakhre Stocks -- payment confirmed'
-    text_body = (
+    has_suggestions = bool(suggestions)
+    subject = (
+        "Welcome to Nari Nakhre Stocks -- today's recommendation inside"
+        if has_suggestions else 'Welcome to Nari Nakhre Stocks -- payment confirmed'
+    )
+    intro_text = (
         f'Hi {greeting},\n\n'
         f"Your Rs 299/month subscription is active. Every day, every golden-cross stock that clears our "
         f"screening bar gets emailed to you -- buy price, target sell price, stop-loss, and the reasoning "
@@ -160,20 +183,49 @@ def send_subscription_welcome_email(email, name, current_period_end_label):
         f'Your subscription renews automatically on {current_period_end_label} -- '
         f"we'll email you a reminder a few days before, and you can cancel "
         f"anytime from your account.\n\n"
-        f'Login: {STOCKS_LOGIN_URL}\n\n'
-        f'{DISCLAIMER}\n'
     )
-    html_body = (
-        f'<p>Hi {greeting},</p>'
-        f"<p>Your Rs 299/month subscription is active. Every day, every golden-cross stock that clears our "
-        f"screening bar gets emailed to you -- buy price, target sell price, stop-loss, and the reasoning "
-        f"behind each one, marked Highly Recommended or Recommended so you can see at a glance which are "
-        f"strongest.</p>"
-        f'<p>Your subscription renews automatically on <strong>{current_period_end_label}</strong> -- '
-        f"we'll email you a reminder a few days before, and you can cancel "
-        f"anytime from your account.</p>"
-        f'<p><a href="{STOCKS_LOGIN_URL}">{STOCKS_LOGIN_URL}</a></p>'
-        f'<p style="color:#64748b;font-size:0.85em;margin-top:16px;">{DISCLAIMER}</p>'
+    intro_html = (
+        f'<p style="font-family:Arial,Helvetica,sans-serif;color:#0f172a;">Hi {greeting},</p>'
+        f"<p style=\"font-family:Arial,Helvetica,sans-serif;color:#0f172a;\">Your Rs 299/month subscription is active. "
+        f"Every day, every golden-cross stock that clears our screening bar gets emailed to you -- buy price, "
+        f"target sell price, stop-loss, and the reasoning behind each one, marked Highly Recommended or Recommended "
+        f"so you can see at a glance which are strongest.</p>"
+        f'<p style="font-family:Arial,Helvetica,sans-serif;color:#0f172a;">Your subscription renews automatically on '
+        f"<strong>{current_period_end_label}</strong> -- we'll email you a reminder a few days before, and you can "
+        f"cancel anytime from your account.</p>"
+    )
+
+    if has_suggestions:
+        heading = "Today's Recommendation" if len(suggestions) == 1 else "Today's Recommendations"
+        intro_text += f'{heading}:\n\n'
+        for s in suggestions:
+            intro_text += _render_stock_card_text(s) + '\n\n'
+        any_horizon_targets = any(
+            compute_projection_targets(s.get('buy_price'), s.get('target_sell_price'), s.get('pattern_name'))
+            for s in suggestions
+        )
+        if any_horizon_targets:
+            intro_text += HORIZON_DISCLAIMER + '\n\n'
+
+        intro_html += f'<p style="font-family:Arial,Helvetica,sans-serif;font-size:16px;color:#0f172a;">{heading}:</p>'
+        intro_html += ''.join(_render_stock_card_html(s) for s in suggestions)
+        if any_horizon_targets:
+            intro_html += f'<p style="color:#64748b;font-size:0.8em;line-height:1.5;font-family:Arial,Helvetica,sans-serif;">{HORIZON_DISCLAIMER}</p>'
+    else:
+        intro_text += (
+            "Nothing cleared our screening bar today, so there's no pick to show yet -- log in anytime to see "
+            "the latest.\n\n"
+        )
+        intro_html += (
+            '<p style="font-family:Arial,Helvetica,sans-serif;color:#0f172a;">Nothing cleared our screening bar '
+            "today, so there's no pick to show yet -- log in anytime to see the latest.</p>"
+        )
+
+    text_body = intro_text + f'Login: {STOCKS_LOGIN_URL}\n\n{DISCLAIMER}\n'
+    html_body = _wrap_email_html(
+        intro_html
+        + f'<p style="font-family:Arial,Helvetica,sans-serif;"><a href="{STOCKS_LOGIN_URL}">{STOCKS_LOGIN_URL}</a></p>'
+        + f'<p style="color:#64748b;font-size:0.85em;margin-top:16px;font-family:Arial,Helvetica,sans-serif;">{DISCLAIMER}</p>'
     )
     return send_zeptomail_stocks_email(
         to_email=email, to_name=greeting, subject=subject,
@@ -214,6 +266,56 @@ def send_subscription_expiry_reminder_email(email, name, current_period_end_labe
     )
     return send_zeptomail_stocks_email(
         to_email=email, to_name=greeting, subject=subject,
+        textbody=text_body, htmlbody=html_body, sender_name='Nari Nakhre Stocks',
+    )
+
+
+def send_admin_new_subscriber_email(email, name):
+    """Notifies the site owner (STOCKS_ADMIN_NOTIFY_EMAIL) every time a
+    self-serve signup completes its FIRST payment -- see app.py's
+    /stocks/subscribe/verify, called right after activate_subscription.
+    Registering alone (still subscription_status='pending', checkout never
+    completed) does NOT trigger this -- only an actually-activated paid
+    account does, since "registers and makes payment" is one combined
+    event, not two. Renewals (the recurring 'subscription.charged' webhook
+    event) don't trigger this either -- this is specifically about a new
+    subscriber, not every monthly charge on an existing one."""
+    greeting = name or email
+    subject = f'New Nari Nakhre Stocks subscriber: {greeting}'
+    text_body = (
+        f'{greeting} ({email}) just signed up and completed payment for the '
+        f'Rs 299/month Nari Nakhre Stocks subscription.\n'
+    )
+    html_body = (
+        f'<p><strong>{greeting}</strong> ({email}) just signed up and completed payment for the '
+        f'Rs 299/month Nari Nakhre Stocks subscription.</p>'
+    )
+    return send_zeptomail_stocks_email(
+        to_email=STOCKS_ADMIN_NOTIFY_EMAIL, to_name='Nari Nakhre', subject=subject,
+        textbody=text_body, htmlbody=html_body, sender_name='Nari Nakhre Stocks',
+    )
+
+
+def send_admin_subscription_cancelled_email(email, name):
+    """Notifies the site owner (STOCKS_ADMIN_NOTIFY_EMAIL) whenever a
+    subscriber cancels -- see app.py's /stocks/razorpay/webhook, the
+    'subscription.cancelled'/'subscription.completed' branch, right after
+    mark_subscription_cancelled. Access itself keeps working through the
+    already-paid period end (see subscription_is_current) -- this is just
+    the owner's heads-up that it won't auto-renew, not a claim that access
+    already ended."""
+    greeting = name or email
+    subject = f'Nari Nakhre Stocks subscription cancelled: {greeting}'
+    text_body = (
+        f'{greeting} ({email}) just cancelled their Rs 299/month Nari Nakhre Stocks subscription. '
+        f'Their access continues through the end of the period already paid for.\n'
+    )
+    html_body = (
+        f'<p><strong>{greeting}</strong> ({email}) just cancelled their Rs 299/month Nari Nakhre Stocks '
+        f'subscription. Their access continues through the end of the period already paid for.</p>'
+    )
+    return send_zeptomail_stocks_email(
+        to_email=STOCKS_ADMIN_NOTIFY_EMAIL, to_name='Nari Nakhre', subject=subject,
         textbody=text_body, htmlbody=html_body, sender_name='Nari Nakhre Stocks',
     )
 

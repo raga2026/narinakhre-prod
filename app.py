@@ -56,6 +56,7 @@ from utils.stocks_subscription import (
     mark_subscription_cancelled,
     mark_subscription_halted,
     find_expiring_subscribers,
+    find_account_by_razorpay_subscription_id,
     mark_reminder_sent,
     has_stocks_access,
     days_until,
@@ -163,6 +164,8 @@ from utils.suggestion_email import (
     send_subscription_welcome_email,
     send_subscription_expiry_reminder_email,
     send_stop_loss_review_email,
+    send_admin_new_subscriber_email,
+    send_admin_subscription_cancelled_email,
 )
 from utils.trading_calendar import is_trading_day
 import auth_providers
@@ -8422,9 +8425,16 @@ def stocks_subscribe_verify():
 
     try:
         period_end_label = current_period_end.strftime('%d %b %Y')
-        send_subscription_welcome_email(row['username'], row.get('name'), period_end_label)
+        today_iso = date.today().isoformat()
+        todays_suggestions = get_suggestions(db, start_date=today_iso, end_date=today_iso)
+        send_subscription_welcome_email(row['username'], row.get('name'), period_end_label, suggestions=todays_suggestions)
     except Exception as e:
         app.logger.warning(f'Subscription welcome email failed for {row["username"]}: {e}')
+
+    try:
+        send_admin_new_subscriber_email(row['username'], row.get('name'))
+    except Exception as e:
+        app.logger.warning(f'Admin new-subscriber notification failed for {row["username"]}: {e}')
 
     redirect_url = url_for('stocks_change_password') if session['stocks_must_change_password'] else url_for('stocks_my_suggestions')
     return jsonify({'status': 'ok', 'redirect': redirect_url})
@@ -8524,7 +8534,13 @@ def stocks_razorpay_webhook():
             current_period_end = datetime.fromtimestamp(entity['current_end'], tz=timezone.utc)
             record_recurring_charge(db, subscription_id, current_period_end)
         elif event in ('subscription.cancelled', 'subscription.completed') and subscription_id:
+            account = find_account_by_razorpay_subscription_id(db, subscription_id)
             mark_subscription_cancelled(db, subscription_id)
+            if account:
+                try:
+                    send_admin_subscription_cancelled_email(account['username'], account.get('name'))
+                except Exception as e:
+                    app.logger.warning(f'Admin cancellation notification failed for {account["username"]}: {e}')
         elif event == 'subscription.halted' and subscription_id:
             mark_subscription_halted(db, subscription_id)
     except Exception as e:

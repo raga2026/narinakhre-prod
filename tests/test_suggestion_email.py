@@ -1,6 +1,13 @@
 from unittest.mock import patch
 
-from utils.suggestion_email import DISCLAIMER, send_daily_suggestions_email, send_viewer_welcome_email
+from utils.suggestion_email import (
+    DISCLAIMER,
+    send_admin_new_subscriber_email,
+    send_admin_subscription_cancelled_email,
+    send_daily_suggestions_email,
+    send_subscription_welcome_email,
+    send_viewer_welcome_email,
+)
 
 
 class FakeCursor:
@@ -551,3 +558,52 @@ def test_viewer_welcome_email_falls_back_to_email_as_greeting_when_no_name():
 
     kwargs = mock_send.call_args.kwargs
     assert kwargs['to_name'] == 'noname@example.com'
+
+
+def test_subscription_welcome_email_without_suggestions_is_the_plain_welcome():
+    with patch('utils.suggestion_email.send_zeptomail_stocks_email', return_value=(True, 'ok')) as mock_send:
+        send_subscription_welcome_email('new@example.com', 'New Sub', '17 Sep 2026')
+
+    kwargs = mock_send.call_args.kwargs
+    assert 'payment confirmed' in kwargs['subject'].lower()
+    assert "today's recommendation" not in kwargs['subject'].lower()
+    assert 'no pick to show yet' in kwargs['textbody'].lower()
+    assert '17 Sep 2026' in kwargs['textbody']
+
+
+def test_subscription_welcome_email_with_suggestions_includes_todays_pick():
+    suggestions = [
+        {'symbol': 'GLD', 'exchange': 'NSE', 'company_name': 'Golden Co Ltd', 'buy_price': 100.0,
+         'target_sell_price': 105.0, 'stop_loss_price': 97.0, 'holding_period_days': 10,
+         'rationale': 'Golden cross with confirming volume'},
+    ]
+    with patch('utils.suggestion_email.send_zeptomail_stocks_email', return_value=(True, 'ok')) as mock_send:
+        send_subscription_welcome_email('new@example.com', 'New Sub', '17 Sep 2026', suggestions=suggestions)
+
+    kwargs = mock_send.call_args.kwargs
+    assert "today's recommendation" in kwargs['subject'].lower()
+    assert 'Golden Co Ltd' in kwargs['textbody']
+    assert 'Golden Co Ltd' in kwargs['htmlbody']
+    assert kwargs['htmlbody'].strip().startswith('<!doctype html>')
+    assert DISCLAIMER in kwargs['textbody']
+
+
+def test_admin_new_subscriber_email_goes_to_the_fixed_admin_address():
+    with patch('utils.suggestion_email.send_zeptomail_stocks_email', return_value=(True, 'ok')) as mock_send:
+        send_admin_new_subscriber_email('newsub@example.com', 'New Sub')
+
+    kwargs = mock_send.call_args.kwargs
+    assert kwargs['to_email'] == 'narinakhre@gmail.com'
+    assert 'New Sub' in kwargs['subject']
+    assert 'newsub@example.com' in kwargs['textbody']
+    assert 'completed payment' in kwargs['textbody']
+
+
+def test_admin_cancellation_email_goes_to_the_fixed_admin_address():
+    with patch('utils.suggestion_email.send_zeptomail_stocks_email', return_value=(True, 'ok')) as mock_send:
+        send_admin_subscription_cancelled_email('leaving@example.com', 'Leaving User')
+
+    kwargs = mock_send.call_args.kwargs
+    assert kwargs['to_email'] == 'narinakhre@gmail.com'
+    assert 'Leaving User' in kwargs['subject']
+    assert 'cancelled' in kwargs['textbody'].lower()

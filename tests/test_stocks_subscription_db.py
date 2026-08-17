@@ -7,6 +7,7 @@ from utils.stocks_subscription import (
     activate_subscription,
     attach_razorpay_subscription,
     create_pending_subscriber,
+    find_account_by_razorpay_subscription_id,
     find_expiring_subscribers,
     has_stocks_access,
     mark_reminder_sent,
@@ -89,6 +90,11 @@ class FakeSubscriberDB:
                     r['subscription_status'] = 'active'
                     r['subscription_current_period_end'] = period_end
             return FakeCursor([])
+
+        if normalized.startswith('SELECT id, username, name FROM stocks_admin_users WHERE razorpay_subscription_id=?'):
+            subscription_id, = params
+            matches = [r for r in self.rows if r.get('razorpay_subscription_id') == subscription_id]
+            return FakeCursor(matches[:1])
 
         if normalized.startswith("UPDATE stocks_admin_users SET subscription_status='cancelled'"):
             subscription_id, = params
@@ -224,6 +230,18 @@ def test_mark_subscription_cancelled_and_halted():
 
     assert db.rows[0]['subscription_status'] == 'cancelled'
     assert db.rows[1]['subscription_status'] == 'halted'
+
+
+def test_find_account_by_razorpay_subscription_id():
+    db = FakeSubscriberDB(rows=[
+        {'id': 1, 'username': 'a@example.com', 'name': 'A', 'subscription_status': 'active', 'razorpay_subscription_id': 'sub_1'},
+        {'id': 2, 'username': 'b@example.com', 'name': 'B', 'subscription_status': 'active', 'razorpay_subscription_id': 'sub_2'},
+    ])
+
+    found = find_account_by_razorpay_subscription_id(db, 'sub_2')
+    assert found['username'] == 'b@example.com'
+
+    assert find_account_by_razorpay_subscription_id(db, 'sub_unknown') is None
 
 
 def test_find_expiring_subscribers_and_reminder_dedup():

@@ -219,6 +219,19 @@ def record_recurring_charge(db, razorpay_subscription_id, current_period_end):
     db.commit()
 
 
+def find_account_by_razorpay_subscription_id(db, razorpay_subscription_id):
+    """Looks up the stocks_admin_users row a webhook event's subscription_id
+    belongs to -- the webhook payload itself carries no other identifying
+    detail (no admin_id, no email), so this is how app.py's
+    /stocks/razorpay/webhook turns a bare subscription_id into a
+    username/name to notify about (see send_admin_subscription_cancelled_email
+    in utils/suggestion_email.py). Returns None if unrecognized."""
+    return db.execute(
+        'SELECT id, username, name FROM stocks_admin_users WHERE razorpay_subscription_id=?',
+        (razorpay_subscription_id,)
+    ).fetchone()
+
+
 def mark_subscription_cancelled(db, razorpay_subscription_id):
     """'subscription.cancelled' / 'subscription.completed' webhook events --
     access keeps working (see subscription_is_current) through whatever
