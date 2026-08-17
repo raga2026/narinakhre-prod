@@ -57,10 +57,11 @@
             <h2 class="text-lg font-bold text-gray-900">Welcome back{{ ', ' ~ session.stocks_admin_username if session.stocks_admin_username }}</h2>
             <p class="text-gray-600 text-sm mt-2">
                 {% if suggestions %}
-                    {{ suggestions | length }} Pick{{ 's' if suggestions | length != 1 }} of the Day from the last 10 days, below --
-                    at most one per day, never the same stock again within 30 days unless the recommendation genuinely changes.
+                    {{ suggestions | length }} recommendation{{ 's' if suggestions | length != 1 }} from the last 10 days, below --
+                    every golden-cross stock that cleared our screening bar on a given day gets its own row, so the
+                    same stock can reappear on a later date if it still qualifies.
                 {% else %}
-                    No Pick of the Day in the last 10 days -- check back after the next screening run.
+                    No recommendations in the last 10 days -- check back after the next screening run.
                 {% endif %}
             </p>
             {% if subscription_period_end_label %}
@@ -97,7 +98,7 @@
                     <tr>
                         <th scope="col">Company</th>
                         <th scope="col">Date</th>
-                        <th scope="col">NNS Score</th>
+                        <th scope="col">Recommendation</th>
                         <th scope="col" class="num">Buy</th>
                         <th scope="col" class="num">Target</th>
                         <th scope="col" class="num">Stop-loss</th>
@@ -112,9 +113,12 @@
                         <th scope="row" class="text-gray-900">{{ s.symbol }} <span class="text-gray-400 font-normal">({{ s.exchange }})</span></th>
                         <td>{{ s.suggestion_date }}</td>
                         <td>
-                            {% if s.nns_tier %}
-                                <span class="badge badge-{{ s.nns_tier }}">{{ s.nns_tier | title }} {{ s.nns_score }}</span>
-                            {% else %}—
+                            {% if s.nns_tier in ('golden', 'silver') %}
+                                <span class="badge badge-golden">Highly Recommended</span>
+                            {% elif s.nns_tier == 'bronze' %}
+                                <span class="badge badge-bronze">Recommended -- extra caution</span>
+                            {% else %}
+                                <span class="badge badge-silver">Recommended</span>
                             {% endif %}
                             {% if s.fundamental_tier == 'silver' %}
                                 <span class="text-gray-500 text-xs" style="display:block;">PE {{ '%.2f'|format(s.pe_at_suggestion) if s.pe_at_suggestion is not none else '—' }}, OPM {{ '%.0f'|format(s.opm_at_suggestion) if s.opm_at_suggestion is not none else '—' }}%</span>
@@ -135,7 +139,7 @@
                     </tr>
                     {% else %}
                     <tr>
-                        <td colspan="9" class="text-gray-400">No Pick of the Day in the last 10 days.</td>
+                        <td colspan="9" class="text-gray-400">No recommendations in the last 10 days.</td>
                     </tr>
                     {% endfor %}
                 </tbody>

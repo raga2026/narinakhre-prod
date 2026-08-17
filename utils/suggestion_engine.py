@@ -8,31 +8,16 @@ from utils.price_pattern import compute_suggestion_pricing
 from utils.nns_score import NNS_BRONZE_MIN, compute_nns_score, nns_tier
 from utils.stock_shortlist import _compute_industry_benchmarks
 
-# At most this many suggestions go out per day -- "Pick of the Day", not a
-# fixed quota to fill regardless of quality (see score_candidates, which
-# excludes anything that doesn't clear at least NNS_BRONZE_MIN -- a day can
-# still yield zero).
+# Default cap for select_top_suggestions (a general-purpose "top N
+# candidates" helper, still used as such/tested independently) -- NOT used
+# by generate_daily_suggestions itself, which sends every golden-cross
+# candidate that clears NNS_BRONZE_MIN, uncapped (see that function's
+# docstring for why: "send out all the golden cross stocks", not a
+# single Pick of the Day).
 TOP_N_SUGGESTIONS = 1
 HOLDING_PERIOD_DAYS = 10
 TARGET_MULTIPLIER = 1.05   # +5%, used as the fallback when no chart pattern applies -- see compute_suggestion_pricing
 STOP_LOSS_MULTIPLIER = 0.97  # -3%, same fallback role
-
-# The SAME stock isn't picked again within this many days of its last
-# still-open suggestion, UNLESS the recommendation has genuinely changed
-# since then (see _is_genuine_change) -- otherwise a stock that just
-# keeps ranking #1 for weeks would get re-announced as "Pick of the Day"
-# every single day, which isn't a fresh recommendation, just a repeat.
-SUGGESTION_REPEAT_WINDOW_DAYS = 30
-
-# Thresholds for "genuinely changed" (see _is_genuine_change) -- both are
-# deliberately not tiny: an NNS Score wobbling by 0.2 points day to day
-# from routine data noise, or a target price drifting 1% with the stock's
-# own price, isn't a new call, it's the same call restated. A change in
-# which chart pattern (if any) the price/stop-loss is now based on always
-# counts, regardless of these thresholds, since that's a change in the
-# underlying reasoning, not just a number moving.
-NNS_SCORE_CHANGE_THRESHOLD = 1.0        # points, out of 10
-TARGET_PRICE_CHANGE_THRESHOLD_PCT = 3.0  # %
 
 # How far back to pull daily closes for pattern detection (see
 # utils.price_pattern.detect_head_and_shoulders/detect_rounding_pattern) --
@@ -203,10 +188,13 @@ def _build_rationale(candidate, tier=None):
         parts.append(f"OPM {candidate['opm_pct']:.0f}%")
     rationale = ', '.join(parts)
     if tier == 'bronze':
+        # Deliberately doesn't say "NNS Score" or a number -- customer-
+        # facing text (email/viewer pages) explains strength in plain
+        # language, not by naming the internal scoring mechanism.
         rationale += (
-            '. Bronze-tier NNS Score (weaker profile than our usual silver/golden picks, sent only because '
-            'nothing stronger cleared the bar today) -- extra caution advised; research this one more closely '
-            'than usual before acting.'
+            '. Weaker overall profile than our usual highly-recommended picks, included only because '
+            'nothing stronger cleared the bar today -- extra caution advised; research this one more '
+            'closely than usual before acting.'
         )
     return rationale
 
@@ -250,31 +238,6 @@ def _build_pattern_note(pattern_name, pattern_research):
         f'not a prediction for this stock specifically. There is no reliable way to predict exact timing from '
         f'chart shape alone.'
     )
-
-
-def _is_genuine_change(existing_recent, new_nns_score, new_pricing):
-    """True if today's would-be suggestion for a stock differs meaningfully
-    from the most recent still-open ('pending') one within
-    SUGGESTION_REPEAT_WINDOW_DAYS -- see that constant and the two
-    threshold constants above for what counts. existing_recent is a
-    {'score', 'target_sell_price', 'pattern_name'} row (the columns
-    generate_daily_suggestions itself just wrote last time); new_pricing is
-    this run's compute_suggestion_pricing() result. A None old score/target
-    (a pre-NNS-Score row from before this existed) always counts as
-    changed -- there's nothing meaningful to compare against."""
-    if existing_recent.get('pattern_name') != new_pricing.get('pattern_name'):
-        return True
-
-    old_score = existing_recent.get('score')
-    if old_score is None or abs(new_nns_score - old_score) >= NNS_SCORE_CHANGE_THRESHOLD:
-        return True
-
-    old_target = existing_recent.get('target_sell_price')
-    new_target = new_pricing.get('target_sell_price')
-    if not old_target or new_target is None:
-        return True
-    pct_change = abs(new_target - old_target) / old_target * 100
-    return pct_change >= TARGET_PRICE_CHANGE_THRESHOLD_PCT
 
 
 def _fetch_price_history(db, watchlist_id, lookback_days=PATTERN_LOOKBACK_DAYS):
@@ -508,15 +471,12 @@ def generate_daily_suggestions(db):
     explicit caution note in its rationale (see _build_rationale) rather
     than being presented the same as a stronger pick.
 
-    A candidate is SKIPPED, falling through to the next-ranked one, if it
-    already has an open (status='pending') suggestion from within the last
-    SUGGESTION_REPEAT_WINDOW_DAYS (30) that hasn't genuinely changed since
-    (see _is_genuine_change) -- the same stock topping the rankings for
-    weeks straight shouldn't get re-announced as a "fresh" pick every day.
-    A day can still end up with zero picks if every eligible candidate is
-    on cooldown with nothing new to say, or none clear NNS_BRONZE_MIN at
-    all -- this is meant to keep sends to only genuinely fresh, good picks,
-    never a forced daily quota.
+    Every golden-cross candidate that clears NNS_BRONZE_MIN gets a row for
+    today, uncapped -- this is a daily "here's the current full picture"
+    digest, not a single novelty pick, so a stock that also qualified
+    yesterday (or every day this month) is included again today rather
+    than being suppressed as a repeat. A day can still end up with zero
+    rows if no golden-cross candidate clears NNS_BRONZE_MIN at all.
 
     buy/target/stop-loss come from compute_suggestion_pricing()
     (utils/price_pattern.py), which prefers a confirmed chart pattern
@@ -537,31 +497,16 @@ def generate_daily_suggestions(db):
     ranked = score_candidates(eligible, previous_snapshots_by_watchlist, industry_benchmarks_by_industry)
 
     today = date.today().isoformat()
-    repeat_window_cutoff = (date.today() - timedelta(days=SUGGESTION_REPEAT_WINDOW_DAYS)).isoformat()
 
     created = []
-    skipped_duplicates = []
 
     for candidate, nns_score in ranked:
-        if len(created) >= TOP_N_SUGGESTIONS:
-            break
-
         watchlist_id = candidate['watchlist_id']
 
         price_history = _fetch_price_history(db, watchlist_id)
         pricing = compute_suggestion_pricing(
             price_history, candidate['latest_close'], TARGET_MULTIPLIER, STOP_LOSS_MULTIPLIER
         )
-
-        existing_recent = db.execute(
-            '''SELECT score, target_sell_price, pattern_name FROM stock_suggestions
-               WHERE watchlist_id=? AND status='pending' AND suggestion_date >= ?
-               ORDER BY suggestion_date DESC LIMIT 1''',
-            (watchlist_id, repeat_window_cutoff)
-        ).fetchone()
-        if existing_recent and not _is_genuine_change(existing_recent, nns_score, pricing):
-            skipped_duplicates.append(candidate['symbol'])
-            continue
 
         buy_price = pricing['buy_price']
         target_sell_price = pricing['target_sell_price']
@@ -612,5 +557,4 @@ def generate_daily_suggestions(db):
     return {
         'candidates_evaluated': len(candidates),
         'created': created,
-        'skipped_duplicates': skipped_duplicates,
     }

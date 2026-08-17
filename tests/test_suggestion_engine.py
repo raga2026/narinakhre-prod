@@ -2,7 +2,6 @@ from datetime import date, timedelta
 
 from utils.suggestion_engine import (
     HOLDING_PERIOD_DAYS,
-    SUGGESTION_REPEAT_WINDOW_DAYS,
     TOP_N_SUGGESTIONS,
     _build_rationale,
     generate_daily_suggestions,
@@ -195,15 +194,6 @@ class FakeSuggestionDB:
         if normalized.startswith('SELECT w.id AS watchlist_id, w.symbol, w.exchange'):
             return FakeCursor(self.candidate_rows)
 
-        if normalized.startswith('SELECT score, target_sell_price, pattern_name FROM stock_suggestions'):
-            watchlist_id, cutoff = params
-            matches = [
-                s for s in self.suggestions
-                if s['watchlist_id'] == watchlist_id and s['status'] == 'pending' and s['suggestion_date'] >= cutoff
-            ]
-            matches.sort(key=lambda s: s['suggestion_date'], reverse=True)
-            return FakeCursor(matches[:1])
-
         if normalized.startswith('SELECT close FROM stock_daily_data WHERE watchlist_id=?'):
             watchlist_id, _lookback_days = params
             closes = self.price_history.get(watchlist_id, [])
@@ -217,15 +207,29 @@ class FakeSuggestionDB:
              holding_period_days, rsi_at_suggestion, pe_at_suggestion, peg_at_suggestion,
              opm_at_suggestion, fundamental_tier, pattern_name, pattern_note, nns_score, nns_tier,
              rationale) = params
-            self.suggestions.append({
-                'id': self._next_id, 'watchlist_id': watchlist_id, 'suggestion_date': suggestion_date,
+            fields = {
                 'status': 'pending', 'buy_price': buy_price, 'target_sell_price': target_sell_price,
                 'stop_loss_price': stop_loss_price,
                 'opm_at_suggestion': opm_at_suggestion, 'fundamental_tier': fundamental_tier,
                 'pattern_name': pattern_name, 'pattern_note': pattern_note,
                 'score': nns_score, 'nns_score': nns_score, 'nns_tier': nns_tier,
-            })
-            self._next_id += 1
+            }
+            # Mirrors the real ON CONFLICT (watchlist_id, suggestion_date) DO
+            # UPDATE -- a second call for the same stock on the same day
+            # updates that row in place rather than duplicating it.
+            existing = next(
+                (s for s in self.suggestions
+                 if s['watchlist_id'] == watchlist_id and s['suggestion_date'] == suggestion_date),
+                None
+            )
+            if existing:
+                existing.update(fields)
+            else:
+                self.suggestions.append({
+                    'id': self._next_id, 'watchlist_id': watchlist_id, 'suggestion_date': suggestion_date,
+                    **fields,
+                })
+                self._next_id += 1
             return FakeCursor([])
 
         if normalized.startswith('SELECT id FROM stock_suggestions WHERE watchlist_id=? AND suggestion_date=?'):
@@ -239,10 +243,22 @@ class FakeSuggestionDB:
         pass
 
 
-def test_unchanged_recommendation_within_repeat_window_is_not_resent():
-    # Nothing about the candidate changes between the two calls -- the
-    # second one (simulating a later day, same stock still topping the
-    # rankings) must NOT re-send it as a "fresh" pick.
+def test_every_qualifying_candidate_gets_a_suggestion_not_just_the_top_one():
+    # "send out all the golden cross stocks" -- every candidate that's
+    # golden-cross and clears NNS_BRONZE_MIN gets a row, uncapped.
+    candidates = [_candidate(i, f'SYM{i}') for i in range(5)]
+    db = FakeSuggestionDB(candidates)
+
+    summary = generate_daily_suggestions(db)
+
+    assert len(summary['created']) == 5
+    assert {c['symbol'] for c in summary['created']} == {'SYM0', 'SYM1', 'SYM2', 'SYM3', 'SYM4'}
+
+
+def test_same_stock_sent_again_the_next_day_even_if_unchanged():
+    # Unlike the old "Pick of the Day" cooldown, this is a daily "current
+    # picture" digest -- a stock qualifying again tomorrow, unchanged, is
+    # included again, not suppressed as a repeat.
     candidates = [_candidate(1, 'STABLE')]
     db = FakeSuggestionDB(candidates)
 
@@ -250,65 +266,9 @@ def test_unchanged_recommendation_within_repeat_window_is_not_resent():
     assert len(first['created']) == 1
 
     second = generate_daily_suggestions(db)
-    assert second['created'] == []
-    assert second['skipped_duplicates'] == ['STABLE']
-    assert len(db.suggestions) == 1  # still just the one row
-
-
-def test_existing_suggestion_older_than_the_repeat_window_can_be_resent():
-    candidates = [_candidate(1, 'STALE')]
-    old_date = (date.today() - timedelta(days=SUGGESTION_REPEAT_WINDOW_DAYS + 1)).isoformat()
-    db = FakeSuggestionDB(
-        candidates,
-        existing_suggestions=[{
-            'watchlist_id': 1, 'status': 'pending', 'suggestion_date': old_date,
-            'score': 5.0, 'target_sell_price': 999.0, 'pattern_name': None,
-        }],
-    )
-
-    summary = generate_daily_suggestions(db)
-
-    assert len(summary['created']) == 1
-    assert summary['skipped_duplicates'] == []
-
-
-def test_genuine_nns_score_change_allows_a_resend_within_the_window():
-    candidates = [_candidate(1, 'IMPROVED')]
-    recent_date = (date.today() - timedelta(days=2)).isoformat()
-    db = FakeSuggestionDB(
-        candidates,
-        existing_suggestions=[{
-            # Old score is far below whatever this strong candidate scores
-            # today -- clears NNS_SCORE_CHANGE_THRESHOLD easily.
-            'watchlist_id': 1, 'status': 'pending', 'suggestion_date': recent_date,
-            'score': 1.0, 'target_sell_price': 105.0, 'pattern_name': None,
-        }],
-    )
-
-    summary = generate_daily_suggestions(db)
-
-    assert len(summary['created']) == 1
-    assert summary['skipped_duplicates'] == []
-
-
-def test_fallthrough_to_next_candidate_when_the_top_one_is_on_cooldown():
-    # WINNER is the higher-scoring candidate but already has an unchanged,
-    # recent suggestion -- RUNNERUP should get today's single pick instead
-    # of the day going out with zero picks.
-    winner = _candidate(1, 'WINNER', peg_ratio=0.1, quarterly_profit_growth_pct=30, opm_pct=40, roce_pct=25, roa_pct=15)
-    runnerup = _candidate(2, 'RUNNERUP')
-    db = FakeSuggestionDB([winner, runnerup])
-
-    # First call establishes WINNER's suggestion.
-    first = generate_daily_suggestions(db)
-    assert first['created'][0]['symbol'] == 'WINNER'
-
-    # Second call: WINNER hasn't changed, so it's on cooldown -- RUNNERUP
-    # should be picked instead, and only one suggestion goes out.
-    second = generate_daily_suggestions(db)
     assert len(second['created']) == 1
-    assert second['created'][0]['symbol'] == 'RUNNERUP'
-    assert 'WINNER' in second['skipped_duplicates']
+    assert second['created'][0]['symbol'] == 'STABLE'
+    assert len(db.suggestions) == 1  # same day -- upserts the same row, doesn't duplicate it
 
 
 def test_new_suggestion_created_when_no_open_one_exists():
@@ -319,7 +279,6 @@ def test_new_suggestion_created_when_no_open_one_exists():
 
     assert len(summary['created']) == 1
     assert summary['created'][0]['symbol'] == 'FRESH'
-    assert summary['skipped_duplicates'] == []
     assert len(db.suggestions) == 1
 
 
@@ -393,10 +352,3 @@ def test_watchlist_fundamental_tier_and_opm_carry_through_to_the_suggestion():
     assert db.suggestions[0]['opm_at_suggestion'] == 32
 
 
-def test_only_one_pick_of_the_day_goes_out_even_with_many_great_candidates():
-    candidates = [_candidate(i, f'SYM{i}') for i in range(5)]
-    db = FakeSuggestionDB(candidates)
-
-    summary = generate_daily_suggestions(db)
-
-    assert len(summary['created']) == TOP_N_SUGGESTIONS == 1

@@ -90,12 +90,12 @@
         {% endif %}
 
         <section class="bg-slate-800 rounded-2xl p-6 border border-sky-500/20 mb-6" aria-labelledby="suggestions-heading">
-            <h2 id="suggestions-heading" class="text-lg font-bold text-slate-200 mb-2">Pick of the Day</h2>
-            <p class="text-slate-400 text-sm mb-3">Picks today's single top-ranked stock (by NNS Score) from the current watchlist/indicators/fundamentals, then emails everyone on the recipient list -- never the same stock again within 30 days unless the recommendation genuinely changes, so this can send nothing some days.</p>
+            <h2 id="suggestions-heading" class="text-lg font-bold text-slate-200 mb-2">Daily Recommendations</h2>
+            <p class="text-slate-400 text-sm mb-3">Picks every golden-cross stock from the current watchlist/indicators/fundamentals that clears at least the bronze NNS Score bar, then emails everyone on the recipient list -- can send nothing on a day when no golden-cross stock clears the bar, and can send several stocks on a day when many do.</p>
             <form method="POST" action="{{ url_for('stocks_suggestions_send_daily_email') }}"
-                  data-job-form data-job-name="suggestion_email" data-job-label="Generate and send Pick of the Day">
+                  data-job-form data-job-name="suggestion_email" data-job-label="Generate and send daily recommendations">
                 <button type="submit" class="stocks-btn py-3 px-6 rounded-2xl font-bold transition hover:opacity-90">
-                    Generate and send Pick of the Day
+                    Generate and send daily recommendations
                 </button>
             </form>
         </section>

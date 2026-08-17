@@ -31,15 +31,16 @@
         <div class="card p-5 overflow-x-auto">
             <table>
                 <caption class="text-left text-gray-500 text-xs mb-3">
-                    Every Pick of the Day ever sent (at most one per day, never the same stock again within 30
-                    days unless the recommendation genuinely changed). Status here always shows "Pending" -- this
-                    view is a plain history, not a profit/loss tracker.
+                    Every recommendation ever sent -- every golden-cross stock that cleared our screening bar on
+                    a given day gets its own row here, so the same stock can appear again on a later date if it
+                    still qualifies. Status here always shows "Pending" -- this view is a plain history, not a
+                    profit/loss tracker.
                 </caption>
                 <thead>
                     <tr>
                         <th scope="col">Symbol</th>
                         <th scope="col">Date</th>
-                        <th scope="col">NNS Score</th>
+                        <th scope="col">Recommendation</th>
                         <th scope="col" class="num">Buy</th>
                         <th scope="col" class="num">Target</th>
                         <th scope="col" class="num">Stop-loss</th>
@@ -54,8 +55,9 @@
                         <th scope="row" class="text-gray-900">{{ s.symbol }} <span class="text-gray-400 font-normal">({{ s.exchange }})</span></th>
                         <td>{{ s.suggestion_date }}</td>
                         <td>
-                            {% if s.nns_tier %}{{ s.nns_tier | title }} {{ s.nns_score }}
-                            {% else %}—
+                            {% if s.nns_tier in ('golden', 'silver') %}Highly Recommended
+                            {% elif s.nns_tier == 'bronze' %}Recommended -- extra caution
+                            {% else %}Recommended
                             {% endif %}
                             {% if s.fundamental_tier == 'silver' %}
                                 <span class="text-gray-500 text-xs" style="display:block;">PE {{ '%.2f'|format(s.pe_at_suggestion) if s.pe_at_suggestion is not none else '—' }}, OPM {{ '%.0f'|format(s.opm_at_suggestion) if s.opm_at_suggestion is not none else '—' }}%</span>
