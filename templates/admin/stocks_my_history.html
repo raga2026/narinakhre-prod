@@ -6,39 +6,43 @@
     <title>Suggestion History - Nari Nakhre Stocks</title>
     <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
     <style>
-        body { background: #0f172a; color: #f8fafc; }
-        .stocks-accent { color: #0ea5e9; }
+        body { background: #f5f6f8; color: #24262d; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; font-size: 0.9rem; }
+        .kite-accent { color: #387ed1; }
+        .card { background: #ffffff; border: 1px solid #e6e9ec; border-radius: 0.5rem; }
         table { border-collapse: collapse; width: 100%; }
-        th, td { text-align: left; padding: 0.6rem 0.9rem; border-bottom: 1px solid rgba(14, 165, 233, 0.15); }
-        th { color: #7dd3fc; font-weight: 600; }
+        th, td { text-align: left; padding: 0.6rem 0.9rem; border-bottom: 1px solid #eef0f2; }
+        th { color: #6c7080; font-weight: 600; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.04em; background: #fafbfc; }
+        td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+        tbody tr:hover { background: #f9fbfd; }
+        a.link { color: #387ed1; text-decoration: underline; }
+        a.link:hover { color: #2b6cb8; }
     </style>
 </head>
-<body class="min-h-screen p-8">
-    <div class="max-w-4xl mx-auto">
+<body class="min-h-screen">
+    <div class="max-w-4xl mx-auto p-6">
         <div class="flex items-center justify-between mb-6">
-            <h1 class="text-2xl font-extrabold stocks-accent font-serif">Suggestion History</h1>
-            <a href="{{ url_for('stocks_admin_logout') }}" class="text-sm text-slate-400 hover:text-sky-400 underline">Log out</a>
+            <h1 class="text-xl font-bold kite-accent">Suggestion History</h1>
+            <a href="{{ url_for('stocks_admin_logout') }}" class="text-sm text-gray-500 hover:underline">Log out</a>
         </div>
-        <p class="text-slate-400 text-sm mb-6">
-            <a href="{{ url_for('stocks_my_suggestions') }}" class="text-sky-400 hover:text-sky-300 underline">Back to recent suggestions</a>
+        <p class="text-gray-500 text-sm mb-6">
+            <a href="{{ url_for('stocks_my_suggestions') }}" class="link">Back to recent suggestions</a>
         </p>
 
-        <div class="bg-slate-800 rounded-2xl p-6 border border-sky-500/20 overflow-x-auto">
+        <div class="card p-5 overflow-x-auto">
             <table>
-                <caption class="text-left text-slate-400 text-sm mb-3">
+                <caption class="text-left text-gray-500 text-xs mb-3">
                     Every Pick of the Day ever sent (at most one per day, never the same stock again within 30
-                    days unless the recommendation genuinely changed). Outcome tracking (whether a pick actually
-                    hit its target or stop-loss) isn't built yet, so every row genuinely shows "Pending" -- that's
-                    not a bug, it's an honest reflection of what this system currently tracks.
+                    days unless the recommendation genuinely changed). Status here always shows "Pending" -- this
+                    view is a plain history, not a profit/loss tracker.
                 </caption>
                 <thead>
                     <tr>
                         <th scope="col">Symbol</th>
                         <th scope="col">Date</th>
                         <th scope="col">NNS Score</th>
-                        <th scope="col">Buy</th>
-                        <th scope="col">Target</th>
-                        <th scope="col">Stop-loss</th>
+                        <th scope="col" class="num">Buy</th>
+                        <th scope="col" class="num">Target</th>
+                        <th scope="col" class="num">Stop-loss</th>
                         <th scope="col">Timing</th>
                         <th scope="col">Rationale</th>
                         <th scope="col">Outcome</th>
@@ -47,32 +51,32 @@
                 <tbody>
                     {% for s in suggestions %}
                     <tr>
-                        <th scope="row">{{ s.symbol }} ({{ s.exchange }})</th>
+                        <th scope="row" class="text-gray-900">{{ s.symbol }} <span class="text-gray-400 font-normal">({{ s.exchange }})</span></th>
                         <td>{{ s.suggestion_date }}</td>
                         <td>
                             {% if s.nns_tier %}{{ s.nns_tier | title }} {{ s.nns_score }}
                             {% else %}—
                             {% endif %}
                             {% if s.fundamental_tier == 'silver' %}
-                                <span class="text-slate-400 text-sm" style="display:block;">PE {{ '%.2f'|format(s.pe_at_suggestion) if s.pe_at_suggestion is not none else '—' }}, OPM {{ '%.0f'|format(s.opm_at_suggestion) if s.opm_at_suggestion is not none else '—' }}%</span>
+                                <span class="text-gray-500 text-xs" style="display:block;">PE {{ '%.2f'|format(s.pe_at_suggestion) if s.pe_at_suggestion is not none else '—' }}, OPM {{ '%.0f'|format(s.opm_at_suggestion) if s.opm_at_suggestion is not none else '—' }}%</span>
                             {% endif %}
                         </td>
-                        <td>{{ s.buy_price }}</td>
-                        <td>{{ s.target_sell_price }}</td>
-                        <td>{{ s.stop_loss_price }}</td>
+                        <td class="num">{{ s.buy_price }}</td>
+                        <td class="num">{{ s.target_sell_price }}</td>
+                        <td class="num">{{ s.stop_loss_price }}</td>
                         <td>
                             {% if s.pattern_name %}
-                                <span class="text-slate-400 text-sm">{{ s.pattern_note }}</span>
+                                <span class="text-gray-500 text-xs">{{ s.pattern_note }}</span>
                             {% else %}
                                 {{ s.holding_period_days }} days
                             {% endif %}
                         </td>
-                        <td>{{ s.rationale }}</td>
+                        <td class="text-gray-600">{{ s.rationale }}</td>
                         <td>{{ s.status | title }}</td>
                     </tr>
                     {% else %}
                     <tr>
-                        <td colspan="9" class="text-slate-400">No suggestions yet.</td>
+                        <td colspan="9" class="text-gray-400">No suggestions yet.</td>
                     </tr>
                     {% endfor %}
                 </tbody>

@@ -162,12 +162,18 @@
             <p class="mt-2">
                 <a href="{{ url_for('stocks_universe_list') }}" class="text-sky-400 hover:text-sky-300 underline">Browse all companies</a>
             </p>
+            <p class="mt-2">
+                <a href="{{ url_for('stocks_recommendations_tracker') }}" class="text-sky-400 hover:text-sky-300 underline">Recommendation tracker</a>
+            </p>
             {% if role == 'super_admin' %}
             <p class="mt-2">
                 <a href="{{ url_for('stocks_admin_manage') }}" class="text-sky-400 hover:text-sky-300 underline">Manage admins</a>
             </p>
             <p class="mt-2">
                 <a href="{{ url_for('stocks_users_manage') }}" class="text-sky-400 hover:text-sky-300 underline">Viewer users</a>
+            </p>
+            <p class="mt-2">
+                <a href="{{ url_for('stocks_auto_trader') }}" class="text-sky-400 hover:text-sky-300 underline">Auto-Trader (dry run)</a>
             </p>
             {% endif %}
         </div>
@@ -234,7 +240,7 @@
             lastSyncEl.textContent = 'Last synced: ' + (formatted || 'never yet');
         }
 
-        function pollStatus(jobName, label, form, progressEl, lastSyncEl) {
+        function pollStatus(jobName, label, form, progressEl, lastSyncEl, cancelEl) {
             if (activePolls[jobName]) { return; }
             activePolls[jobName] = setInterval(function () {
                 fetch('/stocks/jobs/' + jobName + '/status', { headers: { 'Accept': 'application/json' } })
@@ -242,12 +248,14 @@
                     .then(function (data) {
                         if (data.status === 'running') {
                             updateProgress(progressEl, data.progress, true);
+                            if (cancelEl) { setCancelVisible(cancelEl, true); }
                             return;
                         }
                         clearInterval(activePolls[jobName]);
                         delete activePolls[jobName];
                         setButtonRunning(form, false);
                         updateProgress(progressEl, null, false);
+                        if (cancelEl) { setCancelVisible(cancelEl, false); }
                         updateLastSync(lastSyncEl, data.last_success_at);
                         if (data.status === 'done') {
                             announce(label + ': done' + summarizeResult(data.result) + '.');
@@ -264,7 +272,7 @@
             }, POLL_INTERVAL_MS);
         }
 
-        function checkStatusOnLoad(jobName, label, form, progressEl, lastSyncEl) {
+        function checkStatusOnLoad(jobName, label, form, progressEl, lastSyncEl, cancelEl) {
             // Always runs on page load, whether or not a job happens to be
             // running right now -- this is what populates "Last synced"
             // from a previous run, and (if a job was already running before
@@ -278,11 +286,16 @@
                     if (data.status === 'running') {
                         setButtonRunning(form, true);
                         updateProgress(progressEl, data.progress, true);
+                        if (cancelEl) { setCancelVisible(cancelEl, true); }
                         announce(label + ': already running from an earlier click -- watching for it to finish.');
-                        pollStatus(jobName, label, form, progressEl, lastSyncEl);
+                        pollStatus(jobName, label, form, progressEl, lastSyncEl, cancelEl);
                     }
                 })
                 .catch(function () {});
+        }
+
+        function setCancelVisible(cancelEl, visible) {
+            cancelEl.style.display = visible ? 'inline' : 'none';
         }
 
         document.querySelectorAll('form[data-job-form]').forEach(function (form) {
@@ -294,12 +307,26 @@
             var button = form.querySelector('button[type="submit"]');
             button.insertAdjacentElement('afterend', progressEl);
 
+            {% if role == 'super_admin' %}
+            var cancelEl = document.createElement('button');
+            cancelEl.type = 'button';
+            cancelEl.textContent = 'Stuck? Cancel it';
+            cancelEl.className = 'text-sm underline text-rose-400 hover:text-rose-300 ml-3';
+            cancelEl.style.display = 'none';
+            cancelEl.addEventListener('click', function () {
+                if (!confirm('Cancel "' + label + '"? Only do this if it looks stuck (e.g. running far longer than usual).')) { return; }
+                fetch('/stocks/jobs/' + jobName + '/cancel', { method: 'POST', headers: { 'Accept': 'application/json' } })
+                    .then(function () { window.location.reload(); });
+            });
+            progressEl.insertAdjacentElement('afterend', cancelEl);
+            {% endif %}
+
             var lastSyncEl = document.createElement('p');
             lastSyncEl.className = 'text-slate-500 text-xs mt-2';
             lastSyncEl.textContent = 'Last synced: checking…';
             form.insertAdjacentElement('afterend', lastSyncEl);
 
-            checkStatusOnLoad(jobName, label, form, progressEl, lastSyncEl);
+            checkStatusOnLoad(jobName, label, form, progressEl, lastSyncEl, {% if role == 'super_admin' %}cancelEl{% else %}null{% endif %});
 
             form.addEventListener('submit', function (event) {
                 event.preventDefault();
@@ -320,7 +347,8 @@
                             announce(data.already_running
                                 ? label + ': already running -- watching for it to finish.'
                                 : label + ': running in the background -- you can keep using the dashboard.');
-                            pollStatus(jobName, label, form, progressEl, lastSyncEl);
+                            {% if role == 'super_admin' %}setCancelVisible(cancelEl, true);{% endif %}
+                            pollStatus(jobName, label, form, progressEl, lastSyncEl, {% if role == 'super_admin' %}cancelEl{% else %}null{% endif %});
                             return;
                         }
                         // Defensive fallback -- a session-triggered click always

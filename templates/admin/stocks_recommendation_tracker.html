@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Recommendation Tracker - Nari Nakhre Stocks</title>
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+    <style>
+        body { background: #0f172a; color: #f8fafc; }
+        .stocks-accent { color: #0ea5e9; }
+        table { border-collapse: collapse; width: 100%; }
+        th, td { text-align: left; padding: 0.6rem 0.9rem; border-bottom: 1px solid rgba(14, 165, 233, 0.15); white-space: nowrap; }
+        th { color: #7dd3fc; font-weight: 600; position: sticky; top: 0; background: #1e293b; }
+        tbody tr:hover { background: rgba(14, 165, 233, 0.06); }
+        .badge { display:inline-flex; align-items:center; padding:3px 11px; border-radius:999px; font-size:0.72rem; font-weight:700; }
+        .badge-open { background:#334155; color:#e2e8f0; }
+        .badge-target { background:#14532d; color:#bbf7d0; }
+        .badge-stop { background:#7f1d1d; color:#fecaca; }
+        .badge-unknown { background:#334155; color:#94a3b8; }
+        .pct-up { color:#4ade80; font-weight:600; }
+        .pct-down { color:#f87171; font-weight:600; }
+    </style>
+</head>
+<body class="min-h-screen p-8">
+    <div class="max-w-7xl mx-auto">
+        <div class="flex items-center justify-between mb-6">
+            <div>
+                <h1 class="text-2xl font-extrabold stocks-accent font-serif">Recommendation Tracker</h1>
+                <p class="text-slate-400 text-sm mt-1">Every Pick of the Day ever sent, all-time, against its current price.</p>
+            </div>
+            <a href="{{ url_for('stocks_admin_dashboard') }}" class="text-sm text-slate-400 hover:text-sky-400 underline">Back to dashboard</a>
+        </div>
+
+        <div class="bg-slate-800 rounded-2xl p-6 border border-sky-500/20 overflow-x-auto">
+            <table>
+                <caption class="text-left text-slate-400 text-sm mb-3">
+                    "Current price" is the latest synced close, not live intraday. Target/stop-loss outcomes are
+                    computed purely from that close vs. the price levels recorded at suggestion time -- click a row
+                    to see the full reasoning and current fundamentals/technicals on that company's own page.
+                </caption>
+                <thead>
+                    <tr>
+                        <th scope="col">Company</th>
+                        <th scope="col">Date</th>
+                        <th scope="col">Days</th>
+                        <th scope="col">Buy</th>
+                        <th scope="col">Target</th>
+                        <th scope="col">Stop-loss</th>
+                        <th scope="col">Current</th>
+                        <th scope="col">P/L %</th>
+                        <th scope="col">Outcome</th>
+                        <th scope="col">NNS</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for r in tracker_rows %}
+                    <tr onclick="window.location='{{ url_for('stocks_company_detail', watchlist_id=r.watchlist_id) }}'" style="cursor:pointer;">
+                        <th scope="row">
+                            <a href="{{ url_for('stocks_company_detail', watchlist_id=r.watchlist_id) }}" class="text-sky-400 hover:text-sky-300 underline">
+                                {{ r.symbol }} ({{ r.exchange }})
+                            </a>
+                        </th>
+                        <td>{{ r.suggestion_date }}</td>
+                        <td>{{ r.days_elapsed }}</td>
+                        <td>{{ r.buy_price if r.buy_price is not none else '—' }}</td>
+                        <td>{{ r.target_sell_price if r.target_sell_price is not none else '—' }}</td>
+                        <td>{{ r.stop_loss_price if r.stop_loss_price is not none else '—' }}</td>
+                        <td>{{ r.latest_price if r.latest_price is not none else '—' }}</td>
+                        <td>
+                            {% if r.pct_change is not none %}
+                                <span class="{{ 'pct-up' if r.pct_change >= 0 else 'pct-down' }}">
+                                    {{ '+' if r.pct_change >= 0 }}{{ r.pct_change }}%
+                                </span>
+                            {% else %}—{% endif %}
+                        </td>
+                        <td>
+                            {% if r.outcome == 'target_hit' %}<span class="badge badge-target">Target hit</span>
+                            {% elif r.outcome == 'stop_loss_hit' %}<span class="badge badge-stop">Stop-loss hit</span>
+                            {% elif r.outcome == 'open' %}<span class="badge badge-open">Open</span>
+                            {% else %}<span class="badge badge-unknown">No price yet</span>
+                            {% endif %}
+                        </td>
+                        <td>{{ r.nns_tier | title if r.nns_tier else '—' }} {{ r.nns_score if r.nns_score is not none else '' }}</td>
+                    </tr>
+                    {% else %}
+                    <tr>
+                        <td colspan="10" class="text-slate-400">No recommendations sent yet.</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</body>
+</html>

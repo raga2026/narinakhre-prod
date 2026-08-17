@@ -20,8 +20,21 @@ success/failure. Background jobs are for the dashboard's own buttons only.
 """
 import json
 import threading
+from datetime import datetime, timedelta, timezone
 
 from utils.job_progress import bind as bind_progress, clear as clear_progress
+
+# If a 'running' row is older than this with no update, the process that
+# was running it almost certainly died (a Render restart/deploy/OOM kill --
+# this daemon thread has no way to survive that, and nothing else was ever
+# going to transition its row out of 'running') rather than still
+# genuinely being in progress. Without this, start_background_job's dedup
+# check below would refuse to ever start that job again -- exactly what
+# happened in production (Super Sync stuck showing "running" since the
+# previous day, with no way to retry it from the dashboard). Generous on
+# purpose: even the slowest job here (Super Sync's ~1,067-symbol universe
+# step) normally finishes in minutes, not hours.
+STALE_JOB_MINUTES = 60
 
 STOCK_BACKGROUND_JOBS_TABLE_SQL = [
     '''CREATE TABLE IF NOT EXISTS stock_background_jobs (
@@ -99,6 +112,24 @@ def _run_and_record(build_db, job_id, target_fn):
         clear_progress()
 
 
+def _parse_timestamp(value):
+    """started_at comes back from the Supabase RPC bridge as an ISO8601
+    string, not a native datetime -- same normalization as
+    utils/stock_alerting.py's own _parse_timestamp."""
+    if isinstance(value, datetime):
+        return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+    dt = datetime.fromisoformat(str(value).replace('Z', '+00:00'))
+    return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+
+
+def _mark_errored(db, job_id, message):
+    db.execute(
+        "UPDATE stock_background_jobs SET status='error', error_message=?, finished_at=NOW() WHERE id=?",
+        (message, job_id)
+    )
+    db.commit()
+
+
 def start_background_job(db, build_db, job_name, target_fn, triggered_by_id):
     """Starts target_fn(db) on a background thread under job_name, unless
     a job with that name is already running -- returns
@@ -107,16 +138,27 @@ def start_background_job(db, build_db, job_name, target_fn, triggered_by_id):
     caller should treat that the same as a fresh start from the requester's
     point of view (there's a job running, come back for its result).
 
+    A 'running' row older than STALE_JOB_MINUTES is treated as abandoned
+    rather than genuinely in flight -- see that constant's comment -- and
+    gets marked 'error' here so a fresh run can start instead of being
+    blocked by it forever.
+
     db is the caller's request-scoped connection, used only for the
     dedup check and the initial INSERT -- build_db is a zero-arg callable
     the background thread uses to get its OWN connection once the request
     (and db) may no longer be alive by the time the thread actually runs."""
     existing = db.execute(
-        "SELECT id FROM stock_background_jobs WHERE job_name=? AND status='running' LIMIT 1",
+        "SELECT id, started_at FROM stock_background_jobs WHERE job_name=? AND status='running' LIMIT 1",
         (job_name,)
     ).fetchone()
     if existing:
-        return {'started': False, 'status': 'running', 'job_id': existing['id']}
+        age = datetime.now(timezone.utc) - _parse_timestamp(existing['started_at'])
+        if age <= timedelta(minutes=STALE_JOB_MINUTES):
+            return {'started': False, 'status': 'running', 'job_id': existing['id']}
+        _mark_errored(
+            db, existing['id'],
+            'Marked as stale/abandoned -- the process that started it likely restarted mid-run.'
+        )
 
     db.execute(
         'INSERT INTO stock_background_jobs (job_name, status, triggered_by) VALUES (?, ?, ?)',
@@ -137,6 +179,29 @@ def start_background_job(db, build_db, job_name, target_fn, triggered_by_id):
     # 'thread' is exposed only so tests can .join() it for a deterministic
     # wait -- the HTTP route ignores it and returns immediately either way.
     return {'started': True, 'status': 'running', 'job_id': job_id, 'thread': thread}
+
+
+def cancel_job(db, job_name):
+    """Immediately marks job_name's latest 'running' row as 'error' --
+    the manual escape hatch for a stuck job, rather than waiting out
+    STALE_JOB_MINUTES for start_background_job's own auto-recovery to kick
+    in. Does NOT and cannot actually stop a real, still-executing Python
+    thread (there's no interrupt mechanism here, and once one exists, the
+    daemon thread dies with the process anyway) -- this only clears the
+    dedup lock stopping a fresh run, and updates what the dashboard shows.
+    If the underlying process is somehow still genuinely running (rather
+    than the far more common case of it having already died when the
+    server restarted), that thread will still finish and separately
+    overwrite this row's status when it does. Returns True if a running
+    row was found and cancelled, False if there was nothing to cancel."""
+    row = db.execute(
+        "SELECT id FROM stock_background_jobs WHERE job_name=? AND status='running' ORDER BY id DESC LIMIT 1",
+        (job_name,)
+    ).fetchone()
+    if not row:
+        return False
+    _mark_errored(db, row['id'], 'Manually cancelled from the dashboard.')
+    return True
 
 
 def get_job_status(db, job_name):

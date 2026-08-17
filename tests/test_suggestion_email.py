@@ -22,7 +22,7 @@ class FakeEmailDB:
     def execute(self, sql, params=None):
         normalized = ' '.join(sql.split())
 
-        if normalized.startswith('SELECT w.symbol, w.exchange, s.suggestion_date, s.buy_price'):
+        if normalized.startswith('SELECT w.id AS watchlist_id, w.symbol, w.exchange, s.suggestion_date, s.buy_price'):
             return FakeCursor(self.suggestion_rows)
 
         if normalized.startswith("SELECT username AS email, name FROM stocks_admin_users WHERE role='viewer'"):

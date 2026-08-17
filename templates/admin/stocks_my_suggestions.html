@@ -6,39 +6,56 @@
     <title>My Suggestions - Nari Nakhre Stocks</title>
     <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
     <style>
-        body { background: #0f172a; color: #f8fafc; }
-        .stocks-accent { color: #0ea5e9; }
+        /* Kite-inspired: light background, dense tables, blue/green/red
+           accents -- see the other viewer-facing Stocks templates for the
+           same palette (stocks_my_history.html, stocks_universe_list.html,
+           stocks_universe_detail.html). Staff/admin pages intentionally
+           keep the original dark theme -- this only applies to the pages
+           an actual paying viewer spends time in. */
+        body { background: #f5f6f8; color: #24262d; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; font-size: 0.9rem; }
+        .kite-accent { color: #387ed1; }
+        .kite-btn { background: #387ed1; color: white; }
+        .kite-btn:hover { background: #2b6cb8; }
+        .topbar { background: #ffffff; border-bottom: 1px solid #e6e9ec; }
+        .card { background: #ffffff; border: 1px solid #e6e9ec; border-radius: 0.5rem; }
         table { border-collapse: collapse; width: 100%; }
-        th, td { text-align: left; padding: 0.7rem 0.9rem; border-bottom: 1px solid rgba(14, 165, 233, 0.15); }
-        th { color: #7dd3fc; font-weight: 600; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.03em; }
-        tbody tr:hover { background: rgba(14, 165, 233, 0.06); }
-        .badge { display:inline-flex; align-items:center; padding:3px 11px; border-radius:999px; font-size:0.72rem; font-weight:700; white-space: nowrap; }
-        .badge-golden { background:#78350f; color:#fef3c7; }
-        .badge-silver { background:#334155; color:#e2e8f0; }
-        .badge-bronze { background:#7c2d12; color:#fed7aa; }
-        .hero { background: linear-gradient(135deg, rgba(8,145,178,0.25) 0%, rgba(14,165,233,0.08) 100%); border: 1px solid rgba(14,165,233,0.25); border-radius: 1.25rem; padding: 1.75rem; }
+        th, td { text-align: left; padding: 0.65rem 0.9rem; border-bottom: 1px solid #eef0f2; }
+        th { color: #6c7080; font-weight: 600; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.04em; background: #fafbfc; }
+        td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+        tbody tr:hover { background: #f9fbfd; }
+        .badge { display:inline-flex; align-items:center; padding:2px 10px; border-radius:999px; font-size:0.7rem; font-weight:700; white-space: nowrap; }
+        .badge-golden { background:#fff3cd; color:#8a6706; }
+        .badge-silver { background:#eceff2; color:#4a4f57; }
+        .badge-bronze { background:#fde3d2; color:#9a4a12; }
+        .up { color: #00875a; font-weight: 600; }
+        .down { color: #d64534; font-weight: 600; }
+        .hero { background: linear-gradient(135deg, #eaf2fc 0%, #f5f6f8 100%); border: 1px solid #dbe7f7; border-radius: 0.5rem; padding: 1.5rem; }
+        a.link { color: #387ed1; text-decoration: underline; }
+        a.link:hover { color: #2b6cb8; }
     </style>
 </head>
-<body class="min-h-screen p-8">
-    <div class="max-w-4xl mx-auto">
-        <div class="flex items-center justify-between mb-6">
-            <h1 class="text-2xl font-extrabold stocks-accent font-serif">Nari Nakhre Stocks</h1>
-            <a href="{{ url_for('stocks_admin_logout') }}" class="text-sm text-slate-400 hover:text-sky-400 underline">Log out</a>
+<body class="min-h-screen">
+    <div class="topbar">
+        <div class="max-w-4xl mx-auto px-6 py-4 flex items-center justify-between">
+            <span class="text-lg font-bold kite-accent">Nari Nakhre Stocks</span>
+            <a href="{{ url_for('stocks_admin_logout') }}" class="text-sm text-gray-500 hover:kite-accent underline">Log out</a>
         </div>
+    </div>
 
+    <div class="max-w-4xl mx-auto p-6">
         {% with messages = get_flashed_messages(with_categories=true) %}
         {% if messages %}
             <div class="mb-6" role="alert" aria-live="assertive">
             {% for category, msg in messages %}
-                <div class="bg-sky-900/40 text-sky-200 border border-sky-500/30 rounded-xl p-3 mb-2 text-sm">{{ msg }}</div>
+                <div class="bg-blue-50 text-blue-900 border border-blue-200 rounded-md p-3 mb-2 text-sm">{{ msg }}</div>
             {% endfor %}
             </div>
         {% endif %}
         {% endwith %}
 
         <div class="hero mb-6">
-            <h2 class="text-xl font-bold text-slate-100">Welcome back{{ ', ' ~ session.stocks_admin_username if session.stocks_admin_username }}</h2>
-            <p class="text-slate-300 text-sm mt-2">
+            <h2 class="text-lg font-bold text-gray-900">Welcome back{{ ', ' ~ session.stocks_admin_username if session.stocks_admin_username }}</h2>
+            <p class="text-gray-600 text-sm mt-2">
                 {% if suggestions %}
                     {{ suggestions | length }} Pick{{ 's' if suggestions | length != 1 }} of the Day from the last 10 days, below --
                     at most one per day, never the same stock again within 30 days unless the recommendation genuinely changes.
@@ -47,31 +64,31 @@
                 {% endif %}
             </p>
             {% if subscription_period_end_label %}
-            <p class="text-slate-400 text-sm mt-3">
+            <p class="text-gray-600 text-sm mt-3">
                 {% if subscription_status == 'active' %}
-                    Your subscription renews on <strong class="text-slate-200">{{ subscription_period_end_label }}</strong>.
+                    Your subscription renews on <strong class="text-gray-900">{{ subscription_period_end_label }}</strong>.
                 {% elif subscription_status == 'cancelled' %}
-                    Your subscription is cancelled -- access ends <strong class="text-slate-200">{{ subscription_period_end_label }}</strong>.
+                    Your subscription is cancelled -- access ends <strong class="text-gray-900">{{ subscription_period_end_label }}</strong>.
                 {% elif subscription_status == 'halted' %}
-                    Your last renewal payment failed -- access ended <strong class="text-slate-200">{{ subscription_period_end_label }}</strong>.
-                    <a href="{{ url_for('stocks_signup') }}" class="text-sky-400 underline">Renew now</a>.
+                    Your last renewal payment failed -- access ended <strong class="text-gray-900">{{ subscription_period_end_label }}</strong>.
+                    <a href="{{ url_for('stocks_signup') }}" class="link">Renew now</a>.
                 {% endif %}
             </p>
             {% endif %}
-            <p class="text-slate-400 text-sm mt-3">
-                <a href="{{ url_for('stocks_my_history') }}" class="text-sky-400 hover:text-sky-300 underline">View full history</a>
+            <p class="text-gray-600 text-sm mt-3">
+                <a href="{{ url_for('stocks_my_history') }}" class="link">View full history</a>
                 &nbsp;·&nbsp;
-                <a href="{{ url_for('stocks_universe_list') }}" class="text-sky-400 hover:text-sky-300 underline">Browse all companies</a>
+                <a href="{{ url_for('stocks_universe_list') }}" class="link">Browse all companies</a>
                 {% if session.stocks_can_view_watchlist %}
                 &nbsp;·&nbsp;
-                <a href="{{ url_for('stocks_watchlist') }}" class="text-sky-400 hover:text-sky-300 underline">View watchlist</a>
+                <a href="{{ url_for('stocks_watchlist') }}" class="link">View watchlist</a>
                 {% endif %}
             </p>
         </div>
 
-        <div class="bg-slate-800 rounded-2xl p-6 border border-sky-500/20 overflow-x-auto">
+        <div class="card p-5 overflow-x-auto">
             <table>
-                <caption class="text-left text-slate-400 text-sm mb-3">
+                <caption class="text-left text-gray-500 text-xs mb-3">
                     Pick(s) of the Day from the last 10 days. NNS Score is a 0-10 composite of every screened
                     fundamental and technical parameter (see the company page for the full breakdown). Read-only --
                     there's nothing to execute or edit here.
@@ -81,9 +98,9 @@
                         <th scope="col">Company</th>
                         <th scope="col">Date</th>
                         <th scope="col">NNS Score</th>
-                        <th scope="col">Buy</th>
-                        <th scope="col">Target</th>
-                        <th scope="col">Stop-loss</th>
+                        <th scope="col" class="num">Buy</th>
+                        <th scope="col" class="num">Target</th>
+                        <th scope="col" class="num">Stop-loss</th>
                         <th scope="col">Timing</th>
                         <th scope="col">Rationale</th>
                         <th scope="col">Status</th>
@@ -92,7 +109,7 @@
                 <tbody>
                     {% for s in suggestions %}
                     <tr>
-                        <th scope="row">{{ s.symbol }} ({{ s.exchange }})</th>
+                        <th scope="row" class="text-gray-900">{{ s.symbol }} <span class="text-gray-400 font-normal">({{ s.exchange }})</span></th>
                         <td>{{ s.suggestion_date }}</td>
                         <td>
                             {% if s.nns_tier %}
@@ -100,25 +117,25 @@
                             {% else %}—
                             {% endif %}
                             {% if s.fundamental_tier == 'silver' %}
-                                <span class="text-slate-400 text-sm" style="display:block;">PE {{ '%.2f'|format(s.pe_at_suggestion) if s.pe_at_suggestion is not none else '—' }}, OPM {{ '%.0f'|format(s.opm_at_suggestion) if s.opm_at_suggestion is not none else '—' }}%</span>
+                                <span class="text-gray-500 text-xs" style="display:block;">PE {{ '%.2f'|format(s.pe_at_suggestion) if s.pe_at_suggestion is not none else '—' }}, OPM {{ '%.0f'|format(s.opm_at_suggestion) if s.opm_at_suggestion is not none else '—' }}%</span>
                             {% endif %}
                         </td>
-                        <td>{{ s.buy_price }}</td>
-                        <td>{{ s.target_sell_price }}</td>
-                        <td>{{ s.stop_loss_price }}</td>
+                        <td class="num">{{ s.buy_price }}</td>
+                        <td class="num up">{{ s.target_sell_price }}</td>
+                        <td class="num down">{{ s.stop_loss_price }}</td>
                         <td>
                             {% if s.pattern_name %}
-                                <span class="text-slate-400 text-sm">{{ s.pattern_note }}</span>
+                                <span class="text-gray-500 text-xs">{{ s.pattern_note }}</span>
                             {% else %}
                                 {{ s.holding_period_days }} days
                             {% endif %}
                         </td>
-                        <td>{{ s.rationale }}</td>
+                        <td class="text-gray-600">{{ s.rationale }}</td>
                         <td>{{ s.status | title }}</td>
                     </tr>
                     {% else %}
                     <tr>
-                        <td colspan="9" class="text-slate-400">No Pick of the Day in the last 10 days.</td>
+                        <td colspan="9" class="text-gray-400">No Pick of the Day in the last 10 days.</td>
                     </tr>
                     {% endfor %}
                 </tbody>

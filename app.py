@@ -13,7 +13,7 @@ from datetime import date, datetime, timedelta, timezone
 from functools import wraps
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
-from urllib.parse import urlparse
+from urllib.parse import urlparse, urlencode
 
 from flask import Flask, g, jsonify, redirect, render_template, request, session, url_for, flash, has_request_context
 from werkzeug.routing import BuildError
@@ -62,6 +62,28 @@ from utils.stocks_subscription import (
     verify_subscription_payment_signature,
     verify_webhook_signature,
 )
+from utils.saved_filters import (
+    initialize_saved_filters_table_if_needed,
+    list_saved_stock_filters,
+    save_stock_filter,
+    delete_saved_stock_filter,
+)
+from utils.auto_trader import (
+    initialize_auto_trade_tables_if_needed,
+    get_auto_trade_settings,
+    set_auto_trade_settings,
+    open_auto_trade_if_enabled,
+    reconcile_open_trades,
+    confirm_stop_loss_sell,
+    cancel_stop_loss_sell,
+    compute_pnl as compute_auto_trade_pnl,
+    get_deployed_capital,
+    compute_available_funds,
+    list_auto_trades,
+    DEFAULT_BUDGET_PER_TRADE as DEFAULT_AUTO_TRADE_BUDGET,
+    DEFAULT_TOTAL_CAPITAL as DEFAULT_AUTO_TRADE_TOTAL_CAPITAL,
+    STOP_LOSS_ALERT_EMAIL,
+)
 from utils.kite_client import KiteClient
 from utils.kite_instrument_map import (
     initialize_kite_instrument_map_table_if_needed,
@@ -71,6 +93,7 @@ from utils.background_jobs import (
     initialize_background_jobs_table_if_needed,
     start_background_job,
     get_job_status,
+    cancel_job,
 )
 from utils.kite_session import (
     initialize_kite_session_table_if_needed,
@@ -124,6 +147,9 @@ from utils.suggestion_engine import (
     get_suggestions,
     passes_hard_filters,
     HOLDING_PERIOD_DAYS,
+    get_recommendation_tracker,
+    compute_tracker_row_stats,
+    compute_watchlist_nns_scores,
 )
 from utils.suggestion_email import (
     initialize_stocks_email_recipients_table_if_needed,
@@ -131,6 +157,7 @@ from utils.suggestion_email import (
     send_viewer_welcome_email,
     send_subscription_welcome_email,
     send_subscription_expiry_reminder_email,
+    send_stop_loss_review_email,
 )
 from utils.trading_calendar import is_trading_day
 import auth_providers
@@ -167,6 +194,22 @@ def fromjson_filter(value):
         return []
 load_env_file(os.path.join(os.path.dirname(os.path.abspath(__file__)), '.env'))
 app.secret_key = os.environ.get('FLASK_SECRET_KEY', 'nari-nakhre-dev-secret')
+# Without this, session.permanent defaults to False, which makes Flask omit
+# Expires/Max-Age from the session cookie entirely -- a "browser session"
+# cookie that different browsers/OSes/extensions are free to drop on their
+# own schedule (tab close, sleep, some idle-cleanup policy), not on any
+# fixed timer this app controls. That's the likely cause of users
+# (storefront customers, storefront admin, and Stocks admins/viewers alike)
+# getting logged out earlier/less predictably than intended. Marking every
+# session permanent with an explicit 30-day lifetime here, once, fixes it
+# app-wide instead of needing session.permanent=True repeated at every
+# individual login route.
+app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(days=30)
+
+
+@app.before_request
+def _make_session_permanent():
+    session.permanent = True
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 def normalize_supabase_url(raw_url):
@@ -816,6 +859,8 @@ initialize_stock_indicators_table_if_needed(get_supabase())
 initialize_stock_alerting_tables_if_needed(get_supabase())
 initialize_stock_suggestions_table_if_needed(get_supabase())
 initialize_stocks_email_recipients_table_if_needed(get_supabase())
+initialize_saved_filters_table_if_needed(get_supabase())
+initialize_auto_trade_tables_if_needed(get_supabase())
 
 
 def calculate_inclusive_gst(display_cart, discount=0.0, full_subtotal=0.0):
@@ -7039,7 +7084,16 @@ def stocks_suggestions_send_daily_email():
             record_job_success(job_db, 'suggestion_email')
             return {'status': 'skipped', 'reason': 'not a trading day'}
         try:
-            generate_daily_suggestions(job_db)
+            generation_summary = generate_daily_suggestions(job_db)
+            for created in generation_summary.get('created', []):
+                # Dry-run only (see utils/auto_trader.py) -- a no-op unless
+                # a super_admin has explicitly turned this on from
+                # /stocks/auto-trader. Failures here must never take the
+                # actual suggestion email down with them.
+                try:
+                    open_auto_trade_if_enabled(job_db, created)
+                except Exception as e:
+                    app.logger.error(f'Auto-trade open failed for {created.get("symbol")}: {e}')
             summary = send_daily_suggestions_email(job_db)
         except Exception as e:
             app.logger.error(f'Daily suggestions email failed: {e}')
@@ -7063,6 +7117,25 @@ def stocks_job_status(job_name):
     query some other way."""
     db = get_db()
     return jsonify(get_job_status(db, job_name))
+
+
+@app.route('/stocks/jobs/<job_name>/cancel', methods=['POST'])
+@stocks_role_required('super_admin')
+def stocks_job_cancel(job_name):
+    """Manual escape hatch for a job stuck showing 'running' -- see
+    cancel_job's docstring for exactly what this does and doesn't do (it
+    can't interrupt a genuinely still-executing thread, only clear the
+    dedup lock and update what the dashboard shows; in practice the
+    process that started it has almost always already died by the time
+    anyone needs this button, e.g. after a Render restart mid-run).
+    super_admin only, same as Super Sync itself."""
+    db = get_db()
+    cancelled = cancel_job(db, job_name)
+    if cancelled:
+        flash(f'"{job_name}" was cancelled.', 'info')
+    else:
+        flash(f'"{job_name}" was not running.', 'info')
+    return redirect(url_for('stocks_admin_dashboard'))
 
 
 @app.route('/stocks/users', methods=['GET', 'POST'])
@@ -7372,10 +7445,14 @@ def stocks_watchlist():
 
     rows = db.execute(
         '''SELECT w.id, w.symbol, w.exchange, w.name, w.is_active, w.fundamental_tier,
-                  f.pe_ratio, f.peg_ratio, f.eps, f.opm_pct, f.snapshot_date,
+                  u.id AS universe_id, u.industry,
+                  f.pe_ratio, f.peg_ratio, f.eps, f.opm_pct, f.roce_pct, f.roa_pct,
+                  f.quarterly_profit_growth_pct, f.quarterly_revenue_growth_pct, f.price_to_book,
+                  f.promoter_holding_pct, f.fii_holding_pct, f.snapshot_date,
                   i.rsi_14, i.cross_status, i.volume_trend, i.calc_date,
                   d.close AS latest_price, d.trade_date AS price_date
            FROM stock_watchlist w
+           LEFT JOIN stock_universe u ON u.symbol = w.symbol AND u.exchange = w.exchange
            LEFT JOIN stock_fundamentals f ON f.watchlist_id = w.id
                AND f.snapshot_date = (
                    SELECT MAX(f2.snapshot_date) FROM stock_fundamentals f2 WHERE f2.watchlist_id = w.id
@@ -7391,6 +7468,15 @@ def stocks_watchlist():
            WHERE w.is_active = 1
            ORDER BY w.symbol'''
     ).fetchall()
+
+    # NNS Score for every row, not just ones that also clear
+    # passes_hard_filters -- see compute_watchlist_nns_scores's docstring.
+    # Staff-only: computing this for every row (industry benchmarks +
+    # previous-snapshot batching) is extra DB work a viewer's simplified
+    # table has no use for anyway (see the template -- viewers still only
+    # see is_recommended, not the score itself).
+    if session.get('stocks_admin_role') in ('super_admin', 'child_admin'):
+        rows = compute_watchlist_nns_scores(db, rows)
 
     rows = enrich_and_sort_watchlist_rows(rows, cross_filter=cross_filter)
 
@@ -7570,9 +7656,42 @@ def stocks_universe_list():
     buy-signal layer on top."""
     db = get_db()
     query = (request.args.get('q') or '').strip()
+    industry_filter = (request.args.get('industry') or '').strip()
+    cross_filter = (request.args.get('cross') or '').strip()
     page = max(1, request.args.get('page', 1, type=int))
     offset = (page - 1) * UNIVERSE_LIST_PAGE_SIZE
     can_view_signals = _can_view_watchlist_signals()
+    # A cross_status filter would otherwise let someone without
+    # can_view_signals infer the redacted signal indirectly (e.g. "filter to
+    # golden_cross" narrows the list to exactly the companies that column
+    # would have shown, even with the column itself stripped from the
+    # rendered rows) -- so the filter itself is only honoured, not just
+    # hidden in the template, when they're actually allowed to see it.
+    if cross_filter and not can_view_signals:
+        cross_filter = ''
+
+    # Every numeric fundamental/technical filter -- open to every logged-in
+    # role (not just staff), same as the rest of this page. Kept as a flat
+    # list of (query param, SQL fragment, cast) tuples rather than one
+    # per-field if/append block each, since they're all the same shape
+    # (a single optional bound, applied only when present and parseable).
+    numeric_filters = [
+        ('pe_min', 'f.pe_ratio >= ?'), ('pe_max', 'f.pe_ratio <= ?'),
+        ('peg_max', 'f.peg_ratio <= ?'),
+        ('opm_min', 'f.opm_pct >= ?'),
+        ('roce_min', 'f.roce_pct >= ?'),
+        ('roa_min', 'f.roa_pct >= ?'),
+        ('rsi_min', 'i.rsi_14 >= ?'), ('rsi_max', 'i.rsi_14 <= ?'),
+    ]
+    numeric_values = {}
+    for arg_name, _fragment in numeric_filters:
+        raw = (request.args.get(arg_name) or '').strip()
+        if not raw:
+            continue
+        try:
+            numeric_values[arg_name] = float(raw)
+        except ValueError:
+            pass  # silently ignored, same as any other malformed query param
 
     where_sql = 'WHERE u.is_scrape_eligible = true'
     params = []
@@ -7580,14 +7699,43 @@ def stocks_universe_list():
         where_sql += ' AND (u.company_name ILIKE ? OR u.symbol ILIKE ?)'
         like_query = f'%{query}%'
         params += [like_query, like_query]
+    if industry_filter:
+        where_sql += ' AND u.industry = ?'
+        params.append(industry_filter)
+
+    industries = db.execute(
+        'SELECT DISTINCT industry FROM stock_universe '
+        'WHERE is_scrape_eligible = true AND industry IS NOT NULL ORDER BY industry'
+    ).fetchall()
+    industries = [r['industry'] for r in industries]
+
+    # cross_filter and every numeric filter narrow on the LEFT JOINed
+    # fundamentals/indicators tables, so they have to be applied after
+    # those joins exist -- built as a separate fragment rather than folded
+    # into where_sql (which the COUNT(*) query below also uses, joined the
+    # same way for exactly this reason).
+    having_sql = ''
+    if cross_filter:
+        having_sql += ' AND i.cross_status = ?'
+        params.append(cross_filter)
+    for arg_name, fragment in numeric_filters:
+        if arg_name in numeric_values:
+            having_sql += f' AND {fragment}'
+            params.append(numeric_values[arg_name])
 
     total = db.execute(
-        f'SELECT COUNT(*) AS c FROM stock_universe u {where_sql}', tuple(params)
+        f'''SELECT COUNT(*) AS c FROM stock_universe u
+            LEFT JOIN stock_fundamentals f ON f.universe_id = u.id
+                AND f.snapshot_date = (SELECT MAX(f2.snapshot_date) FROM stock_fundamentals f2 WHERE f2.universe_id = u.id)
+            LEFT JOIN stock_indicators i ON i.universe_id = u.id
+                AND i.calc_date = (SELECT MAX(i2.calc_date) FROM stock_indicators i2 WHERE i2.universe_id = u.id)
+            {where_sql}{having_sql}''',
+        tuple(params)
     ).fetchone()['c']
 
     rows = db.execute(
         f'''SELECT u.id AS universe_id, u.symbol, u.exchange, u.company_name, u.industry,
-                   f.pe_ratio, f.opm_pct,
+                   f.pe_ratio, f.peg_ratio, f.opm_pct, f.roce_pct, f.roa_pct,
                    i.rsi_14, i.cross_status,
                    d.close AS latest_price
             FROM stock_universe u
@@ -7597,7 +7745,7 @@ def stocks_universe_list():
                 AND i.calc_date = (SELECT MAX(i2.calc_date) FROM stock_indicators i2 WHERE i2.universe_id = u.id)
             LEFT JOIN stock_daily_data d ON d.universe_id = u.id
                 AND d.trade_date = (SELECT MAX(d2.trade_date) FROM stock_daily_data d2 WHERE d2.universe_id = u.id)
-            {where_sql}
+            {where_sql}{having_sql}
             ORDER BY u.company_name ASC
             LIMIT ? OFFSET ?''',
         tuple(params) + (UNIVERSE_LIST_PAGE_SIZE, offset)
@@ -7606,11 +7754,48 @@ def stocks_universe_list():
 
     total_pages = max(1, -(-total // UNIVERSE_LIST_PAGE_SIZE))  # ceil division
 
+    saved_filters = list_saved_stock_filters(db, session.get('stocks_admin_id'))
+    # Everything the user could plausibly want to save/re-apply later --
+    # deliberately excludes page (a saved filter should always reopen on
+    # page 1, not wherever pagination happened to be when it was saved).
+    filters_for_saving = {'q': query, 'industry': industry_filter, 'cross': cross_filter, **numeric_values}
+    filters_query_string = urlencode({k: v for k, v in filters_for_saving.items() if v not in (None, '')})
+
     return render_template(
         'admin/stocks_universe_list.html',
         rows=rows, query=query, page=page, total=total, total_pages=total_pages,
-        can_view_signals=can_view_signals,
+        can_view_signals=can_view_signals, industries=industries,
+        industry_filter=industry_filter, cross_filter=cross_filter,
+        numeric_values=numeric_values, saved_filters=saved_filters,
+        filters_query_string=filters_query_string,
     )
+
+
+@app.route('/stocks/universe/filters/save', methods=['POST'])
+@stocks_login_required
+def stocks_universe_filters_save():
+    """Saves the current /stocks/universe filter combination (passed back
+    as a hidden field, not re-derived from request.args -- see the
+    template's save form) under a name, for the logged-in account. Open to
+    any role, same as the universe page itself -- see utils/saved_filters.py."""
+    db = get_db()
+    name = request.form.get('name')
+    query_string = request.form.get('query_string')
+    _row, error = save_stock_filter(db, session.get('stocks_admin_id'), name, query_string)
+    if error:
+        flash(error, 'error')
+    else:
+        flash(f'Saved filter "{name}".', 'info')
+    redirect_target = f'{url_for("stocks_universe_list")}?{query_string}' if query_string else url_for('stocks_universe_list')
+    return redirect(redirect_target)
+
+
+@app.route('/stocks/universe/filters/<int:filter_id>/delete', methods=['POST'])
+@stocks_login_required
+def stocks_universe_filters_delete(filter_id):
+    db = get_db()
+    delete_saved_stock_filter(db, session.get('stocks_admin_id'), filter_id)
+    return redirect(url_for('stocks_universe_list'))
 
 
 @app.route('/stocks/universe/<int:universe_id>', methods=['GET'])
@@ -7779,6 +7964,137 @@ def stocks_my_history():
     db = get_db()
     suggestions = get_suggestions(db)
     return render_template('admin/stocks_my_history.html', suggestions=suggestions)
+
+
+@app.route('/stocks/recommendations/tracker', methods=['GET'])
+@stocks_role_required('super_admin', 'child_admin')
+def stocks_recommendations_tracker():
+    """Staff-only: every Pick of the Day ever sent, all-time, with its
+    current price, profit/loss since the suggestion, days elapsed, and
+    whether it's hit its target or stop-loss yet -- see
+    utils.suggestion_engine.get_recommendation_tracker/compute_tracker_row_stats.
+    Each row links to /stocks/company/<watchlist_id>, which already has both
+    the full reasoning for every suggestion on that company (its suggestion
+    history section) and the company's full current stock details -- one
+    page covers both halves of what this links out to, so there's no
+    separate per-suggestion detail page to build."""
+    db = get_db()
+    rows = get_recommendation_tracker(db)
+    tracker_rows = []
+    for row in rows:
+        row = dict(row)
+        row.update(compute_tracker_row_stats(
+            row.get('buy_price'), row.get('target_sell_price'), row.get('stop_loss_price'),
+            row.get('latest_price'), row['suggestion_date'],
+        ))
+        tracker_rows.append(row)
+    return render_template('admin/stocks_recommendation_tracker.html', tracker_rows=tracker_rows)
+
+
+@app.route('/stocks/auto-trader', methods=['GET'])
+@stocks_role_required('super_admin')
+def stocks_auto_trader():
+    """Dry-run auto-trading dashboard -- super_admin only (see
+    utils/auto_trader.py's module docstring for exactly what this does and
+    doesn't do: it simulates a fixed-budget buy on every new Pick of the
+    Day and closes it against target/stop-loss using real synced prices,
+    but never places a real Kite order -- there is no live mode wired up
+    yet). Shows every simulated trade ever opened, newest first, with
+    running P&L."""
+    db = get_db()
+    settings = get_auto_trade_settings(db)
+    trades = list_auto_trades(db)
+    open_count = sum(1 for t in trades if t['status'] == 'open')
+    pending_count = sum(1 for t in trades if t['status'] == 'stop_loss_pending')
+    closed_trades = [t for t in trades if t['status'] in ('target_hit', 'stopped_out')]
+    total_pnl = sum(t['pnl_amount'] for t in closed_trades if t.get('pnl_amount') is not None)
+    win_count = sum(1 for t in closed_trades if t['status'] == 'target_hit')
+    deployed_capital = get_deployed_capital(db)
+    available_funds = compute_available_funds(settings['total_capital'], deployed_capital)
+    return render_template(
+        'admin/stocks_auto_trader.html', settings=settings, trades=trades,
+        open_count=open_count, pending_count=pending_count, closed_count=len(closed_trades),
+        total_pnl=total_pnl, win_count=win_count, stop_loss_alert_email=STOP_LOSS_ALERT_EMAIL,
+        deployed_capital=deployed_capital, available_funds=available_funds,
+    )
+
+
+@app.route('/stocks/auto-trader/settings', methods=['POST'])
+@stocks_role_required('super_admin')
+def stocks_auto_trader_settings():
+    db = get_db()
+    enabled = request.form.get('enabled') == 'on'
+    try:
+        budget = float(request.form.get('budget_per_trade') or DEFAULT_AUTO_TRADE_BUDGET)
+    except ValueError:
+        budget = DEFAULT_AUTO_TRADE_BUDGET
+    try:
+        total_capital = float(request.form.get('total_capital') or DEFAULT_AUTO_TRADE_TOTAL_CAPITAL)
+    except ValueError:
+        total_capital = DEFAULT_AUTO_TRADE_TOTAL_CAPITAL
+    set_auto_trade_settings(db, enabled, budget, total_capital)
+    flash(
+        f'Auto-trading {"enabled" if enabled else "disabled"} (dry-run), '
+        f'budget Rs {budget:,.0f} per pick, Rs {total_capital:,.0f} total capital.',
+        'info'
+    )
+    return redirect(url_for('stocks_auto_trader'))
+
+
+@app.route('/stocks/auto-trader/reconcile', methods=['POST'])
+def stocks_auto_trader_reconcile():
+    """Daily cron-triggered: auto-closes any open dry-run trade that's hit
+    its target, and emails STOP_LOSS_ALERT_EMAIL for any that have hit
+    their stop-loss instead (never auto-closed -- see
+    utils.auto_trader.reconcile_open_trades' module docstring for why the
+    two exits are handled differently). Same dual auth as every other
+    Stocks cron route; should run after price_sync each day."""
+    is_cron = has_valid_cron_secret(request.headers, STOCKS_FUNDAMENTALS_CRON_SECRET)
+    if not is_cron and not session.get('stocks_admin_id'):
+        return redirect(url_for('stocks_admin_login'))
+
+    db = get_db()
+
+    def _job(job_db):
+        try:
+            summary = reconcile_open_trades(job_db)
+            for trade in summary.get('stop_loss_pending', []):
+                pnl_amount, pnl_pct = compute_auto_trade_pnl(
+                    trade['buy_price'], trade['stop_loss_triggered_price'], trade['quantity']
+                )
+                try:
+                    send_stop_loss_review_email(STOP_LOSS_ALERT_EMAIL, trade, pnl_amount, pnl_pct)
+                except Exception as e:
+                    app.logger.warning(f'Stop-loss review email failed for {trade.get("symbol")}: {e}')
+        except Exception as e:
+            app.logger.error(f'Auto-trade reconciliation failed: {e}')
+            alert_job_error(job_db, 'auto_trade_reconcile', str(e))
+            raise
+        record_job_success(job_db, 'auto_trade_reconcile')
+        return {'checked': summary['checked'], 'target_hit': summary['target_hit'],
+                'stop_loss_pending': len(summary['stop_loss_pending'])}
+
+    return _dispatch_stocks_job(db, is_cron, 'auto_trade_reconcile', _job)
+
+
+@app.route('/stocks/auto-trader/<int:trade_id>/proceed', methods=['POST'])
+@stocks_role_required('super_admin')
+def stocks_auto_trader_proceed(trade_id):
+    """Manually confirms a pending stop-loss -- books the loss at the
+    price that triggered it (see confirm_stop_loss_sell)."""
+    ok = confirm_stop_loss_sell(get_db(), trade_id)
+    flash('Stop-loss confirmed -- position closed.' if ok else 'That trade is not awaiting a stop-loss decision.', 'info')
+    return redirect(url_for('stocks_auto_trader'))
+
+
+@app.route('/stocks/auto-trader/<int:trade_id>/cancel', methods=['POST'])
+@stocks_role_required('super_admin')
+def stocks_auto_trader_cancel(trade_id):
+    """Manually cancels a pending stop-loss -- keeps holding, puts the
+    trade back to 'open' (see cancel_stop_loss_sell)."""
+    ok = cancel_stop_loss_sell(get_db(), trade_id)
+    flash('Kept the position open.' if ok else 'That trade is not awaiting a stop-loss decision.', 'info')
+    return redirect(url_for('stocks_auto_trader'))
 
 
 @app.route('/stocks', methods=['GET'])

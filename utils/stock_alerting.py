@@ -58,9 +58,15 @@ IST = timezone(timedelta(hours=5, minutes=30))
 #                          suggestion_email above which skips non-trading days;
 #                          see utils/trading_calendar.py and
 #                          stocks-subscription-reminders.yml)
+#   auto_trade_reconcile   01:30 UTC = 07:00 IST -> expect done by 08:00 IST
+#                          (dry-run only, see utils/auto_trader.py -- runs
+#                          every day regardless of whether the simulation
+#                          is actually enabled, always a "success" either
+#                          way, so this is safe to alert on unconditionally)
 JOB_EXPECTATIONS = {
     'shortlist_refresh': {'expected_by_ist_hour': 6, 'label': '6 AM IST'},
     'price_sync': {'expected_by_ist_hour': 7, 'label': '7 AM IST'},
+    'auto_trade_reconcile': {'expected_by_ist_hour': 8, 'label': '8 AM IST'},
     'indicator_calc': {'expected_by_ist_hour': 8, 'label': '8 AM IST'},
     'suggestion_email': {'expected_by_ist_hour': 9, 'label': '9 AM IST'},
     'subscription_reminders': {'expected_by_ist_hour': 11, 'label': '11 AM IST'},

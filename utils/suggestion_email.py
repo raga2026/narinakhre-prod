@@ -61,6 +61,46 @@ def send_viewer_welcome_email(email, name, password):
         textbody=text_body, htmlbody=html_body, sender_name='Nari Nakhre Stocks',
     )
 
+def send_stop_loss_review_email(to_email, trade, pnl_amount, pnl_pct):
+    """Sent once per stop-loss trigger, to the fixed auto-trader alert
+    address (see utils.auto_trader.STOP_LOSS_ALERT_EMAIL and app.py's
+    /stocks/auto-trader/reconcile) -- unlike a target hit, which the
+    auto-trader closes on its own, a stop-loss hit is deliberately never
+    closed automatically; this email is the notification half of that
+    manual review, the actual Proceed/Cancel decision happens on the
+    /stocks/auto-trader dashboard (not via a link in this email -- a
+    financial decision shouldn't be one unauthenticated click away).
+    trade is a dict with at least symbol, exchange, buy_price, quantity,
+    stop_loss_triggered_price."""
+    auto_trader_url = 'https://narinakhre.com/stocks/auto-trader'
+    subject = f'Nari Nakhre Stocks -- stop-loss hit on {trade["symbol"]}, review needed'
+    body_text = (
+        f'{trade["symbol"]} ({trade["exchange"]}) has hit its stop-loss in the dry-run auto-trader.\n\n'
+        f'Bought {trade["quantity"]} shares at Rs {trade["buy_price"]}.\n'
+        f'Stop-loss triggered at Rs {trade["stop_loss_triggered_price"]} '
+        f'(would book {"+" if pnl_amount >= 0 else ""}Rs {pnl_amount:.2f}, {pnl_pct:+.2f}%).\n\n'
+        f"This position has NOT been sold -- it's waiting on your decision. Log in and go to "
+        f'{auto_trader_url} to either Proceed (book the loss at this price) or Cancel (keep holding; '
+        f"you'll get this email again if it dips to the stop-loss level another time).\n\n"
+        f'{DISCLAIMER}\n'
+    )
+    body_html = (
+        f'<p><strong>{trade["symbol"]} ({trade["exchange"]})</strong> has hit its stop-loss in the dry-run auto-trader.</p>'
+        f'<p>Bought {trade["quantity"]} shares at Rs {trade["buy_price"]}.<br>'
+        f'Stop-loss triggered at Rs {trade["stop_loss_triggered_price"]} '
+        f'(would book {"+" if pnl_amount >= 0 else ""}Rs {pnl_amount:.2f}, {pnl_pct:+.2f}%).</p>'
+        f"<p>This position has <strong>NOT</strong> been sold -- it's waiting on your decision. "
+        f'<a href="{auto_trader_url}">Log in and go to the Auto-Trader dashboard</a> to either Proceed '
+        f"(book the loss at this price) or Cancel (keep holding; you'll get this email again if it dips "
+        f'to the stop-loss level another time).</p>'
+        f'<p style="color:#64748b;font-size:0.85em;margin-top:16px;">{DISCLAIMER}</p>'
+    )
+    return send_zeptomail_stocks_email(
+        to_email=to_email, to_name=to_email, subject=subject,
+        textbody=body_text, htmlbody=body_html, sender_name='Nari Nakhre Stocks Auto-Trader',
+    )
+
+
 def send_subscription_welcome_email(email, name, current_period_end_label):
     """Sent right after a self-serve Nari Nakhre Stocks signup's first
     Razorpay payment is verified (see app.py's /stocks/subscribe/verify) --

@@ -1,6 +1,7 @@
 import threading
+from datetime import datetime, timedelta, timezone
 
-from utils.background_jobs import get_job_status, start_background_job
+from utils.background_jobs import cancel_job, get_job_status, start_background_job
 from utils.job_progress import report as report_progress
 
 
@@ -32,7 +33,7 @@ class FakeJobsDB:
         normalized = ' '.join(sql.split())
 
         with self._lock:
-            if normalized.startswith("SELECT id FROM stock_background_jobs WHERE job_name=? AND status='running'"):
+            if normalized.startswith("SELECT id, started_at FROM stock_background_jobs WHERE job_name=? AND status='running'"):
                 job_name, = params
                 matches = [r for r in self.rows if r['job_name'] == job_name and r['status'] == 'running']
                 return FakeCursor(matches[:1])
@@ -42,7 +43,8 @@ class FakeJobsDB:
                 row = {
                     'id': self._next_id, 'job_name': job_name, 'status': status,
                     'result_json': None, 'error_message': None,
-                    'started_at': 'now', 'finished_at': None, 'triggered_by': triggered_by,
+                    'started_at': datetime.now(timezone.utc).isoformat(), 'finished_at': None,
+                    'triggered_by': triggered_by,
                     'progress_current': None, 'progress_total': None, 'progress_label': None,
                 }
                 self._next_id += 1
@@ -217,6 +219,72 @@ def test_last_success_at_reflects_the_previous_completed_run_while_a_new_one_is_
 
     release.set()
     second['thread'].join(timeout=5)
+
+
+def test_stale_running_job_is_superseded_by_a_fresh_start():
+    # Simulates the real production incident: a 'running' row whose process
+    # died (a Render restart mid-run) with nothing left to ever mark it
+    # done/error -- without staleness recovery this would block every
+    # future run of the same job_name forever.
+    db = FakeJobsDB()
+    db.rows.append({
+        'id': 1, 'job_name': 'super_sync', 'status': 'running',
+        'result_json': None, 'error_message': None,
+        'started_at': (datetime.now(timezone.utc) - timedelta(hours=25)).isoformat(),
+        'finished_at': None, 'triggered_by': 1,
+        'progress_current': None, 'progress_total': None, 'progress_label': None,
+    })
+    db._next_id = 2
+
+    result = start_background_job(db, build_db=lambda: db, job_name='super_sync',
+                                    target_fn=lambda d: {'ok': True}, triggered_by_id=1)
+    assert result['started'] is True
+    result['thread'].join(timeout=5)
+
+    # The stale row is now 'error', and a brand new row completed 'done'.
+    stale_row = next(r for r in db.rows if r['id'] == 1)
+    assert stale_row['status'] == 'error'
+    assert 'stale' in stale_row['error_message'].lower()
+    assert get_job_status(db, 'super_sync')['status'] == 'done'
+
+
+def test_recently_started_running_job_is_not_treated_as_stale():
+    db = FakeJobsDB()
+    db.rows.append({
+        'id': 1, 'job_name': 'super_sync', 'status': 'running',
+        'result_json': None, 'error_message': None,
+        'started_at': (datetime.now(timezone.utc) - timedelta(minutes=5)).isoformat(),
+        'finished_at': None, 'triggered_by': 1,
+        'progress_current': None, 'progress_total': None, 'progress_label': None,
+    })
+    db._next_id = 2
+
+    result = start_background_job(db, build_db=lambda: db, job_name='super_sync',
+                                    target_fn=lambda d: {'ok': True}, triggered_by_id=1)
+    assert result['started'] is False
+    assert result['job_id'] == 1
+
+
+def test_cancel_job_marks_running_row_as_error():
+    db = FakeJobsDB()
+    db.rows.append({
+        'id': 1, 'job_name': 'super_sync', 'status': 'running',
+        'result_json': None, 'error_message': None,
+        'started_at': datetime.now(timezone.utc).isoformat(), 'finished_at': None,
+        'triggered_by': 1, 'progress_current': None, 'progress_total': None, 'progress_label': None,
+    })
+
+    cancelled = cancel_job(db, 'super_sync')
+
+    assert cancelled is True
+    status = get_job_status(db, 'super_sync')
+    assert status['status'] == 'error'
+    assert 'cancelled' in status['error'].lower()
+
+
+def test_cancel_job_returns_false_when_nothing_is_running():
+    db = FakeJobsDB()
+    assert cancel_job(db, 'super_sync') is False
 
 
 def test_different_job_names_run_independently():

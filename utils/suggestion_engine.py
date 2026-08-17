@@ -323,6 +323,38 @@ def _fetch_previous_snapshots(db, candidates):
     return previous_by_watchlist
 
 
+def compute_watchlist_nns_scores(db, watchlist_rows):
+    """Annotates every row from /stocks/watchlist's own query with
+    nns_score/nns_tier, using the exact same compute_nns_score the
+    suggestion engine itself scores candidates with -- but for EVERY
+    watchlist row, not just the ones that also cleared passes_hard_filters
+    (see generate_daily_suggestions/score_candidates, which only ever
+    scores hard-filter-passers). This is what lets staff see how strong a
+    company looks right now even on a day it wasn't -- and couldn't have
+    been -- sent as the Pick of the Day.
+
+    Each row must already carry universe_id, industry, snapshot_date and
+    the fundamentals/indicators columns compute_nns_score reads (see
+    app.py's stocks_watchlist route for the exact SELECT) -- same shape
+    _fetch_candidates below produces, since this reuses the same
+    industry-benchmark and previous-snapshot batching those candidates get.
+    Returns NEW dicts (does not mutate the input rows); a row with missing
+    data still gets a score (compute_nns_score treats missing fields as
+    failing that sub-score, same as everywhere else it's used)."""
+    rows = [dict(r) for r in watchlist_rows]
+    for row in rows:
+        row.setdefault('watchlist_id', row.get('id'))
+    industry_benchmarks = _compute_industry_benchmarks(rows)
+    previous_snapshots = _fetch_previous_snapshots(db, rows)
+    for row in rows:
+        previous = previous_snapshots.get(row.get('watchlist_id'))
+        benchmarks = industry_benchmarks.get(row.get('industry'))
+        score, _breakdown = compute_nns_score(row, previous, benchmarks)
+        row['nns_score'] = score
+        row['nns_tier'] = nns_tier(score)
+    return rows
+
+
 def get_suggestions(db, start_date=None, end_date=None):
     """Fetches stock_suggestions rows (symbol/exchange joined from
     stock_watchlist), most recent first, optionally bounded by
@@ -341,7 +373,7 @@ def get_suggestions(db, start_date=None, end_date=None):
     where_clause = ('WHERE ' + ' AND '.join(conditions)) if conditions else ''
 
     return db.execute(
-        f'''SELECT w.symbol, w.exchange, s.suggestion_date, s.buy_price,
+        f'''SELECT w.id AS watchlist_id, w.symbol, w.exchange, s.suggestion_date, s.buy_price,
                    s.target_sell_price, s.stop_loss_price, s.holding_period_days,
                    s.rsi_at_suggestion, s.pe_at_suggestion, s.peg_at_suggestion,
                    s.opm_at_suggestion, s.fundamental_tier,
@@ -352,6 +384,73 @@ def get_suggestions(db, start_date=None, end_date=None):
             {where_clause}
             ORDER BY s.suggestion_date DESC, s.score DESC''',
         tuple(params)
+    ).fetchall()
+
+
+def compute_tracker_row_stats(buy_price, target_sell_price, stop_loss_price, latest_price, suggestion_date, today=None):
+    """Pure per-row math for the recommendation tracker (see
+    get_recommendation_tracker and app.py's /stocks/recommendations/tracker)
+    -- kept separate from the DB query so the profit/loss and outcome
+    arithmetic is unit-testable without a database. suggestion_date/today
+    are date objects (or ISO strings, which get parsed) -- today defaults to
+    date.today(). Returns {'days_elapsed', 'pct_change', 'outcome'}:
+      - days_elapsed: whole days since the suggestion, >= 0 (never negative
+        -- a suggestion is never "in the future" relative to today).
+      - pct_change: (latest - buy) / buy * 100, rounded to 1 decimal, or
+        None if buy_price or latest_price is missing (nothing to divide).
+      - outcome: 'target_hit' if latest_price has reached target_sell_price,
+        'stop_loss_hit' if it's dropped to/through stop_loss_price (checked
+        AFTER target, so a pattern-based suggestion with an unusually tight
+        stop that also happens to sit at/above target reads as the good
+        outcome, not the bad one), else 'open'. 'unknown' if latest_price
+        is missing entirely (nothing synced yet)."""
+    if isinstance(suggestion_date, str):
+        suggestion_date = date.fromisoformat(suggestion_date[:10])
+    today = today or date.today()
+    days_elapsed = max(0, (today - suggestion_date).days)
+
+    pct_change = None
+    if buy_price and latest_price is not None:
+        pct_change = round((latest_price - buy_price) / buy_price * 100, 1)
+
+    if latest_price is None:
+        outcome = 'unknown'
+    elif target_sell_price is not None and latest_price >= target_sell_price:
+        outcome = 'target_hit'
+    elif stop_loss_price is not None and latest_price <= stop_loss_price:
+        outcome = 'stop_loss_hit'
+    else:
+        outcome = 'open'
+
+    return {'days_elapsed': days_elapsed, 'pct_change': pct_change, 'outcome': outcome}
+
+
+def get_recommendation_tracker(db):
+    """Every stock_suggestions row ever sent, newest first, joined to its
+    current price -- the super_admin/child_admin "recommendation tracker"
+    view (app.py's /stocks/recommendations/tracker). Unlike get_suggestions
+    above (bounded to a recent window for the viewer-facing pages), this is
+    deliberately all-time and unfiltered -- it's meant to answer "how did
+    every pick we've ever sent actually do", not just the recent ones.
+    latest_price/price_date come from whichever of watchlist_id or
+    universe_id the price row is actually keyed by (see the dual-identity
+    pattern noted throughout this codebase -- a company that's both
+    watchlisted and in the universe has ONE stock_daily_data row keyed by
+    watchlist_id with universe_id also stamped, so joining on watchlist_id
+    alone is sufficient here since every suggestion candidate is by
+    definition a watchlist row)."""
+    return db.execute(
+        '''SELECT s.id, w.id AS watchlist_id, w.symbol, w.exchange, s.suggestion_date,
+                  s.buy_price, s.target_sell_price, s.stop_loss_price, s.status,
+                  s.nns_tier, s.score AS nns_score, s.pattern_name, s.rationale,
+                  d.close AS latest_price, d.trade_date AS price_date
+           FROM stock_suggestions s
+           JOIN stock_watchlist w ON w.id = s.watchlist_id
+           LEFT JOIN stock_daily_data d ON d.watchlist_id = w.id
+               AND d.trade_date = (
+                   SELECT MAX(d2.trade_date) FROM stock_daily_data d2 WHERE d2.watchlist_id = w.id
+               )
+           ORDER BY s.suggestion_date DESC, s.id DESC'''
     ).fetchall()
 
 
@@ -453,9 +552,15 @@ def generate_daily_suggestions(db):
              pattern_name, pattern_note, nns_score, tier, rationale)
         )
         db.commit()
+        suggestion_row = db.execute(
+            'SELECT id FROM stock_suggestions WHERE watchlist_id=? AND suggestion_date=?',
+            (watchlist_id, today)
+        ).fetchone()
         created.append({
-            'symbol': candidate['symbol'], 'buy_price': buy_price, 'nns_score': nns_score,
-            'nns_tier': tier, 'pattern_name': pattern_name,
+            'suggestion_id': suggestion_row['id'] if suggestion_row else None,
+            'watchlist_id': watchlist_id, 'symbol': candidate['symbol'], 'exchange': candidate['exchange'],
+            'buy_price': buy_price, 'target_sell_price': target_sell_price, 'stop_loss_price': stop_loss_price,
+            'nns_score': nns_score, 'nns_tier': tier, 'pattern_name': pattern_name,
         })
 
     return {

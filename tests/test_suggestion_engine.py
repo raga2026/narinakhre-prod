@@ -126,6 +126,7 @@ class FakeSuggestionDB:
         self.candidate_rows = candidate_rows
         self.suggestions = existing_suggestions or []  # list of dicts: watchlist_id, status, suggestion_date
         self.price_history = price_history or {}
+        self._next_id = 1
 
     def execute(self, sql, params=None):
         params = params or ()
@@ -157,14 +158,20 @@ class FakeSuggestionDB:
              opm_at_suggestion, fundamental_tier, pattern_name, pattern_note, nns_score, nns_tier,
              rationale) = params
             self.suggestions.append({
-                'watchlist_id': watchlist_id, 'suggestion_date': suggestion_date,
+                'id': self._next_id, 'watchlist_id': watchlist_id, 'suggestion_date': suggestion_date,
                 'status': 'pending', 'buy_price': buy_price, 'target_sell_price': target_sell_price,
                 'stop_loss_price': stop_loss_price,
                 'opm_at_suggestion': opm_at_suggestion, 'fundamental_tier': fundamental_tier,
                 'pattern_name': pattern_name, 'pattern_note': pattern_note,
                 'score': nns_score, 'nns_score': nns_score, 'nns_tier': nns_tier,
             })
+            self._next_id += 1
             return FakeCursor([])
+
+        if normalized.startswith('SELECT id FROM stock_suggestions WHERE watchlist_id=? AND suggestion_date=?'):
+            watchlist_id, suggestion_date = params
+            matches = [s for s in self.suggestions if s['watchlist_id'] == watchlist_id and s['suggestion_date'] == suggestion_date]
+            return FakeCursor(matches[-1:])
 
         raise AssertionError(f'Unexpected SQL in test: {sql}')
 

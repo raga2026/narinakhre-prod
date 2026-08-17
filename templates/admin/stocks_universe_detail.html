@@ -6,37 +6,39 @@
     <title>{{ company.name or company.symbol }} - Nari Nakhre Stocks</title>
     <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
     <style>
-        body { background: #0f172a; color: #f8fafc; }
-        .stocks-accent { color: #0ea5e9; }
+        body { background: #f5f6f8; color: #24262d; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; font-size: 0.9rem; }
+        .kite-accent, .stocks-accent { color: #387ed1; }
         table { border-collapse: collapse; width: 100%; }
-        th, td { text-align: left; padding: 0.6rem 0.9rem; border-bottom: 1px solid rgba(14, 165, 233, 0.15); }
-        th { color: #7dd3fc; font-weight: 600; }
+        th, td { text-align: left; padding: 0.6rem 0.9rem; border-bottom: 1px solid #eef0f2; }
+        th { color: #6c7080; font-weight: 600; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.04em; }
         .badge { display:inline-flex; align-items:center; padding:4px 12px; border-radius:999px; font-size:0.78rem; font-weight:700; white-space: nowrap; }
         .badge-golden_cross    { background:#dcfce7; color:#15803d; }
         .badge-death_cross     { background:#fee2e2; color:#b91c1c; }
-        .badge-no_clear_trend  { background:#e2e8f0; color:#475569; }
-        .badge-recommended     { background:#166534; color:#dcfce7; }
-        .badge-not-recommended { background:#1e293b; color:#94a3b8; border:1px solid rgba(148,163,184,0.3); }
-        .metric-note { font-size: 0.75rem; color: #94a3b8; display: block; margin-top: 2px; }
-        .stat-card { background: #1e293b; border: 1px solid rgba(14,165,233,0.15); border-radius: 1rem; padding: 1.1rem 1.25rem; }
-        .stat-label { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.04em; color: #7dd3fc; font-weight: 600; }
-        .stat-value { font-size: 1.4rem; font-weight: 800; margin-top: 4px; }
-        .stat-value.up { color: #4ade80; }
-        .stat-value.down { color: #f87171; }
-        .section-card { background: #1e293b; border: 1px solid rgba(14,165,233,0.15); border-radius: 1rem; padding: 1.5rem; }
-        .chart-wrap { background: #0f172a; border-radius: 0.75rem; padding: 0.5rem; }
+        .badge-no_clear_trend  { background:#eceff2; color:#4a4f57; }
+        .badge-recommended     { background:#00875a; color:#ffffff; }
+        .badge-not-recommended { background:#eceff2; color:#6c7080; border:1px solid #d7dbe0; }
+        .metric-note { font-size: 0.75rem; color: #6c7080; display: block; margin-top: 2px; }
+        .stat-card { background: #ffffff; border: 1px solid #e6e9ec; border-radius: 0.5rem; padding: 1.1rem 1.25rem; }
+        .stat-label { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.04em; color: #6c7080; font-weight: 600; }
+        .stat-value { font-size: 1.4rem; font-weight: 800; margin-top: 4px; color: #24262d; }
+        .stat-value.up { color: #00875a; }
+        .stat-value.down { color: #d64534; }
+        .section-card { background: #ffffff; border: 1px solid #e6e9ec; border-radius: 0.5rem; padding: 1.5rem; }
+        .chart-wrap { background: #fafbfc; border: 1px solid #eef0f2; border-radius: 0.375rem; padding: 0.5rem; }
+        a.link { color: #387ed1; text-decoration: underline; }
+        a.link:hover { color: #2b6cb8; }
     </style>
 </head>
-<body class="min-h-screen p-8">
+<body class="min-h-screen p-6">
     <div class="max-w-4xl mx-auto">
         <div class="flex items-center justify-between mb-2">
-            <a href="{{ url_for('stocks_universe_list') }}" class="text-sm text-slate-400 hover:text-sky-400 underline">&larr; Back to all companies</a>
+            <a href="{{ url_for('stocks_universe_list') }}" class="text-sm text-gray-500 hover:underline">&larr; Back to all companies</a>
         </div>
 
         <div class="flex flex-wrap items-center justify-between gap-3 mb-6 mt-2">
             <div>
-                <h1 class="text-3xl font-extrabold stocks-accent font-serif">{{ company.name or company.symbol }}</h1>
-                <p class="text-slate-400 text-sm mt-1">
+                <h1 class="text-2xl font-bold stocks-accent">{{ company.name or company.symbol }}</h1>
+                <p class="text-gray-500 text-sm mt-1">
                     {{ company.symbol }} &middot; {{ company.exchange }}{% if company.industry %} &middot; {{ company.industry }}{% endif %}
                 </p>
             </div>
@@ -58,7 +60,7 @@
         {% if messages %}
             <div class="mb-6" role="alert" aria-live="assertive">
             {% for category, msg in messages %}
-                <div class="bg-sky-900/40 text-sky-200 border border-sky-500/30 rounded-xl p-3 mb-2 text-sm">{{ msg }}</div>
+                <div class="bg-blue-50 text-blue-900 border border-blue-200 rounded-md p-3 mb-2 text-sm">{{ msg }}</div>
             {% endfor %}
             </div>
         {% endif %}
@@ -69,12 +71,12 @@
                 <p class="stat-label">Price</p>
                 <p class="stat-value">{{ '₹%.2f'|format(company.latest_price) if company.latest_price is not none else '—' }}</p>
                 {% if company.day_change %}
-                <p class="metric-note {{ 'text-emerald-400' if company.day_change.change_pct >= 0 else 'text-rose-400' }}">
+                <p class="metric-note {{ 'text-green-600' if company.day_change.change_pct >= 0 else 'text-red-600' }}">
                     {{ '+' if company.day_change.change_pct >= 0 }}{{ company.day_change.change_pct }}%
                     ({{ '+' if company.day_change.change_amount >= 0 }}₹{{ '%.2f'|format(company.day_change.change_amount) }}) vs previous close
                 </p>
                 {% endif %}
-                <p class="text-slate-500 text-xs mt-1">as of {{ company.price_date or '—' }}</p>
+                <p class="text-gray-400 text-xs mt-1">as of {{ company.price_date or '—' }}</p>
             </div>
             <div class="stat-card">
                 <p class="stat-label">52-week range</p>
@@ -83,7 +85,7 @@
                     &ndash;
                     {{ '₹%.2f'|format(company.week52_high) if company.week52_high is not none else '—' }}
                 </p>
-                <p class="text-slate-500 text-xs mt-1">low &ndash; high, over available history</p>
+                <p class="text-gray-400 text-xs mt-1">low &ndash; high, over available history</p>
             </div>
             <div class="stat-card">
                 <p class="stat-label">P/E</p>
@@ -95,14 +97,14 @@
                 <p class="stat-label">RSI (14)</p>
                 <p class="stat-value">{{ company.rsi_14 if company.rsi_14 is not none else '—' }}</p>
                 {% if company.rsi_trend %}<p class="metric-note">{{ company.rsi_trend }} since {{ company.indicators_trend_as_of or 'yesterday' }}</p>{% endif %}
-                <p class="text-slate-500 text-xs mt-1">as of {{ company.indicators_date or '—' }}</p>
+                <p class="text-gray-400 text-xs mt-1">as of {{ company.indicators_date or '—' }}</p>
             </div>
         </div>
 
         <div class="section-card mb-6">
-            <h2 class="text-lg font-bold text-slate-200 mb-2">Price chart</h2>
+            <h2 class="text-lg font-bold text-gray-900 mb-2">Price chart</h2>
             {% if sparkline_summary %}
-            <p class="text-slate-300 text-sm mb-3">
+            <p class="text-gray-700 text-sm mb-3">
                 Over the last {{ sparkline_summary.days }} trading days: from ₹{{ '%.2f'|format(sparkline_summary.start_price) }}
                 to ₹{{ '%.2f'|format(sparkline_summary.end_price) }}
                 {% if sparkline_summary.change_pct is not none %}
@@ -110,18 +112,18 @@
                 {% else %}.{% endif %}
             </p>
             {% else %}
-            <p class="text-slate-400 text-sm mb-3">Not enough price history yet to chart a trend.</p>
+            <p class="text-gray-500 text-sm mb-3">Not enough price history yet to chart a trend.</p>
             {% endif %}
             {% if sparkline_svg %}
             <div class="chart-wrap">{{ sparkline_svg | safe }}</div>
-            <p class="text-slate-500 text-xs mt-2">The line above is a visual glimpse only -- the numbers above it are the actual data.</p>
+            <p class="text-gray-400 text-xs mt-2">The line above is a visual glimpse only -- the numbers above it are the actual data.</p>
             {% endif %}
         </div>
 
         <div class="section-card mb-6">
-            <h2 class="text-lg font-bold text-slate-200 mb-2">Historical pattern, not a forecast</h2>
+            <h2 class="text-lg font-bold text-gray-900 mb-2">Historical pattern, not a forecast</h2>
             {% if backtest %}
-            <p class="text-slate-300 text-sm mb-4">
+            <p class="text-gray-700 text-sm mb-4">
                 RSI is currently {{ backtest.rsi }}, in the "{{ backtest.zone }}" zone. Looking back at this stock's own price
                 history, RSI has been in that same zone on {{ backtest.matched_occurrences }} other day{{ 's' if backtest.matched_occurrences != 1 }}.
                 Here's what the price actually did afterward on those occasions -- this describes the past, it does not predict what happens next.
@@ -143,12 +145,12 @@
                             <th scope="row">{{ window }} trading days</th>
                             {% if outcome %}
                             <td>{{ outcome.sample_size }}{% if outcome.sample_size < 5 %} <span class="metric-note" style="display:inline;">(very small sample -- treat cautiously)</span>{% endif %}</td>
-                            <td class="{{ 'text-emerald-400' if outcome.avg_return_pct >= 0 else 'text-rose-400' }}">
+                            <td class="{{ 'text-green-600' if outcome.avg_return_pct >= 0 else 'text-red-600' }}">
                                 {{ '+' if outcome.avg_return_pct >= 0 }}{{ outcome.avg_return_pct }}%
                             </td>
                             <td>{{ outcome.pct_positive }}%</td>
                             {% else %}
-                            <td colspan="3" class="text-slate-400">Not enough subsequent history yet to measure this window.</td>
+                            <td colspan="3" class="text-gray-500">Not enough subsequent history yet to measure this window.</td>
                             {% endif %}
                         </tr>
                         {% endfor %}
@@ -156,22 +158,22 @@
                 </table>
             </div>
             {% else %}
-            <p class="text-slate-400 text-sm">
+            <p class="text-gray-500 text-sm">
                 Not enough price history yet to run this backtest for this company (needs at least a few months of daily data).
             </p>
             {% endif %}
         </div>
 
         <div class="section-card mb-6">
-            <h2 class="text-lg font-bold text-slate-200 mb-2">Rounding pattern -- shape, not a schedule</h2>
+            <h2 class="text-lg font-bold text-gray-900 mb-2">Rounding pattern -- shape, not a schedule</h2>
             {% if rounding_pattern %}
-            <p class="text-slate-300 text-sm mb-3">
+            <p class="text-gray-700 text-sm mb-3">
                 Fitting a curve to the last {{ rounding_pattern.days_analyzed }} trading days, the price shape looks like a
                 <strong>{{ 'rounding bottom' if rounding_pattern.shape == 'rounding_bottom' else 'rounding top' }}</strong>
                 (fit quality {{ rounding_pattern.fit_quality }} out of 1.0 -- higher means the curve matches the actual prices more closely).
                 Right now the stock is {{ rounding_pattern.phase }}.
             </p>
-            <p class="text-slate-300 text-sm mb-3">
+            <p class="text-gray-700 text-sm mb-3">
                 Neckline reference price (start of this window): ₹{{ '%.2f'|format(rounding_pattern.neckline_price) }}.
                 Current price: ₹{{ '%.2f'|format(rounding_pattern.current_price) }} --
                 {% if rounding_pattern.above_neckline %}
@@ -180,21 +182,21 @@
                 still below the neckline.
                 {% endif %}
             </p>
-            <p class="text-slate-500 text-xs">
+            <p class="text-gray-400 text-xs">
                 This describes the shape of the chart so far -- it is not a prediction of what happens next. Rounding patterns
                 are known to play out over weeks to months, but there is no fixed schedule, and this shape can fail to complete
                 at any point. Do not treat this as a time estimate for when the stock will move.
             </p>
             {% else %}
-            <p class="text-slate-400 text-sm">
+            <p class="text-gray-500 text-sm">
                 Not enough price history yet, or the recent price movement doesn't fit a clean rounding shape closely enough to call.
             </p>
             {% endif %}
         </div>
 
         <div class="section-card mb-6">
-            <h2 class="text-lg font-bold text-slate-200 mb-4">Fundamentals</h2>
-            <p class="text-slate-400 text-sm mb-4">
+            <h2 class="text-lg font-bold text-gray-900 mb-4">Fundamentals</h2>
+            <p class="text-gray-500 text-sm mb-4">
                 Most recent quarterly snapshot, {{ company.fundamentals_date or '—' }}
                 {% if company.fundamentals_trend_as_of %}&middot; trend vs. {{ company.fundamentals_trend_as_of }}{% endif %}.
             </p>
@@ -229,15 +231,15 @@
                     </tbody>
                 </table>
             </div>
-            <p class="text-slate-500 text-xs mt-3">
+            <p class="text-gray-400 text-xs mt-3">
                 Shareholding and other fundamentals are reported quarterly, not daily -- "Trend" compares against the previous
                 quarterly snapshot, not a 5/21/200-day window (there's no daily data for these to compute that against).
             </p>
         </div>
 
         <div class="section-card mb-6">
-            <h2 class="text-lg font-bold text-slate-200 mb-4">Technicals</h2>
-            <p class="text-slate-400 text-sm mb-4">As of {{ company.indicators_date or '—' }}.</p>
+            <h2 class="text-lg font-bold text-gray-900 mb-4">Technicals</h2>
+            <p class="text-gray-500 text-sm mb-4">As of {{ company.indicators_date or '—' }}.</p>
             <div class="overflow-x-auto">
                 <table>
                     <caption class="sr-only">Technical indicators for {{ company.name or company.symbol }}</caption>
@@ -262,10 +264,10 @@
         </div>
 
         <div class="section-card">
-            <h2 class="text-lg font-bold text-slate-200 mb-4">Recent prices</h2>
+            <h2 class="text-lg font-bold text-gray-900 mb-4">Recent prices</h2>
             <div class="overflow-x-auto">
                 <table>
-                    <caption class="text-left text-slate-400 text-sm mb-3">Last {{ recent_prices | length }} trading day{{ 's' if recent_prices | length != 1 }}, most recent first.</caption>
+                    <caption class="text-left text-gray-500 text-sm mb-3">Last {{ recent_prices | length }} trading day{{ 's' if recent_prices | length != 1 }}, most recent first.</caption>
                     <thead>
                         <tr>
                             <th scope="col">Date</th>
@@ -281,7 +283,7 @@
                             <td>{{ '{:,}'.format(p.volume) if p.volume is not none else '—' }}</td>
                         </tr>
                         {% else %}
-                        <tr><td colspan="3" class="text-slate-400">No price history yet.</td></tr>
+                        <tr><td colspan="3" class="text-gray-500">No price history yet.</td></tr>
                         {% endfor %}
                     </tbody>
                 </table>
