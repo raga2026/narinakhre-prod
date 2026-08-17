@@ -70,6 +70,25 @@ def test_missing_universe_id_still_scores_with_holding_trend_at_zero():
     assert rows[0]['nns_score'] is not None
 
 
+def test_missing_snapshot_date_does_not_crash_the_previous_snapshot_lookup():
+    # Regression test for a live 500 on /stocks/watchlist: a company with a
+    # universe_id match but no stock_fundamentals row synced yet at all has
+    # snapshot_date=None (LEFT JOIN, unlike _fetch_candidates' INNER JOIN
+    # which guarantees a non-null snapshot_date). _fetch_previous_snapshots
+    # used to compare snap['snapshot_date'] < candidate['snapshot_date']
+    # unconditionally, which raised TypeError: '<' not supported between
+    # instances of 'str' and 'NoneType' the moment candidate['snapshot_date']
+    # was None -- this must score the row (holding_trend at 0), not crash.
+    row = {**GOOD_ROW, 'snapshot_date': None}
+    db = FakeSnapshotDB(snapshot_rows=[
+        {'universe_id': 101, 'promoter_holding_pct': 55, 'fii_holding_pct': 8, 'snapshot_date': '2026-07-01'},
+    ])
+
+    rows = compute_watchlist_nns_scores(db, [row])
+
+    assert rows[0]['nns_score'] is not None
+
+
 def test_falls_back_to_id_key_when_watchlist_id_is_absent():
     # /stocks/watchlist's own query selects w.id, not w.id AS watchlist_id --
     # compute_watchlist_nns_scores must still work from 'id' alone.

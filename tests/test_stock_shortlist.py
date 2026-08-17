@@ -1,3 +1,5 @@
+import re
+
 from utils.stock_shortlist import (
     SHORTLIST_SOURCE,
     _compute_industry_benchmarks,
@@ -24,8 +26,9 @@ PASSING_FUNDAMENTALS = {
     'quarterly_profit_growth_pct': 12, 'quarterly_revenue_growth_pct': 11,
 }
 
-FAILING_FUNDAMENTALS = {**PASSING_FUNDAMENTALS, 'roce_pct': -1}  # fails ROCE -- excluded outright, not silver-eligible
+FAILING_FUNDAMENTALS = {**PASSING_FUNDAMENTALS, 'peg_ratio': 2.0}  # fails PEG -- never forgiven at any tier, excluded outright
 SILVER_FUNDAMENTALS = {**PASSING_FUNDAMENTALS, 'pe_ratio': 45}  # fails PE range only -- silver-eligible
+BRONZE_FUNDAMENTALS = {**PASSING_FUNDAMENTALS, 'roce_pct': -1}  # fails ROCE only -- bronze-eligible
 
 
 class FakeShortlistDB:
@@ -50,8 +53,14 @@ class FakeShortlistDB:
 
         if normalized.startswith('UPDATE stock_watchlist SET is_active=0'):
             (source,) = params
-            for w in self.watchlist.values():
-                if w['source'] == source and w['is_active'] == 1:
+            # The real query embeds the winning (symbol, exchange) pairs
+            # directly in the SQL text (NOT IN (...), not bind params --
+            # same reasoning as the universe_id IN-list elsewhere in this
+            # module) -- parsed back out here so the fake only deactivates
+            # what the real diff-based query would, not a blanket reset.
+            winning_pairs = set(re.findall(r"\('([^']*)','([^']*)'\)", sql))
+            for (symbol, exchange), w in self.watchlist.items():
+                if w['source'] == source and w['is_active'] == 1 and (symbol, exchange) not in winning_pairs:
                     w['is_active'] = 0
             return FakeCursor([])
 
@@ -153,8 +162,9 @@ def test_shortlist_deactivates_no_longer_passing_and_protects_manual_rows():
     assert summary['passed'] == 2   # STILLGOOD, MANUALCO
     assert summary['golden'] == 2
     assert summary['silver'] == 0
+    assert summary['bronze'] == 0
     assert summary['failed'] == 1   # NOWBAD
-    assert summary['failed_criteria_counts'] == {'ROCE': 1}
+    assert summary['failed_criteria_counts'] == {'PEG': 1}
 
     # Still passing -> stays active, still auto-shortlisted, golden tier.
     still_good = db.watchlist[('STILLGOOD', 'NSE')]
@@ -172,6 +182,44 @@ def test_shortlist_deactivates_no_longer_passing_and_protects_manual_rows():
     manual = db.watchlist[('MANUALCO', 'NSE')]
     assert manual['is_active'] == 1
     assert manual['source'] == 'manual'
+
+
+def test_bronze_only_candidate_gets_watchlisted_not_excluded():
+    universe = [{'id': 1, 'symbol': 'BRONZECO', 'exchange': 'NSE', 'company_name': 'Bronze Co Ltd', 'is_scrape_eligible': True}]
+    fundamentals = [{'universe_id': 1, 'snapshot_date': '2026-08-10', **BRONZE_FUNDAMENTALS}]
+    db = FakeShortlistDB(universe, fundamentals, watchlist_rows=[])
+
+    summary = run_fundamental_shortlist(db)
+
+    assert summary['golden'] == 0
+    assert summary['silver'] == 0
+    assert summary['bronze'] == 1
+    assert summary['failed'] == 0
+
+    row = db.watchlist[('BRONZECO', 'NSE')]
+    assert row['is_active'] == 1
+    assert row['fundamental_tier'] == 'bronze'
+
+
+def test_watchlist_is_not_blanked_when_nothing_qualifies_this_run():
+    # Regression test for a live incident: a run where every candidate
+    # fails (e.g. a scraper outage staled out every fundamentals snapshot
+    # at once) must NOT be read as "deactivate the whole watchlist" -- the
+    # existing, previously-qualified rows must stay exactly as they were
+    # until a run actually produces a fresh qualifying set.
+    universe = [{'id': 1, 'symbol': 'NOWFAILING', 'exchange': 'NSE', 'company_name': 'Now Failing Ltd', 'is_scrape_eligible': True}]
+    fundamentals = [{'universe_id': 1, 'snapshot_date': '2026-08-10', **FAILING_FUNDAMENTALS}]
+    watchlist = [
+        {'symbol': 'NOWFAILING', 'exchange': 'NSE', 'name': 'Now Failing Ltd', 'is_active': 1, 'source': SHORTLIST_SOURCE},
+    ]
+    db = FakeShortlistDB(universe, fundamentals, watchlist)
+
+    summary = run_fundamental_shortlist(db)
+
+    assert summary['passed'] == 0
+    # Still active -- NOT deactivated, even though it no longer qualifies,
+    # because nothing at all qualified this run (see the docstring).
+    assert db.watchlist[('NOWFAILING', 'NSE')]['is_active'] == 1
 
 
 def test_previous_snapshot_lookup_is_batched_not_one_query_per_candidate():

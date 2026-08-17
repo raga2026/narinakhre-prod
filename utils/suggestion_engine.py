@@ -295,8 +295,14 @@ def _fetch_previous_snapshots(db, candidates):
     that module's docstring for the live incident that pattern was built
     to fix). This candidate pool is much smaller (already hard-filtered),
     but there's no reason to reintroduce a per-row query here either.
-    Candidates with no universe_id (LEFT JOIN didn't match) are skipped --
-    nothing to look up, holding_trend just scores 0 for them."""
+    Candidates with no universe_id (LEFT JOIN didn't match) OR no
+    snapshot_date of their own (no stock_fundamentals row synced yet at
+    all -- possible here since /stocks/watchlist's own query, unlike
+    _fetch_candidates' INNER JOIN, LEFT JOINs fundamentals so a
+    just-added, not-yet-synced company still shows up with nulls rather
+    than being hidden entirely) are skipped -- nothing to compare a
+    "previous" snapshot against either way, holding_trend just scores 0
+    for them."""
     universe_ids = [c['universe_id'] for c in candidates if c.get('universe_id') is not None]
     if not universe_ids:
         return {}
@@ -314,7 +320,7 @@ def _fetch_previous_snapshots(db, candidates):
     previous_by_watchlist = {}
     for candidate in candidates:
         universe_id = candidate.get('universe_id')
-        if universe_id is None:
+        if universe_id is None or candidate.get('snapshot_date') is None:
             continue
         for snap in snapshots_by_universe.get(universe_id, []):
             if snap['snapshot_date'] < candidate['snapshot_date']:

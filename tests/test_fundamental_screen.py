@@ -383,12 +383,68 @@ def test_classify_missing_pe_never_earns_silver():
 
 
 def test_classify_failure_on_unrelated_criterion_is_excluded_regardless_of_pe_opm():
-    row = {**PASSING_ROW, 'pe_ratio': 45, 'roce_pct': -1}
+    # PEG is never forgiven at any tier -- unlike ROCE/ROA (bronze-eligible,
+    # see the tests below), failing it always means outright exclusion.
+    row = {**PASSING_ROW, 'pe_ratio': 45, 'peg_ratio': 2.0}
+
+    tier, failed = classify_fundamental_tier(row, previous_fundamentals_row=None)
+
+    assert tier is None
+    assert set(failed) == {'PE range', 'PEG'}
+
+
+def test_classify_roce_only_failure_is_bronze():
+    row = {**PASSING_ROW, 'roce_pct': -1}
+
+    tier, failed = classify_fundamental_tier(row, previous_fundamentals_row=None)
+
+    assert tier == 'bronze'
+    assert failed == ['ROCE']
+
+
+def test_classify_roa_only_failure_is_bronze():
+    row = {**PASSING_ROW, 'roa_pct': -1}
+
+    tier, failed = classify_fundamental_tier(row, previous_fundamentals_row=None)
+
+    assert tier == 'bronze'
+    assert failed == ['ROA']
+
+
+def test_classify_pe_opm_roce_roa_all_failing_together_is_still_bronze():
+    row = {**PASSING_ROW, 'pe_ratio': 45, 'opm_pct': 18, 'roce_pct': -1, 'roa_pct': -1}
+
+    tier, failed = classify_fundamental_tier(row, previous_fundamentals_row=None)
+
+    assert tier == 'bronze'
+    assert set(failed) == {'PE range', 'OPM', 'ROCE', 'ROA'}
+
+
+def test_classify_roce_failure_plus_unrelated_criterion_is_excluded():
+    row = {**PASSING_ROW, 'roce_pct': -1, 'peg_ratio': 2.0}
+
+    tier, failed = classify_fundamental_tier(row, previous_fundamentals_row=None)
+
+    assert tier is None
+    assert set(failed) == {'ROCE', 'PEG'}
+
+
+def test_classify_bronze_still_respects_the_missing_pe_data_floor():
+    row = {**PASSING_ROW, 'pe_ratio': None, 'roce_pct': -1}
 
     tier, failed = classify_fundamental_tier(row, previous_fundamentals_row=None)
 
     assert tier is None
     assert set(failed) == {'PE range', 'ROCE'}
+
+
+def test_classify_bronze_still_respects_the_opm_silver_floor():
+    row = {**PASSING_ROW, 'opm_pct': 10, 'roce_pct': -1}  # OPM below the silver/bronze floor entirely
+
+    tier, failed = classify_fundamental_tier(row, previous_fundamentals_row=None)
+
+    assert tier is None
+    assert set(failed) == {'OPM', 'ROCE'}
 
 
 def test_classify_uses_industry_benchmark_when_given():

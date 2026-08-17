@@ -19,6 +19,9 @@
         .badge-no_clear_trend  { background:#e2e8f0; color:#475569; }
         .badge-recommended     { background:#166534; color:#dcfce7; }
         .badge-not-recommended { background:#1e293b; color:#64748b; }
+        .tier-badge-golden { background:#78350f; color:#fef3c7; }
+        .tier-badge-silver { background:#334155; color:#e2e8f0; }
+        .tier-badge-bronze { background:#7c2d12; color:#fed7aa; }
         .metric-note { font-size: 0.75rem; color: #94a3b8; display: block; }
         .company-link { color: #f8fafc; text-decoration: underline; text-decoration-color: rgba(148,163,184,0.4); }
         .company-link:hover { color: #38bdf8; }
@@ -39,8 +42,15 @@
                     {% else %}
                         {{ rows | length }} compan{{ 'y' if rows | length == 1 else 'ies' }} shown
                         {% if cross_filter == 'golden' %}&middot; golden cross only{% endif %}
+                        {% if tier_filter and tier_filter != 'all' %}&middot; Tier {{ {'golden': 1, 'silver': 2, 'bronze': 3}[tier_filter] }} ({{ tier_filter | title }}) only{% endif %}
                     {% endif %}
                 </p>
+                {% if session.stocks_admin_role in ('super_admin', 'child_admin') and cross_filter != 'golden_not_qualified' %}
+                <p class="text-slate-500 text-xs mt-1">
+                    Tier 1 = Golden (passes everything) &middot; Tier 2 = Silver (lost out on PE and/or OPM) &middot;
+                    Tier 3 = Bronze (also lost out on ROCE and/or ROA) -- all three stay tracked here.
+                </p>
+                {% endif %}
             </div>
             {% if session.stocks_admin_role == 'viewer' %}
             <a href="{{ url_for('stocks_my_suggestions') }}" class="text-sm text-slate-400 hover:text-sky-400 underline">Back to my suggestions</a>
@@ -59,7 +69,7 @@
         {% endif %}
         {% endwith %}
 
-        <nav aria-label="Filter watchlist by cross-over status" class="flex gap-2 mb-6 flex-wrap">
+        <nav aria-label="Filter watchlist by cross-over status" class="flex gap-2 mb-3 flex-wrap">
             <a href="{{ url_for('stocks_watchlist') }}"
                class="filter-pill {{ 'active' if cross_filter == 'all' }}"
                {% if cross_filter == 'all' %}aria-current="page"{% endif %}>All companies</a>
@@ -72,6 +82,23 @@
                {% if cross_filter == 'golden_not_qualified' %}aria-current="page"{% endif %}>Golden cross, not yet qualified</a>
             {% endif %}
         </nav>
+
+        {% if session.stocks_admin_role in ('super_admin', 'child_admin') and cross_filter != 'golden_not_qualified' %}
+        <nav aria-label="Filter watchlist by fundamental tier" class="flex gap-2 mb-6 flex-wrap">
+            <a href="{{ url_for('stocks_watchlist') }}"
+               class="filter-pill {{ 'active' if tier_filter == 'all' }}"
+               {% if tier_filter == 'all' %}aria-current="page"{% endif %}>All tiers</a>
+            <a href="{{ url_for('stocks_watchlist', tier='golden') }}"
+               class="filter-pill {{ 'active' if tier_filter == 'golden' }}"
+               {% if tier_filter == 'golden' %}aria-current="page"{% endif %}>Tier 1 -- Golden</a>
+            <a href="{{ url_for('stocks_watchlist', tier='silver') }}"
+               class="filter-pill {{ 'active' if tier_filter == 'silver' }}"
+               {% if tier_filter == 'silver' %}aria-current="page"{% endif %}>Tier 2 -- Silver</a>
+            <a href="{{ url_for('stocks_watchlist', tier='bronze') }}"
+               class="filter-pill {{ 'active' if tier_filter == 'bronze' }}"
+               {% if tier_filter == 'bronze' %}aria-current="page"{% endif %}>Tier 3 -- Bronze</a>
+        </nav>
+        {% endif %}
 
         {% if cross_filter == 'golden_not_qualified' %}
         <div class="bg-slate-800 rounded-2xl p-6 border border-sky-500/20 overflow-x-auto">
@@ -180,6 +207,7 @@
                         <th scope="col">As of</th>
                         <th scope="col">RSI (14)</th>
                         <th scope="col">Cross</th>
+                        <th scope="col">Tier</th>
                         <th scope="col">NNS Score</th>
                         <th scope="col">Recommended</th>
                     </tr>
@@ -213,6 +241,12 @@
                             {% endif %}
                         </td>
                         <td>
+                            {% if row.fundamental_tier %}
+                                <span class="badge tier-badge-{{ row.fundamental_tier }}">{{ {'golden': 'Tier 1', 'silver': 'Tier 2', 'bronze': 'Tier 3'}[row.fundamental_tier] }}</span>
+                            {% else %}—
+                            {% endif %}
+                        </td>
+                        <td>
                             {% if row.nns_tier %}
                                 <span class="badge badge-{{ row.nns_tier }}" style="background:#1e293b;color:#7dd3fc;border:1px solid rgba(14,165,233,0.4);">{{ row.nns_tier | title }} {{ row.nns_score }}</span>
                             {% elif row.nns_score is not none %}
@@ -230,7 +264,7 @@
                     </tr>
                     {% else %}
                     <tr>
-                        <td colspan="13" class="text-slate-400">No symbols in the watchlist yet.</td>
+                        <td colspan="14" class="text-slate-400">No symbols in the watchlist yet.</td>
                     </tr>
                     {% endfor %}
                 </tbody>

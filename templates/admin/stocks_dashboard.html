@@ -207,7 +207,7 @@
 
         function summarizeResult(result) {
             if (!result) { return ''; }
-            var keys = ['inserted', 'passed', 'golden', 'silver', 'failed', 'matched', 'sent'];
+            var keys = ['inserted', 'passed', 'golden', 'silver', 'bronze', 'failed', 'matched', 'sent'];
             var parts = [];
             keys.forEach(function (key) {
                 if (typeof result[key] === 'number') {

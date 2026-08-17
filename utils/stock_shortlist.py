@@ -103,29 +103,48 @@ def _compute_industry_benchmarks(rows):
     return benchmarks
 
 
+def _escape_sql_literal(value):
+    return str(value).replace("'", "''")
+
+
 def run_fundamental_shortlist(db):
     """Runs classify_fundamental_tier() against every scrape-eligible
     stock_universe company with a stock_fundamentals snapshot no older than
     MAX_SNAPSHOT_AGE_DAYS, and syncs the result into stock_watchlist:
-      - Companies classified 'golden' or 'silver' (see
+      - Companies classified 'golden', 'silver', or 'bronze' (see
         fundamental_screen.classify_fundamental_tier) get upserted with
         source=SHORTLIST_SOURCE, is_active=true, fundamental_tier set to
-        whichever tier they earned.
+        whichever tier they earned -- all three tiers stay tracked/visible,
+        they're not a pass/fail cutoff.
       - Everything previously auto-shortlisted that isn't in this run's
-        passing set (golden or silver) gets is_active=false -- never
-        deleted, history stays. Note this covers two cases, both mapped to
-        the same outcome: a company that was evaluated and excluded, and
-        one that wasn't evaluated at all this run (no longer
-        is_scrape_eligible, or its fundamentals data is stale past
-        MAX_SNAPSHOT_AGE_DAYS) -- either way, it stops being actively
+        qualifying set (any of the three tiers) gets is_active=false --
+        never deleted, history stays. Note this covers two cases, both
+        mapped to the same outcome: a company that was evaluated and
+        excluded outright, and one that wasn't evaluated at all this run
+        (no longer is_scrape_eligible, or its fundamentals data is stale
+        past MAX_SNAPSHOT_AGE_DAYS) -- either way, it stops being actively
         watchlisted until fresh data confirms it qualifies again.
       - Rows with any other source value (manual additions) are never
         touched, in either direction -- enforced by the conditional
         ON CONFLICT below, not just by never selecting them.
 
-    Implemented as deactivate-everything-auto-shortlisted-first, then
-    reactivate/insert whatever currently qualifies -- simpler than computing
-    a dynamic "stopped qualifying" list, and reaches the identical end state.
+    Deliberately does NOT deactivate anything before it knows the new
+    qualifying set -- this used to run as deactivate-everything-first, then
+    reactivate/insert winners, which left a real window (and on a slow or
+    interrupted run, potentially a PERMANENT window) where the watchlist
+    was emptier than it should be, or fully blank, for anyone loading it --
+    a live incident this rewrite fixes. Now every winner is upserted
+    (activated) FIRST, and only THEN does a single UPDATE deactivate
+    whichever previously-active auto-shortlisted rows aren't in the new
+    winning set -- a true diff, not a blanket reset. If the run dies
+    partway through the upsert loop, whatever already got upserted is
+    correct and nothing else was touched -- worst case, a company that
+    should have dropped a tier stays at its old one until the next
+    successful run, never "the whole watchlist vanished." And if literally
+    nothing qualifies this run (e.g. a scraper outage stales out every
+    snapshot at once), the deactivation step is skipped entirely rather
+    than reading that as "the market wiped out the whole watchlist" -- see
+    below.
 
     A company listed on both NSE and BSE has two separate stock_universe
     rows (different symbols, same ISIN) and could otherwise pass the
@@ -142,19 +161,13 @@ def run_fundamental_shortlist(db):
     so the same company never shows as 'Ltd' in one place and 'Limited'
     in another just because our NSE/BSE source lists don't agree.
 
-    Returns a summary including a golden/silver breakdown, how many
+    Returns a summary including a golden/silver/bronze breakdown, how many
     passing candidates were the losing side of an ISIN duplicate
     ('deduped'), and aggregate exclusion-reason counts (e.g. how many
     were excluded on PE range) for the route to report.
     failed_criteria_counts only reflects companies that were actually
-    excluded (tier is None) -- a silver company's PE/OPM "failure" isn't
-    counted there, since it didn't cause exclusion."""
-    db.execute(
-        'UPDATE stock_watchlist SET is_active=0, updated_at=NOW() WHERE source=? AND is_active=1',
-        (SHORTLIST_SOURCE,)
-    )
-    db.commit()
-
+    excluded (tier is None) -- a silver/bronze company's forgiven failures
+    aren't counted there, since they didn't cause exclusion."""
     cutoff = (date.today() - timedelta(days=MAX_SNAPSHOT_AGE_DAYS)).isoformat()
     candidates = db.execute(
         '''SELECT u.id AS universe_id, u.symbol, u.exchange, u.company_name, u.isin, u.industry,
@@ -207,8 +220,7 @@ def run_fundamental_shortlist(db):
                 return snap
         return None
 
-    golden = 0
-    silver = 0
+    tier_counts = {'golden': 0, 'silver': 0, 'bronze': 0}
     failed = 0
     failed_criteria_counts = {}
     qualifying_by_isin = {}  # isin -> list of (row, tier); None-ISIN rows never grouped
@@ -230,10 +242,7 @@ def run_fundamental_shortlist(db):
                 failed_criteria_counts[criterion] = failed_criteria_counts.get(criterion, 0) + 1
             continue
 
-        if tier == 'golden':
-            golden += 1
-        else:
-            silver += 1
+        tier_counts[tier] += 1
 
         row_with_tier = {**row, '_tier': tier}
         isin = (row.get('isin') or '').strip()
@@ -251,6 +260,8 @@ def run_fundamental_shortlist(db):
 
     passed = len(to_watchlist) + deduped
 
+    # Activate every winner first -- see the module docstring above for why
+    # this has to happen before anything is deactivated.
     for row in to_watchlist:
         tier = row['_tier']
         db.execute(
@@ -268,11 +279,29 @@ def run_fundamental_shortlist(db):
         )
         db.commit()
 
+    # THEN deactivate whatever previously-active auto-shortlisted row isn't
+    # in the winning set -- a true diff via NOT IN, computed and run as one
+    # statement, not a blanket reset. Skipped entirely when nothing
+    # qualified at all (see the module docstring: more likely a stale-data
+    # problem than a real "everything dropped out" market event).
+    if to_watchlist:
+        pairs_sql = ','.join(
+            f"('{_escape_sql_literal(row['symbol'])}','{_escape_sql_literal(row['exchange'])}')"
+            for row in to_watchlist
+        )
+        db.execute(
+            f'''UPDATE stock_watchlist SET is_active=0, updated_at=NOW()
+                WHERE source=? AND is_active=1 AND (symbol, exchange) NOT IN ({pairs_sql})''',
+            (SHORTLIST_SOURCE,)
+        )
+        db.commit()
+
     return {
         'evaluated': len(candidates),
         'passed': passed,
-        'golden': golden,
-        'silver': silver,
+        'golden': tier_counts['golden'],
+        'silver': tier_counts['silver'],
+        'bronze': tier_counts['bronze'],
         'deduped': deduped,
         'failed': failed,
         'failed_criteria_counts': failed_criteria_counts,

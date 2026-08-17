@@ -165,6 +165,15 @@ def evaluate_fundamentals(fundamentals_row, previous_fundamentals_row=None, indu
 # exclusion, unchanged from evaluate_fundamentals()'s original behavior.
 SILVER_ELIGIBLE_CRITERIA = {'PE range', 'OPM'}
 
+# One tier more lenient than silver -- everything silver forgives, plus
+# ROCE and/or ROA (profitability-quality, thematically the same family as
+# OPM) failing too. A company still has to pass PEG, both growth checks,
+# EPS, price-to-book, and both holding-trend checks to land here -- this
+# is a deliberate, bounded judgment call (not derived from any published
+# rule), same as the NNS Score's own ROCE/ROA thresholds elsewhere in this
+# codebase: extend this set again if a future tier should forgive more.
+BRONZE_ELIGIBLE_CRITERIA = SILVER_ELIGIBLE_CRITERIA | {'ROCE', 'ROA'}
+
 
 def get_metric_note(metric_name, value):
     """Short, factual context for a PE or OPM value that's outside its
@@ -194,9 +203,27 @@ def get_metric_note(metric_name, value):
     return None
 
 
+def _fails_pe_or_opm_data_floor(fundamentals_row, failed_criteria):
+    """Shared missing-data/floor guard for both silver and bronze -- a
+    missing PE value, or an OPM below OPM_SILVER_MIN_PCT (or also missing),
+    never gets the benefit of the doubt at ANY forgiving tier, only a full
+    exclusion. Applies regardless of which forgiving tier is being
+    evaluated, since both silver and bronze forgive PE range/OPM the same
+    way -- bronze just additionally forgives ROCE/ROA on top."""
+    if 'PE range' in failed_criteria and fundamentals_row.get('pe_ratio') is None:
+        return True
+    if 'OPM' in failed_criteria:
+        opm_pct = fundamentals_row.get('opm_pct')
+        if opm_pct is None or opm_pct < OPM_SILVER_MIN_PCT:
+            return True
+    return False
+
+
 def classify_fundamental_tier(fundamentals_row, previous_fundamentals_row=None, industry_benchmarks=None):
-    """Runs evaluate_fundamentals() and sorts the result into a two-tier
-    outcome for stock_shortlist.run_fundamental_shortlist():
+    """Runs evaluate_fundamentals() and sorts the result into a graduated
+    outcome for stock_shortlist.run_fundamental_shortlist() -- a company
+    doesn't have to pass everything outright to stay tracked, it just drops
+    a tier for each additional thing it's lost out on:
       - 'golden': passes every criterion outright.
       - 'silver': fails ONLY on PE range and/or OPM (every other criterion
         still passes) -- these two become a soft second-level filter instead
@@ -205,8 +232,15 @@ def classify_fundamental_tier(fundamentals_row, previous_fundamentals_row=None, 
         failure. A missing (None) PE or OPM value never earns silver --
         missing data still doesn't get the benefit of the doubt, same rule
         evaluate_fundamentals() already applies everywhere else.
-      - None: excluded -- fails on some other criterion, or PE/OPM data is
-        missing, or OPM is below OPM_SILVER_MIN_PCT.
+      - 'bronze': fails on PE range and/or OPM (same floor/missing-data
+        rule as silver above) AND/OR ROCE and/or ROA -- i.e. everything
+        silver forgives, plus weak-but-not-fatal profitability quality on
+        top. Every other criterion (PEG, growth, EPS, price-to-book,
+        holding trends) must still pass -- this is still a company with a
+        sound growth/valuation story, just a softer profitability profile
+        than silver requires.
+      - None: excluded -- fails on some criterion outside
+        BRONZE_ELIGIBLE_CRITERIA, or hits the PE/OPM data floor above.
 
     industry_benchmarks: passed straight through to evaluate_fundamentals --
     see its docstring.
@@ -215,20 +249,21 @@ def classify_fundamental_tier(fundamentals_row, previous_fundamentals_row=None, 
     evaluate_fundamentals() returned, so run_fundamental_shortlist's
     failed_criteria_counts reporting (which only wants criteria that
     actually caused exclusion) keeps working: it should only be recorded
-    for a None tier, never for 'silver'."""
+    for a None tier, never for 'silver'/'bronze'."""
     passes, failed_criteria = evaluate_fundamentals(fundamentals_row, previous_fundamentals_row, industry_benchmarks)
     if passes:
         return 'golden', failed_criteria
 
-    if set(failed_criteria) - SILVER_ELIGIBLE_CRITERIA:
-        return None, failed_criteria
+    failed_set = set(failed_criteria)
 
-    if 'PE range' in failed_criteria and fundamentals_row.get('pe_ratio') is None:
-        return None, failed_criteria
-
-    if 'OPM' in failed_criteria:
-        opm_pct = fundamentals_row.get('opm_pct')
-        if opm_pct is None or opm_pct < OPM_SILVER_MIN_PCT:
+    if not failed_set - SILVER_ELIGIBLE_CRITERIA:
+        if _fails_pe_or_opm_data_floor(fundamentals_row, failed_criteria):
             return None, failed_criteria
+        return 'silver', failed_criteria
 
-    return 'silver', failed_criteria
+    if not failed_set - BRONZE_ELIGIBLE_CRITERIA:
+        if _fails_pe_or_opm_data_floor(fundamentals_row, failed_criteria):
+            return None, failed_criteria
+        return 'bronze', failed_criteria
+
+    return None, failed_criteria

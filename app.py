@@ -7439,7 +7439,7 @@ def stocks_watchlist():
             return redirect(url_for('stocks_watchlist'))
         golden_not_qualified = get_golden_cross_not_qualified(db)
         return render_template(
-            'admin/stocks_watchlist.html', rows=[], cross_filter=cross_filter,
+            'admin/stocks_watchlist.html', rows=[], cross_filter=cross_filter, tier_filter='all',
             golden_not_qualified=golden_not_qualified
         )
 
@@ -7480,8 +7480,19 @@ def stocks_watchlist():
 
     rows = enrich_and_sort_watchlist_rows(rows, cross_filter=cross_filter)
 
+    # Separate from cross_filter -- this narrows by fundamental_tier
+    # (golden/silver/bronze, see utils.fundamental_screen.classify_fundamental_tier),
+    # not by the golden-cross technical signal. Applied after enrich/sort
+    # (which already computed is_recommended/pe_note/etc. for every row)
+    # rather than in SQL, since is_active=1 already includes all three
+    # tiers -- this is purely a display-side narrowing.
+    tier_filter = request.args.get('tier')
+    if tier_filter in ('golden', 'silver', 'bronze'):
+        rows = [r for r in rows if r.get('fundamental_tier') == tier_filter]
+
     return render_template(
-        'admin/stocks_watchlist.html', rows=rows, cross_filter=cross_filter or 'all'
+        'admin/stocks_watchlist.html', rows=rows, cross_filter=cross_filter or 'all',
+        tier_filter=tier_filter or 'all',
     )
 
 
