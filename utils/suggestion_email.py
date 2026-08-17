@@ -28,6 +28,7 @@ HORIZON_DISCLAIMER = (
 )
 
 STOCKS_LOGIN_URL = 'https://narinakhre.com/stocks/login'
+STOCKS_BASE_URL = 'https://narinakhre.com'
 
 _TREND_BADGE_COLORS = {
     'Highly Recommended': ('#dcfce7', '#15803d'),
@@ -312,6 +313,37 @@ def _identity_suffix(s):
     return f"{s['symbol']} · {s['exchange']}"
 
 
+def _stock_url(s):
+    """Link to this stock's full analysis page -- /stocks/universe/<id>,
+    NOT /stocks/company/<watchlist_id> (that one is staff/can_view_watchlist
+    -only and 403s for a plain self-serve viewer, see get_suggestions'
+    docstring on why universe_id is joined in specifically for this).
+    Returns None if universe_id wasn't resolved (the company was removed
+    from stock_universe after this suggestion was made) -- callers must
+    skip the link in that rare case rather than build a broken URL."""
+    universe_id = s.get('universe_id')
+    if not universe_id:
+        return None
+    return f'{STOCKS_BASE_URL}/stocks/universe/{universe_id}'
+
+
+def _highlights(s):
+    """The handful of basic technical/fundamental numbers worth putting
+    right on the card -- RSI at suggestion time, PE, PEG, OPM -- whichever
+    of these actually have a value (not gated to silver-tier the way
+    _fundamentals_note's PE/OPM callout is; this is a plain factual
+    snapshot, shown regardless of tier). Returns a list of (label, value)
+    pairs, e.g. [('RSI', '54.2'), ('PE', '18.20')] -- empty list if none of
+    the four are available (an old suggestion predating these columns)."""
+    fields = [
+        ('RSI', s.get('rsi_at_suggestion'), '{:.1f}'),
+        ('PE', s.get('pe_at_suggestion'), '{:.2f}'),
+        ('PEG', s.get('peg_at_suggestion'), '{:.2f}'),
+        ('OPM', s.get('opm_at_suggestion'), '{:.0f}%'),
+    ]
+    return [(label, fmt.format(value)) for label, value, fmt in fields if value is not None]
+
+
 def _timing_text(s):
     """A pattern-based suggestion (see suggestion_engine.generate_daily_suggestions
     / utils.price_pattern.compute_suggestion_pricing) shows the cited
@@ -336,6 +368,9 @@ def _render_stock_card_text(s):
     if fundamentals_note:
         lines.append(f'  {_capitalize_first(fundamentals_note)}')
     lines.append(f"  Buy: Rs {s['buy_price']}   Stop-loss: Rs {s['stop_loss_price']}")
+    highlights = _highlights(s)
+    if highlights:
+        lines.append('  ' + '   '.join(f'{label}: {value}' for label, value in highlights))
     if projection:
         mid, long_term = projection['mid_period'], projection['long_term']
         lines.append(
@@ -344,6 +379,9 @@ def _render_stock_card_text(s):
         )
     lines.append(f'  {_timing_text(s)}')
     lines.append(f'  Why: {s["rationale"]}')
+    stock_url = _stock_url(s)
+    if stock_url:
+        lines.append(f'  Full analysis: {stock_url}')
     return '\n'.join(lines)
 
 
@@ -385,17 +423,42 @@ def _render_stock_card_html(s):
     chart_block = ''
     if chart_uri:
         chart_block = (
-            f'<div style="margin-top:14px;"><img src="{chart_uri}" width="520" height="230" alt="'
+            '<div style="margin-top:14px;padding:12px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;">'
+            '<div style="color:#64748b;font-size:11px;text-transform:uppercase;letter-spacing:.03em;margin-bottom:8px;">Price Projection</div>'
+            f'<img src="{chart_uri}" width="100%" alt="'
             f"Projected price chart for {_company_display_name(s)}: buy Rs {s.get('buy_price')} through its "
             'mid-period and long-term projected price" '
-            'style="max-width:100%;height:auto;display:block;border:1px solid #e2e8f0;border-radius:8px;"></div>'
+            'style="width:100%;max-width:496px;height:auto;display:block;border-radius:6px;">'
+            '</div>'
         )
+
+    highlights = _highlights(s)
+    highlights_block = ''
+    if highlights:
+        chips = ''.join(
+            f'<span style="display:inline-block;background:#f1f5f9;color:#334155;border-radius:6px;'
+            f'padding:4px 10px;margin:0 6px 6px 0;font-size:12px;white-space:nowrap;">'
+            f'<span style="color:#64748b;">{label}</span> {value}</span>'
+            for label, value in highlights
+        )
+        highlights_block = f'<div style="margin-top:12px;">{chips}</div>'
 
     fundamentals_html = f'<div style="margin-top:6px;color:#64748b;font-size:12.5px;">{_capitalize_first(fundamentals_note)}</div>' if fundamentals_note else ''
 
+    stock_url = _stock_url(s)
+    link_block = ''
+    if stock_url:
+        link_block = (
+            '<div style="margin-top:16px;">'
+            f'<a href="{stock_url}" style="display:inline-block;background:#0ea5e9;color:#ffffff;'
+            'text-decoration:none;font-size:13px;font-weight:bold;padding:10px 18px;border-radius:8px;">'
+            f'View full analysis for {s["symbol"]} &rarr;</a>'
+            '</div>'
+        )
+
     return (
-        '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" '
-        'style="max-width:600px;margin:0 0 20px 0;border:1px solid #e2e8f0;border-radius:12px;'
+        '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" class="stock-card" '
+        'style="max-width:600px;width:100%;margin:0 0 20px 0;border:1px solid #e2e8f0;border-radius:12px;'
         'overflow:hidden;font-family:Arial,Helvetica,sans-serif;">'
         '<tr><td style="background:#0f172a;padding:14px 18px;">'
         '<table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr>'
@@ -413,13 +476,59 @@ def _render_stock_card_html(s):
         '<td style="width:50%;"><div style="color:#64748b;font-size:11px;text-transform:uppercase;letter-spacing:.03em;">Stop-loss</div>'
         f'<div style="font-size:19px;font-weight:bold;color:#b91c1c;">Rs {s["stop_loss_price"]}</div></td>'
         '</tr></table>'
+        f'{highlights_block}'
         f'{horizon_block}'
         f'{chart_block}'
         f'<div style="margin-top:14px;padding:12px 14px;background:#f8fafc;border-left:3px solid #0ea5e9;'
         f'border-radius:4px;color:#334155;font-size:13px;line-height:1.5;">{s["rationale"]}</div>'
         f'{fundamentals_html}'
         f'<div style="margin-top:10px;color:#64748b;font-size:12.5px;">{_timing_text(s)}</div>'
+        f'{link_block}'
         '</td></tr></table>'
+    )
+
+
+def _wrap_email_html(inner_html):
+    """Wraps inner_html (a fragment of <p>/<table> markup) in a real,
+    minimal HTML document with a viewport meta tag and a small responsive
+    <style> block -- without this, send_zeptomail_stocks_email's htmlbody
+    goes out as a bare fragment with no <head> at all, which is exactly
+    why the email didn't fit properly on mobile: no viewport meta means
+    phone mail clients (iOS Mail in particular) render it at a fixed
+    desktop width and shrink the whole thing to fit, making everything
+    tiny until the reader pinch-zooms. table/img max-width:100% below is
+    the actual fix that lets each stock card and its chart shrink to the
+    screen instead of overflowing it; the @media block is a belt-and-
+    braces refinement for the mail clients that do honor it (most
+    webmail/mobile clients; Outlook desktop ignores <style> media queries
+    but still benefits from the width:100%/max-width rules above, which
+    it does honor)."""
+    return (
+        '<!doctype html>'
+        '<html><head><meta charset="utf-8">'
+        '<meta name="viewport" content="width=device-width, initial-scale=1.0">'
+        '<title>Nari Nakhre Stocks</title>'
+        '<style>'
+        'body,table,td,a{-webkit-text-size-adjust:100%;-ms-text-size-adjust:100%;}'
+        'table{border-collapse:collapse !important;}'
+        'img{border:0;line-height:100%;outline:none;text-decoration:none;}'
+        'body{margin:0;padding:0;width:100% !important;background:#eef2f6;}'
+        '@media only screen and (max-width:600px){'
+        '.email-container{width:100% !important;padding:0 12px !important;}'
+        '.stock-card{max-width:100% !important;}'
+        '}'
+        '</style></head>'
+        '<body style="margin:0;padding:0;background:#eef2f6;">'
+        '<div style="display:none;max-height:0;overflow:hidden;">'
+        "Today's stock recommendations from Nari Nakhre Stocks"
+        '</div>'
+        '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#eef2f6;">'
+        '<tr><td align="center" style="padding:20px 0;">'
+        '<div class="email-container" style="max-width:600px;width:100%;padding:0 16px;">'
+        f'{inner_html}'
+        '</div>'
+        '</td></tr></table>'
+        '</body></html>'
     )
 
 
@@ -448,9 +557,9 @@ def _build_email_content(suggestions, today_label):
             f'No stock met our screening criteria today ({today_label}).\n\n'
             f'{DISCLAIMER}\n'
         )
-        html_body = (
-            f'<p>No stock met our screening criteria today ({today_label}).</p>'
-            f'<p style="color:#64748b;font-size:0.85em;">{DISCLAIMER}</p>'
+        html_body = _wrap_email_html(
+            f'<p style="font-family:Arial,Helvetica,sans-serif;color:#0f172a;">No stock met our screening criteria today ({today_label}).</p>'
+            f'<p style="color:#64748b;font-size:0.85em;font-family:Arial,Helvetica,sans-serif;">{DISCLAIMER}</p>'
         )
         return subject, text_body, html_body
 
@@ -476,10 +585,10 @@ def _build_email_content(suggestions, today_label):
     text_body = '\n'.join(text_lines)
 
     horizon_note_html = (
-        f'<p style="color:#64748b;font-size:0.8em;line-height:1.5;">{HORIZON_DISCLAIMER}</p>'
+        f'<p style="color:#64748b;font-size:0.8em;line-height:1.5;font-family:Arial,Helvetica,sans-serif;">{HORIZON_DISCLAIMER}</p>'
         if any_horizon_targets else ''
     )
-    html_body = (
+    html_body = _wrap_email_html(
         f'<p style="font-family:Arial,Helvetica,sans-serif;font-size:16px;color:#0f172a;">{heading}:</p>'
         + ''.join(_render_stock_card_html(s) for s in suggestions)
         + horizon_note_html

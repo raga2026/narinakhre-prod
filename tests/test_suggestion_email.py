@@ -23,7 +23,7 @@ class FakeEmailDB:
     def execute(self, sql, params=None):
         normalized = ' '.join(sql.split())
 
-        if normalized.startswith('SELECT w.id AS watchlist_id, w.symbol, w.exchange, w.name AS company_name,'):
+        if normalized.startswith('SELECT w.id AS watchlist_id, w.symbol, w.exchange, w.name AS company_name, u.id AS universe_id,'):
             self.last_query_params = params
             return FakeCursor(self.suggestion_rows)
 
@@ -268,6 +268,138 @@ def test_suggestion_missing_prices_gets_no_projection_or_chart():
 
     htmlbody = mock_send.call_args.kwargs['htmlbody']
     assert 'data:image/png;base64,' not in htmlbody
+
+
+def test_html_is_a_real_responsive_document_not_a_bare_fragment():
+    # The original bug report: htmlbody went out with no <head>/viewport at
+    # all, which is exactly what makes an email render tiny/unzoomed on a
+    # phone -- this locks in the fix.
+    db = FakeEmailDB(
+        suggestion_rows=[
+            {'symbol': 'GLD', 'exchange': 'NSE', 'buy_price': 100.0, 'target_sell_price': 105.0,
+             'stop_loss_price': 97.0, 'holding_period_days': 10, 'rationale': 'Golden cross with confirming volume'},
+        ],
+        recipient_rows=[{'email': 'a@example.com', 'name': 'A'}],
+    )
+
+    with patch('utils.suggestion_email.send_zeptomail_stocks_email', return_value=(True, 'ok')) as mock_send:
+        send_daily_suggestions_email(db)
+
+    htmlbody = mock_send.call_args.kwargs['htmlbody']
+    assert htmlbody.strip().startswith('<!doctype html>')
+    assert 'name="viewport" content="width=device-width' in htmlbody
+    assert '@media only screen and (max-width' in htmlbody
+    # No-suggestions path must be wrapped the same way, not just the main one.
+    empty_db = FakeEmailDB(suggestion_rows=[], recipient_rows=[{'email': 'a@example.com', 'name': 'A'}])
+    with patch('utils.suggestion_email.send_zeptomail_stocks_email', return_value=(True, 'ok')) as mock_send2:
+        send_daily_suggestions_email(empty_db)
+    empty_htmlbody = mock_send2.call_args.kwargs['htmlbody']
+    assert empty_htmlbody.strip().startswith('<!doctype html>')
+    assert 'name="viewport"' in empty_htmlbody
+
+
+def test_chart_image_is_fluid_width_not_a_fixed_pixel_size():
+    db = FakeEmailDB(
+        suggestion_rows=[
+            {'symbol': 'GLD', 'exchange': 'NSE', 'buy_price': 100.0, 'target_sell_price': 105.0,
+             'stop_loss_price': 97.0, 'holding_period_days': 10, 'rationale': 'Golden cross with confirming volume'},
+        ],
+        recipient_rows=[{'email': 'a@example.com', 'name': 'A'}],
+    )
+
+    with patch('utils.suggestion_email.send_zeptomail_stocks_email', return_value=(True, 'ok')) as mock_send:
+        send_daily_suggestions_email(db)
+
+    htmlbody = mock_send.call_args.kwargs['htmlbody']
+    assert 'width="100%"' in htmlbody
+    assert 'height:auto' in htmlbody
+    # A fixed pixel width attribute would prevent the image from shrinking
+    # to fit a narrow phone screen -- must not be present on the chart img.
+    assert 'width="520"' not in htmlbody
+    # The chart sits inside its own bordered/padded container, not bare.
+    assert 'Price Projection' in htmlbody
+
+
+def test_highlights_show_available_technical_and_fundamental_figures():
+    db = FakeEmailDB(
+        suggestion_rows=[
+            {'symbol': 'GLD', 'exchange': 'NSE', 'buy_price': 100.0, 'target_sell_price': 105.0,
+             'stop_loss_price': 97.0, 'holding_period_days': 10, 'rationale': 'Golden cross with confirming volume',
+             'rsi_at_suggestion': 58.234, 'pe_at_suggestion': 22.567, 'peg_at_suggestion': 1.234,
+             'opm_at_suggestion': 19.8},
+        ],
+        recipient_rows=[{'email': 'a@example.com', 'name': 'A'}],
+    )
+
+    with patch('utils.suggestion_email.send_zeptomail_stocks_email', return_value=(True, 'ok')) as mock_send:
+        send_daily_suggestions_email(db)
+
+    textbody = mock_send.call_args.kwargs['textbody']
+    htmlbody = mock_send.call_args.kwargs['htmlbody']
+    assert 'RSI: 58.2' in textbody
+    assert 'PE: 22.57' in textbody
+    assert 'PEG: 1.23' in textbody
+    assert 'OPM: 20%' in textbody
+    assert 'RSI</span> 58.2' in htmlbody
+
+
+def test_highlights_omit_missing_fields_without_crashing():
+    db = FakeEmailDB(
+        suggestion_rows=[
+            {'symbol': 'GLD', 'exchange': 'NSE', 'buy_price': 100.0, 'target_sell_price': 105.0,
+             'stop_loss_price': 97.0, 'holding_period_days': 10, 'rationale': 'Golden cross with confirming volume'},
+        ],
+        recipient_rows=[{'email': 'a@example.com', 'name': 'A'}],
+    )
+
+    with patch('utils.suggestion_email.send_zeptomail_stocks_email', return_value=(True, 'ok')) as mock_send:
+        send_daily_suggestions_email(db)
+
+    textbody = mock_send.call_args.kwargs['textbody']
+    assert 'RSI:' not in textbody
+    assert 'PE:' not in textbody
+
+
+def test_stock_link_points_to_the_any_viewer_accessible_universe_page():
+    # /stocks/company/<watchlist_id> is staff/can_view_watchlist-only and
+    # would 403 for a plain self-serve viewer -- the email must link to
+    # /stocks/universe/<universe_id> instead, which any logged-in role can
+    # open (see get_suggestions' docstring).
+    db = FakeEmailDB(
+        suggestion_rows=[
+            {'symbol': 'GLD', 'exchange': 'NSE', 'buy_price': 100.0, 'target_sell_price': 105.0,
+             'stop_loss_price': 97.0, 'holding_period_days': 10, 'rationale': 'Golden cross with confirming volume',
+             'universe_id': 77},
+        ],
+        recipient_rows=[{'email': 'a@example.com', 'name': 'A'}],
+    )
+
+    with patch('utils.suggestion_email.send_zeptomail_stocks_email', return_value=(True, 'ok')) as mock_send:
+        send_daily_suggestions_email(db)
+
+    textbody = mock_send.call_args.kwargs['textbody']
+    htmlbody = mock_send.call_args.kwargs['htmlbody']
+    assert 'https://narinakhre.com/stocks/universe/77' in textbody
+    assert 'https://narinakhre.com/stocks/universe/77' in htmlbody
+    assert '/stocks/company/' not in htmlbody
+
+
+def test_no_stock_link_when_universe_id_unresolved():
+    # A company that's since been removed from stock_universe -- universe_id
+    # comes back None from the LEFT JOIN. Must not build a broken link.
+    db = FakeEmailDB(
+        suggestion_rows=[
+            {'symbol': 'GLD', 'exchange': 'NSE', 'buy_price': 100.0, 'target_sell_price': 105.0,
+             'stop_loss_price': 97.0, 'holding_period_days': 10, 'rationale': 'Golden cross with confirming volume'},
+        ],
+        recipient_rows=[{'email': 'a@example.com', 'name': 'A'}],
+    )
+
+    with patch('utils.suggestion_email.send_zeptomail_stocks_email', return_value=(True, 'ok')) as mock_send:
+        send_daily_suggestions_email(db)
+
+    htmlbody = mock_send.call_args.kwargs['htmlbody']
+    assert 'stocks/universe/' not in htmlbody
 
 
 def test_resend_uses_the_given_date_instead_of_today():

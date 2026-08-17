@@ -367,7 +367,13 @@ def compute_watchlist_nns_scores(db, watchlist_rows):
 def get_suggestions(db, start_date=None, end_date=None):
     """Fetches stock_suggestions rows (symbol/exchange joined from
     stock_watchlist), most recent first, optionally bounded by
-    suggestion_date on either end (either or both may be omitted). Shared
+    suggestion_date on either end (either or both may be omitted).
+    universe_id (LEFT JOINed by symbol/exchange, same match as
+    _fetch_candidates -- may be None if the company was ever removed from
+    stock_universe) is what suggestion_email.py links out to
+    /stocks/universe/<universe_id> with -- the ANY-logged-in-role company
+    detail page, unlike /stocks/company/<watchlist_id> which is staff/
+    can_view_watchlist-only and would 403 for a plain viewer. Shared
     by the daily email (utils/suggestion_email.py) and the read-only viewer
     pages (/stocks/my/suggestions, /stocks/my/history) so there's exactly
     one place building this join, not three."""
@@ -383,6 +389,7 @@ def get_suggestions(db, start_date=None, end_date=None):
 
     return db.execute(
         f'''SELECT w.id AS watchlist_id, w.symbol, w.exchange, w.name AS company_name,
+                   u.id AS universe_id,
                    s.suggestion_date, s.buy_price,
                    s.target_sell_price, s.stop_loss_price, s.holding_period_days,
                    s.rsi_at_suggestion, s.pe_at_suggestion, s.peg_at_suggestion,
@@ -391,6 +398,7 @@ def get_suggestions(db, start_date=None, end_date=None):
                    s.score AS nns_score, s.nns_tier, s.rationale, s.status
             FROM stock_suggestions s
             JOIN stock_watchlist w ON w.id = s.watchlist_id
+            LEFT JOIN stock_universe u ON u.symbol = w.symbol AND u.exchange = w.exchange
             {where_clause}
             ORDER BY s.suggestion_date DESC, s.score DESC''',
         tuple(params)
