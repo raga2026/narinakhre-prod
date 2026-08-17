@@ -597,7 +597,7 @@ def _build_email_content(suggestions, today_label):
     return subject, text_body, html_body
 
 
-def send_daily_suggestions_email(db, target_date=None):
+def send_daily_suggestions_email(db, target_date=None, recipient_ids=None):
     """Fetches target_date's stock_suggestions rows via the shared
     suggestion_engine.get_suggestions() query and emails every active
     role='viewer' account in stocks_admin_users -- one send per recipient.
@@ -614,7 +614,19 @@ def send_daily_suggestions_email(db, target_date=None):
     app.py's /stocks/suggestions/send-daily-email) -- pass a date object or
     an ISO 'YYYY-MM-DD' string to resend a past day's recommendations
     instead (see app.py's /stocks/suggestions/resend, the super_admin-only
-    manual resend page)."""
+    manual resend page).
+
+    recipient_ids=None (the normal daily-cron path) sends to every active
+    viewer, same as before this param existed. Pass a list/tuple of
+    stocks_admin_users.id values to restrict the send to just those
+    accounts instead -- the resend page's recipient checklist (deselect
+    all, then pick specific people) uses this so a resend doesn't have to
+    go to every subscriber every time. An empty list sends to nobody
+    (recipient_count=0, sent=0) rather than silently falling back to
+    "everyone" -- the caller is expected to stop a genuinely-empty
+    selection before calling this (see the resend route's own validation),
+    but this function itself never reinterprets "nobody chosen" as "no
+    filter"."""
     if target_date is None:
         target_date = date.today()
     elif isinstance(target_date, str):
@@ -626,9 +638,21 @@ def send_daily_suggestions_email(db, target_date=None):
 
     subject, text_body, html_body = _build_email_content(suggestions, date_label)
 
-    recipients = db.execute(
-        "SELECT username AS email, name FROM stocks_admin_users WHERE role='viewer' AND is_active=1"
-    ).fetchall()
+    if recipient_ids is not None:
+        recipient_ids = list(recipient_ids)
+        if recipient_ids:
+            placeholders = ','.join('?' * len(recipient_ids))
+            recipients = db.execute(
+                f"SELECT username AS email, name FROM stocks_admin_users "
+                f"WHERE role='viewer' AND is_active=1 AND id IN ({placeholders})",
+                tuple(recipient_ids)
+            ).fetchall()
+        else:
+            recipients = []
+    else:
+        recipients = db.execute(
+            "SELECT username AS email, name FROM stocks_admin_users WHERE role='viewer' AND is_active=1"
+        ).fetchall()
 
     sent = 0
     failed = 0

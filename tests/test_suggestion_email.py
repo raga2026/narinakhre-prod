@@ -28,6 +28,9 @@ class FakeEmailDB:
             return FakeCursor(self.suggestion_rows)
 
         if normalized.startswith("SELECT username AS email, name FROM stocks_admin_users WHERE role='viewer'"):
+            if 'AND id IN (' in normalized:
+                wanted = set(params)
+                return FakeCursor([r for r in self.recipient_rows if r.get('id') in wanted])
             return FakeCursor(self.recipient_rows)
 
         raise AssertionError(f'Unexpected SQL in test: {sql}')
@@ -418,6 +421,59 @@ def test_resend_uses_the_given_date_instead_of_today():
     kwargs = mock_send.call_args.kwargs
     assert '01 Jul 2026' in kwargs['subject']
     assert db.last_query_params == ('2026-07-01', '2026-07-01')
+
+
+def test_recipient_ids_restricts_the_send_to_just_those_accounts():
+    db = FakeEmailDB(
+        suggestion_rows=[
+            {'symbol': 'GLD', 'exchange': 'NSE', 'buy_price': 100.0, 'target_sell_price': 105.0,
+             'stop_loss_price': 97.0, 'holding_period_days': 10, 'rationale': 'Golden cross with confirming volume'},
+        ],
+        recipient_rows=[
+            {'id': 1, 'email': 'a@example.com', 'name': 'A'},
+            {'id': 2, 'email': 'b@example.com', 'name': 'B'},
+            {'id': 3, 'email': 'c@example.com', 'name': 'C'},
+        ],
+    )
+
+    with patch('utils.suggestion_email.send_zeptomail_stocks_email', return_value=(True, 'ok')) as mock_send:
+        summary = send_daily_suggestions_email(db, recipient_ids=[1, 3])
+
+    assert summary['recipient_count'] == 2
+    sent_to = {call.kwargs['to_email'] for call in mock_send.call_args_list}
+    assert sent_to == {'a@example.com', 'c@example.com'}
+
+
+def test_recipient_ids_none_still_means_every_active_viewer():
+    db = FakeEmailDB(
+        suggestion_rows=[],
+        recipient_rows=[
+            {'id': 1, 'email': 'a@example.com', 'name': 'A'},
+            {'id': 2, 'email': 'b@example.com', 'name': 'B'},
+        ],
+    )
+
+    with patch('utils.suggestion_email.send_zeptomail_stocks_email', return_value=(True, 'ok')) as mock_send:
+        summary = send_daily_suggestions_email(db, recipient_ids=None)
+
+    assert summary['recipient_count'] == 2
+    assert mock_send.call_count == 2
+
+
+def test_recipient_ids_empty_list_sends_to_nobody():
+    # Distinguishes "no filter" (None) from "filtered down to nothing"
+    # ([]) -- an empty selection must never silently fall back to everyone.
+    db = FakeEmailDB(
+        suggestion_rows=[],
+        recipient_rows=[{'id': 1, 'email': 'a@example.com', 'name': 'A'}],
+    )
+
+    with patch('utils.suggestion_email.send_zeptomail_stocks_email', return_value=(True, 'ok')) as mock_send:
+        summary = send_daily_suggestions_email(db, recipient_ids=[])
+
+    assert summary['recipient_count'] == 0
+    assert summary['sent'] == 0
+    mock_send.assert_not_called()
 
 
 def test_pattern_based_suggestion_shows_pattern_note_instead_of_hold_days():

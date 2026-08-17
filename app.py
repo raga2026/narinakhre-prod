@@ -7122,14 +7122,19 @@ def stocks_suggestions_send_daily_email():
 @app.route('/stocks/suggestions/resend', methods=['GET', 'POST'])
 @stocks_role_required('super_admin')
 def stocks_suggestions_resend():
-    """super_admin-only: re-sends a PAST day's recommendation email to
-    every active viewer, unchanged from however it looked that day (see
+    """super_admin-only: re-sends a PAST day's recommendation email,
+    unchanged from however it looked that day (see
     send_daily_suggestions_email's target_date param) -- for when a send
     needs to go out again (e.g. a design fix, or a recipient who says they
     never got it), without re-running the suggestion engine or affecting
-    today's picks at all. Runs synchronously (unlike the dashboard's other
-    job buttons) -- this is an occasional manual action sending a handful
-    of already-computed emails, not a slow sync job worth backgrounding."""
+    today's picks at all. Defaults to every active viewer, same as the
+    original daily send, but the form lets the admin deselect all and pick
+    specific recipients instead (see send_daily_suggestions_email's
+    recipient_ids param) -- useful for e.g. resending to just the one
+    person who reported a problem, not the whole list again. Runs
+    synchronously (unlike the dashboard's other job buttons) -- this is an
+    occasional manual action sending a handful of already-computed emails,
+    not a slow sync job worth backgrounding."""
     db = get_db()
 
     if request.method == 'POST':
@@ -7137,8 +7142,19 @@ def stocks_suggestions_resend():
         if not target_date:
             flash('Please choose a date to resend.', 'error')
             return redirect(url_for('stocks_suggestions_resend'))
+
+        raw_recipient_ids = request.form.getlist('recipient_ids')
+        if not raw_recipient_ids:
+            flash('Please select at least one recipient.', 'error')
+            return redirect(url_for('stocks_suggestions_resend'))
         try:
-            summary = send_daily_suggestions_email(db, target_date=target_date)
+            recipient_ids = [int(v) for v in raw_recipient_ids]
+        except ValueError:
+            flash('Invalid recipient selection.', 'error')
+            return redirect(url_for('stocks_suggestions_resend'))
+
+        try:
+            summary = send_daily_suggestions_email(db, target_date=target_date, recipient_ids=recipient_ids)
         except Exception as e:
             app.logger.error(f'Manual suggestion resend failed for {target_date}: {e}')
             flash(f'Resend failed: {e}', 'error')
@@ -7147,7 +7163,7 @@ def stocks_suggestions_resend():
         stock_word = 'stock' if summary['suggestion_count'] == 1 else 'stocks'
         message = (
             f"Resent {target_date}'s recommendations ({summary['suggestion_count']} {stock_word}) "
-            f"to {summary['sent']} of {summary['recipient_count']} recipients"
+            f"to {summary['sent']} of {summary['recipient_count']} selected recipients"
             + (f", {summary['failed']} failed" if summary['failed'] else '') + '.'
         )
         flash(message, 'error' if summary['failed'] else 'info')
@@ -7156,9 +7172,11 @@ def stocks_suggestions_resend():
     dates = db.execute(
         'SELECT DISTINCT suggestion_date FROM stock_suggestions ORDER BY suggestion_date DESC LIMIT 90'
     ).fetchall()
+    recipients = [v for v in list_viewers(db) if v.get('is_active')]
     return render_template(
         'admin/stocks_suggestions_resend.html',
         dates=[d['suggestion_date'] for d in dates],
+        recipients=recipients,
     )
 
 
