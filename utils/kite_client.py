@@ -100,3 +100,63 @@ class KiteClient:
                 'volume': candle['volume'],
             })
         return records
+
+    def place_market_order(self, tradingsymbol, exchange, transaction_type, quantity):
+        """Places a real, immediate-execution market order -- BUY or SELL
+        (transaction_type), product=CNC (equity delivery/investment, held
+        toward a target/stop-loss rather than squared off same-day like an
+        intraday MIS order would be). Used only by utils/auto_trader.py's
+        live mode -- see its module docstring.
+
+        tradingsymbol MUST be Kite's own tradingsymbol for this listing
+        (see utils.kite_instrument_map.get_cached_kite_tradingsymbol), NOT
+        this app's internal stock_watchlist.symbol -- for a lot of BSE
+        listings those are different strings (often a numeric scrip code
+        on our side), and Kite's order API will reject or mis-resolve a
+        tradingsymbol it doesn't recognize.
+
+        Regulatory note this class does NOT resolve on its own: exchange
+        rules require API-placed orders originating from an automated
+        strategy to carry an Algo ID registered with the broker/exchange
+        under NSE/BSE's retail algo-trading framework. No algo_id/tag is
+        passed here -- if that requirement is enforced on this account,
+        Kite may reject orders placed this way until one is registered.
+        That's a compliance decision for the account holder, not something
+        to guess a value for here.
+
+        Returns Kite's order_id (str). Raises KiteClientError (wrapping
+        whatever pykiteconnect raised -- e.g. insufficient margin, invalid
+        tradingsymbol, market closed) on rejection; never swallowed, since
+        a failed real order is never something a caller should silently
+        treat as success."""
+        try:
+            return self._kite.place_order(
+                variety=self._kite.VARIETY_REGULAR,
+                exchange=exchange,
+                tradingsymbol=tradingsymbol,
+                transaction_type=transaction_type,
+                quantity=quantity,
+                product=self._kite.PRODUCT_CNC,
+                order_type=self._kite.ORDER_TYPE_MARKET,
+            )
+        except Exception as e:
+            raise KiteClientError(f'Kite order placement failed ({transaction_type} {quantity} {tradingsymbol}): {e}')
+
+    def get_order_fill(self, order_id):
+        """Returns {'status', 'average_price', 'filled_quantity'} for
+        order_id, reflecting its LATEST lifecycle update (Kite's
+        order_history returns every status change oldest-first; the last
+        entry is the current state). None if Kite has no history for this
+        order_id at all. status is one of Kite's own values -- callers
+        care specifically about 'COMPLETE' (average_price is the real fill
+        price to record) vs. anything else (not yet actionable -- still
+        'OPEN'/'TRIGGER PENDING', or failed -- 'REJECTED'/'CANCELLED')."""
+        history = self._kite.order_history(order_id)
+        if not history:
+            return None
+        latest = history[-1]
+        return {
+            'status': latest.get('status'),
+            'average_price': latest.get('average_price'),
+            'filled_quantity': latest.get('filled_quantity'),
+        }

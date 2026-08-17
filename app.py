@@ -74,6 +74,8 @@ from utils.auto_trader import (
     set_auto_trade_settings,
     open_auto_trade_if_enabled,
     reconcile_open_trades,
+    reconcile_pending_buys,
+    reconcile_pending_sells,
     confirm_stop_loss_sell,
     cancel_stop_loss_sell,
     compute_pnl as compute_auto_trade_pnl,
@@ -82,9 +84,11 @@ from utils.auto_trader import (
     list_auto_trades,
     DEFAULT_BUDGET_PER_TRADE as DEFAULT_AUTO_TRADE_BUDGET,
     DEFAULT_TOTAL_CAPITAL as DEFAULT_AUTO_TRADE_TOTAL_CAPITAL,
+    MODE_DRY_RUN,
+    MODE_LIVE,
     STOP_LOSS_ALERT_EMAIL,
 )
-from utils.kite_client import KiteClient
+from utils.kite_client import KiteClient, KiteClientError
 from utils.kite_instrument_map import (
     initialize_kite_instrument_map_table_if_needed,
     sync_kite_instrument_map,
@@ -7085,15 +7089,24 @@ def stocks_suggestions_send_daily_email():
             return {'status': 'skipped', 'reason': 'not a trading day'}
         try:
             generation_summary = generate_daily_suggestions(job_db)
-            for created in generation_summary.get('created', []):
-                # Dry-run only (see utils/auto_trader.py) -- a no-op unless
-                # a super_admin has explicitly turned this on from
-                # /stocks/auto-trader. Failures here must never take the
-                # actual suggestion email down with them.
+            if generation_summary.get('created'):
+                # A no-op unless a super_admin has explicitly turned this
+                # on from /stocks/auto-trader. Failures here must never
+                # take the actual suggestion email down with them -- see
+                # utils/auto_trader.py's module docstring for dry_run vs
+                # live behavior.
                 try:
-                    open_auto_trade_if_enabled(job_db, created)
+                    auto_trade_settings = get_auto_trade_settings(job_db)
+                    auto_trade_kite_client = _kite_client_for_auto_trade(job_db, auto_trade_settings)
                 except Exception as e:
-                    app.logger.error(f'Auto-trade open failed for {created.get("symbol")}: {e}')
+                    app.logger.error(f'Auto-trade Kite session unavailable: {e}')
+                    auto_trade_settings, auto_trade_kite_client = None, None
+                if auto_trade_settings is not None:
+                    for created in generation_summary['created']:
+                        try:
+                            open_auto_trade_if_enabled(job_db, created, kite_client=auto_trade_kite_client)
+                        except Exception as e:
+                            app.logger.error(f'Auto-trade open failed for {created.get("symbol")}: {e}')
             summary = send_daily_suggestions_email(job_db)
         except Exception as e:
             app.logger.error(f'Daily suggestions email failed: {e}')
@@ -8002,25 +8015,37 @@ def stocks_recommendations_tracker():
     return render_template('admin/stocks_recommendation_tracker.html', tracker_rows=tracker_rows)
 
 
+def _kite_client_for_auto_trade(db, settings):
+    """Returns a KiteClient when settings['mode'] == 'live' (real orders
+    need a real session), None for dry_run (never touches Kite at all).
+    Raises the same clear error stocks_super_sync etc. already surface
+    when no Kite session exists yet, rather than a bare AttributeError
+    later when a None client gets called."""
+    if settings['mode'] != MODE_LIVE:
+        return None
+    access_token = get_kite_access_token(db)
+    if not access_token:
+        raise KiteClientError('No Kite session yet -- a super_admin must log in via /admin/stocks/kite/login first.')
+    return KiteClient(access_token=access_token)
+
+
 @app.route('/stocks/auto-trader', methods=['GET'])
 @stocks_role_required('super_admin')
 def stocks_auto_trader():
-    """Dry-run auto-trading dashboard -- super_admin only (see
-    utils/auto_trader.py's module docstring for exactly what this does and
-    doesn't do: it simulates a fixed-budget buy on every new Pick of the
-    Day and closes it against target/stop-loss using real synced prices,
-    but never places a real Kite order -- there is no live mode wired up
-    yet). Shows every simulated trade ever opened, newest first, with
-    running P&L."""
+    """Auto-trading dashboard -- super_admin only (see utils/auto_trader.py's
+    module docstring for exactly what dry_run vs live mode each do, and the
+    stop-loss handling that's identical in both: never auto-sold, always a
+    manual Proceed/Cancel). Shows every trade ever opened, newest first,
+    with running P&L."""
     db = get_db()
     settings = get_auto_trade_settings(db)
     trades = list_auto_trades(db)
-    open_count = sum(1 for t in trades if t['status'] == 'open')
-    pending_count = sum(1 for t in trades if t['status'] == 'stop_loss_pending')
+    open_count = sum(1 for t in trades if t['status'] in ('open', 'pending_buy'))
+    pending_count = sum(1 for t in trades if t['status'] in ('stop_loss_pending', 'pending_sell'))
     closed_trades = [t for t in trades if t['status'] in ('target_hit', 'stopped_out')]
     total_pnl = sum(t['pnl_amount'] for t in closed_trades if t.get('pnl_amount') is not None)
     win_count = sum(1 for t in closed_trades if t['status'] == 'target_hit')
-    deployed_capital = get_deployed_capital(db)
+    deployed_capital = get_deployed_capital(db, settings['mode'])
     available_funds = compute_available_funds(settings['total_capital'], deployed_capital)
     return render_template(
         'admin/stocks_auto_trader.html', settings=settings, trades=trades,
@@ -8035,6 +8060,7 @@ def stocks_auto_trader():
 def stocks_auto_trader_settings():
     db = get_db()
     enabled = request.form.get('enabled') == 'on'
+    mode = MODE_LIVE if (request.form.get('mode') == 'live' and request.form.get('confirm_live') == 'on') else MODE_DRY_RUN
     try:
         budget = float(request.form.get('budget_per_trade') or DEFAULT_AUTO_TRADE_BUDGET)
     except ValueError:
@@ -8043,9 +8069,10 @@ def stocks_auto_trader_settings():
         total_capital = float(request.form.get('total_capital') or DEFAULT_AUTO_TRADE_TOTAL_CAPITAL)
     except ValueError:
         total_capital = DEFAULT_AUTO_TRADE_TOTAL_CAPITAL
-    set_auto_trade_settings(db, enabled, budget, total_capital)
+    set_auto_trade_settings(db, enabled, budget, total_capital, mode=mode)
+    mode_label = 'LIVE -- real orders' if mode == MODE_LIVE else 'dry-run (simulated)'
     flash(
-        f'Auto-trading {"enabled" if enabled else "disabled"} (dry-run), '
+        f'Auto-trading {"enabled" if enabled else "disabled"}, mode: {mode_label}, '
         f'budget Rs {budget:,.0f} per pick, Rs {total_capital:,.0f} total capital.',
         'info'
     )
@@ -8054,12 +8081,13 @@ def stocks_auto_trader_settings():
 
 @app.route('/stocks/auto-trader/reconcile', methods=['POST'])
 def stocks_auto_trader_reconcile():
-    """Daily cron-triggered: auto-closes any open dry-run trade that's hit
-    its target, and emails STOP_LOSS_ALERT_EMAIL for any that have hit
-    their stop-loss instead (never auto-closed -- see
-    utils.auto_trader.reconcile_open_trades' module docstring for why the
-    two exits are handled differently). Same dual auth as every other
-    Stocks cron route; should run after price_sync each day."""
+    """Daily cron-triggered: auto-closes any open trade that's hit its
+    target, and emails STOP_LOSS_ALERT_EMAIL for any that have hit their
+    stop-loss instead (never auto-sold, in either mode -- see
+    utils.auto_trader's module docstring). Also picks up any live order
+    that hadn't filled the moment it was placed (reconcile_pending_buys/
+    reconcile_pending_sells). Same dual auth as every other Stocks cron
+    route; should run after price_sync each day."""
     is_cron = has_valid_cron_secret(request.headers, STOCKS_FUNDAMENTALS_CRON_SECRET)
     if not is_cron and not session.get('stocks_admin_id'):
         return redirect(url_for('stocks_admin_login'))
@@ -8068,7 +8096,16 @@ def stocks_auto_trader_reconcile():
 
     def _job(job_db):
         try:
-            summary = reconcile_open_trades(job_db)
+            settings = get_auto_trade_settings(job_db)
+            kite_client = _kite_client_for_auto_trade(job_db, settings)
+
+            pending_buys_summary = {'checked': 0, 'filled': 0, 'failed': 0}
+            pending_sells_summary = {'checked': 0, 'closed': 0}
+            if kite_client is not None:
+                pending_buys_summary = reconcile_pending_buys(job_db, kite_client)
+                pending_sells_summary = reconcile_pending_sells(job_db, kite_client)
+
+            summary = reconcile_open_trades(job_db, kite_client=kite_client)
             for trade in summary.get('stop_loss_pending', []):
                 pnl_amount, pnl_pct = compute_auto_trade_pnl(
                     trade['buy_price'], trade['stop_loss_triggered_price'], trade['quantity']
@@ -8082,8 +8119,11 @@ def stocks_auto_trader_reconcile():
             alert_job_error(job_db, 'auto_trade_reconcile', str(e))
             raise
         record_job_success(job_db, 'auto_trade_reconcile')
-        return {'checked': summary['checked'], 'target_hit': summary['target_hit'],
-                'stop_loss_pending': len(summary['stop_loss_pending'])}
+        return {
+            'checked': summary['checked'], 'target_hit': summary['target_hit'],
+            'stop_loss_pending': len(summary['stop_loss_pending']),
+            'pending_buys': pending_buys_summary, 'pending_sells': pending_sells_summary,
+        }
 
     return _dispatch_stocks_job(db, is_cron, 'auto_trade_reconcile', _job)
 
@@ -8091,10 +8131,17 @@ def stocks_auto_trader_reconcile():
 @app.route('/stocks/auto-trader/<int:trade_id>/proceed', methods=['POST'])
 @stocks_role_required('super_admin')
 def stocks_auto_trader_proceed(trade_id):
-    """Manually confirms a pending stop-loss -- books the loss at the
-    price that triggered it (see confirm_stop_loss_sell)."""
-    ok = confirm_stop_loss_sell(get_db(), trade_id)
-    flash('Stop-loss confirmed -- position closed.' if ok else 'That trade is not awaiting a stop-loss decision.', 'info')
+    """Manually confirms a pending stop-loss -- dry_run books the loss at
+    the price that triggered it; live places a real sell order right now
+    (see confirm_stop_loss_sell)."""
+    db = get_db()
+    settings = get_auto_trade_settings(db)
+    try:
+        kite_client = _kite_client_for_auto_trade(db, settings)
+        ok = confirm_stop_loss_sell(db, trade_id, kite_client=kite_client)
+        flash('Stop-loss confirmed -- position closed.' if ok else 'That trade is not awaiting a stop-loss decision.', 'info')
+    except KiteClientError as e:
+        flash(f'Could not place the sell order: {e}', 'error')
     return redirect(url_for('stocks_auto_trader'))
 
 
@@ -8102,7 +8149,8 @@ def stocks_auto_trader_proceed(trade_id):
 @stocks_role_required('super_admin')
 def stocks_auto_trader_cancel(trade_id):
     """Manually cancels a pending stop-loss -- keeps holding, puts the
-    trade back to 'open' (see cancel_stop_loss_sell)."""
+    trade back to 'open' (see cancel_stop_loss_sell). Same in both modes
+    -- no order was ever placed to cancel."""
     ok = cancel_stop_loss_sell(get_db(), trade_id)
     flash('Kept the position open.' if ok else 'That trade is not awaiting a stop-loss decision.', 'info')
     return redirect(url_for('stocks_auto_trader'))
@@ -8137,7 +8185,7 @@ def _render_stocks_checkout(admin_id, email, name):
     if not RAZORPAY_STOCKS_PLAN_ID:
         app.logger.error('RAZORPAY_STOCKS_PLAN_ID is not set -- cannot start a Stocks subscription checkout.')
         flash('Sign-ups are temporarily unavailable. Please try again shortly.', 'error')
-        return redirect(url_for('stocks_landing'))
+        return redirect(url_for('stocks_signup'))
 
     try:
         subscription = razorpay_client.subscription.create({
@@ -8149,7 +8197,7 @@ def _render_stocks_checkout(admin_id, email, name):
     except Exception as e:
         app.logger.error(f'Razorpay subscription.create failed for admin_id={admin_id}: {e}')
         flash('Could not start checkout right now. Please try again shortly.', 'error')
-        return redirect(url_for('stocks_landing'))
+        return redirect(url_for('stocks_signup'))
 
     db = get_db()
     attach_razorpay_subscription(db, admin_id, None, subscription['id'])
@@ -8183,10 +8231,15 @@ def stocks_signup():
 
     if (request.form.get('system_verification_token') or '').strip():
         app.logger.warning(f'Bot caught on stocks signup (honeypot): {request.form.get("email")}')
-        return redirect(url_for('stocks_landing'))
+        return redirect(url_for('stocks_signup'))
     if contact_form_is_bot(request.form.get('form_rendered_at')):
         app.logger.warning(f'Bot caught on stocks signup (timing): {request.form.get("email")}')
-        return redirect(url_for('stocks_landing'))
+        # A genuine user CAN trip this (browser autofill filling every
+        # field near-instantly, then submitting fast) -- unlike the
+        # honeypot check above (which a real person can't trigger at all),
+        # this one needs a visible way back in rather than a silent bounce.
+        flash('Please try submitting the form again.', 'error')
+        return redirect(url_for('stocks_signup'))
     client_ip = request.remote_addr or 'unknown'
     if contact_ip_is_rate_limited(client_ip):
         flash('Please wait a moment before trying again.', 'error')

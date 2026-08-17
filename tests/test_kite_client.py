@@ -5,13 +5,25 @@ from utils.kite_client import KiteClient, KiteClientError
 
 class FakeKite:
     """Stands in for pykiteconnect's KiteConnect -- just the methods
-    fetch_daily_candles()/fetch_instruments() call."""
+    fetch_daily_candles()/fetch_instruments()/place_market_order()/
+    get_order_fill() call. Class-level constants mirror the real
+    KiteConnect's own (VARIETY_REGULAR='regular', etc.) since
+    place_market_order references them off self._kite directly."""
 
-    def __init__(self, ltp_response=None, historical_data_response=None, instruments_response=None):
+    VARIETY_REGULAR = 'regular'
+    PRODUCT_CNC = 'CNC'
+    ORDER_TYPE_MARKET = 'MARKET'
+
+    def __init__(self, ltp_response=None, historical_data_response=None, instruments_response=None,
+                 place_order_response=None, place_order_error=None, order_history_response=None):
         self._ltp_response = ltp_response if ltp_response is not None else {}
         self._historical_data_response = historical_data_response or []
         self._instruments_response = instruments_response or []
+        self._place_order_response = place_order_response
+        self._place_order_error = place_order_error
+        self._order_history_response = order_history_response or []
         self.ltp_call_count = 0
+        self.place_order_calls = []
 
     def ltp(self, instrument_keys):
         self.ltp_call_count += 1
@@ -22,6 +34,15 @@ class FakeKite:
 
     def instruments(self, exchange):
         return self._instruments_response
+
+    def place_order(self, **kwargs):
+        self.place_order_calls.append(kwargs)
+        if self._place_order_error:
+            raise self._place_order_error
+        return self._place_order_response
+
+    def order_history(self, order_id):
+        return self._order_history_response
 
 
 def test_missing_instrument_in_ltp_response_raises_clear_error_not_bare_keyerror():
@@ -89,3 +110,55 @@ def test_fetch_instruments_returns_kite_instrument_list_as_is():
     assert result == [
         {'tradingsymbol': 'BLISSGVS', 'name': 'BLISS GVS PHARMA LIMITED', 'instrument_token': 999, 'exchange': 'BSE'},
     ]
+
+
+# --- place_market_order / get_order_fill ------------------------------------
+
+def test_place_market_order_sends_correct_params_and_returns_order_id():
+    fake_kite = FakeKite(place_order_response='250817000012345')
+    client = KiteClient(kite=fake_kite)
+
+    order_id = client.place_market_order('GOODCO', 'NSE', 'BUY', 60)
+
+    assert order_id == '250817000012345'
+    assert len(fake_kite.place_order_calls) == 1
+    call = fake_kite.place_order_calls[0]
+    assert call['tradingsymbol'] == 'GOODCO'
+    assert call['exchange'] == 'NSE'
+    assert call['transaction_type'] == 'BUY'
+    assert call['quantity'] == 60
+    assert call['product'] == FakeKite.PRODUCT_CNC
+    assert call['order_type'] == FakeKite.ORDER_TYPE_MARKET
+    assert call['variety'] == FakeKite.VARIETY_REGULAR
+
+
+def test_place_market_order_wraps_a_rejection_in_kite_client_error():
+    fake_kite = FakeKite(place_order_error=Exception('Insufficient funds'))
+    client = KiteClient(kite=fake_kite)
+
+    try:
+        client.place_market_order('GOODCO', 'NSE', 'BUY', 60)
+        assert False, 'expected KiteClientError'
+    except KiteClientError as e:
+        assert 'GOODCO' in str(e)
+        assert 'BUY' in str(e)
+        assert 'Insufficient funds' in str(e)
+
+
+def test_get_order_fill_returns_the_latest_status():
+    fake_kite = FakeKite(order_history_response=[
+        {'status': 'OPEN', 'average_price': 0, 'filled_quantity': 0},
+        {'status': 'COMPLETE', 'average_price': 413.5, 'filled_quantity': 60},
+    ])
+    client = KiteClient(kite=fake_kite)
+
+    fill = client.get_order_fill('250817000012345')
+
+    assert fill == {'status': 'COMPLETE', 'average_price': 413.5, 'filled_quantity': 60}
+
+
+def test_get_order_fill_returns_none_for_unknown_order():
+    fake_kite = FakeKite(order_history_response=[])
+    client = KiteClient(kite=fake_kite)
+
+    assert client.get_order_fill('nonexistent') is None

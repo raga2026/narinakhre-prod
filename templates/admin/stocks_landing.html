@@ -29,6 +29,16 @@
         </div>
     </div>
 
+    {% with messages = get_flashed_messages(with_categories=true) %}
+    {% if messages %}
+        <div class="max-w-6xl mx-auto px-6 pt-6" role="alert" aria-live="assertive">
+        {% for category, msg in messages %}
+            <div class="bg-sky-900/40 text-sky-200 border border-sky-500/30 rounded-xl p-3 mb-2 text-sm">{{ msg }}</div>
+        {% endfor %}
+        </div>
+    {% endif %}
+    {% endwith %}
+
     <!-- Hero -->
     <div class="hero-glow">
         <div class="max-w-6xl mx-auto px-6 pt-16 pb-14 grid md:grid-cols-2 gap-12 items-center">

@@ -27,9 +27,13 @@ WORST_CANDIDATE = {
 
 
 def test_excellent_candidate_scores_a_perfect_ten():
+    # No cross_status here -- golden_cross_bonus is 0.0, the other ten are
+    # all 1.0 (see the golden-cross-specific tests below for the bonus
+    # itself).
     score, breakdown = compute_nns_score(EXCELLENT_CANDIDATE, EXCELLENT_PREVIOUS)
     assert score == 10.0
-    assert all(v == 1.0 for v in breakdown.values())
+    assert breakdown['golden_cross_bonus'] == 0.0
+    assert all(v == 1.0 for k, v in breakdown.items() if k != 'golden_cross_bonus')
 
 
 def test_worst_candidate_scores_zero():
@@ -47,8 +51,39 @@ def test_ten_sub_scores_are_all_present_in_breakdown():
     _, breakdown = compute_nns_score(EXCELLENT_CANDIDATE, EXCELLENT_PREVIOUS)
     assert set(breakdown.keys()) == {
         'pe_fit', 'peg', 'opm', 'roce', 'roa', 'profit_growth', 'revenue_growth',
-        'price_to_book_fit', 'rsi_position', 'holding_trend',
+        'price_to_book_fit', 'rsi_position', 'holding_trend', 'golden_cross_bonus',
     }
+
+
+# --- golden_cross_bonus --------------------------------------------------
+
+def test_golden_cross_adds_the_bonus_for_an_otherwise_middling_candidate():
+    middling = {
+        'pe_ratio': 20, 'peg_ratio': 2.0, 'opm_pct': 0, 'roce_pct': 0, 'roa_pct': 0,
+        'quarterly_profit_growth_pct': 0, 'quarterly_revenue_growth_pct': 0,
+        'price_to_book': 999, 'rsi_14': None, 'promoter_holding_pct': None, 'fii_holding_pct': None,
+    }
+    without_cross = compute_nns_score(middling, previous_fundamentals_row=None)
+    with_cross = compute_nns_score({**middling, 'cross_status': 'golden_cross'}, previous_fundamentals_row=None)
+
+    assert with_cross[1]['golden_cross_bonus'] == 0.5
+    assert with_cross[0] == round(without_cross[0] + 0.5, 1)
+
+
+def test_golden_cross_bonus_is_zero_for_death_cross_or_no_cross_status():
+    row = {**WORST_CANDIDATE, 'cross_status': 'death_cross'}
+    _, breakdown = compute_nns_score(row, previous_fundamentals_row=None)
+    assert breakdown['golden_cross_bonus'] == 0.0
+
+    _, breakdown = compute_nns_score(WORST_CANDIDATE, previous_fundamentals_row=None)
+    assert breakdown['golden_cross_bonus'] == 0.0
+
+
+def test_golden_cross_bonus_does_not_push_score_above_ten():
+    already_perfect = {**EXCELLENT_CANDIDATE, 'cross_status': 'golden_cross'}
+    score, breakdown = compute_nns_score(already_perfect, EXCELLENT_PREVIOUS)
+    assert breakdown['golden_cross_bonus'] == 0.5
+    assert score == 10.0  # capped, not 10.5
 
 
 # --- pe_fit -------------------------------------------------------------

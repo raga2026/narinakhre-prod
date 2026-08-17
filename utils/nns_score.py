@@ -55,6 +55,20 @@ GROWTH_EXCELLENT_PCT = 30
 RSI_CENTER = 52.5
 RSI_HALF_WIDTH = 12.5  # (65 - 40) / 2
 
+# Added on top of the ten fundamental/technical sub-scores below (then the
+# total is capped back to 10.0), rather than as an eleventh full 0-1
+# sub-score -- that would push the natural maximum past 10 and quietly
+# change what every existing NNS_GOLDEN_MIN/SILVER_MIN/BRONZE_MIN threshold
+# (and every "out of 10" badge in the UI) actually means. This way a
+# golden-cross stock always scores strictly higher than an otherwise
+# identical one without it, without moving the scale anyone already reads
+# this score against. Own judgment call on the size (same as the
+# ROCE/ROA/growth ceilings above), not derived from anything published --
+# meaningful enough to matter at a tier boundary, small enough that a weak
+# golden-cross stock still can't outscore a strong non-crossed one on
+# fundamentals alone.
+GOLDEN_CROSS_BONUS = 0.5
+
 # Tier thresholds -- the NNS Score's own golden/silver/bronze categories,
 # separate from (and more granular than) fundamental_screen.py's
 # golden/silver watchlist-membership tiers. A score below NNS_BRONZE_MIN
@@ -140,16 +154,17 @@ def _holding_trend_score(fundamentals_row, previous_fundamentals_row):
 def compute_nns_score(candidate, previous_fundamentals_row=None, industry_benchmarks=None):
     """candidate: dict-like with pe_ratio, peg_ratio, opm_pct, roce_pct,
     roa_pct, quarterly_profit_growth_pct, quarterly_revenue_growth_pct,
-    price_to_book, rsi_14, promoter_holding_pct, fii_holding_pct.
-    industry_benchmarks: this candidate's own industry's {'pe_ratio',
-    'price_to_book'} benchmark dict -- see
+    price_to_book, rsi_14, promoter_holding_pct, fii_holding_pct,
+    cross_status. industry_benchmarks: this candidate's own industry's
+    {'pe_ratio', 'price_to_book'} benchmark dict -- see
     stock_shortlist._compute_industry_benchmarks; omit/None falls back to
     the flat bands, same as fundamental_screen.py's own screening.
 
     Returns (score: float 0-10 with one decimal, breakdown: dict of the
-    ten individual 0-1 sub-scores) -- the breakdown is returned so a
-    caller (or a future "why this score" display) can show which specific
-    parameters helped or hurt, not just the final number."""
+    ten individual 0-1 sub-scores plus 'golden_cross_bonus') -- the
+    breakdown is returned so a caller (or a future "why this score"
+    display) can show which specific parameters helped or hurt, not just
+    the final number."""
     pe_lo, pe_hi = _pe_band(industry_benchmarks)
     pb_ceiling = _price_to_book_ceiling(industry_benchmarks)
 
@@ -172,8 +187,9 @@ def compute_nns_score(candidate, previous_fundamentals_row=None, industry_benchm
         'rsi_position': rsi_position,
         'holding_trend': _holding_trend_score(candidate, previous_fundamentals_row),
     }
+    breakdown['golden_cross_bonus'] = GOLDEN_CROSS_BONUS if candidate.get('cross_status') == 'golden_cross' else 0.0
 
-    score = round(sum(breakdown.values()), 1)
+    score = round(min(10.0, sum(breakdown.values())), 1)
     return score, breakdown
 
 

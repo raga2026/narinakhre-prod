@@ -112,14 +112,33 @@ def initialize_stock_suggestions_table_if_needed(client):
 
 def passes_hard_filters(candidate):
     """candidate is dict-like with cross_status/volume_trend/rsi_14 keys.
-    All three must pass for a candidate to be suggestion-eligible at all,
-    regardless of how well it would otherwise score."""
+    All three must pass. NOT used to gate suggestion generation anymore
+    (see is_suggestion_eligible/generate_daily_suggestions below, and the
+    module docstring note on why -- this exact three-way combination
+    proved too strict against a ~40-company watchlist and produced zero
+    suggestions for days on end) -- kept only for the "Recommended to buy"
+    badge on /stocks/watchlist (see enrich_and_sort_watchlist_rows), a
+    stricter, purely informational label distinct from what actually gets
+    sent as the Pick of the Day."""
     return (
         candidate.get('cross_status') == 'golden_cross'
         and candidate.get('volume_trend') == 'confirming'
         and candidate.get('rsi_14') is not None
         and RSI_MIN <= candidate['rsi_14'] <= RSI_MAX
     )
+
+
+def is_suggestion_eligible(candidate):
+    """The actual gate for suggestion generation (see generate_daily_suggestions/
+    select_top_suggestions) -- golden cross is required, full stop, but
+    that's it: no separate volume-trend or RSI hard cutoff. RSI still
+    matters, just as one of the NNS Score's own ten sub-scores (see
+    utils.nns_score.compute_nns_score's rsi_position) rather than an
+    all-or-nothing gate -- a candidate with poor RSI scores lower and
+    ranks behind better ones, it doesn't get excluded outright over it
+    alone. Quality is enforced afterward by score_candidates' own
+    NNS_BRONZE_MIN floor, not here."""
+    return candidate.get('cross_status') == 'golden_cross'
 
 
 def score_candidates(candidates, previous_snapshots_by_watchlist=None, industry_benchmarks_by_industry=None):
@@ -135,10 +154,10 @@ def score_candidates(candidates, previous_snapshots_by_watchlist=None, industry_
 
     Returns [(candidate, score), ...] sorted highest score first,
     EXCLUDING anything that doesn't reach at least NNS_BRONZE_MIN --
-    passing the hard filters gets a candidate INTO consideration here, not
-    automatically a suggestion (see passes_hard_filters / nns_tier). Does
-    NOT apply passes_hard_filters itself -- callers are expected to filter
-    first (see select_top_suggestions)."""
+    being golden-cross gets a candidate INTO consideration here, not
+    automatically a suggestion (see is_suggestion_eligible / nns_tier).
+    Does NOT apply is_suggestion_eligible itself -- callers are expected
+    to filter first (see select_top_suggestions)."""
     previous_snapshots_by_watchlist = previous_snapshots_by_watchlist or {}
     industry_benchmarks_by_industry = industry_benchmarks_by_industry or {}
 
@@ -157,25 +176,39 @@ def score_candidates(candidates, previous_snapshots_by_watchlist=None, industry_
 
 def select_top_suggestions(candidates, top_n=TOP_N_SUGGESTIONS, previous_snapshots_by_watchlist=None,
                             industry_benchmarks_by_industry=None):
-    """Filters candidates to hard-filter-passers, scores them (see
-    score_candidates), and returns the top_n as [(candidate, score), ...],
-    highest first. Returns fewer than top_n (even zero) if fewer candidates
-    pass the hard filters or clear the NNS_BRONZE_MIN scoring floor --
-    never pads with filter-failing or below-bronze candidates just to
-    reach a count."""
-    eligible = [c for c in candidates if passes_hard_filters(c)]
+    """Filters candidates to golden-cross ones (see is_suggestion_eligible),
+    scores them (see score_candidates), and returns the top_n as
+    [(candidate, score), ...], highest first -- since score_candidates
+    sorts strictly by score descending and a silver-or-better score (>=
+    NNS_SILVER_MIN) always outranks any bronze one, this naturally prefers
+    silver+ candidates and only ever falls through to a bronze one when no
+    silver+ candidate exists at all, with no separate two-pass logic
+    needed for that. Returns fewer than top_n (even zero) if fewer
+    candidates are golden-cross or clear the NNS_BRONZE_MIN scoring floor
+    -- never pads with a non-golden-cross or below-bronze candidate just
+    to reach a count."""
+    eligible = [c for c in candidates if is_suggestion_eligible(c)]
     if not eligible:
         return []
     return score_candidates(eligible, previous_snapshots_by_watchlist, industry_benchmarks_by_industry)[:top_n]
 
 
-def _build_rationale(candidate):
-    parts = ['Golden cross with confirming volume']
+def _build_rationale(candidate, tier=None):
+    parts = ['Golden cross']
+    if candidate.get('volume_trend') == 'confirming':
+        parts.append('confirming volume')
     if candidate.get('peg_ratio') is not None:
         parts.append(f"PEG {candidate['peg_ratio']:.2f}")
     if candidate.get('opm_pct') is not None:
         parts.append(f"OPM {candidate['opm_pct']:.0f}%")
-    return ', '.join(parts)
+    rationale = ', '.join(parts)
+    if tier == 'bronze':
+        rationale += (
+            '. Bronze-tier NNS Score (weaker profile than our usual silver/golden picks, sent only because '
+            'nothing stronger cleared the bar today) -- extra caution advised; research this one more closely '
+            'than usual before acting.'
+        )
+    return rationale
 
 
 _PATTERN_LABELS = {
@@ -463,10 +496,17 @@ def get_recommendation_tracker(db):
 def generate_daily_suggestions(db):
     """Builds the candidate pool (active watchlist joined to today's
     indicators and each symbol's latest fundamentals snapshot within 20
-    days), applies the hard filters and NNS Score ranking (see
-    utils.nns_score.compute_nns_score), and works down that ranked list
-    looking for the single "Pick of the Day" (TOP_N_SUGGESTIONS -- see its
-    definition) to insert as a stock_suggestions row.
+    days), narrows to golden-cross candidates and ranks them by NNS Score
+    (see is_suggestion_eligible/score_candidates, utils.nns_score.compute_nns_score),
+    and works down that ranked list looking for the single "Pick of the
+    Day" (TOP_N_SUGGESTIONS -- see its definition) to insert as a
+    stock_suggestions row. Because score_candidates sorts strictly by
+    score descending, this naturally tries every silver-or-better
+    candidate (NNS_SILVER_MIN, 6.0+) before ever falling through to a
+    bronze one (4.0-6.0) -- a bronze pick only ever goes out when nothing
+    silver+ is both golden-cross and off cooldown that day, and gets an
+    explicit caution note in its rationale (see _build_rationale) rather
+    than being presented the same as a stronger pick.
 
     A candidate is SKIPPED, falling through to the next-ranked one, if it
     already has an open (status='pending') suggestion from within the last
@@ -493,7 +533,7 @@ def generate_daily_suggestions(db):
     candidates = _fetch_candidates(db)
     previous_snapshots_by_watchlist = _fetch_previous_snapshots(db, candidates)
     industry_benchmarks_by_industry = _compute_industry_benchmarks(candidates)
-    eligible = [c for c in candidates if passes_hard_filters(c)]
+    eligible = [c for c in candidates if is_suggestion_eligible(c)]
     ranked = score_candidates(eligible, previous_snapshots_by_watchlist, industry_benchmarks_by_industry)
 
     today = date.today().isoformat()
@@ -528,8 +568,8 @@ def generate_daily_suggestions(db):
         stop_loss_price = pricing['stop_loss_price']
         pattern_name = pricing['pattern_name']
         pattern_note = _build_pattern_note(pattern_name, pricing['pattern_research'])
-        rationale = _build_rationale(candidate)
         tier = nns_tier(nns_score)
+        rationale = _build_rationale(candidate, tier)
 
         db.execute(
             '''INSERT INTO stock_suggestions

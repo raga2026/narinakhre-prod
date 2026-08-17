@@ -4,7 +4,9 @@ from utils.suggestion_engine import (
     HOLDING_PERIOD_DAYS,
     SUGGESTION_REPEAT_WINDOW_DAYS,
     TOP_N_SUGGESTIONS,
+    _build_rationale,
     generate_daily_suggestions,
+    is_suggestion_eligible,
     passes_hard_filters,
     score_candidates,
     select_top_suggestions,
@@ -46,21 +48,79 @@ def test_scoring_picks_the_objectively_better_candidate():
     assert scored[0][1] > scored[1][1]
 
 
-def test_candidate_failing_rsi_range_excluded_even_with_great_score():
-    # Excellent fundamentals, but RSI is way outside the 40-65 window.
-    great_but_overbought = _candidate(1, 'OVERBOUGHT', rsi_14=85)
-    mediocre_but_in_range = _candidate(
-        2, 'INRANGE', peg_ratio=0.9, quarterly_profit_growth_pct=11, opm_pct=26, roce_pct=10, roa_pct=5,
-    )
+def test_rsi_outside_range_lowers_score_but_no_longer_excludes_outright():
+    # RSI moved from a hard pass/fail gate to just one of NNS Score's ten
+    # sub-scores (rsi_position) -- a golden-cross candidate with terrible
+    # RSI now ranks BEHIND a similar one with ideal RSI, instead of being
+    # excluded from consideration entirely (see is_suggestion_eligible).
+    overbought = _candidate(1, 'OVERBOUGHT', rsi_14=85)
+    ideal_rsi = _candidate(2, 'IDEALRSI', rsi_14=52.5)
 
-    assert passes_hard_filters(great_but_overbought) is False
-    assert passes_hard_filters(mediocre_but_in_range) is True
+    assert passes_hard_filters(overbought) is False  # still fails the OLD, now-unused hard filter
+    top = select_top_suggestions([overbought], top_n=5)
+    assert [c['symbol'] for c, _ in top] == ['OVERBOUGHT']  # included on its own
 
-    top = select_top_suggestions([great_but_overbought, mediocre_but_in_range])
+    ranked = score_candidates([overbought, ideal_rsi])
+    assert [c['symbol'] for c, _ in ranked] == ['IDEALRSI', 'OVERBOUGHT']  # still ranks worse
 
-    symbols = [c['symbol'] for c, _ in top]
-    assert 'OVERBOUGHT' not in symbols
-    assert 'INRANGE' in symbols
+
+def test_non_golden_cross_is_excluded_regardless_of_nns_score():
+    # cross_status is the one thing that's still a hard, non-negotiable
+    # gate -- see is_suggestion_eligible.
+    death_cross = _candidate(1, 'DEATHX', cross_status='death_cross')
+    no_trend = _candidate(2, 'FLATX', cross_status='no_clear_trend')
+
+    assert select_top_suggestions([death_cross]) == []
+    assert select_top_suggestions([no_trend]) == []
+
+
+def test_diverging_volume_no_longer_excludes_a_golden_cross_candidate():
+    # volume_trend was part of the old three-way hard filter -- it's not
+    # part of is_suggestion_eligible at all anymore (this is the exact
+    # combination that was producing zero suggestions for days: golden
+    # cross without 'confirming' volume used to be excluded outright).
+    diverging_volume = _candidate(1, 'DIVERGE', volume_trend='diverging')
+    top = select_top_suggestions([diverging_volume])
+    assert [c['symbol'] for c, _ in top] == ['DIVERGE']
+
+
+def test_silver_candidate_preferred_over_a_bronze_one_when_both_available():
+    silver = _candidate(1, 'SILVERCO')  # GOOD_FUNDAMENTALS defaults alone already land in silver (6.0-8.0)
+    bronze = _candidate(2, 'BRONZECO', roce_pct=-1, roa_pct=-1)  # fails only ROCE/ROA -- bronze-eligible
+
+    top = select_top_suggestions([bronze, silver], top_n=1)
+
+    assert len(top) == 1
+    assert top[0][0]['symbol'] == 'SILVERCO'
+    from utils.nns_score import nns_tier
+    assert nns_tier(top[0][1]) == 'silver'
+
+
+def test_bronze_candidate_used_when_no_silver_or_better_is_available():
+    bronze_only = _candidate(1, 'BRONZECO', roce_pct=-1, roa_pct=-1)
+
+    top = select_top_suggestions([bronze_only], top_n=1)
+
+    assert len(top) == 1
+    assert top[0][0]['symbol'] == 'BRONZECO'
+    from utils.nns_score import nns_tier
+    assert nns_tier(top[0][1]) == 'bronze'
+
+
+def test_rationale_flags_bronze_tier_with_extra_caution():
+    candidate = _candidate(1, 'BRONZECO')
+    bronze_rationale = _build_rationale(candidate, tier='bronze')
+    silver_rationale = _build_rationale(candidate, tier='silver')
+    golden_rationale = _build_rationale(candidate, tier='golden')
+
+    assert 'extra caution' in bronze_rationale.lower()
+    assert 'extra caution' not in silver_rationale.lower()
+    assert 'extra caution' not in golden_rationale.lower()
+
+
+def test_rationale_still_mentions_golden_cross_without_tier():
+    candidate = _candidate(1, 'GOODCO')
+    assert 'Golden cross' in _build_rationale(candidate)
 
 
 def test_hard_filters_check_cross_status_and_volume_trend_too():

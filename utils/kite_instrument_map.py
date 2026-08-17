@@ -47,6 +47,22 @@ def get_cached_instrument_token(db, symbol, exchange):
     return row['kite_instrument_token'] if row else None
 
 
+def get_cached_kite_tradingsymbol(db, symbol, exchange):
+    """Returns Kite's OWN tradingsymbol for (symbol, exchange), or None if
+    never matched. Required before placing any real order (see
+    utils.auto_trader's live-mode path) -- Kite's order-placement API needs
+    ITS tradingsymbol, which for a lot of BSE listings is not the same
+    string as this app's own stock_universe/stock_watchlist.symbol (often a
+    numeric scrip code Kite's order API doesn't accept at all). A live
+    order is never placed with the raw internal symbol as a fallback --
+    None here means "don't place this order," not "guess." """
+    row = db.execute(
+        'SELECT kite_tradingsymbol FROM stock_kite_instrument_map WHERE symbol=? AND exchange=?',
+        (symbol, exchange)
+    ).fetchone()
+    return row['kite_tradingsymbol'] if row else None
+
+
 def get_cached_kite_name(db, symbol, exchange):
     """Returns the company name Kite itself uses for (symbol, exchange), or
     None if it's never been matched. Kite's naming is internally consistent

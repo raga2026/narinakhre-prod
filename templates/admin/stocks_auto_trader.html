@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Auto-Trader (Dry Run) - Nari Nakhre Stocks</title>
+    <title>Auto-Trader - Nari Nakhre Stocks</title>
     <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
     <style>
         body { background: #0f172a; color: #f8fafc; }
@@ -21,7 +21,13 @@
         .badge-target_hit { background:#14532d; color:#bbf7d0; }
         .badge-stopped_out { background:#7f1d1d; color:#fecaca; }
         .badge-stop_loss_pending { background:#78350f; color:#fed7aa; }
+        .badge-pending_buy { background:#1e3a8a; color:#bfdbfe; }
+        .badge-pending_sell { background:#1e3a8a; color:#bfdbfe; }
+        .badge-buy_failed { background:#450a0a; color:#fca5a5; }
+        .badge-live { background:#7f1d1d; color:#fecaca; }
+        .badge-dry_run { background:#334155; color:#e2e8f0; }
         .warning-banner { background: #451a03; border: 1px solid #92400e; color: #fed7aa; border-radius: 0.75rem; padding: 1rem 1.25rem; }
+        .live-banner { background: #450a0a; border: 1px solid #991b1b; color: #fecaca; border-radius: 0.75rem; padding: 1rem 1.25rem; font-weight: 600; }
         .review-row { background: rgba(146, 64, 14, 0.15); }
         .btn-small { padding: 4px 12px; border-radius: 999px; font-size: 0.75rem; font-weight: 700; border: none; cursor: pointer; }
         .btn-proceed { background: #7f1d1d; color: #fecaca; }
@@ -33,7 +39,9 @@
         <div class="flex items-center justify-between mb-6">
             <div>
                 <h1 class="text-2xl font-extrabold stocks-accent font-serif">Auto-Trader</h1>
-                <p class="text-slate-400 text-sm mt-1">Dry-run simulation only -- no real Kite orders are placed by this yet.</p>
+                <p class="text-slate-400 text-sm mt-1">
+                    Mode: <span class="badge badge-{{ settings.mode }}">{{ 'LIVE -- real orders' if settings.mode == 'live' else 'Dry run (simulated)' }}</span>
+                </p>
             </div>
             <a href="{{ url_for('stocks_admin_dashboard') }}" class="text-sm text-slate-400 hover:text-sky-400 underline">Back to dashboard</a>
         </div>
@@ -48,12 +56,22 @@
         {% endif %}
         {% endwith %}
 
+        {% if settings.mode == 'live' %}
+        <div class="live-banner mb-6 text-sm">
+            LIVE mode -- buys and target-hit sells place REAL orders on your Kite account with real money.
+            A stop-loss hit still never sells on its own in this mode either: it emails {{ stop_loss_alert_email }}
+            and waits for you to Proceed (places a real sell now) or Cancel (keeps holding, unprotected, until you
+            act). No automatic stop-loss/GTT order is ever placed on the exchange -- that exposure was accepted
+            knowingly, not an oversight.
+        </div>
+        {% else %}
         <div class="warning-banner mb-6 text-sm">
             Buying and taking profit at target are both automatic (fixed budget per pick, closes itself when target
             is reached). A stop-loss hit is different by design: it does NOT sell on its own -- it emails
             {{ stop_loss_alert_email }} and waits here for you to Proceed (book the loss) or Cancel (keep holding).
-            This is all a paper simulation either way -- placing real Kite orders is a separate, not-yet-built step.
+            This is a paper simulation -- no real orders are placed while in dry-run mode.
         </div>
+        {% endif %}
 
         <div class="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-4">
             <div class="card">
@@ -96,24 +114,74 @@
 
         <div class="card mb-6">
             <h2 class="text-lg font-bold text-slate-200 mb-3">Settings</h2>
-            <form method="POST" action="{{ url_for('stocks_auto_trader_settings') }}" class="flex flex-wrap items-center gap-4">
-                <label class="flex items-center gap-2">
-                    <input type="checkbox" name="enabled" {% if settings.enabled %}checked{% endif %} class="h-4 w-4">
-                    <span class="text-slate-300 text-sm">Enable dry-run simulation for new Picks of the Day</span>
-                </label>
-                <label class="flex items-center gap-2 text-sm text-slate-300">
-                    Budget per pick (Rs)
-                    <input type="number" step="1" min="1" name="budget_per_trade" value="{{ settings.budget_per_trade | int }}"
-                           style="color:#ffffff;background-color:#0f172a;" class="w-32 border border-sky-500/30 rounded-xl p-2">
-                </label>
-                <label class="flex items-center gap-2 text-sm text-slate-300">
-                    Total capital (Rs)
-                    <input type="number" step="1" min="1" name="total_capital" value="{{ settings.total_capital | int }}"
-                           style="color:#ffffff;background-color:#0f172a;" class="w-32 border border-sky-500/30 rounded-xl p-2">
-                </label>
+            <form method="POST" action="{{ url_for('stocks_auto_trader_settings') }}" id="auto-trader-settings-form">
+                <div class="flex flex-wrap items-center gap-4 mb-4">
+                    <label class="flex items-center gap-2">
+                        <input type="checkbox" name="enabled" {% if settings.enabled %}checked{% endif %} class="h-4 w-4">
+                        <span class="text-slate-300 text-sm">Enable auto-trading for new Picks of the Day</span>
+                    </label>
+                    <label class="flex items-center gap-2 text-sm text-slate-300">
+                        Budget per pick (Rs)
+                        <input type="number" step="1" min="1" name="budget_per_trade" value="{{ settings.budget_per_trade | int }}"
+                               style="color:#ffffff;background-color:#0f172a;" class="w-32 border border-sky-500/30 rounded-xl p-2">
+                    </label>
+                    <label class="flex items-center gap-2 text-sm text-slate-300">
+                        Total capital (Rs)
+                        <input type="number" step="1" min="1" name="total_capital" value="{{ settings.total_capital | int }}"
+                               style="color:#ffffff;background-color:#0f172a;" class="w-32 border border-sky-500/30 rounded-xl p-2">
+                    </label>
+                </div>
+                <div class="flex flex-wrap items-center gap-4 mb-4 p-3" style="background:#0f172a;border-radius:0.75rem;">
+                    <span class="text-slate-300 text-sm font-semibold">Mode:</span>
+                    <label class="flex items-center gap-2 text-sm text-slate-300">
+                        <input type="radio" name="mode" value="dry_run" id="mode-dry-run"
+                               {% if settings.mode != 'live' %}checked{% endif %}>
+                        Dry run (simulated, no real orders)
+                    </label>
+                    <label class="flex items-center gap-2 text-sm text-rose-300">
+                        <input type="radio" name="mode" value="live" id="mode-live"
+                               {% if settings.mode == 'live' %}checked{% endif %}>
+                        Live (real Kite orders, real money)
+                    </label>
+                    <label class="flex items-center gap-2 text-xs text-rose-300" id="confirm-live-wrapper" style="display:none;">
+                        <input type="checkbox" name="confirm_live" id="confirm-live-checkbox">
+                        I understand this places real orders with real money
+                    </label>
+                </div>
                 <button type="submit" class="stocks-btn py-2 px-6 rounded-2xl font-bold text-sm">Save</button>
             </form>
         </div>
+
+        <script>
+        (function() {
+            var liveRadio = document.getElementById('mode-live');
+            var dryRunRadio = document.getElementById('mode-dry-run');
+            var confirmWrapper = document.getElementById('confirm-live-wrapper');
+            var confirmCheckbox = document.getElementById('confirm-live-checkbox');
+            var form = document.getElementById('auto-trader-settings-form');
+
+            function syncConfirmVisibility() {
+                confirmWrapper.style.display = liveRadio.checked ? 'flex' : 'none';
+                if (!liveRadio.checked) { confirmCheckbox.checked = false; }
+            }
+            liveRadio.addEventListener('change', syncConfirmVisibility);
+            dryRunRadio.addEventListener('change', syncConfirmVisibility);
+            syncConfirmVisibility();
+
+            form.addEventListener('submit', function(e) {
+                if (liveRadio.checked && !confirmCheckbox.checked) {
+                    e.preventDefault();
+                    alert('Check "I understand this places real orders with real money" to switch to live mode.');
+                    return;
+                }
+                if (liveRadio.checked) {
+                    if (!confirm('Switch Auto-Trader to LIVE mode? This will place real Kite orders with real money on the next Pick of the Day.')) {
+                        e.preventDefault();
+                    }
+                }
+            });
+        })();
+        </script>
 
         <div class="card overflow-x-auto">
             <table>
@@ -147,6 +215,8 @@
                         <td>
                             {% if t.status == 'stop_loss_pending' %}
                                 <span class="down">₹{{ '%.2f'|format(t.stop_loss_triggered_price) }} (triggered)</span>
+                            {% elif t.status == 'pending_sell' %}
+                                <span class="text-slate-400">sell order pending fill</span>
                             {% elif t.exit_price is not none %}
                                 {{ '₹%.2f'|format(t.exit_price) }}
                             {% else %}—
