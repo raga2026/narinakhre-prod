@@ -58,8 +58,9 @@
             <p class="text-gray-600 text-sm mt-2">
                 {% if suggestions %}
                     {{ suggestions | length }} recommendation{{ 's' if suggestions | length != 1 }} from the last 10 days, below --
-                    every golden-cross stock that cleared our screening bar on a given day gets its own row, so the
-                    same stock can reappear on a later date if it still qualifies.
+                    at most one Pick of the Day, and a stock already picked recently is skipped in favor of the
+                    next-best one until its own pick genuinely changes, so this rotates through the qualifying
+                    list rather than repeating the same stock.
                 {% else %}
                     No recommendations in the last 10 days -- check back after the next screening run.
                 {% endif %}
@@ -83,6 +84,33 @@
                 {% if session.stocks_can_view_watchlist %}
                 &nbsp;·&nbsp;
                 <a href="{{ url_for('stocks_watchlist') }}" class="link">View watchlist</a>
+                {% endif %}
+            </p>
+        </div>
+
+        <div class="card p-5 mb-6">
+            <h2 class="text-lg font-bold text-gray-900 mb-2">Refer friends, earn a free month</h2>
+            <p class="text-gray-600 text-sm mb-3">
+                Refer {{ referrals_per_free_month }} friends who subscribe and get 1 month free -- they get their
+                first month for Rs 199 instead of Rs 299 when they sign up with your link or code.
+            </p>
+            <div class="flex flex-wrap items-center gap-2 mb-3">
+                <input id="referral-link" type="text" readonly value="{{ referral_link }}"
+                       class="flex-1 min-w-0 border border-gray-300 rounded-md px-3 py-2 text-sm bg-gray-50 text-gray-700"
+                       onclick="this.select();" aria-label="Your referral link">
+                <button type="button" onclick="stocksCopyReferralLink()" class="kite-btn rounded-md px-4 py-2 text-sm font-semibold">
+                    Copy link
+                </button>
+            </div>
+            <p class="text-gray-600 text-sm mb-3">
+                Or share the code directly: <strong class="text-gray-900">{{ referral_code }}</strong>
+            </p>
+            <p class="text-gray-600 text-sm">
+                Qualified referrals (friends who've paid at least once): <strong class="text-gray-900">{{ qualified_referrals }}</strong>
+                &nbsp;·&nbsp;
+                Free months available: <strong class="text-gray-900">{{ available_referral_credits }}</strong>
+                {% if available_referral_credits %}
+                    <span class="text-gray-500">(applied automatically to extend your access when you cancel)</span>
                 {% endif %}
             </p>
         </div>
@@ -160,5 +188,21 @@
             </table>
         </div>
     </div>
+
+    <script>
+    function stocksCopyReferralLink() {
+        var input = document.getElementById('referral-link');
+        if (!input) { return; }
+        input.select();
+        input.setSelectionRange(0, 99999);
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText(input.value).catch(function () {
+                document.execCommand('copy');
+            });
+        } else {
+            document.execCommand('copy');
+        }
+    }
+    </script>
 </body>
 </html>

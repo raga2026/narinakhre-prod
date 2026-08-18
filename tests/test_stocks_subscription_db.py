@@ -38,7 +38,7 @@ class FakeSubscriberDB:
         normalized = ' '.join(sql.split())
 
         if normalized.startswith(
-            'SELECT id, username, name, is_active, is_pro, subscription_status, subscription_current_period_end '
+            'SELECT id, username, name, is_active, is_pro, subscription_status, subscription_current_period_end, referred_by_id '
             'FROM stocks_admin_users WHERE username=?'
         ):
             username, = params
@@ -46,18 +46,18 @@ class FakeSubscriberDB:
             return FakeCursor(matches[:1])
 
         if normalized.startswith('INSERT INTO stocks_admin_users'):
-            email, password_hash, name = params
+            email, password_hash, name, referred_by_id = params
             self.rows.append({
                 'id': self._next_id, 'username': email, 'password_hash': password_hash, 'name': name,
                 'role': 'viewer', 'is_active': 0, 'must_change_password': 0, 'is_pro': 0,
                 'subscription_status': 'pending', 'subscription_current_period_end': None,
-                'razorpay_subscription_id': None,
+                'razorpay_subscription_id': None, 'referred_by_id': referred_by_id,
             })
             self._next_id += 1
             return FakeCursor([])
 
         if normalized.startswith(
-            'SELECT id, username, name, subscription_status, razorpay_subscription_id FROM stocks_admin_users WHERE username=?'
+            'SELECT id, username, name, subscription_status, razorpay_subscription_id, referred_by_id FROM stocks_admin_users WHERE username=?'
         ):
             username, = params
             matches = [r for r in self.rows if r['username'] == username]

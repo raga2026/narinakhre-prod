@@ -34,11 +34,32 @@ class FakeEmailDB:
             self.last_query_params = params
             return FakeCursor(self.suggestion_rows)
 
-        if normalized.startswith("SELECT username AS email, name FROM stocks_admin_users WHERE role='viewer'"):
+        if normalized.startswith("SELECT id, username AS email, name FROM stocks_admin_users WHERE role='viewer'"):
             if 'AND id IN (' in normalized:
                 wanted = set(params)
                 return FakeCursor([r for r in self.recipient_rows if r.get('id') in wanted])
             return FakeCursor(self.recipient_rows)
+
+        # get_or_create_referral_code's queries -- looks up/persists against
+        # the same recipient_rows fixture. Most tests' recipient_rows don't
+        # set a 'referral_code' or even an 'id' at all, in which case this
+        # always falls through to "no code yet"/"not found", which
+        # send_daily_suggestions_email's own try/except already treats as
+        # "skip the footer for this recipient" rather than an error.
+        if normalized.startswith('SELECT referral_code FROM stocks_admin_users WHERE id=?'):
+            admin_id, = params
+            matches = [r for r in self.recipient_rows if r.get('id') == admin_id and r.get('referral_code')]
+            return FakeCursor(matches[:1])
+        if normalized.startswith('SELECT id FROM stocks_admin_users WHERE referral_code=?'):
+            code, = params
+            matches = [r for r in self.recipient_rows if r.get('referral_code') == code]
+            return FakeCursor(matches[:1])
+        if normalized.startswith('UPDATE stocks_admin_users SET referral_code=?'):
+            code, admin_id = params
+            for r in self.recipient_rows:
+                if r.get('id') == admin_id:
+                    r['referral_code'] = code
+            return FakeCursor([])
 
         raise AssertionError(f'Unexpected SQL in test: {sql}')
 
@@ -278,6 +299,48 @@ def test_suggestion_missing_prices_gets_no_projection_or_chart():
 
     htmlbody = mock_send.call_args.kwargs['htmlbody']
     assert 'data:image/png;base64,' not in htmlbody
+
+
+def test_short_term_target_price_is_shown_alongside_buy_and_stop_loss():
+    # Regression: the near-term target_sell_price (what the suggestion's
+    # holding_period_days is actually based on) must be visible as its own
+    # labeled figure, not just implicitly folded into the mid-period/
+    # long-term projection block.
+    db = FakeEmailDB(
+        suggestion_rows=[
+            {'symbol': 'GLD', 'exchange': 'NSE', 'buy_price': 100.0, 'target_sell_price': 105.0,
+             'stop_loss_price': 97.0, 'holding_period_days': 10, 'rationale': 'Golden cross with confirming volume'},
+        ],
+        recipient_rows=[{'email': 'a@example.com', 'name': 'A'}],
+    )
+
+    with patch('utils.suggestion_email.send_zeptomail_stocks_email', return_value=(True, 'ok')) as mock_send:
+        send_daily_suggestions_email(db)
+
+    textbody = mock_send.call_args.kwargs['textbody']
+    htmlbody = mock_send.call_args.kwargs['htmlbody']
+    assert 'Target (10-day): Rs 105.0' in textbody
+    assert '>Target (10-day)<' in htmlbody
+    assert '>Rs 105.0<' in htmlbody
+
+
+def test_pattern_based_suggestion_target_label_has_no_day_count_claim():
+    db = FakeEmailDB(
+        suggestion_rows=[
+            {'symbol': 'PTN', 'exchange': 'NSE', 'buy_price': 100.0, 'target_sell_price': 130.0,
+             'stop_loss_price': 95.0, 'holding_period_days': 10, 'rationale': 'Reverse head-and-shoulders confirmed',
+             'pattern_name': 'head_and_shoulders_bottom',
+             'pattern_note': 'Target and stop-loss are based on a reverse head-and-shoulders pattern...'},
+        ],
+        recipient_rows=[{'email': 'a@example.com', 'name': 'A'}],
+    )
+
+    with patch('utils.suggestion_email.send_zeptomail_stocks_email', return_value=(True, 'ok')) as mock_send:
+        send_daily_suggestions_email(db)
+
+    textbody = mock_send.call_args.kwargs['textbody']
+    assert 'Target: Rs 130.0' in textbody
+    assert '10-day' not in textbody.split('Why:')[0]  # no day-count claim near the target itself
 
 
 def test_html_is_a_real_responsive_document_not_a_bare_fragment():
@@ -607,3 +670,44 @@ def test_admin_cancellation_email_goes_to_the_fixed_admin_address():
     assert kwargs['to_email'] == 'narinakhre@gmail.com'
     assert 'Leaving User' in kwargs['subject']
     assert 'cancelled' in kwargs['textbody'].lower()
+
+
+def test_daily_email_includes_each_recipients_own_referral_footer():
+    db = FakeEmailDB(
+        suggestion_rows=[
+            {'symbol': 'GLD', 'exchange': 'NSE', 'buy_price': 100.0, 'target_sell_price': 105.0,
+             'stop_loss_price': 97.0, 'holding_period_days': 10, 'rationale': 'Golden cross with confirming volume'},
+        ],
+        recipient_rows=[
+            {'id': 1, 'email': 'a@example.com', 'name': 'A', 'referral_code': 'AAACODE1'},
+            {'id': 2, 'email': 'b@example.com', 'name': 'B', 'referral_code': 'BBBCODE2'},
+        ],
+    )
+
+    with patch('utils.suggestion_email.send_zeptomail_stocks_email', return_value=(True, 'ok')) as mock_send:
+        send_daily_suggestions_email(db)
+
+    calls_by_email = {c.kwargs['to_email']: c.kwargs for c in mock_send.call_args_list}
+    assert 'ref=AAACODE1' in calls_by_email['a@example.com']['textbody']
+    assert 'ref=BBBCODE2' in calls_by_email['b@example.com']['textbody']
+    # Each recipient's own code, not the other's.
+    assert 'BBBCODE2' not in calls_by_email['a@example.com']['textbody']
+    assert 'AAACODE1' not in calls_by_email['b@example.com']['textbody']
+    assert 'ref=AAACODE1' in calls_by_email['a@example.com']['htmlbody']
+    assert 'month free' in calls_by_email['a@example.com']['textbody'].lower()
+
+
+def test_daily_email_generates_a_referral_code_for_a_recipient_who_has_none_yet():
+    db = FakeEmailDB(
+        suggestion_rows=[
+            {'symbol': 'GLD', 'exchange': 'NSE', 'buy_price': 100.0, 'target_sell_price': 105.0,
+             'stop_loss_price': 97.0, 'holding_period_days': 10, 'rationale': 'Golden cross with confirming volume'},
+        ],
+        recipient_rows=[{'id': 1, 'email': 'a@example.com', 'name': 'A'}],  # no referral_code yet
+    )
+
+    with patch('utils.suggestion_email.send_zeptomail_stocks_email', return_value=(True, 'ok')) as mock_send:
+        send_daily_suggestions_email(db)
+
+    assert db.recipient_rows[0]['referral_code']  # lazily generated and persisted
+    assert f"ref={db.recipient_rows[0]['referral_code']}" in mock_send.call_args.kwargs['textbody']

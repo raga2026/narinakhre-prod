@@ -7,6 +7,7 @@ from utils.stock_auth import (
     create_viewer_account,
     delete_viewer_account,
     list_viewers,
+    safe_stocks_next_url,
     stocks_login_required,
     stocks_role_required,
     stocks_watchlist_access_required,
@@ -233,6 +234,11 @@ def _build_test_app():
     def stocks_my_suggestions():
         return 'my suggestions content', 200
 
+    @app.route('/stocks/universe/<int:universe_id>')
+    @stocks_login_required
+    def stocks_universe_detail(universe_id):
+        return f'universe detail {universe_id}', 200
+
     return app
 
 
@@ -366,3 +372,25 @@ def test_once_flag_is_cleared_normal_access_resumes():
     response = client.get('/stocks/my/suggestions')
     assert response.status_code == 200
     assert b'my suggestions content' in response.data
+
+
+def test_safe_stocks_next_url_accepts_only_same_site_stocks_paths():
+    assert safe_stocks_next_url('/stocks/universe/5') == '/stocks/universe/5'
+    assert safe_stocks_next_url('') is None
+    assert safe_stocks_next_url(None) is None
+    assert safe_stocks_next_url('/admin/dashboard') is None  # not a /stocks/ path
+    assert safe_stocks_next_url('https://evil.example.com/stocks/x') is None  # absolute URL
+    assert safe_stocks_next_url('//evil.example.com/stocks/x') is None  # protocol-relative
+
+
+def test_logged_out_request_redirects_to_login_with_next_pointing_back():
+    # Regression: a "View full analysis" email link clicked while logged
+    # out must come back to that same page after login, not just the
+    # generic default -- stocks_login_required is what carries the
+    # originally-requested path through as ?next=.
+    app = _build_test_app()
+    client = app.test_client()
+
+    response = client.get('/stocks/universe/42')
+    assert response.status_code == 302
+    assert response.headers['Location'] == '/stocks/login?next=/stocks/universe/42'

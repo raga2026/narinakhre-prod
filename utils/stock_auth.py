@@ -153,6 +153,20 @@ STOCKS_AUTH_ALTER_SQL = [
     # self-serve email/password signups all still set one, this only
     # affects new Google-only rows).
     'ALTER TABLE stocks_admin_users ALTER COLUMN password_hash DROP NOT NULL',
+    # Referral system (see utils/stocks_referrals.py) -- every viewer gets
+    # their own shareable code, generated lazily (signup, profile view, or
+    # first email send) rather than backfilled here, so this column starts
+    # NULL for every existing row. referred_by_id is set once at signup if
+    # a valid code was supplied and never changes after -- self-referral
+    # (a code owner using their own code) is rejected at signup time, not
+    # by a constraint here. referral_credits_redeemed tracks how many
+    # free-month credits have already been applied at a past cancellation
+    # (see apply_referral_credits_on_cancellation) so re-subscribing later
+    # never double-spends them -- qualified-referral count and available
+    # credits are computed on the fly, not stored.
+    'ALTER TABLE stocks_admin_users ADD COLUMN IF NOT EXISTS referral_code TEXT UNIQUE',
+    'ALTER TABLE stocks_admin_users ADD COLUMN IF NOT EXISTS referred_by_id BIGINT REFERENCES stocks_admin_users(id)',
+    'ALTER TABLE stocks_admin_users ADD COLUMN IF NOT EXISTS referral_credits_redeemed INTEGER DEFAULT 0',
 ]
 
 
@@ -243,12 +257,29 @@ def _must_change_password_redirect():
     return None
 
 
+def safe_stocks_next_url(url):
+    """Validates a ?next= redirect target before stocks_admin_login uses
+    it -- must be a same-site /stocks/... path, never an absolute URL or a
+    protocol-relative //host one (both would be an open-redirect hole:
+    login, then get bounced off-site). Returns the url unchanged if safe,
+    else None."""
+    if not url or not url.startswith('/stocks/') or url.startswith('//'):
+        return None
+    return url
+
+
 def stocks_login_required(view_func):
-    """Any active stocks_admin_users account (super_admin or child_admin)."""
+    """Any active stocks_admin_users account (super_admin or child_admin).
+    Carries the originally-requested path through as ?next= so
+    stocks_admin_login can send the visitor straight there after signing
+    in, instead of always dropping them on the generic default page --
+    matters most for a link clicked from an email (e.g. a suggestion's
+    "View full analysis" link to /stocks/universe/<id>) while logged out,
+    which should land on that same stock page, not somewhere generic."""
     @wraps(view_func)
     def wrapped(*args, **kwargs):
         if not session.get('stocks_admin_id'):
-            return redirect(url_for('stocks_admin_login'))
+            return redirect(url_for('stocks_admin_login', next=request.path))
         forced = _must_change_password_redirect()
         if forced:
             return forced
@@ -485,7 +516,7 @@ def toggle_viewer_pro(db, admin_id):
 def find_stocks_account_by_google_sub(db, google_sub):
     return db.execute(
         'SELECT id, username, name, role, is_active, can_view_watchlist, must_change_password, '
-        'is_pro, subscription_status, subscription_current_period_end, razorpay_subscription_id '
+        'is_pro, subscription_status, subscription_current_period_end, razorpay_subscription_id, referred_by_id '
         'FROM stocks_admin_users WHERE google_sub=?',
         (google_sub,)
     ).fetchone()
@@ -494,7 +525,7 @@ def find_stocks_account_by_google_sub(db, google_sub):
 def find_stocks_account_by_username(db, username):
     return db.execute(
         'SELECT id, username, name, role, is_active, can_view_watchlist, must_change_password, '
-        'is_pro, subscription_status, subscription_current_period_end, razorpay_subscription_id, google_sub '
+        'is_pro, subscription_status, subscription_current_period_end, razorpay_subscription_id, google_sub, referred_by_id '
         'FROM stocks_admin_users WHERE username=?',
         (username,)
     ).fetchone()
@@ -512,7 +543,7 @@ def link_google_sub(db, admin_id, google_sub):
     db.commit()
 
 
-def create_pending_google_subscriber(db, email, name, google_sub):
+def create_pending_google_subscriber(db, email, name, google_sub, referred_by_id=None):
     """Brand-new self-serve signup via 'Sign up with Google' -- no password
     at all (password_hash stays NULL; see the relaxed NOT NULL constraint
     in STOCKS_AUTH_ALTER_SQL and authenticate_stocks_admin's check for a
@@ -520,14 +551,18 @@ def create_pending_google_subscriber(db, email, name, google_sub):
     utils.stocks_subscription.create_pending_subscriber's email/password
     version: is_active=0, subscription_status='pending', is_pro=0 -- the
     caller (app.py's Google callback) still has to send this account
-    through Razorpay checkout before it can log in. Returns the new row."""
+    through Razorpay checkout before it can log in. referred_by_id (see
+    utils/stocks_referrals.py), when given, is stamped once here and never
+    changes after -- app.py's Google callback resolves the code (carried
+    across the OAuth round-trip via session, since form fields don't
+    survive it) into this id before calling in. Returns the new row."""
     email = (email or '').strip().lower()
     db.execute(
         '''INSERT INTO stocks_admin_users
                (username, password_hash, role, name, is_active, must_change_password,
-                subscription_status, is_pro, google_sub)
-           VALUES (?, NULL, 'viewer', ?, 0, 0, 'pending', 0, ?)''',
-        (email, (name or '').strip() or None, google_sub)
+                subscription_status, is_pro, google_sub, referred_by_id)
+           VALUES (?, NULL, 'viewer', ?, 0, 0, 'pending', 0, ?, ?)''',
+        (email, (name or '').strip() or None, google_sub, referred_by_id)
     )
     db.commit()
     return find_stocks_account_by_google_sub(db, google_sub)

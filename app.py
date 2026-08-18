@@ -46,6 +46,7 @@ from utils.stock_auth import (
     find_stocks_account_by_username,
     link_google_sub,
     create_pending_google_subscriber,
+    safe_stocks_next_url,
 )
 from utils.stocks_subscription import (
     SUBSCRIPTION_TOTAL_COUNT_MONTHS,
@@ -62,6 +63,14 @@ from utils.stocks_subscription import (
     days_until,
     verify_subscription_payment_signature,
     verify_webhook_signature,
+)
+from utils.stocks_referrals import (
+    REFERRALS_PER_FREE_MONTH,
+    apply_referral_credits_on_cancellation,
+    available_referral_credits,
+    count_qualified_referrals,
+    find_referrer_by_code,
+    get_or_create_referral_code,
 )
 from utils.saved_filters import (
     initialize_saved_filters_table_if_needed,
@@ -303,8 +312,16 @@ razorpay_client = razorpay.Client(auth=(os.environ.get("RAZORPAY_KEY_ID"), os.en
 # Webhooks), and must match exactly or every webhook signature check fails.
 RAZORPAY_STOCKS_PLAN_ID = os.environ.get('RAZORPAY_STOCKS_PLAN_ID', '')
 RAZORPAY_WEBHOOK_SECRET = os.environ.get('RAZORPAY_WEBHOOK_SECRET', '')
+# Referral system (see utils/stocks_referrals.py) -- a referred signup's
+# first cycle bills against THIS plan (Rs 199/month) instead of the
+# regular one above; right after that first payment verifies,
+# /stocks/subscribe/verify schedules a swap back to RAZORPAY_STOCKS_PLAN_ID
+# for cycle 2 onward via subscription.edit(..., schedule_change_at='cycle_end').
+# Same one-time-setup nature as RAZORPAY_STOCKS_PLAN_ID above.
+RAZORPAY_STOCKS_REFERRAL_PLAN_ID = os.environ.get('RAZORPAY_STOCKS_REFERRAL_PLAN_ID', '')
 STOCKS_SUBSCRIPTION_PRICE_PAISE = 29900  # Rs 299.00
 STOCKS_SUBSCRIPTION_PRICE_DISPLAY = 'Rs 299'
+STOCKS_REFERRAL_PRICE_DISPLAY = 'Rs 199'
 
 # Auth providers are pluggable -- see auth_providers/base.py. Adding another
 # login option later (e.g. Facebook) means adding auth_providers/facebook.py
@@ -7243,7 +7260,7 @@ def stocks_users_manage():
             flash(error, 'error')
         else:
             email = email.strip()
-            sent, detail = send_viewer_welcome_email(email, name, password)
+            sent, detail = send_viewer_welcome_email(email, name, password, db=db, admin_id=row['id'])
             if sent:
                 flash(f'Added {email} as a viewer and emailed their login details.')
             else:
@@ -8039,12 +8056,13 @@ def stocks_my_suggestions():
     the same get_suggestions() query the daily email and /stocks/my/history
     both use."""
     db = get_db()
+    admin_id = session.get('stocks_admin_id')
     start_date = (date.today() - timedelta(days=HOLDING_PERIOD_DAYS)).isoformat()
     suggestions = _annotate_suggestions_with_projection(get_suggestions(db, start_date=start_date))
 
     subscription_row = db.execute(
         'SELECT subscription_status, subscription_current_period_end FROM stocks_admin_users WHERE id=?',
-        (session.get('stocks_admin_id'),)
+        (admin_id,)
     ).fetchone()
     subscription_period_end_label = None
     if subscription_row and subscription_row.get('subscription_status') in ('active', 'cancelled', 'halted') \
@@ -8053,10 +8071,21 @@ def stocks_my_suggestions():
         end_dt = datetime.fromisoformat(str(end_value).replace('Z', '+00:00')) if isinstance(end_value, str) else end_value
         subscription_period_end_label = end_dt.strftime('%d %b %Y')
 
+    # Referral status (see utils/stocks_referrals.py) -- lazily generates a
+    # code on first view for an account that's never had one (existing
+    # accounts predating this feature weren't backfilled).
+    referral_code = get_or_create_referral_code(db, admin_id)
+    referral_link = f'https://narinakhre.com/stocks/signup?ref={referral_code}'
+    qualified_referrals = count_qualified_referrals(db, admin_id)
+    available_credits = available_referral_credits(db, admin_id)
+
     return render_template(
         'admin/stocks_my_suggestions.html', suggestions=suggestions,
         subscription_status=subscription_row.get('subscription_status') if subscription_row else None,
         subscription_period_end_label=subscription_period_end_label,
+        referral_code=referral_code, referral_link=referral_link,
+        qualified_referrals=qualified_referrals, available_referral_credits=available_credits,
+        referrals_per_free_month=REFERRALS_PER_FREE_MONTH,
     )
 
 
@@ -8250,7 +8279,7 @@ def stocks_landing():
     return render_template('admin/stocks_landing.html')
 
 
-def _render_stocks_checkout(admin_id, email, name):
+def _render_stocks_checkout(admin_id, email, name, referral_plan=False):
     """Creates a fresh Razorpay subscription for admin_id and renders the
     Checkout page for it -- shared by /stocks/signup (password path) and
     /stocks/auth/google/callback (Google path), and also re-run any time a
@@ -8263,17 +8292,30 @@ def _render_stocks_checkout(admin_id, email, name):
     charge anything, since Razorpay only bills after Checkout actually
     authorizes one).
 
+    referral_plan=True (see utils/stocks_referrals.py) checks out against
+    RAZORPAY_STOCKS_REFERRAL_PLAN_ID (Rs 199) instead of the regular Rs 299
+    plan -- only ever set True for a brand-new signup that supplied a
+    valid referral code, never for a renewal (see the call sites). The
+    account's own referred_by_id (already stamped at signup time) is what
+    /stocks/subscribe/verify later checks to know whether to schedule the
+    swap back to the regular plan after this first cycle -- this function
+    itself doesn't need to remember which plan it used beyond the one API
+    call.
+
     Returns a Flask response (either the checkout page, or a redirect back
     to signup with a flashed error if Razorpay itself isn't reachable/
     configured)."""
-    if not RAZORPAY_STOCKS_PLAN_ID:
-        app.logger.error('RAZORPAY_STOCKS_PLAN_ID is not set -- cannot start a Stocks subscription checkout.')
+    plan_id = RAZORPAY_STOCKS_REFERRAL_PLAN_ID if referral_plan else RAZORPAY_STOCKS_PLAN_ID
+    price_display = STOCKS_REFERRAL_PRICE_DISPLAY if referral_plan else STOCKS_SUBSCRIPTION_PRICE_DISPLAY
+    if not plan_id:
+        missing_var = 'RAZORPAY_STOCKS_REFERRAL_PLAN_ID' if referral_plan else 'RAZORPAY_STOCKS_PLAN_ID'
+        app.logger.error(f'{missing_var} is not set -- cannot start a Stocks subscription checkout.')
         flash('Sign-ups are temporarily unavailable. Please try again shortly.', 'error')
         return redirect(url_for('stocks_signup'))
 
     try:
         subscription = razorpay_client.subscription.create({
-            'plan_id': RAZORPAY_STOCKS_PLAN_ID,
+            'plan_id': plan_id,
             'total_count': SUBSCRIPTION_TOTAL_COUNT_MONTHS,
             'customer_notify': 1,
             'notes': {'stocks_admin_id': str(admin_id)},
@@ -8294,7 +8336,7 @@ def _render_stocks_checkout(admin_id, email, name):
         subscription_id=subscription['id'],
         prefill_name=name or '',
         prefill_email=email,
-        price_display=STOCKS_SUBSCRIPTION_PRICE_DISPLAY,
+        price_display=price_display,
     )
 
 
@@ -8309,9 +8351,21 @@ def stocks_signup():
     Same bot-defense stack as the storefront's /contact form (honeypot +
     timing trap + IP rate limit + reCAPTCHA) -- a spam submission here
     would otherwise create a real (if never-authorized) Razorpay
-    subscription object, not just a wasted DB row."""
+    subscription object, not just a wasted DB row.
+
+    ?ref=<code> (see utils/stocks_referrals.py) prefills the visible
+    referral-code field -- also editable by hand, since a code shared
+    verbally rather than via the link has nowhere else to go. A valid,
+    non-self code checks the new account out on the discounted referral
+    plan (see _render_stocks_checkout's referral_plan param) and stamps
+    referred_by_id once at creation time."""
     if request.method == 'GET':
-        return render_template('admin/stocks_signup.html', recaptcha_site_key=RECAPTCHA_SITE_KEY, form_rendered_at=time.time())
+        return render_template(
+            'admin/stocks_signup.html', recaptcha_site_key=RECAPTCHA_SITE_KEY, form_rendered_at=time.time(),
+            referral_code_prefill=(request.args.get('ref') or '').strip(),
+        )
+
+    referral_code_prefill = (request.form.get('referral_code') or '').strip()
 
     if (request.form.get('system_verification_token') or '').strip():
         app.logger.warning(f'Bot caught on stocks signup (honeypot): {request.form.get("email")}')
@@ -8327,11 +8381,11 @@ def stocks_signup():
     client_ip = request.remote_addr or 'unknown'
     if contact_ip_is_rate_limited(client_ip):
         flash('Please wait a moment before trying again.', 'error')
-        return render_template('admin/stocks_signup.html', recaptcha_site_key=RECAPTCHA_SITE_KEY, form_rendered_at=time.time()), 429
+        return render_template('admin/stocks_signup.html', recaptcha_site_key=RECAPTCHA_SITE_KEY, form_rendered_at=time.time(), referral_code_prefill=referral_code_prefill), 429
     if not verify_recaptcha(request.form.get('recaptcha_token'), remote_ip=client_ip, expected_action='stocks_signup'):
         app.logger.warning(f'Bot caught on stocks signup (recaptcha): {request.form.get("email")}')
         flash('Please try again.', 'error')
-        return render_template('admin/stocks_signup.html', recaptcha_site_key=RECAPTCHA_SITE_KEY, form_rendered_at=time.time()), 401
+        return render_template('admin/stocks_signup.html', recaptcha_site_key=RECAPTCHA_SITE_KEY, form_rendered_at=time.time(), referral_code_prefill=referral_code_prefill), 401
 
     name = (request.form.get('name') or '').strip()
     email = (request.form.get('email') or '').strip().lower()
@@ -8340,16 +8394,20 @@ def stocks_signup():
 
     if not EMAIL_RE.match(email):
         flash('Please enter a valid email address.', 'error')
-        return render_template('admin/stocks_signup.html', recaptcha_site_key=RECAPTCHA_SITE_KEY, form_rendered_at=time.time()), 400
+        return render_template('admin/stocks_signup.html', recaptcha_site_key=RECAPTCHA_SITE_KEY, form_rendered_at=time.time(), referral_code_prefill=referral_code_prefill), 400
     if password != confirm_password:
         flash('Passwords do not match.', 'error')
-        return render_template('admin/stocks_signup.html', recaptcha_site_key=RECAPTCHA_SITE_KEY, form_rendered_at=time.time()), 400
+        return render_template('admin/stocks_signup.html', recaptcha_site_key=RECAPTCHA_SITE_KEY, form_rendered_at=time.time(), referral_code_prefill=referral_code_prefill), 400
 
     db = get_db()
-    row, error = create_pending_subscriber(db, email, name, password)
+    referrer = find_referrer_by_code(db, referral_code_prefill)
+    if referrer and referrer['username'] == email:
+        referrer = None  # self-referral -- silently ignored, not an error worth blocking signup over
+
+    row, error = create_pending_subscriber(db, email, name, password, referred_by_id=referrer['id'] if referrer else None)
     if error and error != 'existing':
         flash(error, 'error')
-        return render_template('admin/stocks_signup.html', recaptcha_site_key=RECAPTCHA_SITE_KEY, form_rendered_at=time.time()), 400
+        return render_template('admin/stocks_signup.html', recaptcha_site_key=RECAPTCHA_SITE_KEY, form_rendered_at=time.time(), referral_code_prefill=referral_code_prefill), 400
 
     if error == 'existing':
         if has_stocks_access(row.get('is_pro'), row.get('subscription_status'), row.get('subscription_current_period_end')):
@@ -8357,9 +8415,17 @@ def stocks_signup():
             return redirect(url_for('stocks_admin_login'))
         # Pending (never completed checkout) or lapsed (halted/expired
         # cancelled) -- send them back through checkout rather than
-        # refusing the signup outright.
+        # refusing the signup outright. An existing row's referred_by_id
+        # (if any) was already stamped the first time it was created --
+        # this referral_code re-submission doesn't retroactively change it.
 
-    return _render_stocks_checkout(row['id'], email, name)
+    # Based on the ACCOUNT's own stored referred_by_id, not just whether a
+    # code was resubmitted in this exact request -- covers the retry path
+    # too (an abandoned-checkout account coming back through signup again
+    # without re-typing the code still gets the discount it originally
+    # qualified for, as long as it's still on its first, never-completed
+    # payment attempt).
+    return _render_stocks_checkout(row['id'], email, name, referral_plan=bool(row.get('referred_by_id')))
 
 
 @app.route('/stocks/subscribe/verify', methods=['POST'])
@@ -8391,7 +8457,7 @@ def stocks_subscribe_verify():
 
     db = get_db()
     row = db.execute(
-        'SELECT id, username, name, can_view_watchlist, must_change_password, razorpay_subscription_id '
+        'SELECT id, username, name, can_view_watchlist, must_change_password, razorpay_subscription_id, referred_by_id '
         'FROM stocks_admin_users WHERE id=?',
         (admin_id,)
     ).fetchone()
@@ -8416,6 +8482,24 @@ def stocks_subscribe_verify():
     activate_subscription(db, admin_id, current_period_end)
     session.pop('stocks_pending_signup_id', None)
 
+    if row.get('referred_by_id') and RAZORPAY_STOCKS_PLAN_ID:
+        # This account's first cycle just billed at the discounted
+        # referral rate (Rs 199 -- see _render_stocks_checkout's
+        # referral_plan param) -- schedule the swap back to the regular
+        # Rs 299 plan for cycle 2 onward. schedule_change_at='cycle_end'
+        # (not 'now') is what keeps cycle 1's already-completed charge at
+        # Rs 199 untouched while queuing the new plan for the next billing
+        # date -- Razorpay handles that automatically from here with no
+        # further action needed. Never blocks activation if this fails
+        # (logged for manual follow-up) -- the customer's own access
+        # doesn't depend on it succeeding immediately.
+        try:
+            razorpay_client.subscription.edit(
+                razorpay_subscription_id, {'plan_id': RAZORPAY_STOCKS_PLAN_ID, 'schedule_change_at': 'cycle_end'}
+            )
+        except Exception as e:
+            app.logger.error(f'Failed to schedule referral-to-regular plan swap for admin_id={admin_id}: {e}')
+
     session['stocks_admin_id'] = row['id']
     session['stocks_admin_username'] = row['username']
     session['stocks_admin_role'] = 'viewer'
@@ -8427,7 +8511,10 @@ def stocks_subscribe_verify():
         period_end_label = current_period_end.strftime('%d %b %Y')
         today_iso = date.today().isoformat()
         todays_suggestions = get_suggestions(db, start_date=today_iso, end_date=today_iso)
-        send_subscription_welcome_email(row['username'], row.get('name'), period_end_label, suggestions=todays_suggestions)
+        send_subscription_welcome_email(
+            row['username'], row.get('name'), period_end_label, suggestions=todays_suggestions,
+            db=db, admin_id=admin_id,
+        )
     except Exception as e:
         app.logger.warning(f'Subscription welcome email failed for {row["username"]}: {e}')
 
@@ -8445,7 +8532,21 @@ def stocks_google_login():
     """Mirrors the storefront's /auth/google/login (see google_login above)
     against stocks_admin_users instead of the storefront's users table --
     same GoogleAuthProvider, same Authlib handshake, just a different
-    redirect_uri/callback and a different table on the other end."""
+    redirect_uri/callback and a different table on the other end.
+
+    ?ref=<code> (see utils/stocks_referrals.py) and ?next=<path> (see
+    stocks_login_required/stocks_admin_login) are both stashed in the
+    session rather than passed through the OAuth round-trip itself
+    (Google's redirect back to /stocks/auth/google/callback carries no
+    form fields or query params of ours) -- the callback reads them back
+    from here."""
+    referral_code = (request.args.get('ref') or '').strip()
+    if referral_code:
+        session['stocks_pending_referral_code'] = referral_code
+    next_url = safe_stocks_next_url(request.args.get('next', ''))
+    if next_url:
+        session['stocks_pending_next_url'] = next_url
+    session.modified = True
     provider = auth_providers.get_auth_provider('google')
     redirect_uri = url_for('stocks_google_callback', _external=True)
     return redirect(provider.get_auth_url(redirect_uri))
@@ -8477,6 +8578,10 @@ def stocks_google_callback():
         flash('Sign-in was cancelled or failed. Please try again.', 'error')
         return redirect(url_for('stocks_landing'))
 
+    referral_code = session.pop('stocks_pending_referral_code', None)
+    next_url = session.pop('stocks_pending_next_url', None)
+    session.modified = True
+
     db = get_db()
     row = find_stocks_account_by_google_sub(db, google_sub)
     if not row:
@@ -8485,7 +8590,12 @@ def stocks_google_callback():
             link_google_sub(db, existing['id'], google_sub)
             row = existing
         else:
-            row = create_pending_google_subscriber(db, email, name, google_sub)
+            referrer = find_referrer_by_code(db, referral_code)
+            if referrer and referrer['username'] == email:
+                referrer = None  # self-referral -- silently ignored
+            row = create_pending_google_subscriber(
+                db, email, name, google_sub, referred_by_id=referrer['id'] if referrer else None
+            )
 
     if row.get('is_active') and has_stocks_access(row.get('is_pro'), row.get('subscription_status'), row.get('subscription_current_period_end')):
         session['stocks_admin_id'] = row['id']
@@ -8496,9 +8606,14 @@ def stocks_google_callback():
         session.modified = True
         if session['stocks_must_change_password']:
             return redirect(url_for('stocks_change_password'))
+        if next_url:
+            return redirect(next_url)
         return redirect(url_for('stocks_my_suggestions'))
 
-    return _render_stocks_checkout(row['id'], email, name)
+    # Based on the ACCOUNT's own stored referred_by_id (see the matching
+    # comment in /stocks/signup) so a retried checkout still gets the
+    # discount it originally qualified for.
+    return _render_stocks_checkout(row['id'], email, name, referral_plan=bool(row.get('referred_by_id')))
 
 
 @app.route('/stocks/razorpay/webhook', methods=['POST'])
@@ -8537,6 +8652,16 @@ def stocks_razorpay_webhook():
             account = find_account_by_razorpay_subscription_id(db, subscription_id)
             mark_subscription_cancelled(db, subscription_id)
             if account:
+                try:
+                    # Banked referral credits (see utils/stocks_referrals.py's
+                    # module docstring for why this happens at cancellation
+                    # rather than as a live billing interruption) -- extends
+                    # subscription_current_period_end by 30 days per
+                    # unredeemed credit, so access actually lasts the extra
+                    # free month(s) earned before really ending.
+                    apply_referral_credits_on_cancellation(db, account['id'])
+                except Exception as e:
+                    app.logger.error(f'Failed to apply referral credits for admin_id={account["id"]}: {e}')
                 try:
                     send_admin_subscription_cancelled_email(account['username'], account.get('name'))
                 except Exception as e:
@@ -8607,14 +8732,22 @@ def stocks_users_toggle_pro(viewer_id):
 def stocks_admin_login():
     """Separate login for Nari Nakhre Stocks -- shared by super_admin and
     child admins (session['stocks_admin_role'] tells them apart). Nothing to
-    do with the storefront's /admin/login or session['is_admin']."""
+    do with the storefront's /admin/login or session['is_admin'].
+
+    ?next=<path> (set by stocks_login_required when it redirects a logged-
+    out visit here -- e.g. a "View full analysis" email link to
+    /stocks/universe/<id>) takes over the post-login redirect so that
+    visit lands on the page actually requested, not always the generic
+    role default. Validated via safe_stocks_next_url (same-site /stocks/...
+    paths only) to rule out an open-redirect via a crafted next= value."""
+    next_url = safe_stocks_next_url(request.values.get('next', ''))
     if request.method == 'GET':
-        return render_template('admin/stocks_login.html', recaptcha_site_key=RECAPTCHA_SITE_KEY)
+        return render_template('admin/stocks_login.html', recaptcha_site_key=RECAPTCHA_SITE_KEY, next_url=next_url or '')
 
     if not verify_recaptcha(request.form.get('recaptcha_token'), remote_ip=request.remote_addr, expected_action='stocks_admin_login'):
         app.logger.warning('Bot caught on stocks admin login (recaptcha)')
         flash('Please try again.', 'error')
-        return render_template('admin/stocks_login.html', recaptcha_site_key=RECAPTCHA_SITE_KEY), 401
+        return render_template('admin/stocks_login.html', recaptcha_site_key=RECAPTCHA_SITE_KEY, next_url=next_url or ''), 401
 
     username = (request.form.get('username') or '').strip()
     password = request.form.get('password') or ''
@@ -8623,7 +8756,7 @@ def stocks_admin_login():
     admin_row = authenticate_stocks_admin(db, username, password)
     if not admin_row:
         flash('Invalid username or password.', 'error')
-        return render_template('admin/stocks_login.html', recaptcha_site_key=RECAPTCHA_SITE_KEY), 401
+        return render_template('admin/stocks_login.html', recaptcha_site_key=RECAPTCHA_SITE_KEY, next_url=next_url or ''), 401
 
     session['stocks_admin_id'] = admin_row['id']
     session['stocks_admin_username'] = admin_row['username']
@@ -8636,9 +8769,13 @@ def stocks_admin_login():
     session.modified = True
     # A forced password change wins over every other redirect below -- see
     # stock_auth.py's access decorators, which enforce this on every
-    # subsequent request too, not just this one.
+    # subsequent request too, not just this one. next_url is skipped in
+    # that case too -- there's no page to usefully land on before the
+    # password's actually changed.
     if session['stocks_must_change_password']:
         return redirect(url_for('stocks_change_password'))
+    if next_url:
+        return redirect(next_url)
     # viewer accounts land on their own read-only suggestions page, not the
     # staff dashboard (there was no per-role redirect at all before this --
     # super_admin/child_admin both just went to stocks_admin_dashboard,

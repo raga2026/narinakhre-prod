@@ -8,16 +8,28 @@ from utils.price_pattern import compute_suggestion_pricing
 from utils.nns_score import NNS_BRONZE_MIN, compute_nns_score, nns_tier
 from utils.stock_shortlist import _compute_industry_benchmarks
 
-# Default cap for select_top_suggestions (a general-purpose "top N
-# candidates" helper, still used as such/tested independently) -- NOT used
-# by generate_daily_suggestions itself, which sends every golden-cross
-# candidate that clears NNS_BRONZE_MIN, uncapped (see that function's
-# docstring for why: "send out all the golden cross stocks", not a
-# single Pick of the Day).
+# The daily cap -- exactly one stock_suggestions row per day (the "Pick of
+# the Day"), not every currently-qualifying candidate. Also the default for
+# select_top_suggestions, a general-purpose "top N candidates" helper used
+# the same way.
 TOP_N_SUGGESTIONS = 1
 HOLDING_PERIOD_DAYS = 10
 TARGET_MULTIPLIER = 1.05   # +5%, used as the fallback when no chart pattern applies -- see compute_suggestion_pricing
 STOP_LOSS_MULTIPLIER = 0.97  # -3%, same fallback role
+
+# How far back a candidate's own last suggestion counts as "too recent to
+# repeat" (see _is_genuine_change/generate_daily_suggestions) -- the point
+# of the 1-a-day cap is to work through the qualifying list one stock at a
+# time rather than fixating on the single top-ranked one every single day,
+# so a repeat within this window is skipped in favor of the next-best
+# candidate UNLESS the pick has genuinely changed since then.
+SUGGESTION_REPEAT_WINDOW_DAYS = 30
+# How much the NNS Score has to move (absolute, 0-10 scale) to count as a
+# genuine change worth resending within the repeat window.
+NNS_SCORE_CHANGE_THRESHOLD = 1.0
+# How much the target sell price has to move (%) to count as a genuine
+# change worth resending within the repeat window.
+TARGET_PRICE_CHANGE_THRESHOLD_PCT = 3.0
 
 # How far back to pull daily closes for pattern detection (see
 # utils.price_pattern.detect_head_and_shoulders/detect_rounding_pattern) --
@@ -197,6 +209,29 @@ def _build_rationale(candidate, tier=None):
             'closely than usual before acting.'
         )
     return rationale
+
+
+def _is_genuine_change(existing, new_score, new_target_price):
+    """existing: {'score', 'target_sell_price', 'pattern_name'} -- the most
+    recent stock_suggestions row for this watchlist_id within
+    SUGGESTION_REPEAT_WINDOW_DAYS. Returns True if today's pick differs
+    enough from that one to be worth resending despite the cooldown:
+    either the NNS Score moved by at least NNS_SCORE_CHANGE_THRESHOLD, the
+    target price moved by at least TARGET_PRICE_CHANGE_THRESHOLD_PCT, or
+    the pattern basis itself changed (gaining or losing a confirmed chart
+    pattern is a genuinely different reason to buy even if the score
+    happens to land close to where it was). False means "same pick as
+    last time, nothing meaningfully new to say" -- generate_daily_suggestions
+    skips it and tries the next-best candidate instead."""
+    old_score = existing.get('score')
+    if old_score is not None and abs(new_score - old_score) >= NNS_SCORE_CHANGE_THRESHOLD:
+        return True
+    old_target = existing.get('target_sell_price')
+    if old_target and new_target_price is not None:
+        pct_change = abs(new_target_price - old_target) / old_target * 100
+        if pct_change >= TARGET_PRICE_CHANGE_THRESHOLD_PCT:
+            return True
+    return False
 
 
 # Multi-horizon projected price (1 month/6 months/1 year) moved to
@@ -487,12 +522,18 @@ def generate_daily_suggestions(db):
     explicit caution note in its rationale (see _build_rationale) rather
     than being presented the same as a stronger pick.
 
-    Every golden-cross candidate that clears NNS_BRONZE_MIN gets a row for
-    today, uncapped -- this is a daily "here's the current full picture"
-    digest, not a single novelty pick, so a stock that also qualified
-    yesterday (or every day this month) is included again today rather
-    than being suppressed as a repeat. A day can still end up with zero
-    rows if no golden-cross candidate clears NNS_BRONZE_MIN at all.
+    Exactly ONE stock_suggestions row goes out per day -- this is a single
+    daily pick, not a full digest of everything currently qualifying. To
+    avoid fixating on the same top-ranked stock every single day when it
+    keeps qualifying, a candidate whose own last suggestion falls within
+    SUGGESTION_REPEAT_WINDOW_DAYS is skipped in favor of the next-best
+    candidate UNLESS the pick has genuinely changed since then (see
+    _is_genuine_change) -- this is what "gives the list out one at a time"
+    rather than repeating the single best stock indefinitely: the pool of
+    currently-qualifying candidates naturally rotates through as each gets
+    its turn and then cools down. A day can end up with zero rows if every
+    golden-cross candidate that clears NNS_BRONZE_MIN is on cooldown (or
+    none clear the bar at all).
 
     buy/target/stop-loss come from compute_suggestion_pricing()
     (utils/price_pattern.py), which prefers a confirmed chart pattern
@@ -512,11 +553,17 @@ def generate_daily_suggestions(db):
     eligible = [c for c in candidates if is_suggestion_eligible(c)]
     ranked = score_candidates(eligible, previous_snapshots_by_watchlist, industry_benchmarks_by_industry)
 
-    today = date.today().isoformat()
+    today_date = date.today()
+    today = today_date.isoformat()
+    repeat_window_cutoff = (today_date - timedelta(days=SUGGESTION_REPEAT_WINDOW_DAYS)).isoformat()
 
     created = []
+    skipped_duplicates = []
 
     for candidate, nns_score in ranked:
+        if len(created) >= TOP_N_SUGGESTIONS:
+            break
+
         watchlist_id = candidate['watchlist_id']
 
         price_history = _fetch_price_history(db, watchlist_id)
@@ -528,6 +575,19 @@ def generate_daily_suggestions(db):
         target_sell_price = pricing['target_sell_price']
         stop_loss_price = pricing['stop_loss_price']
         pattern_name = pricing['pattern_name']
+
+        existing_recent = db.execute(
+            '''SELECT score, target_sell_price, pattern_name FROM stock_suggestions
+               WHERE watchlist_id=? AND suggestion_date >= ? AND suggestion_date < ?
+               ORDER BY suggestion_date DESC LIMIT 1''',
+            (watchlist_id, repeat_window_cutoff, today)
+        ).fetchone()
+        if existing_recent and not _is_genuine_change(existing_recent, nns_score, target_sell_price):
+            skipped_duplicates.append({
+                'watchlist_id': watchlist_id, 'symbol': candidate['symbol'], 'exchange': candidate['exchange'],
+            })
+            continue
+
         pattern_note = _build_pattern_note(pattern_name, pricing['pattern_research'])
         tier = nns_tier(nns_score)
         rationale = _build_rationale(candidate, tier)
@@ -573,4 +633,5 @@ def generate_daily_suggestions(db):
     return {
         'candidates_evaluated': len(candidates),
         'created': created,
+        'skipped_duplicates': skipped_duplicates,
     }

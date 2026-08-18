@@ -2,8 +2,12 @@ from datetime import date, timedelta
 
 from utils.suggestion_engine import (
     HOLDING_PERIOD_DAYS,
+    NNS_SCORE_CHANGE_THRESHOLD,
+    SUGGESTION_REPEAT_WINDOW_DAYS,
+    TARGET_PRICE_CHANGE_THRESHOLD_PCT,
     TOP_N_SUGGESTIONS,
     _build_rationale,
+    _is_genuine_change,
     generate_daily_suggestions,
     is_suggestion_eligible,
     passes_hard_filters,
@@ -202,6 +206,15 @@ class FakeSuggestionDB:
         if normalized.startswith('SELECT universe_id, promoter_holding_pct, fii_holding_pct, snapshot_date'):
             return FakeCursor([])  # no candidate in these tests sets universe_id
 
+        if normalized.startswith('SELECT score, target_sell_price, pattern_name FROM stock_suggestions'):
+            watchlist_id, cutoff, today = params
+            matches = sorted(
+                (s for s in self.suggestions
+                 if s['watchlist_id'] == watchlist_id and cutoff <= s['suggestion_date'] < today),
+                key=lambda s: s['suggestion_date'], reverse=True
+            )
+            return FakeCursor(matches[:1])
+
         if normalized.startswith('INSERT INTO stock_suggestions'):
             (watchlist_id, suggestion_date, buy_price, target_sell_price, stop_loss_price,
              holding_period_days, rsi_at_suggestion, pe_at_suggestion, peg_at_suggestion,
@@ -243,22 +256,18 @@ class FakeSuggestionDB:
         pass
 
 
-def test_every_qualifying_candidate_gets_a_suggestion_not_just_the_top_one():
-    # "send out all the golden cross stocks" -- every candidate that's
-    # golden-cross and clears NNS_BRONZE_MIN gets a row, uncapped.
+def test_only_one_suggestion_created_per_day_even_with_many_qualifying_candidates():
+    # Exactly one Pick of the Day, never a full digest of every candidate
+    # that clears the bar.
     candidates = [_candidate(i, f'SYM{i}') for i in range(5)]
     db = FakeSuggestionDB(candidates)
 
     summary = generate_daily_suggestions(db)
 
-    assert len(summary['created']) == 5
-    assert {c['symbol'] for c in summary['created']} == {'SYM0', 'SYM1', 'SYM2', 'SYM3', 'SYM4'}
+    assert len(summary['created']) == TOP_N_SUGGESTIONS == 1
 
 
-def test_same_stock_sent_again_the_next_day_even_if_unchanged():
-    # Unlike the old "Pick of the Day" cooldown, this is a daily "current
-    # picture" digest -- a stock qualifying again tomorrow, unchanged, is
-    # included again, not suppressed as a repeat.
+def test_same_day_rerun_upserts_the_same_row_not_a_duplicate():
     candidates = [_candidate(1, 'STABLE')]
     db = FakeSuggestionDB(candidates)
 
@@ -269,6 +278,83 @@ def test_same_stock_sent_again_the_next_day_even_if_unchanged():
     assert len(second['created']) == 1
     assert second['created'][0]['symbol'] == 'STABLE'
     assert len(db.suggestions) == 1  # same day -- upserts the same row, doesn't duplicate it
+
+
+def test_unchanged_pick_within_the_repeat_window_is_skipped():
+    candidate = _candidate(1, 'STABLE')
+
+    # Capture what this candidate would deterministically score/price
+    # today, so the "existing" row seeded below matches it exactly (no
+    # genuine change).
+    baseline = FakeSuggestionDB([candidate])
+    generate_daily_suggestions(baseline)
+    seeded_score = baseline.suggestions[0]['score']
+    seeded_target = baseline.suggestions[0]['target_sell_price']
+
+    within_window = (date.today() - timedelta(days=SUGGESTION_REPEAT_WINDOW_DAYS - 1)).isoformat()
+    db = FakeSuggestionDB([candidate], existing_suggestions=[{
+        'id': 99, 'watchlist_id': 1, 'suggestion_date': within_window,
+        'score': seeded_score, 'target_sell_price': seeded_target, 'pattern_name': None,
+        'status': 'pending',
+    }])
+
+    summary = generate_daily_suggestions(db)
+
+    assert summary['created'] == []
+    assert len(summary['skipped_duplicates']) == 1
+    assert summary['skipped_duplicates'][0]['symbol'] == 'STABLE'
+    assert len(db.suggestions) == 1  # only the seeded row, nothing new added
+
+
+def test_genuinely_changed_score_is_resent_within_the_repeat_window():
+    candidate = _candidate(1, 'MOVER')
+    baseline = FakeSuggestionDB([candidate])
+    generate_daily_suggestions(baseline)
+    seeded_score = baseline.suggestions[0]['score']
+    seeded_target = baseline.suggestions[0]['target_sell_price']
+
+    within_window = (date.today() - timedelta(days=5)).isoformat()
+    db = FakeSuggestionDB([candidate], existing_suggestions=[{
+        'id': 99, 'watchlist_id': 1, 'suggestion_date': within_window,
+        # Old score far enough from today's to count as a genuine change.
+        'score': seeded_score - NNS_SCORE_CHANGE_THRESHOLD - 0.5, 'target_sell_price': seeded_target,
+        'pattern_name': None, 'status': 'pending',
+    }])
+
+    summary = generate_daily_suggestions(db)
+
+    assert len(summary['created']) == 1
+    assert summary['created'][0]['symbol'] == 'MOVER'
+
+
+def test_top_candidate_on_cooldown_falls_through_to_the_next_best():
+    top = _candidate(1, 'TOPCO')
+    second = _candidate(2, 'SECONDCO', peg_ratio=0.9, quarterly_profit_growth_pct=11, opm_pct=26, roce_pct=10, roa_pct=5)
+
+    baseline = FakeSuggestionDB([top])
+    generate_daily_suggestions(baseline)
+    seeded_score = baseline.suggestions[0]['score']
+    seeded_target = baseline.suggestions[0]['target_sell_price']
+
+    within_window = (date.today() - timedelta(days=2)).isoformat()
+    db = FakeSuggestionDB([top, second], existing_suggestions=[{
+        'id': 99, 'watchlist_id': 1, 'suggestion_date': within_window,
+        'score': seeded_score, 'target_sell_price': seeded_target, 'pattern_name': None, 'status': 'pending',
+    }])
+
+    summary = generate_daily_suggestions(db)
+
+    assert len(summary['created']) == 1
+    assert summary['created'][0]['symbol'] == 'SECONDCO'
+    assert any(s['symbol'] == 'TOPCO' for s in summary['skipped_duplicates'])
+
+
+def test_is_genuine_change_pure_function():
+    existing = {'score': 7.0, 'target_sell_price': 100.0, 'pattern_name': None}
+    assert _is_genuine_change(existing, 7.0, 100.0) is False
+    assert _is_genuine_change(existing, 7.0 + NNS_SCORE_CHANGE_THRESHOLD, 100.0) is True
+    moved_target = 100.0 * (1 + TARGET_PRICE_CHANGE_THRESHOLD_PCT / 100 + 0.01)
+    assert _is_genuine_change(existing, 7.0, moved_target) is True
 
 
 def test_new_suggestion_created_when_no_open_one_exists():
