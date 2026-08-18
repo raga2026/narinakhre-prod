@@ -462,6 +462,32 @@ def get_suggestions(db, start_date=None, end_date=None):
     ).fetchall()
 
 
+def get_suggestion_by_id(db, suggestion_id):
+    """Single stock_suggestions row, for the manual-buy confirmation page
+    and route (/stocks/suggestions/<id>/buy) -- same join/columns as
+    get_suggestions plus s.id AS suggestion_id (which get_suggestions
+    itself doesn't need, since it's never used to open a trade against).
+    Unlike get_suggestions, this deliberately does NOT collapse via
+    DISTINCT ON -- a manual buy targets one specific already-sent
+    suggestion row by its own id, not "today's pick" in the abstract.
+    Returns None if no such row exists."""
+    return db.execute(
+        '''SELECT s.id AS suggestion_id, w.id AS watchlist_id, w.symbol, w.exchange, w.name AS company_name,
+                  u.id AS universe_id,
+                  s.suggestion_date, s.buy_price,
+                  s.target_sell_price, s.stop_loss_price, s.holding_period_days,
+                  s.rsi_at_suggestion, s.pe_at_suggestion, s.peg_at_suggestion,
+                  s.opm_at_suggestion, s.fundamental_tier,
+                  s.pattern_name, s.pattern_note,
+                  s.score AS nns_score, s.nns_tier, s.rationale, s.status
+           FROM stock_suggestions s
+           JOIN stock_watchlist w ON w.id = s.watchlist_id
+           LEFT JOIN stock_universe u ON u.symbol = w.symbol AND u.exchange = w.exchange
+           WHERE s.id = ?''',
+        (suggestion_id,)
+    ).fetchone()
+
+
 def compute_tracker_row_stats(buy_price, target_sell_price, stop_loss_price, latest_price, suggestion_date, today=None):
     """Pure per-row math for the recommendation tracker (see
     get_recommendation_tracker and app.py's /stocks/recommendations/tracker)
@@ -529,6 +555,23 @@ def get_recommendation_tracker(db):
     ).fetchall()
 
 
+def _rank_todays_candidates(db):
+    """Fetches today's candidate pool and scores it -- shared by
+    generate_daily_suggestions below and
+    utils.starters_engine.generate_weekly_starters_pick, which reuses the
+    exact same universe/scoring and only differs in what it does with the
+    ranked list afterward (a stricter golden-tier-only bar and a weekly
+    instead of daily cadence). Returns [(candidate, score), ...] sorted
+    highest score first, already excluding anything that doesn't clear
+    NNS_BRONZE_MIN or isn't golden-cross -- see is_suggestion_eligible/
+    score_candidates."""
+    candidates = _fetch_candidates(db)
+    previous_snapshots_by_watchlist = _fetch_previous_snapshots(db, candidates)
+    industry_benchmarks_by_industry = _compute_industry_benchmarks(candidates)
+    eligible = [c for c in candidates if is_suggestion_eligible(c)]
+    return score_candidates(eligible, previous_snapshots_by_watchlist, industry_benchmarks_by_industry)
+
+
 def generate_daily_suggestions(db):
     """Builds the candidate pool (active watchlist joined to today's
     indicators and each symbol's latest fundamentals snapshot within 20
@@ -569,11 +612,7 @@ def generate_daily_suggestions(db):
     the email/viewer pages show for those, since chart-pattern shape
     doesn't reliably predict timing the way a fixed number of days would
     misleadingly imply."""
-    candidates = _fetch_candidates(db)
-    previous_snapshots_by_watchlist = _fetch_previous_snapshots(db, candidates)
-    industry_benchmarks_by_industry = _compute_industry_benchmarks(candidates)
-    eligible = [c for c in candidates if is_suggestion_eligible(c)]
-    ranked = score_candidates(eligible, previous_snapshots_by_watchlist, industry_benchmarks_by_industry)
+    ranked = _rank_todays_candidates(db)
 
     today_date = date.today()
     today = today_date.isoformat()
@@ -653,7 +692,11 @@ def generate_daily_suggestions(db):
         })
 
     return {
-        'candidates_evaluated': len(candidates),
+        # Candidates that cleared golden-cross + the NNS_BRONZE_MIN scoring
+        # floor and got ranked this run (see _rank_todays_candidates) --
+        # not the full raw watchlist pool, which score_candidates already
+        # filters out before this function ever sees it.
+        'candidates_evaluated': len(ranked),
         'created': created,
         'skipped_duplicates': skipped_duplicates,
     }

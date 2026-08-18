@@ -50,6 +50,7 @@
                         <th scope="col">P/L %</th>
                         <th scope="col">Outcome</th>
                         <th scope="col">NNS</th>
+                        <th scope="col">Buy</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -81,10 +82,13 @@
                             {% endif %}
                         </td>
                         <td>{{ r.nns_tier | title if r.nns_tier else '—' }} {{ r.nns_score if r.nns_score is not none else '' }}</td>
+                        <td onclick="event.stopPropagation();">
+                            <a href="{{ url_for('stocks_suggestion_buy', suggestion_id=r.id) }}" class="text-sky-400 hover:text-sky-300 underline">Buy</a>
+                        </td>
                     </tr>
                     {% else %}
                     <tr>
-                        <td colspan="10" class="text-slate-400">No recommendations sent yet.</td>
+                        <td colspan="11" class="text-slate-400">No recommendations sent yet.</td>
                     </tr>
                     {% endfor %}
                 </tbody>

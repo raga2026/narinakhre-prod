@@ -37,6 +37,7 @@ from utils.stock_auth import (
     create_viewer_account,
     toggle_viewer_active,
     toggle_viewer_pro,
+    set_viewer_plan,
     delete_viewer_account,
     change_own_password,
     migrate_email_recipients_to_viewers,
@@ -72,6 +73,12 @@ from utils.stocks_referrals import (
     find_referrer_by_code,
     get_or_create_referral_code,
 )
+from utils.starters_engine import (
+    STARTERS_REPEAT_WINDOW_DAYS,
+    generate_weekly_starters_pick,
+    get_starters_suggestions,
+    initialize_starters_suggestions_table_if_needed,
+)
 from utils.saved_filters import (
     initialize_saved_filters_table_if_needed,
     list_saved_stock_filters,
@@ -83,6 +90,8 @@ from utils.auto_trader import (
     get_auto_trade_settings,
     set_auto_trade_settings,
     open_auto_trade_if_enabled,
+    open_manual_trade,
+    manual_close_trade,
     reconcile_open_trades,
     reconcile_pending_buys,
     reconcile_pending_sells,
@@ -160,6 +169,7 @@ from utils.suggestion_engine import (
     initialize_stock_suggestions_table_if_needed,
     generate_daily_suggestions,
     get_suggestions,
+    get_suggestion_by_id,
     passes_hard_filters,
     HOLDING_PERIOD_DAYS,
     get_recommendation_tracker,
@@ -175,6 +185,10 @@ from utils.suggestion_email import (
     send_stop_loss_review_email,
     send_admin_new_subscriber_email,
     send_admin_subscription_cancelled_email,
+    send_trading_alert_email,
+    send_target_hit_email,
+    send_weekly_starters_email,
+    STOCKS_BASE_URL,
 )
 from utils.trading_calendar import is_trading_day
 import auth_providers
@@ -322,6 +336,14 @@ RAZORPAY_STOCKS_REFERRAL_PLAN_ID = os.environ.get('RAZORPAY_STOCKS_REFERRAL_PLAN
 STOCKS_SUBSCRIPTION_PRICE_PAISE = 29900  # Rs 299.00
 STOCKS_SUBSCRIPTION_PRICE_DISPLAY = 'Rs 299'
 STOCKS_REFERRAL_PRICE_DISPLAY = 'Rs 199'
+# Starters tier (see STOCKS_AUTH_ALTER_SQL's stocks_plan column,
+# utils/starters_engine.py) -- Rs 99/month, one separately-curated
+# golden-tier-only pick a week instead of the daily one. Its own Plan
+# object, same one-time-setup nature as the two above -- no discount
+# variant exists for this tier (the referral discount stays Standard-only,
+# see /stocks/signup).
+RAZORPAY_STOCKS_STARTERS_PLAN_ID = os.environ.get('RAZORPAY_STOCKS_STARTERS_PLAN_ID', '')
+STOCKS_STARTERS_PRICE_DISPLAY = 'Rs 99'
 
 # Auth providers are pluggable -- see auth_providers/base.py. Adding another
 # login option later (e.g. Facebook) means adding auth_providers/facebook.py
@@ -886,6 +908,7 @@ initialize_stock_suggestions_table_if_needed(get_supabase())
 initialize_stocks_email_recipients_table_if_needed(get_supabase())
 initialize_saved_filters_table_if_needed(get_supabase())
 initialize_auto_trade_tables_if_needed(get_supabase())
+initialize_starters_suggestions_table_if_needed(get_supabase())
 
 
 def calculate_inclusive_gst(display_cart, discount=0.0, full_subtotal=0.0):
@@ -7128,6 +7151,20 @@ def stocks_suggestions_send_daily_email():
                             open_auto_trade_if_enabled(job_db, created, kite_client=auto_trade_kite_client)
                         except Exception as e:
                             app.logger.error(f'Auto-trade open failed for {created.get("symbol")}: {e}')
+                # A "Highly Recommended" pick (golden/silver -- same bucket
+                # _trend_label shows the customer) also gets a separate
+                # trading alert to whoever places manual orders, with a
+                # direct link to buy it -- never blocks the actual daily
+                # email below on a failure here.
+                for created in generation_summary['created']:
+                    if created.get('nns_tier') in ('golden', 'silver'):
+                        try:
+                            full_suggestion = get_suggestion_by_id(job_db, created['suggestion_id'])
+                            if full_suggestion:
+                                buy_link = f'{STOCKS_BASE_URL}/stocks/suggestions/{created["suggestion_id"]}/buy'
+                                send_trading_alert_email(STOP_LOSS_ALERT_EMAIL, full_suggestion, buy_link)
+                        except Exception as e:
+                            app.logger.warning(f'Trading alert email failed for {created.get("symbol")}: {e}')
             summary = send_daily_suggestions_email(job_db)
         except Exception as e:
             app.logger.error(f'Daily suggestions email failed: {e}')
@@ -7137,6 +7174,42 @@ def stocks_suggestions_send_daily_email():
         return summary
 
     return _dispatch_stocks_job(db, is_cron, 'suggestion_email', _job)
+
+
+@app.route('/stocks/starters/send-weekly-email', methods=['POST'])
+def stocks_starters_send_weekly_email():
+    """Starters-tier (Rs 99/mo) equivalent of /stocks/suggestions/send-daily-email
+    -- generates this week's separately-curated golden-tier-only pick (see
+    utils/starters_engine.py) and emails every active stocks_plan='starters'
+    viewer. Same dual cron/session auth as every other Stocks job route.
+
+    Triggered by a DAILY cron (same 02:00 UTC slot as the daily suggestion
+    email), not a Monday-only one -- this job body itself checks the
+    weekday and is_trading_day() and always calls record_job_success
+    either way, exactly mirroring how the daily job already handles
+    non-trading-days (see JOB_EXPECTATIONS in utils/stock_alerting.py for
+    why this needs no day-of-week awareness there)."""
+    is_cron = has_valid_cron_secret(request.headers, STOCKS_FUNDAMENTALS_CRON_SECRET)
+    if not is_cron and not session.get('stocks_admin_id'):
+        return redirect(url_for('stocks_admin_login'))
+
+    db = get_db()
+
+    def _job(job_db):
+        if date.today().weekday() != 0 or not is_trading_day():
+            record_job_success(job_db, 'starters_weekly_email')
+            return {'status': 'skipped', 'reason': 'not a Monday trading day'}
+        try:
+            generate_weekly_starters_pick(job_db)
+            summary = send_weekly_starters_email(job_db)
+        except Exception as e:
+            app.logger.error(f'Weekly Starters email failed: {e}')
+            alert_job_error(job_db, 'starters_weekly_email', str(e))
+            raise
+        record_job_success(job_db, 'starters_weekly_email')
+        return summary
+
+    return _dispatch_stocks_job(db, is_cron, 'starters_weekly_email', _job)
 
 
 @app.route('/stocks/suggestions/resend', methods=['GET', 'POST'])
@@ -8054,11 +8127,26 @@ def stocks_my_suggestions():
     but staff can see it too -- no edit/execute controls here regardless of
     role). Shows suggestions from the last HOLDING_PERIOD_DAYS days, using
     the same get_suggestions() query the daily email and /stocks/my/history
-    both use."""
+    both use.
+
+    A stocks_plan='starters' account (see STOCKS_AUTH_ALTER_SQL) sees its
+    own weekly-curated pick history instead (get_starters_suggestions,
+    utils/starters_engine.py) -- a daily Pick of the Day list would be the
+    wrong content entirely for what they're actually paying for. Staff
+    (super_admin/child_admin) always default to 'standard' and never have
+    this changed, so they keep seeing the daily view regardless."""
     db = get_db()
     admin_id = session.get('stocks_admin_id')
-    start_date = (date.today() - timedelta(days=HOLDING_PERIOD_DAYS)).isoformat()
-    suggestions = _annotate_suggestions_with_projection(get_suggestions(db, start_date=start_date))
+    is_starters = session.get('stocks_plan') == 'starters'
+    if is_starters:
+        # ~9 weeks -- enough recent weekly picks to be worth showing on the
+        # landing page without becoming the full all-time list (that's
+        # stocks_my_history's job below).
+        start_date = (date.today() - timedelta(days=63)).isoformat()
+        suggestions = _annotate_suggestions_with_projection(get_starters_suggestions(db, start_date=start_date))
+    else:
+        start_date = (date.today() - timedelta(days=HOLDING_PERIOD_DAYS)).isoformat()
+        suggestions = _annotate_suggestions_with_projection(get_suggestions(db, start_date=start_date))
 
     subscription_row = db.execute(
         'SELECT subscription_status, subscription_current_period_end FROM stocks_admin_users WHERE id=?',
@@ -8080,7 +8168,7 @@ def stocks_my_suggestions():
     available_credits = available_referral_credits(db, admin_id)
 
     return render_template(
-        'admin/stocks_my_suggestions.html', suggestions=suggestions,
+        'admin/stocks_my_suggestions.html', suggestions=suggestions, is_starters=is_starters,
         subscription_status=subscription_row.get('subscription_status') if subscription_row else None,
         subscription_period_end_label=subscription_period_end_label,
         referral_code=referral_code, referral_link=referral_link,
@@ -8097,10 +8185,17 @@ def stocks_my_history():
     yet (nothing ever moves a suggestion's status away from 'pending', see
     execute_suggestion in an earlier deferred phase), so every row's
     status genuinely reads 'Pending' here rather than a fabricated
-    result."""
+    result.
+
+    Branches to the Starters weekly-pick history the same way
+    stocks_my_suggestions does -- see that route's docstring."""
     db = get_db()
-    suggestions = _annotate_suggestions_with_projection(get_suggestions(db))
-    return render_template('admin/stocks_my_history.html', suggestions=suggestions)
+    is_starters = session.get('stocks_plan') == 'starters'
+    if is_starters:
+        suggestions = _annotate_suggestions_with_projection(get_starters_suggestions(db))
+    else:
+        suggestions = _annotate_suggestions_with_projection(get_suggestions(db))
+    return render_template('admin/stocks_my_history.html', suggestions=suggestions, is_starters=is_starters)
 
 
 @app.route('/stocks/recommendations/tracker', methods=['GET'])
@@ -8227,13 +8322,18 @@ def stocks_auto_trader_reconcile():
                     send_stop_loss_review_email(STOP_LOSS_ALERT_EMAIL, trade, pnl_amount, pnl_pct)
                 except Exception as e:
                     app.logger.warning(f'Stop-loss review email failed for {trade.get("symbol")}: {e}')
+            for trade in summary.get('target_hit', []):
+                try:
+                    send_target_hit_email(STOP_LOSS_ALERT_EMAIL, trade, trade['pnl_amount'], trade['pnl_pct'])
+                except Exception as e:
+                    app.logger.warning(f'Target-hit email failed for {trade.get("symbol")}: {e}')
         except Exception as e:
             app.logger.error(f'Auto-trade reconciliation failed: {e}')
             alert_job_error(job_db, 'auto_trade_reconcile', str(e))
             raise
         record_job_success(job_db, 'auto_trade_reconcile')
         return {
-            'checked': summary['checked'], 'target_hit': summary['target_hit'],
+            'checked': summary['checked'], 'target_hit': len(summary['target_hit']),
             'stop_loss_pending': len(summary['stop_loss_pending']),
             'pending_buys': pending_buys_summary, 'pending_sells': pending_sells_summary,
         }
@@ -8269,6 +8369,69 @@ def stocks_auto_trader_cancel(trade_id):
     return redirect(url_for('stocks_auto_trader'))
 
 
+@app.route('/stocks/auto-trader/<int:trade_id>/sell-now', methods=['POST'])
+@stocks_role_required('super_admin')
+def stocks_auto_trader_sell_now(trade_id):
+    """Discretionary exit on an 'open' position, independent of whether
+    target/stop-loss has actually been reached (see manual_close_trade) --
+    the "Sell now" button on the auto-trader dashboard next to any open
+    row."""
+    db = get_db()
+    settings = get_auto_trade_settings(db)
+    try:
+        kite_client = _kite_client_for_auto_trade(db, settings)
+        ok = manual_close_trade(db, trade_id, kite_client=kite_client)
+        flash('Sold -- position closed.' if ok else 'That trade is not currently open.', 'info')
+    except KiteClientError as e:
+        flash(f'Could not place the sell order: {e}', 'error')
+    return redirect(url_for('stocks_auto_trader'))
+
+
+@app.route('/stocks/suggestions/<int:suggestion_id>/buy', methods=['GET', 'POST'])
+@stocks_role_required('super_admin')
+def stocks_suggestion_buy(suggestion_id):
+    """Discretionary buy on a specific already-sent recommendation -- the
+    "Buy" link on the recommendation tracker. GET shows a confirmation
+    page (company/buy/target/stop-loss read-only, inherited straight from
+    the suggestion; amount editable, defaulting to the configured
+    budget_per_trade). POST places the trade at whatever amount was
+    submitted, using the auto-trader's current global mode (dry_run/live)
+    -- see open_manual_trade, which isn't gated by settings['enabled'] the
+    way the automatic path is."""
+    db = get_db()
+    suggestion = get_suggestion_by_id(db, suggestion_id)
+    if not suggestion:
+        flash('That recommendation no longer exists.', 'error')
+        return redirect(url_for('stocks_recommendations_tracker'))
+
+    settings = get_auto_trade_settings(db)
+
+    if request.method == 'POST':
+        try:
+            budget_amount = float(request.form.get('budget_amount') or settings['budget_per_trade'])
+        except ValueError:
+            budget_amount = settings['budget_per_trade']
+        try:
+            kite_client = _kite_client_for_auto_trade(db, settings)
+            quantity = open_manual_trade(db, suggestion, budget_amount, settings['mode'], kite_client=kite_client)
+            if quantity:
+                flash(f'Bought {quantity} shares of {suggestion["symbol"]} for Rs {budget_amount:,.0f}.', 'info')
+            else:
+                flash(
+                    f'Could not buy {suggestion["symbol"]} -- a trade may already exist for this '
+                    f'recommendation, the amount may be too small, insufficient capital available, or '
+                    f'(live mode) the symbol has no Kite match.', 'error'
+                )
+        except KiteClientError as e:
+            flash(f'Could not place the buy order: {e}', 'error')
+        return redirect(url_for('stocks_auto_trader'))
+
+    return render_template(
+        'admin/stocks_suggestion_buy.html', suggestion=suggestion, settings=settings,
+        default_budget=settings['budget_per_trade'],
+    )
+
+
 @app.route('/stocks', methods=['GET'])
 def stocks_landing():
     """Public marketing/info page for Nari Nakhre Stocks -- no login
@@ -8279,7 +8442,7 @@ def stocks_landing():
     return render_template('admin/stocks_landing.html')
 
 
-def _render_stocks_checkout(admin_id, email, name, referral_plan=False):
+def _render_stocks_checkout(admin_id, email, name, plan='standard', referral_plan=False):
     """Creates a fresh Razorpay subscription for admin_id and renders the
     Checkout page for it -- shared by /stocks/signup (password path) and
     /stocks/auth/google/callback (Google path), and also re-run any time a
@@ -8292,23 +8455,32 @@ def _render_stocks_checkout(admin_id, email, name, referral_plan=False):
     charge anything, since Razorpay only bills after Checkout actually
     authorizes one).
 
-    referral_plan=True (see utils/stocks_referrals.py) checks out against
-    RAZORPAY_STOCKS_REFERRAL_PLAN_ID (Rs 199) instead of the regular Rs 299
-    plan -- only ever set True for a brand-new signup that supplied a
-    valid referral code, never for a renewal (see the call sites). The
+    plan ('standard' or 'starters', see STOCKS_AUTH_ALTER_SQL's stocks_plan
+    column) picks which of the two base Plan objects this checks out
+    against. referral_plan=True (see utils/stocks_referrals.py) overrides
+    that and checks out against RAZORPAY_STOCKS_REFERRAL_PLAN_ID (Rs 199)
+    instead -- only ever set True for a brand-new STANDARD signup that
+    supplied a valid referral code (there's no discounted Starters plan;
+    see the call sites' plan=='standard' guard), never for a renewal. The
     account's own referred_by_id (already stamped at signup time) is what
     /stocks/subscribe/verify later checks to know whether to schedule the
-    swap back to the regular plan after this first cycle -- this function
-    itself doesn't need to remember which plan it used beyond the one API
-    call.
+    swap back to the regular Standard plan after this first cycle -- this
+    function itself doesn't need to remember which plan it used beyond the
+    one API call.
 
     Returns a Flask response (either the checkout page, or a redirect back
     to signup with a flashed error if Razorpay itself isn't reachable/
     configured)."""
-    plan_id = RAZORPAY_STOCKS_REFERRAL_PLAN_ID if referral_plan else RAZORPAY_STOCKS_PLAN_ID
-    price_display = STOCKS_REFERRAL_PRICE_DISPLAY if referral_plan else STOCKS_SUBSCRIPTION_PRICE_DISPLAY
+    if referral_plan:
+        plan_id, price_display = RAZORPAY_STOCKS_REFERRAL_PLAN_ID, STOCKS_REFERRAL_PRICE_DISPLAY
+        missing_var = 'RAZORPAY_STOCKS_REFERRAL_PLAN_ID'
+    elif plan == 'starters':
+        plan_id, price_display = RAZORPAY_STOCKS_STARTERS_PLAN_ID, STOCKS_STARTERS_PRICE_DISPLAY
+        missing_var = 'RAZORPAY_STOCKS_STARTERS_PLAN_ID'
+    else:
+        plan_id, price_display = RAZORPAY_STOCKS_PLAN_ID, STOCKS_SUBSCRIPTION_PRICE_DISPLAY
+        missing_var = 'RAZORPAY_STOCKS_PLAN_ID'
     if not plan_id:
-        missing_var = 'RAZORPAY_STOCKS_REFERRAL_PLAN_ID' if referral_plan else 'RAZORPAY_STOCKS_PLAN_ID'
         app.logger.error(f'{missing_var} is not set -- cannot start a Stocks subscription checkout.')
         flash('Sign-ups are temporarily unavailable. Please try again shortly.', 'error')
         return redirect(url_for('stocks_signup'))
@@ -8358,14 +8530,26 @@ def stocks_signup():
     verbally rather than via the link has nowhere else to go. A valid,
     non-self code checks the new account out on the discounted referral
     plan (see _render_stocks_checkout's referral_plan param) and stamps
-    referred_by_id once at creation time."""
+    referred_by_id once at creation time -- but only for a Standard
+    signup; the referral discount doesn't exist for Starters (see the
+    plan selector below), a Starters signup with a code still stamps
+    referred_by_id (so the referrer earns credit) but pays full price.
+
+    ?plan=starters (or the form's own plan radio) selects the Rs 99/mo
+    Starters tier instead of the default Standard Rs 299/mo -- see
+    STOCKS_AUTH_ALTER_SQL's stocks_plan column and _render_stocks_checkout's
+    plan param. Stamped once at creation time, same as referred_by_id;
+    there's no self-serve way to change it after (a super_admin can, from
+    /stocks/users -- see set_viewer_plan)."""
     if request.method == 'GET':
         return render_template(
             'admin/stocks_signup.html', recaptcha_site_key=RECAPTCHA_SITE_KEY, form_rendered_at=time.time(),
             referral_code_prefill=(request.args.get('ref') or '').strip(),
+            plan_prefill='starters' if request.args.get('plan') == 'starters' else 'standard',
         )
 
     referral_code_prefill = (request.form.get('referral_code') or '').strip()
+    plan = 'starters' if request.form.get('plan') == 'starters' else 'standard'
 
     if (request.form.get('system_verification_token') or '').strip():
         app.logger.warning(f'Bot caught on stocks signup (honeypot): {request.form.get("email")}')
@@ -8381,11 +8565,11 @@ def stocks_signup():
     client_ip = request.remote_addr or 'unknown'
     if contact_ip_is_rate_limited(client_ip):
         flash('Please wait a moment before trying again.', 'error')
-        return render_template('admin/stocks_signup.html', recaptcha_site_key=RECAPTCHA_SITE_KEY, form_rendered_at=time.time(), referral_code_prefill=referral_code_prefill), 429
+        return render_template('admin/stocks_signup.html', recaptcha_site_key=RECAPTCHA_SITE_KEY, form_rendered_at=time.time(), referral_code_prefill=referral_code_prefill, plan_prefill=plan), 429
     if not verify_recaptcha(request.form.get('recaptcha_token'), remote_ip=client_ip, expected_action='stocks_signup'):
         app.logger.warning(f'Bot caught on stocks signup (recaptcha): {request.form.get("email")}')
         flash('Please try again.', 'error')
-        return render_template('admin/stocks_signup.html', recaptcha_site_key=RECAPTCHA_SITE_KEY, form_rendered_at=time.time(), referral_code_prefill=referral_code_prefill), 401
+        return render_template('admin/stocks_signup.html', recaptcha_site_key=RECAPTCHA_SITE_KEY, form_rendered_at=time.time(), referral_code_prefill=referral_code_prefill, plan_prefill=plan), 401
 
     name = (request.form.get('name') or '').strip()
     email = (request.form.get('email') or '').strip().lower()
@@ -8394,20 +8578,22 @@ def stocks_signup():
 
     if not EMAIL_RE.match(email):
         flash('Please enter a valid email address.', 'error')
-        return render_template('admin/stocks_signup.html', recaptcha_site_key=RECAPTCHA_SITE_KEY, form_rendered_at=time.time(), referral_code_prefill=referral_code_prefill), 400
+        return render_template('admin/stocks_signup.html', recaptcha_site_key=RECAPTCHA_SITE_KEY, form_rendered_at=time.time(), referral_code_prefill=referral_code_prefill, plan_prefill=plan), 400
     if password != confirm_password:
         flash('Passwords do not match.', 'error')
-        return render_template('admin/stocks_signup.html', recaptcha_site_key=RECAPTCHA_SITE_KEY, form_rendered_at=time.time(), referral_code_prefill=referral_code_prefill), 400
+        return render_template('admin/stocks_signup.html', recaptcha_site_key=RECAPTCHA_SITE_KEY, form_rendered_at=time.time(), referral_code_prefill=referral_code_prefill, plan_prefill=plan), 400
 
     db = get_db()
     referrer = find_referrer_by_code(db, referral_code_prefill)
     if referrer and referrer['username'] == email:
         referrer = None  # self-referral -- silently ignored, not an error worth blocking signup over
 
-    row, error = create_pending_subscriber(db, email, name, password, referred_by_id=referrer['id'] if referrer else None)
+    row, error = create_pending_subscriber(
+        db, email, name, password, referred_by_id=referrer['id'] if referrer else None, stocks_plan=plan,
+    )
     if error and error != 'existing':
         flash(error, 'error')
-        return render_template('admin/stocks_signup.html', recaptcha_site_key=RECAPTCHA_SITE_KEY, form_rendered_at=time.time(), referral_code_prefill=referral_code_prefill), 400
+        return render_template('admin/stocks_signup.html', recaptcha_site_key=RECAPTCHA_SITE_KEY, form_rendered_at=time.time(), referral_code_prefill=referral_code_prefill, plan_prefill=plan), 400
 
     if error == 'existing':
         if has_stocks_access(row.get('is_pro'), row.get('subscription_status'), row.get('subscription_current_period_end')):
@@ -8416,16 +8602,21 @@ def stocks_signup():
         # Pending (never completed checkout) or lapsed (halted/expired
         # cancelled) -- send them back through checkout rather than
         # refusing the signup outright. An existing row's referred_by_id
-        # (if any) was already stamped the first time it was created --
-        # this referral_code re-submission doesn't retroactively change it.
+        # AND stocks_plan (if any) were already stamped the first time it
+        # was created -- this resubmission doesn't retroactively change
+        # either one.
 
-    # Based on the ACCOUNT's own stored referred_by_id, not just whether a
-    # code was resubmitted in this exact request -- covers the retry path
-    # too (an abandoned-checkout account coming back through signup again
-    # without re-typing the code still gets the discount it originally
+    # Based on the ACCOUNT's own stored referred_by_id/stocks_plan, not
+    # just whatever was resubmitted in this exact request -- covers the
+    # retry path too (an abandoned-checkout account coming back through
+    # signup again still gets the plan and discount it originally
     # qualified for, as long as it's still on its first, never-completed
     # payment attempt).
-    return _render_stocks_checkout(row['id'], email, name, referral_plan=bool(row.get('referred_by_id')))
+    account_plan = row.get('stocks_plan', 'standard')
+    return _render_stocks_checkout(
+        row['id'], email, name, plan=account_plan,
+        referral_plan=bool(row.get('referred_by_id')) and account_plan == 'standard',
+    )
 
 
 @app.route('/stocks/subscribe/verify', methods=['POST'])
@@ -8457,7 +8648,8 @@ def stocks_subscribe_verify():
 
     db = get_db()
     row = db.execute(
-        'SELECT id, username, name, can_view_watchlist, must_change_password, razorpay_subscription_id, referred_by_id '
+        'SELECT id, username, name, can_view_watchlist, must_change_password, razorpay_subscription_id, '
+        'referred_by_id, stocks_plan '
         'FROM stocks_admin_users WHERE id=?',
         (admin_id,)
     ).fetchone()
@@ -8482,7 +8674,7 @@ def stocks_subscribe_verify():
     activate_subscription(db, admin_id, current_period_end)
     session.pop('stocks_pending_signup_id', None)
 
-    if row.get('referred_by_id') and RAZORPAY_STOCKS_PLAN_ID:
+    if row.get('referred_by_id') and row.get('stocks_plan', 'standard') == 'standard' and RAZORPAY_STOCKS_PLAN_ID:
         # This account's first cycle just billed at the discounted
         # referral rate (Rs 199 -- see _render_stocks_checkout's
         # referral_plan param) -- schedule the swap back to the regular
@@ -8493,6 +8685,12 @@ def stocks_subscribe_verify():
         # further action needed. Never blocks activation if this fails
         # (logged for manual follow-up) -- the customer's own access
         # doesn't depend on it succeeding immediately.
+        # The stocks_plan=='standard' guard matters now that Starters
+        # exists (see STOCKS_AUTH_ALTER_SQL) -- a referred Starters signup
+        # still stamps referred_by_id (so the referrer earns credit) but
+        # checks out directly against RAZORPAY_STOCKS_STARTERS_PLAN_ID at
+        # full price, never the discounted referral plan, so it must never
+        # be swapped onto the Standard plan here.
         try:
             razorpay_client.subscription.edit(
                 razorpay_subscription_id, {'plan_id': RAZORPAY_STOCKS_PLAN_ID, 'schedule_change_at': 'cycle_end'}
@@ -8505,15 +8703,25 @@ def stocks_subscribe_verify():
     session['stocks_admin_role'] = 'viewer'
     session['stocks_can_view_watchlist'] = bool(row.get('can_view_watchlist'))
     session['stocks_must_change_password'] = bool(row.get('must_change_password'))
+    session['stocks_plan'] = row.get('stocks_plan', 'standard')
     session.modified = True
 
     try:
         period_end_label = current_period_end.strftime('%d %b %Y')
-        today_iso = date.today().isoformat()
-        todays_suggestions = get_suggestions(db, start_date=today_iso, end_date=today_iso)
+        subscriber_plan = row.get('stocks_plan', 'standard')
+        if subscriber_plan == 'starters':
+            # The most recent pick(s) still within the rotation window --
+            # not "today's", since Starters only generates on Mondays; a
+            # signup on any other day of the week would otherwise always
+            # see an empty welcome email even with a perfectly current pick.
+            window_start = (date.today() - timedelta(days=STARTERS_REPEAT_WINDOW_DAYS)).isoformat()
+            welcome_suggestions = get_starters_suggestions(db, start_date=window_start)
+        else:
+            today_iso = date.today().isoformat()
+            welcome_suggestions = get_suggestions(db, start_date=today_iso, end_date=today_iso)
         send_subscription_welcome_email(
-            row['username'], row.get('name'), period_end_label, suggestions=todays_suggestions,
-            db=db, admin_id=admin_id,
+            row['username'], row.get('name'), period_end_label, suggestions=welcome_suggestions,
+            db=db, admin_id=admin_id, plan=subscriber_plan,
         )
     except Exception as e:
         app.logger.warning(f'Subscription welcome email failed for {row["username"]}: {e}')
@@ -8534,18 +8742,21 @@ def stocks_google_login():
     same GoogleAuthProvider, same Authlib handshake, just a different
     redirect_uri/callback and a different table on the other end.
 
-    ?ref=<code> (see utils/stocks_referrals.py) and ?next=<path> (see
-    stocks_login_required/stocks_admin_login) are both stashed in the
-    session rather than passed through the OAuth round-trip itself
-    (Google's redirect back to /stocks/auth/google/callback carries no
-    form fields or query params of ours) -- the callback reads them back
-    from here."""
+    ?ref=<code> (see utils/stocks_referrals.py), ?next=<path> (see
+    stocks_login_required/stocks_admin_login), and ?plan= (see
+    STOCKS_AUTH_ALTER_SQL's stocks_plan column and the signup page's plan
+    selector) are all stashed in the session rather than passed through the
+    OAuth round-trip itself (Google's redirect back to
+    /stocks/auth/google/callback carries no form fields or query params of
+    ours) -- the callback reads them back from here."""
     referral_code = (request.args.get('ref') or '').strip()
     if referral_code:
         session['stocks_pending_referral_code'] = referral_code
     next_url = safe_stocks_next_url(request.args.get('next', ''))
     if next_url:
         session['stocks_pending_next_url'] = next_url
+    if request.args.get('plan') == 'starters':
+        session['stocks_pending_plan'] = 'starters'
     session.modified = True
     provider = auth_providers.get_auth_provider('google')
     redirect_uri = url_for('stocks_google_callback', _external=True)
@@ -8580,6 +8791,7 @@ def stocks_google_callback():
 
     referral_code = session.pop('stocks_pending_referral_code', None)
     next_url = session.pop('stocks_pending_next_url', None)
+    pending_plan = session.pop('stocks_pending_plan', 'standard')
     session.modified = True
 
     db = get_db()
@@ -8594,7 +8806,8 @@ def stocks_google_callback():
             if referrer and referrer['username'] == email:
                 referrer = None  # self-referral -- silently ignored
             row = create_pending_google_subscriber(
-                db, email, name, google_sub, referred_by_id=referrer['id'] if referrer else None
+                db, email, name, google_sub, referred_by_id=referrer['id'] if referrer else None,
+                stocks_plan=pending_plan,
             )
 
     if row.get('is_active') and has_stocks_access(row.get('is_pro'), row.get('subscription_status'), row.get('subscription_current_period_end')):
@@ -8603,6 +8816,7 @@ def stocks_google_callback():
         session['stocks_admin_role'] = 'viewer'
         session['stocks_can_view_watchlist'] = bool(row.get('can_view_watchlist'))
         session['stocks_must_change_password'] = bool(row.get('must_change_password'))
+        session['stocks_plan'] = row.get('stocks_plan', 'standard')
         session.modified = True
         if session['stocks_must_change_password']:
             return redirect(url_for('stocks_change_password'))
@@ -8610,10 +8824,13 @@ def stocks_google_callback():
             return redirect(next_url)
         return redirect(url_for('stocks_my_suggestions'))
 
-    # Based on the ACCOUNT's own stored referred_by_id (see the matching
-    # comment in /stocks/signup) so a retried checkout still gets the
-    # discount it originally qualified for.
-    return _render_stocks_checkout(row['id'], email, name, referral_plan=bool(row.get('referred_by_id')))
+    # Based on the ACCOUNT's own stored referred_by_id/stocks_plan (see the
+    # matching comment in /stocks/signup) so a retried checkout still gets
+    # the same plan and discount it originally qualified for.
+    return _render_stocks_checkout(
+        row['id'], email, name, plan=row.get('stocks_plan', 'standard'),
+        referral_plan=bool(row.get('referred_by_id')) and row.get('stocks_plan', 'standard') == 'standard',
+    )
 
 
 @app.route('/stocks/razorpay/webhook', methods=['POST'])
@@ -8728,6 +8945,21 @@ def stocks_users_toggle_pro(viewer_id):
     return redirect(url_for('stocks_users_manage'))
 
 
+@app.route('/stocks/users/<int:viewer_id>/set-plan', methods=['POST'])
+@stocks_role_required('super_admin', 'child_admin')
+def stocks_users_set_plan(viewer_id):
+    """Admin-only Standard <-> Starters plan switch (see
+    STOCKS_AUTH_ALTER_SQL's stocks_plan column, set_viewer_plan) -- there's
+    no self-serve upgrade/downgrade flow, so this is the only way an
+    existing subscriber's plan ever changes after signup. Same role gate
+    as the rest of /stocks/users. Doesn't touch Razorpay -- see
+    set_viewer_plan's docstring."""
+    plan = request.form.get('plan')
+    ok = set_viewer_plan(get_db(), viewer_id, plan)
+    flash(f'Plan updated to {plan}.' if ok else 'Could not update plan.', 'info' if ok else 'error')
+    return redirect(url_for('stocks_users_manage'))
+
+
 @app.route('/stocks/login', methods=['GET', 'POST'])
 def stocks_admin_login():
     """Separate login for Nari Nakhre Stocks -- shared by super_admin and
@@ -8766,6 +8998,7 @@ def stocks_admin_login():
     # super_admin/child_admin, who always have watchlist access regardless.
     session['stocks_can_view_watchlist'] = bool(admin_row.get('can_view_watchlist'))
     session['stocks_must_change_password'] = bool(admin_row.get('must_change_password'))
+    session['stocks_plan'] = admin_row.get('stocks_plan', 'standard')
     session.modified = True
     # A forced password change wins over every other redirect below -- see
     # stock_auth.py's access decorators, which enforce this on every

@@ -8,7 +8,9 @@ from utils.auto_trader import (
     get_auto_trade_settings,
     get_deployed_capital,
     list_auto_trades,
+    manual_close_trade,
     open_auto_trade_if_enabled,
+    open_manual_trade,
     reconcile_open_trades,
     reconcile_pending_buys,
     reconcile_pending_sells,
@@ -129,6 +131,21 @@ class FakeAutoTraderDB:
             rows = [{**t, 'latest_price': self.daily_data.get(t['watchlist_id'])} for t in open_trades]
             return FakeCursor(rows)
 
+        # --- manual_close_trade: fetch a single open trade ---
+        if normalized.startswith('SELECT t.id, t.mode, t.symbol, t.exchange, t.buy_price, t.quantity, t.watchlist_id,'):
+            trade_id, = params
+            matches = [
+                {**t, 'latest_price': self.daily_data.get(t['watchlist_id'])}
+                for t in self.trades if t['id'] == trade_id and t['status'] == 'open'
+            ]
+            return FakeCursor(matches[:1])
+
+        if normalized.startswith("UPDATE stock_auto_trades SET status='manual_exit', exit_price=?"):
+            exit_price, pnl_amount, pnl_pct, trade_id = params
+            self._update(trade_id, status='manual_exit', exit_price=exit_price, pnl_amount=pnl_amount,
+                         pnl_pct=pnl_pct, closed_at='2026-08-19')
+            return FakeCursor([])
+
         if normalized.startswith("UPDATE stock_auto_trades SET status='target_hit', exit_price=?"):
             exit_price, pnl_amount, pnl_pct, trade_id = params
             self._update(trade_id, status='target_hit', exit_price=exit_price, pnl_amount=pnl_amount,
@@ -174,6 +191,12 @@ class FakeAutoTraderDB:
             reason, kite_sell_order_id, trade_id = params
             self._update(trade_id, status='pending_sell', pending_sell_reason=reason, kite_sell_order_id=kite_sell_order_id)
             return FakeCursor([])
+
+        # --- reconcile_open_trades: re-fetch after a live target-hit sell ---
+        if normalized.startswith('SELECT status, exit_price, pnl_amount, pnl_pct FROM stock_auto_trades WHERE id=?'):
+            trade_id, = params
+            matches = [t for t in self.trades if t['id'] == trade_id]
+            return FakeCursor(matches[:1])
 
         # --- reconcile_pending_buys ---
         if normalized.startswith("SELECT id, buy_price, kite_buy_order_id FROM stock_auto_trades"):
@@ -414,6 +437,131 @@ def test_open_auto_trade_resumes_automatically_once_a_position_closes():
     assert len(db.trades) == 2
 
 
+# --- manual buy ---------------------------------------------------------
+
+def test_open_manual_trade_ignores_the_enabled_toggle():
+    db = FakeAutoTraderDB(settings={'enabled': False, 'mode': 'dry_run', 'budget_per_trade': 50000, 'total_capital': 200000})
+    quantity = open_manual_trade(db, {
+        'suggestion_id': 1, 'watchlist_id': 10, 'symbol': 'GOODCO', 'exchange': 'NSE',
+        'buy_price': 412, 'target_sell_price': 450, 'stop_loss_price': 396,
+    }, budget_amount=50000, mode='dry_run')
+    assert quantity == 121
+    assert len(db.trades) == 1
+    assert db.trades[0]['status'] == 'open'
+
+
+def test_open_manual_trade_uses_the_explicit_budget_not_the_global_setting():
+    db = FakeAutoTraderDB(settings={'enabled': True, 'mode': 'dry_run', 'budget_per_trade': 50000, 'total_capital': 200000})
+    quantity = open_manual_trade(db, {
+        'suggestion_id': 1, 'watchlist_id': 10, 'symbol': 'GOODCO', 'exchange': 'NSE',
+        'buy_price': 412, 'target_sell_price': 450, 'stop_loss_price': 396,
+    }, budget_amount=10000, mode='dry_run')
+    assert quantity == 24  # 10000 // 412, not the 50000 configured budget
+    assert db.trades[0]['budget_amount'] == 10000
+
+
+def test_open_manual_trade_is_idempotent_per_suggestion():
+    db = FakeAutoTraderDB(settings={'enabled': True, 'mode': 'dry_run', 'budget_per_trade': 50000, 'total_capital': 200000})
+    candidate = {
+        'suggestion_id': 1, 'watchlist_id': 10, 'symbol': 'GOODCO', 'exchange': 'NSE',
+        'buy_price': 412, 'target_sell_price': 450, 'stop_loss_price': 396,
+    }
+    open_manual_trade(db, candidate, budget_amount=50000, mode='dry_run')
+    open_manual_trade(db, candidate, budget_amount=50000, mode='dry_run')
+    assert len(db.trades) == 1
+
+
+def test_open_manual_trade_respects_the_capital_limit():
+    db = FakeAutoTraderDB(
+        settings={'enabled': False, 'mode': 'dry_run', 'budget_per_trade': 50000, 'total_capital': 50000},
+        trades=[_trade(id=1, suggestion_id=1, mode='dry_run', budget_amount=50000, status='open')],
+    )
+    result = open_manual_trade(db, {
+        'suggestion_id': 2, 'watchlist_id': 11, 'symbol': 'SECOND', 'exchange': 'NSE',
+        'buy_price': 100, 'target_sell_price': 110, 'stop_loss_price': 95,
+    }, budget_amount=10000, mode='dry_run')
+    assert result is None  # already fully deployed
+    assert len(db.trades) == 1
+
+
+def test_open_manual_trade_live_places_a_real_buy_order_and_opens_immediately():
+    db = FakeAutoTraderDB(
+        settings={'enabled': False, 'mode': 'live', 'budget_per_trade': 50000, 'total_capital': 200000},
+        kite_tradingsymbols={('GOODCO', 'NSE'): 'GOODCOMPANY'},
+    )
+    kite = FakeKiteOrders()
+    kite.set_next_fill('COMPLETE', average_price=413.5, filled_quantity=100)
+    quantity = open_manual_trade(db, {
+        'suggestion_id': 1, 'watchlist_id': 10, 'symbol': 'GOODCO', 'exchange': 'NSE',
+        'buy_price': 412, 'target_sell_price': 450, 'stop_loss_price': 396,
+    }, budget_amount=50000, mode='live', kite_client=kite)
+    assert quantity == 121
+    assert kite.placed == [('GOODCOMPANY', 'NSE', 'BUY', 121)]
+    assert db.trades[0]['status'] == 'open'
+    assert db.trades[0]['buy_price'] == 413.5
+
+
+def test_open_manual_trade_live_requires_a_kite_client():
+    db = FakeAutoTraderDB(
+        settings={'enabled': False, 'mode': 'live', 'budget_per_trade': 50000, 'total_capital': 200000},
+        kite_tradingsymbols={('GOODCO', 'NSE'): 'GOODCOMPANY'},
+    )
+    try:
+        open_manual_trade(db, {
+            'suggestion_id': 1, 'watchlist_id': 10, 'symbol': 'GOODCO', 'exchange': 'NSE',
+            'buy_price': 412, 'target_sell_price': 450, 'stop_loss_price': 396,
+        }, budget_amount=50000, mode='live', kite_client=None)
+        assert False, 'expected ValueError'
+    except ValueError as e:
+        assert 'kite_client' in str(e)
+
+
+# --- manual sell now ------------------------------------------------------
+
+def test_manual_close_trade_dry_run_closes_at_latest_synced_close():
+    db = FakeAutoTraderDB(trades=[_trade()], daily_data={10: 430})
+    ok = manual_close_trade(db, 1)
+    assert ok is True
+    assert db.trades[0]['status'] == 'manual_exit'
+    assert db.trades[0]['exit_price'] == 430
+    assert db.trades[0]['pnl_amount'] == round((430 - 412) * 60, 2)
+
+
+def test_manual_close_trade_returns_false_for_a_trade_that_is_not_open():
+    db = FakeAutoTraderDB(trades=[_trade(status='stop_loss_pending')], daily_data={10: 430})
+    ok = manual_close_trade(db, 1)
+    assert ok is False
+
+
+def test_manual_close_trade_returns_false_for_an_unknown_trade():
+    db = FakeAutoTraderDB(trades=[_trade()], daily_data={10: 430})
+    ok = manual_close_trade(db, 999)
+    assert ok is False
+
+
+def test_manual_close_trade_live_places_a_real_sell_order():
+    db = FakeAutoTraderDB(
+        trades=[_trade(mode='live')], daily_data={10: 430},
+        kite_tradingsymbols={('GOODCO', 'NSE'): 'GOODCOMPANY'},
+    )
+    kite = FakeKiteOrders()
+    kite.set_next_fill('COMPLETE', average_price=429.0, filled_quantity=60)
+    ok = manual_close_trade(db, 1, kite_client=kite)
+    assert ok is True
+    assert kite.placed == [('GOODCOMPANY', 'NSE', 'SELL', 60)]
+    assert db.trades[0]['status'] == 'manual_exit'
+    assert db.trades[0]['exit_price'] == 429.0
+
+
+def test_manual_close_trade_live_requires_a_kite_client():
+    db = FakeAutoTraderDB(trades=[_trade(mode='live')], daily_data={10: 430})
+    try:
+        manual_close_trade(db, 1, kite_client=None)
+        assert False, 'expected ValueError'
+    except ValueError as e:
+        assert 'kite_client' in str(e)
+
+
 # --- reconciliation (dry_run) -----------------------------------------------
 
 def _trade(**overrides):
@@ -434,7 +582,10 @@ def test_reconcile_auto_closes_target_hit_dry_run_trade_with_correct_pnl():
     db = FakeAutoTraderDB(trades=[_trade()], daily_data={10: 452})
     summary = reconcile_open_trades(db)
     assert summary['checked'] == 1
-    assert summary['target_hit'] == 1
+    assert len(summary['target_hit']) == 1
+    assert summary['target_hit'][0]['id'] == 1
+    assert summary['target_hit'][0]['exit_price'] == 452
+    assert summary['target_hit'][0]['pnl_amount'] == round((452 - 412) * 60, 2)
     assert summary['stop_loss_pending'] == []
     assert db.trades[0]['status'] == 'target_hit'
     assert db.trades[0]['exit_price'] == 452
@@ -444,7 +595,7 @@ def test_reconcile_auto_closes_target_hit_dry_run_trade_with_correct_pnl():
 def test_reconcile_does_not_auto_close_on_stop_loss_hit():
     db = FakeAutoTraderDB(trades=[_trade()], daily_data={10: 390})
     summary = reconcile_open_trades(db)
-    assert summary['target_hit'] == 0
+    assert summary['target_hit'] == []
     assert len(summary['stop_loss_pending']) == 1
     assert db.trades[0]['status'] == 'stop_loss_pending'
     assert db.trades[0]['stop_loss_triggered_price'] == 390
@@ -454,14 +605,14 @@ def test_reconcile_does_not_auto_close_on_stop_loss_hit():
 def test_reconcile_leaves_still_open_trades_alone():
     db = FakeAutoTraderDB(trades=[_trade()], daily_data={10: 420})
     summary = reconcile_open_trades(db)
-    assert summary == {'checked': 1, 'target_hit': 0, 'stop_loss_pending': []}
+    assert summary == {'checked': 1, 'target_hit': [], 'stop_loss_pending': []}
     assert db.trades[0]['status'] == 'open'
 
 
 def test_reconcile_skips_a_trade_already_pending_stop_loss_review():
     db = FakeAutoTraderDB(trades=[_trade(status='stop_loss_pending')], daily_data={10: 380})
     summary = reconcile_open_trades(db)
-    assert summary == {'checked': 0, 'target_hit': 0, 'stop_loss_pending': []}
+    assert summary == {'checked': 0, 'target_hit': [], 'stop_loss_pending': []}
 
 
 def test_reconcile_open_trades_does_not_require_kite_client_when_only_dry_run_trades_exist():
@@ -676,7 +827,8 @@ def test_live_target_hit_places_a_real_sell_order_and_closes_immediately():
 
     summary = reconcile_open_trades(db, kite_client=kite)
 
-    assert summary['target_hit'] == 1
+    assert len(summary['target_hit']) == 1
+    assert summary['target_hit'][0]['exit_price'] == 451.75
     assert kite.placed == [('GOODCOMPANY', 'NSE', 'SELL', 60)]
     trade = db.trades[0]
     assert trade['status'] == 'target_hit'
@@ -692,8 +844,9 @@ def test_live_target_hit_parks_as_pending_sell_when_not_immediately_filled():
     kite = FakeKiteOrders()
     kite.set_next_fill('OPEN')
 
-    reconcile_open_trades(db, kite_client=kite)
+    summary = reconcile_open_trades(db, kite_client=kite)
 
+    assert summary['target_hit'] == []  # not closed yet -- nothing to report until it fills
     trade = db.trades[0]
     assert trade['status'] == 'pending_sell'
     assert trade['pending_sell_reason'] == 'target_hit'

@@ -3,6 +3,7 @@ from datetime import date
 from utils.stock_alerting import send_zeptomail_stocks_email
 from utils.suggestion_chart import build_prediction_chart_data_uri
 from utils.suggestion_engine import get_suggestions
+from utils.starters_engine import get_starters_suggestions
 from utils.price_pattern import compute_projection_targets
 from utils.stocks_referrals import REFERRALS_PER_FREE_MONTH, get_or_create_referral_code
 
@@ -85,7 +86,7 @@ def send_viewer_welcome_email(email, name, password, db=None, admin_id=None):
     text_body = (
         f'Hi {greeting},\n\n'
         f"You've been added as a viewer on Nari Nakhre Stocks. Each day we pick a single stock that clears "
-        f"our screening bar and email it to you -- buy price, target sell price, stop-loss, and timing, "
+        f"our screening bar and email it to you -- buy price, target sell price, and timing, "
         f"marked Highly Recommended or Recommended so you know at a glance how strong the pick is. Some "
         f"days nothing clears the bar, so there's no email that day. You can also log in anytime to see "
         f"today's recommendation and your full history.\n\n"
@@ -99,7 +100,7 @@ def send_viewer_welcome_email(email, name, password, db=None, admin_id=None):
     html_body = (
         f'<p>Hi {greeting},</p>'
         f"<p>You've been added as a viewer on Nari Nakhre Stocks. Each day we pick a single stock that "
-        f"clears our screening bar and email it to you -- buy price, target sell price, stop-loss, and "
+        f"clears our screening bar and email it to you -- buy price, target sell price, and "
         f"timing, marked Highly Recommended or Recommended so you know at a glance how strong the pick "
         f"is. Some days nothing clears the bar, so there's no email that day. You can also log in "
         f"anytime to see today's recommendation and your full history.</p>"
@@ -162,7 +163,80 @@ def send_stop_loss_review_email(to_email, trade, pnl_amount, pnl_pct):
     )
 
 
-def send_subscription_welcome_email(email, name, current_period_end_label, suggestions=None, db=None, admin_id=None):
+def send_trading_alert_email(to_email, suggestion, buy_link):
+    """Sent right after generate_daily_suggestions produces a golden- or
+    silver-tier ('Highly Recommended', see _trend_label) Pick of the Day --
+    app.py's /stocks/suggestions/send-daily-email job, alongside (not
+    instead of) the regular daily suggestions email every recipient gets.
+    Goes only to STOP_LOSS_ALERT_EMAIL (utils.auto_trader), the same
+    single address that already gets the stop-loss/target-hit alerts --
+    this is a trading alert for whoever actually places manual orders, not
+    a second copy of the customer-facing daily email. Reuses the same
+    stock-card rendering as the daily email (_render_stock_card_html/
+    _render_stock_card_text) so this looks and reads identically, just
+    with a prominent Buy Now button up top linking to buy_link (see
+    app.py's /stocks/suggestions/<id>/buy -- a super_admin-only
+    confirmation page, never a one-click purchase straight from the
+    email)."""
+    subject = f'Nari Nakhre Stocks -- Highly Recommended pick: {_company_display_name(suggestion)}'
+    text_body = (
+        f"Today's pick, {_company_display_name(suggestion)}, is Highly Recommended.\n\n"
+        f'{_render_stock_card_text(suggestion)}\n\n'
+        f'Buy now: {buy_link}\n\n'
+        f'{DISCLAIMER}\n'
+    )
+    html_inner = (
+        '<p style="font-family:Arial,Helvetica,sans-serif;font-size:16px;color:#0f172a;">'
+        f"Today's pick, <strong>{_company_display_name(suggestion)}</strong>, is Highly Recommended.</p>"
+        '<div style="margin:0 0 16px 0;">'
+        f'<a href="{buy_link}" style="display:inline-block;background:#15803d;color:#ffffff;'
+        'text-decoration:none;font-size:14px;font-weight:bold;padding:12px 22px;border-radius:8px;">'
+        'Buy Now &rarr;</a>'
+        '</div>'
+        f'{_render_stock_card_html(suggestion)}'
+        f'<p style="color:#64748b;font-size:0.85em;margin-top:16px;">{DISCLAIMER}</p>'
+    )
+    return send_zeptomail_stocks_email(
+        to_email=to_email, to_name=to_email, subject=subject,
+        textbody=text_body, htmlbody=_wrap_email_html(html_inner), sender_name='Nari Nakhre Stocks',
+    )
+
+
+def send_target_hit_email(to_email, trade, pnl_amount, pnl_pct):
+    """Sent once per target-hit close -- app.py's
+    /stocks/auto-trader/reconcile job, for each entry in
+    reconcile_open_trades' 'target_hit' list. Unlike
+    send_stop_loss_review_email, this is purely informational: reaching
+    target_sell_price auto-sells immediately in EITHER mode (see
+    utils.auto_trader's module docstring), so by the time this email goes
+    out the position is already closed -- there's no Proceed/Cancel
+    decision here, just a notification of what already happened. trade is
+    a dict with at least symbol, exchange, buy_price, quantity,
+    exit_price."""
+    auto_trader_url = 'https://narinakhre.com/stocks/auto-trader'
+    subject = f'Nari Nakhre Stocks -- target hit on {trade["symbol"]}, sold'
+    text_body = (
+        f'{trade["symbol"]} ({trade["exchange"]}) hit its target and was sold automatically.\n\n'
+        f'Bought {trade["quantity"]} shares at Rs {trade["buy_price"]}, sold at Rs {trade["exit_price"]} '
+        f'({"+" if pnl_amount >= 0 else ""}Rs {pnl_amount:.2f}, {pnl_pct:+.2f}%).\n\n'
+        f'See it on the Auto-Trader dashboard: {auto_trader_url}\n\n'
+        f'{DISCLAIMER}\n'
+    )
+    body_html = (
+        f'<p><strong>{trade["symbol"]} ({trade["exchange"]})</strong> hit its target and was sold automatically.</p>'
+        f'<p>Bought {trade["quantity"]} shares at Rs {trade["buy_price"]}, sold at Rs {trade["exit_price"]} '
+        f'({"+" if pnl_amount >= 0 else ""}Rs {pnl_amount:.2f}, {pnl_pct:+.2f}%).</p>'
+        f'<p><a href="{auto_trader_url}">See it on the Auto-Trader dashboard</a>.</p>'
+        f'<p style="color:#64748b;font-size:0.85em;margin-top:16px;">{DISCLAIMER}</p>'
+    )
+    return send_zeptomail_stocks_email(
+        to_email=to_email, to_name=to_email, subject=subject,
+        textbody=text_body, htmlbody=body_html, sender_name='Nari Nakhre Stocks Auto-Trader',
+    )
+
+
+def send_subscription_welcome_email(email, name, current_period_end_label, suggestions=None, db=None, admin_id=None,
+                                     plan='standard'):
     """Sent right after a self-serve Nari Nakhre Stocks signup's first
     Razorpay payment is verified (see app.py's /stocks/subscribe/verify) --
     unlike send_viewer_welcome_email above, there's no password to disclose
@@ -172,50 +246,69 @@ def send_subscription_welcome_email(email, name, current_period_end_label, sugge
     pre-formatted date string (see app.py), not a raw datetime -- keeps
     this module free of date-formatting/timezone concerns.
 
+    plan ('standard' or 'starters', see STOCKS_AUTH_ALTER_SQL's stocks_plan
+    column) picks the right price/cadence copy -- Rs 299/mo daily for
+    'standard', Rs 99/mo up to two picks a week for 'starters'. Matters
+    here specifically because this text used to hardcode "Rs 299/month"
+    unconditionally, which was wrong for a Starters signup.
+
     suggestions, when given a non-empty list (today's stock_suggestions
-    rows -- see get_suggestions), appends that day's actual recommendation
-    card(s) (see _render_stock_card_html/_render_stock_card_text) right in
-    this same email -- a brand-new subscriber sees today's pick(s)
-    immediately, in the welcome email itself, rather than only after
-    separately logging in. Omitted/empty (the default) sends the plain
-    welcome text alone -- e.g. a signup completed after that day's
-    suggestions already went out, or on a non-trading day with nothing to
-    show yet.
+    rows for 'standard', or the most recent stock_starters_suggestions
+    rows for 'starters' -- see get_suggestions/get_starters_suggestions),
+    appends the actual recommendation card(s) (see
+    _render_stock_card_html/_render_stock_card_text) right in this same
+    email -- a brand-new subscriber sees their pick(s) immediately, in the
+    welcome email itself, rather than only after separately logging in.
+    Omitted/empty (the default) sends the plain welcome text alone -- e.g.
+    a signup completed after that period's suggestions already went out,
+    or with nothing to show yet.
 
     db/admin_id (both required together), when given, append this new
     subscriber's own referral footer (see _referral_footer_text/_html) --
     introducing referrals right at the moment they've just paid is when
     it's most likely to land."""
+    is_starters = plan == 'starters'
     greeting = name or email
     has_suggestions = bool(suggestions)
+    recommendation_noun = "this week's pick" if is_starters else "today's recommendation"
     subject = (
-        "Welcome to Nari Nakhre Stocks -- today's recommendation inside"
+        f'Welcome to Nari Nakhre Stocks -- {recommendation_noun} inside'
         if has_suggestions else 'Welcome to Nari Nakhre Stocks -- payment confirmed'
     )
+    if is_starters:
+        price_cadence_text = (
+            "Your Rs 99/month Starters subscription is active. Up to twice a week (Mondays), we send a "
+            "separately-curated stock that clears our strictest, golden-tier quality bar -- buy price, "
+            "target sell price, and the reasoning behind it. Some weeks nothing clears that bar, so there's "
+            "no email that week."
+        )
+    else:
+        price_cadence_text = (
+            "Your Rs 299/month subscription is active. Each day we pick a single stock that clears our "
+            "screening bar and email it to you -- buy price, target sell price, and the reasoning "
+            "behind it, marked Highly Recommended or Recommended so you know at a glance how strong the pick "
+            "is. Some days nothing clears the bar, so there's no email that day."
+        )
     intro_text = (
         f'Hi {greeting},\n\n'
-        f"Your Rs 299/month subscription is active. Each day we pick a single stock that clears our "
-        f"screening bar and email it to you -- buy price, target sell price, stop-loss, and the reasoning "
-        f"behind it, marked Highly Recommended or Recommended so you know at a glance how strong the pick "
-        f"is. Some days nothing clears the bar, so there's no email that day.\n\n"
+        f'{price_cadence_text}\n\n'
         f'Your subscription renews automatically on {current_period_end_label} -- '
         f"we'll email you a reminder a few days before, and you can cancel "
         f"anytime from your account.\n\n"
     )
     intro_html = (
         f'<p style="font-family:Arial,Helvetica,sans-serif;color:#0f172a;">Hi {greeting},</p>'
-        f"<p style=\"font-family:Arial,Helvetica,sans-serif;color:#0f172a;\">Your Rs 299/month subscription is active. "
-        f"Each day we pick a single stock that clears our screening bar and email it to you -- buy price, "
-        f"target sell price, stop-loss, and the reasoning behind it, marked Highly Recommended or Recommended "
-        f"so you know at a glance how strong the pick is. Some days nothing clears the bar, so there's no email "
-        f"that day.</p>"
+        f'<p style="font-family:Arial,Helvetica,sans-serif;color:#0f172a;">{price_cadence_text}</p>'
         f'<p style="font-family:Arial,Helvetica,sans-serif;color:#0f172a;">Your subscription renews automatically on '
         f"<strong>{current_period_end_label}</strong> -- we'll email you a reminder a few days before, and you can "
         f"cancel anytime from your account.</p>"
     )
 
     if has_suggestions:
-        heading = "Today's Recommendation" if len(suggestions) == 1 else "Today's Recommendations"
+        if is_starters:
+            heading = "This Week's Pick" if len(suggestions) == 1 else "This Week's Picks"
+        else:
+            heading = "Today's Recommendation" if len(suggestions) == 1 else "Today's Recommendations"
         intro_text += f'{heading}:\n\n'
         for s in suggestions:
             intro_text += _render_stock_card_text(s) + '\n\n'
@@ -231,14 +324,15 @@ def send_subscription_welcome_email(email, name, current_period_end_label, sugge
         if any_horizon_targets:
             intro_html += f'<p style="color:#64748b;font-size:0.8em;line-height:1.5;font-family:Arial,Helvetica,sans-serif;">{HORIZON_DISCLAIMER}</p>'
     else:
-        intro_text += (
+        no_pick_text = (
+            "Nothing has cleared our screening bar yet, so there's no pick to show yet -- log in anytime to see "
+            "the latest."
+        ) if is_starters else (
             "Nothing cleared our screening bar today, so there's no pick to show yet -- log in anytime to see "
-            "the latest.\n\n"
+            "the latest."
         )
-        intro_html += (
-            '<p style="font-family:Arial,Helvetica,sans-serif;color:#0f172a;">Nothing cleared our screening bar '
-            "today, so there's no pick to show yet -- log in anytime to see the latest.</p>"
-        )
+        intro_text += f'{no_pick_text}\n\n'
+        intro_html += f'<p style="font-family:Arial,Helvetica,sans-serif;color:#0f172a;">{no_pick_text}</p>'
 
     referral_footer_text = ''
     referral_footer_html = ''
@@ -502,7 +596,6 @@ def _render_stock_card_text(s):
     target_label = 'Target' if s.get('pattern_name') else f"Target ({s['holding_period_days']}-day)"
     lines.append(
         f"  Buy: Rs {s['buy_price']}   {target_label}: Rs {s['target_sell_price']}"
-        f"   Stop-loss: Rs {s['stop_loss_price']}"
     )
     highlights = _highlights(s)
     if highlights:
@@ -524,7 +617,7 @@ def _render_stock_card_text(s):
 def _render_stock_card_html(s):
     """Styled HTML rendering of one suggestion -- company name front and
     center (not just the ticker symbol), a colored recommendation-strength
-    pill, buy/target/stop-loss called out as the numbers that matter most
+    pill, buy/target called out as the numbers that matter most
     for acting today, this stock's own mid-period/long-term projection (see
     utils.price_pattern.compute_projection_targets -- NOT the same fixed
     calendar point for every stock), an embedded projection chart (see
@@ -533,13 +626,21 @@ def _render_stock_card_html(s):
     paragraph instead of packed into a table cell. Built with inline
     styles and nested tables (not CSS classes/flex/grid) -- the only
     layout approach that renders consistently across email clients,
-    Outlook's Word-based renderer included."""
+    Outlook's Word-based renderer included.
+
+    Deliberately never shows stop_loss_price -- these are investment picks
+    to research and decide on yourself, not trading calls with a defined
+    exit level. stop_loss_price is still computed and stored (see
+    utils.price_pattern.compute_suggestion_pricing) and still drives the
+    auto-trader's own internal safety flow (utils/auto_trader.py) for
+    positions bought through it -- only the subscriber-facing display of it
+    is gone."""
     trend = _trend_label(s)
     badge_bg, badge_fg = _TREND_BADGE_COLORS.get(trend, _TREND_BADGE_COLORS['Recommended'])
     fundamentals_note = _fundamentals_note(s)
     target_label = 'Target' if s.get('pattern_name') else f"Target ({s['holding_period_days']}-day)"
     projection = compute_projection_targets(s.get('buy_price'), s.get('target_sell_price'), s.get('pattern_name'))
-    chart_uri = build_prediction_chart_data_uri(s.get('buy_price'), projection, s.get('stop_loss_price'))
+    chart_uri = build_prediction_chart_data_uri(s.get('buy_price'), projection)
 
     horizon_block = ''
     if projection:
@@ -608,12 +709,10 @@ def _render_stock_card_html(s):
         '</td></tr>'
         '<tr><td style="padding:16px 18px;">'
         '<table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr>'
-        '<td style="width:33%;"><div style="color:#64748b;font-size:11px;text-transform:uppercase;letter-spacing:.03em;">Buy</div>'
+        '<td style="width:50%;"><div style="color:#64748b;font-size:11px;text-transform:uppercase;letter-spacing:.03em;">Buy</div>'
         f'<div style="font-size:19px;font-weight:bold;color:#0f172a;">Rs {s["buy_price"]}</div></td>'
-        f'<td style="width:34%;"><div style="color:#64748b;font-size:11px;text-transform:uppercase;letter-spacing:.03em;">{target_label}</div>'
+        f'<td style="width:50%;"><div style="color:#64748b;font-size:11px;text-transform:uppercase;letter-spacing:.03em;">{target_label}</div>'
         f'<div style="font-size:19px;font-weight:bold;color:#15803d;">Rs {s["target_sell_price"]}</div></td>'
-        '<td style="width:33%;"><div style="color:#64748b;font-size:11px;text-transform:uppercase;letter-spacing:.03em;">Stop-loss</div>'
-        f'<div style="font-size:19px;font-weight:bold;color:#b91c1c;">Rs {s["stop_loss_price"]}</div></td>'
         '</tr></table>'
         f'{highlights_block}'
         f'{horizon_block}'
@@ -715,7 +814,7 @@ def _build_email_content(suggestions, today_label):
     stock ahead of any Recommended (bronze tier) one -- no separate sort
     needed here to get that grouping. The raw NNS Score number itself is
     deliberately never shown here -- see _trend_label -- only the buy/
-    target/stop-loss levels (the actual, concrete numbers that matter) and
+    target levels (the actual, concrete numbers that matter) and
     a plain-language recommendation strength. Each stock is rendered as its
     own card (see _render_stock_card_html/_render_stock_card_text) with the
     company name up front, its own mid-period/long-term projection, and an embedded
@@ -834,6 +933,134 @@ def send_daily_suggestions_email(db, target_date=None, recipient_ids=None):
         # document, per recipient. A code-generation hiccup for one
         # recipient falls back to the plain body rather than skipping
         # their send entirely or crashing the whole batch.
+        try:
+            referral_code = get_or_create_referral_code(db, r['id'])
+        except Exception:
+            referral_code = None
+        if referral_code:
+            text_body = f'{text_body_base}\n\n{_referral_footer_text(referral_code)}\n'
+            html_body = _wrap_email_html(html_inner_base + _referral_footer_html(referral_code))
+        else:
+            text_body = text_body_base
+            html_body = _wrap_email_html(html_inner_base)
+
+        ok, detail = send_zeptomail_stocks_email(
+            to_email=r['email'],
+            to_name=r.get('name') or r['email'],
+            subject=subject,
+            textbody=text_body,
+            htmlbody=html_body,
+            sender_name='Nari Nakhre Stocks',
+        )
+        if ok:
+            sent += 1
+        else:
+            failed += 1
+            failures.append({'email': r['email'], 'error': detail})
+
+    return {
+        'suggestion_count': len(suggestions),
+        'recipient_count': len(recipients),
+        'sent': sent,
+        'failed': failed,
+        'failures': failures,
+    }
+
+
+def _build_starters_email_content(suggestions, week_label):
+    """Same rendering as _build_email_content's non-empty branch (stock
+    card, horizon disclaimer, DISCLAIMER footer) but Starters-flavored
+    copy -- "This Week's Pick" rather than "Today's Recommendation". Only
+    ever called with a non-empty suggestions list (see
+    send_weekly_starters_email, which sends nothing at all on a week with
+    no pick, unlike the daily email's always-send-something behavior --
+    so there's no empty-suggestions branch here to mirror)."""
+    if len(suggestions) == 1:
+        subject = f"Nari Nakhre Stocks Starters — This Week's Pick: {_company_display_name(suggestions[0])} ({week_label})"
+    else:
+        subject = f"Nari Nakhre Stocks Starters — {len(suggestions)} Picks for the Week of {week_label}"
+
+    heading = "This Week's Pick" if len(suggestions) == 1 else "This Week's Picks"
+    any_horizon_targets = any(
+        compute_projection_targets(s.get('buy_price'), s.get('target_sell_price'), s.get('pattern_name'))
+        for s in suggestions
+    )
+
+    text_lines = [f'{heading} (week of {week_label}):', '']
+    for s in suggestions:
+        text_lines.append(_render_stock_card_text(s))
+        text_lines.append('')
+    if any_horizon_targets:
+        text_lines.append(HORIZON_DISCLAIMER)
+        text_lines.append('')
+    text_lines.append(DISCLAIMER)
+    text_body = '\n'.join(text_lines)
+
+    horizon_note_html = (
+        f'<p style="color:#64748b;font-size:0.8em;line-height:1.5;font-family:Arial,Helvetica,sans-serif;">{HORIZON_DISCLAIMER}</p>'
+        if any_horizon_targets else ''
+    )
+    html_inner = (
+        f'<p style="font-family:Arial,Helvetica,sans-serif;font-size:16px;color:#0f172a;">{heading}:</p>'
+        + ''.join(_render_stock_card_html(s) for s in suggestions)
+        + horizon_note_html
+        + f'<p style="color:#64748b;font-size:0.85em;margin-top:16px;font-family:Arial,Helvetica,sans-serif;">{DISCLAIMER}</p>'
+    )
+    return subject, text_body, html_inner
+
+
+def send_weekly_starters_email(db, target_date=None, recipient_ids=None):
+    """The Starters-tier (Rs 99/mo) equivalent of send_daily_suggestions_email
+    -- fetches target_date's week via utils.starters_engine.get_starters_suggestions
+    (a genuinely separate, stricter-bar pick, see that module) and emails
+    every active stocks_admin_users row with stocks_plan='starters'.
+
+    Diverges from the daily email on purpose: when there's nothing to send
+    (no golden-tier candidate cleared the bar that week -- the normal case
+    most weeks), this sends NOTHING at all and returns early, rather than
+    the daily email's always-send-something "nothing cleared the bar"
+    notice. A low-frequency, low-price tier shouldn't get a "sorry,
+    nothing this week" email on top of already getting only ~4 a month.
+
+    target_date/recipient_ids have the exact same meaning as
+    send_daily_suggestions_email's own params (target_date defaults to
+    today -- pass the Monday being generated for; recipient_ids restricts
+    to specific accounts, for a future resend feature, same
+    empty-list-means-nobody semantics)."""
+    if target_date is None:
+        target_date = date.today()
+    elif isinstance(target_date, str):
+        target_date = date.fromisoformat(target_date[:10])
+    date_iso = target_date.isoformat()
+    date_label = target_date.strftime('%d %b %Y')
+
+    suggestions = get_starters_suggestions(db, start_date=date_iso, end_date=date_iso)
+    if not suggestions:
+        return {'suggestion_count': 0, 'recipient_count': 0, 'sent': 0, 'failed': 0, 'failures': []}
+
+    subject, text_body_base, html_inner_base = _build_starters_email_content(suggestions, date_label)
+
+    if recipient_ids is not None:
+        recipient_ids = list(recipient_ids)
+        if recipient_ids:
+            placeholders = ','.join('?' * len(recipient_ids))
+            recipients = db.execute(
+                f"SELECT id, username AS email, name FROM stocks_admin_users "
+                f"WHERE role='viewer' AND is_active=1 AND stocks_plan='starters' AND id IN ({placeholders})",
+                tuple(recipient_ids)
+            ).fetchall()
+        else:
+            recipients = []
+    else:
+        recipients = db.execute(
+            "SELECT id, username AS email, name FROM stocks_admin_users "
+            "WHERE role='viewer' AND is_active=1 AND stocks_plan='starters'"
+        ).fetchall()
+
+    sent = 0
+    failed = 0
+    failures = []
+    for r in recipients:
         try:
             referral_code = get_or_create_referral_code(db, r['id'])
         except Exception:

@@ -167,6 +167,17 @@ STOCKS_AUTH_ALTER_SQL = [
     'ALTER TABLE stocks_admin_users ADD COLUMN IF NOT EXISTS referral_code TEXT UNIQUE',
     'ALTER TABLE stocks_admin_users ADD COLUMN IF NOT EXISTS referred_by_id BIGINT REFERENCES stocks_admin_users(id)',
     'ALTER TABLE stocks_admin_users ADD COLUMN IF NOT EXISTS referral_credits_redeemed INTEGER DEFAULT 0',
+    # Which paid tier this account is on -- 'standard' (Rs 299/mo, daily
+    # Pick of the Day) or 'starters' (Rs 99/mo, one separately-curated
+    # golden-tier-only pick a week, see utils/starters_engine.py). DEFAULT
+    # 'standard' retroactively applies to every existing row (manually-added
+    # viewers and every current paid subscriber) -- zero behavior change for
+    # anyone who already had an account. Stamped once at signup time
+    # (create_pending_subscriber/create_pending_google_subscriber) and
+    # otherwise only ever changed by a super_admin from /stocks/users
+    # (set_viewer_plan) -- no self-serve upgrade/downgrade flow exists.
+    "ALTER TABLE stocks_admin_users ADD COLUMN IF NOT EXISTS stocks_plan TEXT NOT NULL DEFAULT 'standard' "
+    "CHECK (stocks_plan IN ('standard', 'starters'))",
 ]
 
 
@@ -228,7 +239,7 @@ def authenticate_stocks_admin(db, username, password):
     check (subscription_status defaults to 'none', which always passes)."""
     row = db.execute(
         'SELECT id, username, password_hash, role, is_active, can_view_watchlist, must_change_password, '
-        'is_pro, subscription_status, subscription_current_period_end '
+        'is_pro, subscription_status, subscription_current_period_end, stocks_plan '
         'FROM stocks_admin_users WHERE username=?',
         (username,)
     ).fetchone()
@@ -291,12 +302,16 @@ def stocks_role_required(*roles):
     """Restricts a route to one or more specific roles, e.g.
     @stocks_role_required('super_admin') (unchanged usage/behavior from
     before) or @stocks_role_required('super_admin', 'child_admin') for a
-    staff-only page that viewer accounts shouldn't reach."""
+    staff-only page that viewer accounts shouldn't reach. Carries ?next=
+    through to login same as stocks_login_required -- matters for e.g. a
+    trading-alert email's link straight to a super_admin-only page (the
+    manual buy confirmation, the auto-trader dashboard), which should land
+    there after signing in, not on the generic dashboard."""
     def decorator(view_func):
         @wraps(view_func)
         def wrapped(*args, **kwargs):
             if not session.get('stocks_admin_id'):
-                return redirect(url_for('stocks_admin_login'))
+                return redirect(url_for('stocks_admin_login', next=request.path))
             forced = _must_change_password_redirect()
             if forced:
                 return forced
@@ -394,7 +409,7 @@ def toggle_child_admin_active(db, admin_id):
 def list_viewers(db):
     return db.execute(
         "SELECT id, username, name, is_active, can_view_watchlist, must_change_password, is_pro, "
-        "subscription_status, subscription_current_period_end, created_at "
+        "subscription_status, subscription_current_period_end, stocks_plan, created_at "
         "FROM stocks_admin_users WHERE role='viewer' ORDER BY created_at DESC"
     ).fetchall()
 
@@ -513,10 +528,35 @@ def toggle_viewer_pro(db, admin_id):
     return True
 
 
+def set_viewer_plan(db, admin_id, plan):
+    """Admin-only plan switch (Standard <-> Starters, see STOCKS_AUTH_ALTER_SQL's
+    stocks_plan column) -- there's no self-serve upgrade/downgrade flow, so
+    this is the only way an existing subscriber's plan ever changes after
+    signup. Same role-safety pattern as toggle_viewer_active/toggle_viewer_pro:
+    only ever touches a row that's actually role='viewer'. Does NOT touch
+    Razorpay at all -- switching here only changes which weekly/daily send
+    a viewer is included in going forward; their existing subscription
+    keeps billing at whatever price they originally checked out at until it
+    next renews or is cancelled. Returns True if a viewer row was updated,
+    False if not found, not a viewer, or plan isn't a recognized value."""
+    if plan not in ('standard', 'starters'):
+        return False
+    row = db.execute('SELECT id, role FROM stocks_admin_users WHERE id=?', (admin_id,)).fetchone()
+    if not row or row['role'] != 'viewer':
+        return False
+    db.execute(
+        'UPDATE stocks_admin_users SET stocks_plan=?, updated_at=NOW() WHERE id=?',
+        (plan, admin_id)
+    )
+    db.commit()
+    return True
+
+
 def find_stocks_account_by_google_sub(db, google_sub):
     return db.execute(
         'SELECT id, username, name, role, is_active, can_view_watchlist, must_change_password, '
-        'is_pro, subscription_status, subscription_current_period_end, razorpay_subscription_id, referred_by_id '
+        'is_pro, subscription_status, subscription_current_period_end, razorpay_subscription_id, '
+        'referred_by_id, stocks_plan '
         'FROM stocks_admin_users WHERE google_sub=?',
         (google_sub,)
     ).fetchone()
@@ -525,7 +565,8 @@ def find_stocks_account_by_google_sub(db, google_sub):
 def find_stocks_account_by_username(db, username):
     return db.execute(
         'SELECT id, username, name, role, is_active, can_view_watchlist, must_change_password, '
-        'is_pro, subscription_status, subscription_current_period_end, razorpay_subscription_id, google_sub, referred_by_id '
+        'is_pro, subscription_status, subscription_current_period_end, razorpay_subscription_id, google_sub, '
+        'referred_by_id, stocks_plan '
         'FROM stocks_admin_users WHERE username=?',
         (username,)
     ).fetchone()
@@ -543,7 +584,7 @@ def link_google_sub(db, admin_id, google_sub):
     db.commit()
 
 
-def create_pending_google_subscriber(db, email, name, google_sub, referred_by_id=None):
+def create_pending_google_subscriber(db, email, name, google_sub, referred_by_id=None, stocks_plan='standard'):
     """Brand-new self-serve signup via 'Sign up with Google' -- no password
     at all (password_hash stays NULL; see the relaxed NOT NULL constraint
     in STOCKS_AUTH_ALTER_SQL and authenticate_stocks_admin's check for a
@@ -555,14 +596,17 @@ def create_pending_google_subscriber(db, email, name, google_sub, referred_by_id
     utils/stocks_referrals.py), when given, is stamped once here and never
     changes after -- app.py's Google callback resolves the code (carried
     across the OAuth round-trip via session, since form fields don't
-    survive it) into this id before calling in. Returns the new row."""
+    survive it) into this id before calling in. stocks_plan ('standard' or
+    'starters', see STOCKS_AUTH_ALTER_SQL) is likewise resolved from the
+    OAuth round-trip's stashed session value and stamped once here. Returns
+    the new row."""
     email = (email or '').strip().lower()
     db.execute(
         '''INSERT INTO stocks_admin_users
                (username, password_hash, role, name, is_active, must_change_password,
-                subscription_status, is_pro, google_sub, referred_by_id)
-           VALUES (?, NULL, 'viewer', ?, 0, 0, 'pending', 0, ?, ?)''',
-        (email, (name or '').strip() or None, google_sub, referred_by_id)
+                subscription_status, is_pro, google_sub, referred_by_id, stocks_plan)
+           VALUES (?, NULL, 'viewer', ?, 0, 0, 'pending', 0, ?, ?, ?)''',
+        (email, (name or '').strip() or None, google_sub, referred_by_id, stocks_plan)
     )
     db.commit()
     return find_stocks_account_by_google_sub(db, google_sub)

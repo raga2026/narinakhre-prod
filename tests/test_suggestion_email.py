@@ -6,7 +6,10 @@ from utils.suggestion_email import (
     send_admin_subscription_cancelled_email,
     send_daily_suggestions_email,
     send_subscription_welcome_email,
+    send_target_hit_email,
+    send_trading_alert_email,
     send_viewer_welcome_email,
+    send_weekly_starters_email,
 )
 
 
@@ -649,6 +652,46 @@ def test_subscription_welcome_email_with_suggestions_includes_todays_pick():
     assert 'Golden Co Ltd' in kwargs['htmlbody']
     assert kwargs['htmlbody'].strip().startswith('<!doctype html>')
     assert DISCLAIMER in kwargs['textbody']
+    assert 'Rs 299/month' in kwargs['textbody']
+    assert 'Rs 99/month' not in kwargs['textbody']
+
+
+def test_subscription_welcome_email_defaults_to_standard_plan_pricing():
+    with patch('utils.suggestion_email.send_zeptomail_stocks_email', return_value=(True, 'ok')) as mock_send:
+        send_subscription_welcome_email('new@example.com', 'New Sub', '17 Sep 2026')
+
+    kwargs = mock_send.call_args.kwargs
+    assert 'Rs 299/month' in kwargs['textbody']
+    assert 'Each day we pick' in kwargs['textbody']
+
+
+def test_subscription_welcome_email_starters_plan_shows_the_correct_price_and_cadence():
+    with patch('utils.suggestion_email.send_zeptomail_stocks_email', return_value=(True, 'ok')) as mock_send:
+        send_subscription_welcome_email('new@example.com', 'New Sub', '17 Sep 2026', plan='starters')
+
+    kwargs = mock_send.call_args.kwargs
+    assert 'Rs 99/month' in kwargs['textbody']
+    assert 'Rs 299/month' not in kwargs['textbody']
+    assert 'Starters' in kwargs['textbody']
+    assert 'no pick to show yet' in kwargs['textbody'].lower()
+
+
+def test_subscription_welcome_email_starters_plan_with_suggestions_uses_weekly_heading():
+    suggestions = [
+        {'symbol': 'GLD', 'exchange': 'NSE', 'company_name': 'Golden Co Ltd', 'buy_price': 100.0,
+         'target_sell_price': 105.0, 'stop_loss_price': 97.0, 'holding_period_days': 10,
+         'rationale': 'Golden cross with confirming volume'},
+    ]
+    with patch('utils.suggestion_email.send_zeptomail_stocks_email', return_value=(True, 'ok')) as mock_send:
+        send_subscription_welcome_email(
+            'new@example.com', 'New Sub', '17 Sep 2026', suggestions=suggestions, plan='starters',
+        )
+
+    kwargs = mock_send.call_args.kwargs
+    assert "this week's pick" in kwargs['subject'].lower()
+    assert "today's recommendation" not in kwargs['subject'].lower()
+    assert 'Golden Co Ltd' in kwargs['textbody']
+    assert 'Rs 99/month' in kwargs['textbody']
 
 
 def test_admin_new_subscriber_email_goes_to_the_fixed_admin_address():
@@ -670,6 +713,40 @@ def test_admin_cancellation_email_goes_to_the_fixed_admin_address():
     assert kwargs['to_email'] == 'narinakhre@gmail.com'
     assert 'Leaving User' in kwargs['subject']
     assert 'cancelled' in kwargs['textbody'].lower()
+
+
+def test_trading_alert_email_includes_the_stock_card_and_buy_link():
+    suggestion = {
+        'symbol': 'GLD', 'exchange': 'NSE', 'company_name': 'Golden Co Ltd', 'buy_price': 100.0,
+        'target_sell_price': 105.0, 'stop_loss_price': 97.0, 'holding_period_days': 10,
+        'nns_tier': 'golden', 'rationale': 'Golden cross with confirming volume',
+    }
+    buy_link = 'https://narinakhre.com/stocks/suggestions/42/buy'
+    with patch('utils.suggestion_email.send_zeptomail_stocks_email', return_value=(True, 'ok')) as mock_send:
+        send_trading_alert_email('raga2020@gmail.com', suggestion, buy_link)
+
+    kwargs = mock_send.call_args.kwargs
+    assert kwargs['to_email'] == 'raga2020@gmail.com'
+    assert 'Golden Co Ltd' in kwargs['subject']
+    assert 'Golden Co Ltd' in kwargs['textbody']
+    assert buy_link in kwargs['textbody']
+    assert buy_link in kwargs['htmlbody']
+    assert kwargs['htmlbody'].strip().startswith('<!doctype html>')
+    assert DISCLAIMER in kwargs['textbody']
+
+
+def test_target_hit_email_reports_the_pnl_and_links_to_the_dashboard():
+    trade = {'symbol': 'GLD', 'exchange': 'NSE', 'buy_price': 100.0, 'quantity': 60, 'exit_price': 105.0}
+    with patch('utils.suggestion_email.send_zeptomail_stocks_email', return_value=(True, 'ok')) as mock_send:
+        send_target_hit_email('raga2020@gmail.com', trade, pnl_amount=300.0, pnl_pct=5.0)
+
+    kwargs = mock_send.call_args.kwargs
+    assert kwargs['to_email'] == 'raga2020@gmail.com'
+    assert 'GLD' in kwargs['subject']
+    assert 'target hit' in kwargs['subject'].lower()
+    assert 'sold automatically' in kwargs['textbody']
+    assert '+Rs 300.00' in kwargs['textbody']
+    assert '/stocks/auto-trader' in kwargs['textbody']
 
 
 def test_daily_email_includes_each_recipients_own_referral_footer():
@@ -711,3 +788,105 @@ def test_daily_email_generates_a_referral_code_for_a_recipient_who_has_none_yet(
 
     assert db.recipient_rows[0]['referral_code']  # lazily generated and persisted
     assert f"ref={db.recipient_rows[0]['referral_code']}" in mock_send.call_args.kwargs['textbody']
+
+
+class FakeStartersEmailDB:
+    """Same shape as FakeEmailDB above, but for send_weekly_starters_email --
+    a separate class (not a shared one) because the two match different SQL
+    text entirely: get_starters_suggestions' own top-TOP_N_STARTERS-per-week
+    query, and a recipient query that must literally filter on
+    stocks_plan='starters' (asserting on the exact SQL text is what proves
+    the production query actually scopes to Starters accounts, not just
+    every active viewer)."""
+
+    def __init__(self, suggestion_rows, recipient_rows):
+        self.suggestion_rows = suggestion_rows
+        self.recipient_rows = recipient_rows
+
+    def execute(self, sql, params=None):
+        normalized = ' '.join(sql.split())
+
+        if normalized.startswith('SELECT watchlist_id, symbol, exchange, company_name, universe_id,'):
+            return FakeCursor(self.suggestion_rows)
+
+        if "stocks_plan='starters'" in normalized and normalized.startswith("SELECT id, username AS email, name FROM stocks_admin_users WHERE role='viewer'"):
+            if 'AND id IN (' in normalized:
+                wanted = set(params)
+                return FakeCursor([r for r in self.recipient_rows if r.get('id') in wanted])
+            return FakeCursor(self.recipient_rows)
+
+        if normalized.startswith('SELECT referral_code FROM stocks_admin_users WHERE id=?'):
+            admin_id, = params
+            matches = [r for r in self.recipient_rows if r.get('id') == admin_id and r.get('referral_code')]
+            return FakeCursor(matches[:1])
+        if normalized.startswith('SELECT id FROM stocks_admin_users WHERE referral_code=?'):
+            code, = params
+            matches = [r for r in self.recipient_rows if r.get('referral_code') == code]
+            return FakeCursor(matches[:1])
+        if normalized.startswith('UPDATE stocks_admin_users SET referral_code=?'):
+            code, admin_id = params
+            for r in self.recipient_rows:
+                if r.get('id') == admin_id:
+                    r['referral_code'] = code
+            return FakeCursor([])
+
+        raise AssertionError(f'Unexpected SQL in test: {sql}')
+
+    def commit(self):
+        pass
+
+
+def test_weekly_starters_email_sends_nothing_when_no_pick_cleared_the_bar():
+    db = FakeStartersEmailDB(suggestion_rows=[], recipient_rows=[{'id': 1, 'email': 'a@example.com', 'name': 'A'}])
+
+    with patch('utils.suggestion_email.send_zeptomail_stocks_email', return_value=(True, 'ok')) as mock_send:
+        summary = send_weekly_starters_email(db)
+
+    mock_send.assert_not_called()
+    assert summary == {'suggestion_count': 0, 'recipient_count': 0, 'sent': 0, 'failed': 0, 'failures': []}
+
+
+def test_weekly_starters_email_sends_only_to_starters_recipients_with_the_weekly_pick():
+    db = FakeStartersEmailDB(
+        suggestion_rows=[
+            {'symbol': 'GLD', 'exchange': 'NSE', 'company_name': 'Golden Co Ltd', 'buy_price': 100.0,
+             'target_sell_price': 105.0, 'stop_loss_price': 97.0, 'holding_period_days': 10,
+             'nns_tier': 'golden', 'rationale': 'Golden cross with confirming volume'},
+        ],
+        recipient_rows=[{'id': 1, 'email': 'starter@example.com', 'name': 'Starter'}],
+    )
+
+    with patch('utils.suggestion_email.send_zeptomail_stocks_email', return_value=(True, 'ok')) as mock_send:
+        summary = send_weekly_starters_email(db)
+
+    assert summary['sent'] == 1
+    kwargs = mock_send.call_args.kwargs
+    assert kwargs['to_email'] == 'starter@example.com'
+    assert 'Golden Co Ltd' in kwargs['subject']
+    assert "This Week's Pick" in kwargs['subject']
+    assert 'Golden Co Ltd' in kwargs['textbody']
+    assert kwargs['htmlbody'].strip().startswith('<!doctype html>')
+    assert DISCLAIMER in kwargs['textbody']
+
+
+def test_weekly_starters_email_includes_both_picks_when_two_cleared_the_bar():
+    db = FakeStartersEmailDB(
+        suggestion_rows=[
+            {'symbol': 'GLD', 'exchange': 'NSE', 'company_name': 'Golden Co Ltd', 'buy_price': 100.0,
+             'target_sell_price': 105.0, 'stop_loss_price': 97.0, 'holding_period_days': 10,
+             'nns_tier': 'golden', 'rationale': 'Golden cross with confirming volume'},
+            {'symbol': 'SLV', 'exchange': 'NSE', 'company_name': 'Silver Star Ltd', 'buy_price': 50.0,
+             'target_sell_price': 55.0, 'stop_loss_price': 48.0, 'holding_period_days': 10,
+             'nns_tier': 'golden', 'rationale': 'Golden cross with strong fundamentals'},
+        ],
+        recipient_rows=[{'id': 1, 'email': 'starter@example.com', 'name': 'Starter'}],
+    )
+
+    with patch('utils.suggestion_email.send_zeptomail_stocks_email', return_value=(True, 'ok')) as mock_send:
+        summary = send_weekly_starters_email(db)
+
+    assert summary['suggestion_count'] == 2
+    kwargs = mock_send.call_args.kwargs
+    assert '2 Picks' in kwargs['subject']
+    assert 'Golden Co Ltd' in kwargs['textbody']
+    assert 'Silver Star Ltd' in kwargs['textbody']

@@ -56,13 +56,24 @@
         <div class="hero mb-6">
             <h2 class="text-lg font-bold text-gray-900">Welcome back{{ ', ' ~ session.stocks_admin_username if session.stocks_admin_username }}</h2>
             <p class="text-gray-600 text-sm mt-2">
-                {% if suggestions %}
-                    {{ suggestions | length }} recommendation{{ 's' if suggestions | length != 1 }} from the last 10 days, below --
-                    at most one Pick of the Day, and a stock already picked recently is skipped in favor of the
-                    next-best one until its own pick genuinely changes, so this rotates through the qualifying
-                    list rather than repeating the same stock.
+                {% if is_starters %}
+                    {% if suggestions %}
+                        {{ suggestions | length }} weekly pick{{ 's' if suggestions | length != 1 }} from the last ~9 weeks, below --
+                        Starters only ever gets picks that clear our strictest, golden-tier quality bar, up to two a
+                        week on Mondays, so some weeks have fewer (or none at all) if not enough clears that bar.
+                    {% else %}
+                        No pick clearing our golden-tier bar in the last ~9 weeks -- check back after the next Monday
+                        screening run.
+                    {% endif %}
                 {% else %}
-                    No recommendations in the last 10 days -- check back after the next screening run.
+                    {% if suggestions %}
+                        {{ suggestions | length }} recommendation{{ 's' if suggestions | length != 1 }} from the last 10 days, below --
+                        at most one Pick of the Day, and a stock already picked recently is skipped in favor of the
+                        next-best one until its own pick genuinely changes, so this rotates through the qualifying
+                        list rather than repeating the same stock.
+                    {% else %}
+                        No recommendations in the last 10 days -- check back after the next screening run.
+                    {% endif %}
                 {% endif %}
             </p>
             {% if subscription_period_end_label %}
@@ -129,7 +140,6 @@
                         <th scope="col">Recommendation</th>
                         <th scope="col" class="num">Buy</th>
                         <th scope="col" class="num">Target</th>
-                        <th scope="col" class="num">Stop-loss</th>
                         <th scope="col">Projected</th>
                         <th scope="col">Timing</th>
                         <th scope="col">Rationale</th>
@@ -155,7 +165,6 @@
                         </td>
                         <td class="num">{{ s.buy_price }}</td>
                         <td class="num up">{{ s.target_sell_price }}</td>
-                        <td class="num down">{{ s.stop_loss_price }}</td>
                         <td class="text-xs">
                             {% if s.projection %}
                                 <div>{{ s.projection.mid_period.label }}: <strong class="text-gray-900">{{ s.projection.mid_period.price }}</strong></div>
@@ -181,7 +190,7 @@
                     </tr>
                     {% else %}
                     <tr>
-                        <td colspan="10" class="text-gray-400">No recommendations in the last 10 days.</td>
+                        <td colspan="9" class="text-gray-400">No recommendations in the last 10 days.</td>
                     </tr>
                     {% endfor %}
                 </tbody>

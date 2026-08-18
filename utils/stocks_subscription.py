@@ -140,7 +140,7 @@ def hash_password(password):
 
 # --- DB orchestration ------------------------------------------------------
 
-def create_pending_subscriber(db, email, name, password, referred_by_id=None):
+def create_pending_subscriber(db, email, name, password, referred_by_id=None, stocks_plan='standard'):
     """Creates a role='viewer' row for a self-serve signup, before payment
     has been confirmed -- is_active=0 and subscription_status='pending', so
     authenticate_stocks_admin already refuses login (is_active check) even
@@ -150,7 +150,9 @@ def create_pending_subscriber(db, email, name, password, referred_by_id=None):
     and emailed in plaintext -- there's nothing to force a change away from.
     referred_by_id (see utils/stocks_referrals.py), when given, is stamped
     once here and never changes after -- app.py's /stocks/signup resolves
-    a submitted referral code into this id before calling in. Returns
+    a submitted referral code into this id before calling in. stocks_plan
+    ('standard' or 'starters', see STOCKS_AUTH_ALTER_SQL) is likewise
+    stamped once here from the signup form's plan selector. Returns
     (row, error_message)."""
     email = (email or '').strip().lower()
     if not email:
@@ -159,7 +161,8 @@ def create_pending_subscriber(db, email, name, password, referred_by_id=None):
         return None, 'Password must be at least 8 characters.'
 
     existing = db.execute(
-        'SELECT id, username, name, is_active, is_pro, subscription_status, subscription_current_period_end, referred_by_id '
+        'SELECT id, username, name, is_active, is_pro, subscription_status, subscription_current_period_end, '
+        'referred_by_id, stocks_plan '
         'FROM stocks_admin_users WHERE username=?',
         (email,)
     ).fetchone()
@@ -169,14 +172,15 @@ def create_pending_subscriber(db, email, name, password, referred_by_id=None):
     password_hash = hash_password(password)
     db.execute(
         '''INSERT INTO stocks_admin_users
-               (username, password_hash, role, name, is_active, must_change_password, subscription_status, referred_by_id)
-           VALUES (?, ?, 'viewer', ?, 0, 0, 'pending', ?)''',
-        (email, password_hash, (name or '').strip() or None, referred_by_id)
+               (username, password_hash, role, name, is_active, must_change_password, subscription_status,
+                referred_by_id, stocks_plan)
+           VALUES (?, ?, 'viewer', ?, 0, 0, 'pending', ?, ?)''',
+        (email, password_hash, (name or '').strip() or None, referred_by_id, stocks_plan)
     )
     db.commit()
 
     row = db.execute(
-        'SELECT id, username, name, subscription_status, razorpay_subscription_id, referred_by_id '
+        'SELECT id, username, name, subscription_status, razorpay_subscription_id, referred_by_id, stocks_plan '
         'FROM stocks_admin_users WHERE username=?',
         (email,)
     ).fetchone()

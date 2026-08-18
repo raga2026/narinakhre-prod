@@ -8,6 +8,7 @@ from utils.stock_auth import (
     delete_viewer_account,
     list_viewers,
     safe_stocks_next_url,
+    set_viewer_plan,
     stocks_login_required,
     stocks_role_required,
     stocks_watchlist_access_required,
@@ -61,7 +62,7 @@ class FakeViewerDB:
             return FakeCursor(matches[:1])
 
         if normalized.startswith("SELECT id, username, name, is_active, can_view_watchlist, must_change_password, is_pro, "
-                                  "subscription_status, subscription_current_period_end, created_at FROM stocks_admin_users WHERE role='viewer'"):
+                                  "subscription_status, subscription_current_period_end, stocks_plan, created_at FROM stocks_admin_users WHERE role='viewer'"):
             matches = [r for r in self.rows if r['role'] == 'viewer']
             matches.sort(key=lambda r: r['created_at'], reverse=True)
             return FakeCursor(matches)
@@ -94,6 +95,13 @@ class FakeViewerDB:
             for r in self.rows:
                 if r['id'] == admin_id:
                     r['is_pro'] = new_status
+            return FakeCursor([])
+
+        if normalized.startswith('UPDATE stocks_admin_users SET stocks_plan=?, updated_at=NOW() WHERE id=?'):
+            plan, admin_id = params
+            for r in self.rows:
+                if r['id'] == admin_id:
+                    r['stocks_plan'] = plan
             return FakeCursor([])
 
         raise AssertionError(f'Unexpected SQL in test: {sql}')
@@ -174,6 +182,40 @@ def test_toggle_viewer_pro_never_touches_a_non_viewer_role():
     }])
     assert toggle_viewer_pro(db, 1) is False
     assert db.rows[0]['is_pro'] == 0
+
+
+def test_set_viewer_plan_switches_to_starters():
+    db = FakeViewerDB()
+    create_viewer_account(db, 'a@example.com', 'A', created_by_id=1)
+    admin_id = db.rows[0]['id']
+
+    assert set_viewer_plan(db, admin_id, 'starters') is True
+    assert db.rows[0]['stocks_plan'] == 'starters'
+
+    assert set_viewer_plan(db, admin_id, 'standard') is True
+    assert db.rows[0]['stocks_plan'] == 'standard'
+
+
+def test_set_viewer_plan_rejects_an_unrecognized_plan():
+    db = FakeViewerDB()
+    create_viewer_account(db, 'a@example.com', 'A', created_by_id=1)
+    admin_id = db.rows[0]['id']
+    assert set_viewer_plan(db, admin_id, 'deluxe') is False
+
+
+def test_set_viewer_plan_returns_false_for_nonexistent_id():
+    db = FakeViewerDB()
+    assert set_viewer_plan(db, 999, 'starters') is False
+
+
+def test_set_viewer_plan_never_touches_a_non_viewer_role():
+    db = FakeViewerDB(rows=[{
+        'id': 1, 'username': 'boss', 'password_hash': 'x', 'role': 'super_admin',
+        'name': None, 'created_by': None, 'is_active': 1, 'can_view_watchlist': 0,
+        'is_pro': 0, 'stocks_plan': 'standard', 'created_at': '2026-01-01',
+    }])
+    assert set_viewer_plan(db, 1, 'starters') is False
+    assert db.rows[0]['stocks_plan'] == 'standard'
 
 
 def test_delete_viewer_account_removes_the_row():
@@ -394,3 +436,15 @@ def test_logged_out_request_redirects_to_login_with_next_pointing_back():
     response = client.get('/stocks/universe/42')
     assert response.status_code == 302
     assert response.headers['Location'] == '/stocks/login?next=/stocks/universe/42'
+
+
+def test_role_required_also_carries_next_through_to_login():
+    # Same fix as stocks_login_required, extended to stocks_role_required --
+    # matters for e.g. a trading-alert email linking straight to a
+    # super_admin-only page (buy confirmation, auto-trader dashboard).
+    app = _build_test_app()
+    client = app.test_client()
+
+    response = client.get('/stocks/users')
+    assert response.status_code == 302
+    assert response.headers['Location'] == '/stocks/login?next=/stocks/users'

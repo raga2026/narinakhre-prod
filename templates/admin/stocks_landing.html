@@ -86,7 +86,7 @@
                     </defs>
                 </svg>
 
-                <div class="grid grid-cols-3 gap-3 mt-4 text-center">
+                <div class="grid grid-cols-2 gap-3 mt-4 text-center">
                     <div class="bg-slate-900/60 rounded-xl py-2.5">
                         <p class="text-xs text-slate-500">Buy</p>
                         <p class="font-bold text-slate-100 mt-0.5">Rs 412</p>
@@ -94,10 +94,6 @@
                     <div class="bg-slate-900/60 rounded-xl py-2.5">
                         <p class="text-xs text-slate-500">Target</p>
                         <p class="font-bold text-emerald-400 mt-0.5">Rs 452</p>
-                    </div>
-                    <div class="bg-slate-900/60 rounded-xl py-2.5">
-                        <p class="text-xs text-slate-500">Stop-loss</p>
-                        <p class="font-bold text-rose-400 mt-0.5">Rs 396</p>
                     </div>
                 </div>
                 <p class="text-slate-500 text-xs mt-4">Illustrative example only -- not a real recommendation.</p>
@@ -153,7 +149,7 @@
                 <div class="step-num mb-4">3</div>
                 <h3 class="font-bold text-lg">Only the strongest gets sent</h3>
                 <p class="text-slate-400 text-sm mt-2 leading-relaxed">
-                    At most one Pick of the Day, with the full reasoning, buy price, target, stop-loss and
+                    At most one Pick of the Day, with the full reasoning, buy price, target and
                     timing -- so you can research it and decide for yourself. The same pick isn't repeated
                     for 30 days unless something genuinely changes.
                 </p>
@@ -214,7 +210,7 @@
                 <h3 class="font-bold text-lg stocks-accent">Swing trades</h3>
                 <p class="text-slate-400 text-sm mt-2 leading-relaxed">
                     When a chart pattern (like a rounding bottom or a breakout) is behind the call, you get a
-                    specific buy price, target and stop-loss for a shorter move -- with the historical
+                    specific buy price and target for a shorter move -- with the historical
                     reliability of that exact pattern cited alongside it.
                 </p>
             </div>
@@ -241,19 +237,35 @@
             <h2 class="text-3xl font-extrabold font-serif">The toughest job in investing is shortlisting the right stock.</h2>
             <p class="text-slate-300 mt-3">We do it for you, every single day -- for less than the cost of a pizza.</p>
 
-            <div class="card p-8 mt-10 max-w-sm mx-auto text-left">
-                <p class="text-slate-400 text-sm font-semibold uppercase tracking-wide">Nari Nakhre Stocks</p>
-                <p class="mt-2"><span class="text-4xl font-extrabold">Rs 299</span><span class="text-slate-400">/month</span></p>
-                <ul class="mt-6 space-y-3 text-sm text-slate-300">
-                    <li class="flex gap-2"><span class="stocks-accent">✓</span> Pick of the Day, with full reasoning</li>
-                    <li class="flex gap-2"><span class="stocks-accent">✓</span> Buy price, target and stop-loss on every pick</li>
-                    <li class="flex gap-2"><span class="stocks-accent">✓</span> NNS Score breakdown for every pick</li>
-                    <li class="flex gap-2"><span class="stocks-accent">✓</span> Browse and search our full research universe</li>
-                    <li class="flex gap-2"><span class="stocks-accent">✓</span> Delivered straight to your inbox, only on trading days</li>
-                </ul>
-                <a href="{{ url_for('stocks_signup') }}" class="stocks-btn block text-center w-full py-3.5 rounded-2xl font-bold text-lg shadow-lg mt-8 transition hover:opacity-90">
-                    Get Started
-                </a>
+            <div class="grid sm:grid-cols-2 gap-6 mt-10 max-w-3xl mx-auto text-left">
+                <div class="card p-8">
+                    <p class="text-slate-400 text-sm font-semibold uppercase tracking-wide">Standard</p>
+                    <p class="mt-2"><span class="text-4xl font-extrabold">Rs 299</span><span class="text-slate-400">/month</span></p>
+                    <ul class="mt-6 space-y-3 text-sm text-slate-300">
+                        <li class="flex gap-2"><span class="stocks-accent">✓</span> Pick of the Day, with full reasoning</li>
+                        <li class="flex gap-2"><span class="stocks-accent">✓</span> Buy price and target on every pick</li>
+                        <li class="flex gap-2"><span class="stocks-accent">✓</span> NNS Score breakdown for every pick</li>
+                        <li class="flex gap-2"><span class="stocks-accent">✓</span> Browse and search our full research universe</li>
+                        <li class="flex gap-2"><span class="stocks-accent">✓</span> Delivered straight to your inbox, only on trading days</li>
+                    </ul>
+                    <a href="{{ url_for('stocks_signup') }}" class="stocks-btn block text-center w-full py-3.5 rounded-2xl font-bold text-lg shadow-lg mt-8 transition hover:opacity-90">
+                        Get Started
+                    </a>
+                </div>
+                <div class="card p-8">
+                    <p class="text-slate-400 text-sm font-semibold uppercase tracking-wide">Starters</p>
+                    <p class="mt-2"><span class="text-4xl font-extrabold">Rs 99</span><span class="text-slate-400">/month</span></p>
+                    <ul class="mt-6 space-y-3 text-sm text-slate-300">
+                        <li class="flex gap-2"><span class="stocks-accent">✓</span> Up to two separately-curated picks a week, every Monday</li>
+                        <li class="flex gap-2"><span class="stocks-accent">✓</span> Only our strictest, top-quality (golden-tier) picks</li>
+                        <li class="flex gap-2"><span class="stocks-accent">✓</span> Buy price and target included</li>
+                        <li class="flex gap-2"><span class="stocks-accent">✓</span> Browse and search our full research universe</li>
+                        <li class="flex gap-2"><span class="stocks-accent">✓</span> A handful of high-conviction ideas a month, not a daily stream</li>
+                    </ul>
+                    <a href="{{ url_for('stocks_signup', plan='starters') }}" class="stocks-btn block text-center w-full py-3.5 rounded-2xl font-bold text-lg shadow-lg mt-8 transition hover:opacity-90">
+                        Get Started
+                    </a>
+                </div>
             </div>
         </div>
     </div>

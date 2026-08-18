@@ -24,6 +24,7 @@
         .badge-pending_buy { background:#1e3a8a; color:#bfdbfe; }
         .badge-pending_sell { background:#1e3a8a; color:#bfdbfe; }
         .badge-buy_failed { background:#450a0a; color:#fca5a5; }
+        .badge-manual_exit { background:#164e63; color:#a5f3fc; }
         .badge-live { background:#7f1d1d; color:#fecaca; }
         .badge-dry_run { background:#334155; color:#e2e8f0; }
         .warning-banner { background: #451a03; border: 1px solid #92400e; color: #fed7aa; border-radius: 0.75rem; padding: 1rem 1.25rem; }
@@ -32,6 +33,7 @@
         .btn-small { padding: 4px 12px; border-radius: 999px; font-size: 0.75rem; font-weight: 700; border: none; cursor: pointer; }
         .btn-proceed { background: #7f1d1d; color: #fecaca; }
         .btn-cancel { background: #334155; color: #e2e8f0; }
+        .btn-sell-now { background: #164e63; color: #a5f3fc; }
     </style>
 </head>
 <body class="min-h-screen p-8">
@@ -238,6 +240,13 @@
                                 </form>
                                 <form method="POST" action="{{ url_for('stocks_auto_trader_cancel', trade_id=t.id) }}">
                                     <button type="submit" class="btn-small btn-cancel">Cancel (hold)</button>
+                                </form>
+                            </div>
+                            {% elif t.status == 'open' %}
+                            <div class="flex gap-2 mt-2">
+                                <form method="POST" action="{{ url_for('stocks_auto_trader_sell_now', trade_id=t.id) }}"
+                                      onsubmit="return confirm('Sell {{ t.symbol }} now{{ ' -- this places a REAL Kite order' if settings.mode == 'live' else '' }}?');">
+                                    <button type="submit" class="btn-small btn-sell-now">Sell now</button>
                                 </form>
                             </div>
                             {% endif %}

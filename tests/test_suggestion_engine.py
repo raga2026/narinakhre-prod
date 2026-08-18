@@ -9,6 +9,7 @@ from utils.suggestion_engine import (
     _build_rationale,
     _is_genuine_change,
     generate_daily_suggestions,
+    get_suggestion_by_id,
     is_suggestion_eligible,
     passes_hard_filters,
     score_candidates,
@@ -440,5 +441,43 @@ def test_watchlist_fundamental_tier_and_opm_carry_through_to_the_suggestion():
 # Multi-horizon projected price (1 month/6 months/1 year) is tested in
 # tests/test_price_pattern.py (utils.price_pattern.compute_projection_targets),
 # since it lives in that module now -- see that function's docstring.
+
+
+# --- get_suggestion_by_id ----------------------------------------------------
+
+class _FakeCursor:
+    def __init__(self, rows):
+        self._rows = rows
+
+    def fetchone(self):
+        return self._rows[0] if self._rows else None
+
+
+class _FakeByIdDB:
+    def __init__(self, rows):
+        self.rows = rows
+
+    def execute(self, sql, params=None):
+        normalized = ' '.join(sql.split())
+        if normalized.startswith('SELECT s.id AS suggestion_id, w.id AS watchlist_id, w.symbol, w.exchange, w.name AS company_name,'):
+            suggestion_id, = params
+            matches = [r for r in self.rows if r['suggestion_id'] == suggestion_id]
+            return _FakeCursor(matches)
+        raise AssertionError(f'Unexpected SQL in test: {sql}')
+
+
+def test_get_suggestion_by_id_returns_the_matching_row():
+    db = _FakeByIdDB([
+        {'suggestion_id': 1, 'symbol': 'GOODCO', 'watchlist_id': 10, 'buy_price': 412},
+        {'suggestion_id': 2, 'symbol': 'OTHERCO', 'watchlist_id': 11, 'buy_price': 200},
+    ])
+    row = get_suggestion_by_id(db, 2)
+    assert row['symbol'] == 'OTHERCO'
+    assert row['watchlist_id'] == 11
+
+
+def test_get_suggestion_by_id_returns_none_when_not_found():
+    db = _FakeByIdDB([{'suggestion_id': 1, 'symbol': 'GOODCO', 'watchlist_id': 10, 'buy_price': 412}])
+    assert get_suggestion_by_id(db, 999) is None
 
 

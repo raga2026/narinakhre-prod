@@ -69,6 +69,15 @@ JOB_EXPECTATIONS = {
     'auto_trade_reconcile': {'expected_by_ist_hour': 8, 'label': '8 AM IST'},
     'indicator_calc': {'expected_by_ist_hour': 8, 'label': '8 AM IST'},
     'suggestion_email': {'expected_by_ist_hour': 9, 'label': '9 AM IST'},
+    # Runs daily (same cron as suggestion_email) but only does real work on
+    # a Monday -- the job body itself checks the weekday and calls
+    # record_job_success either way (skip-but-record-success on the other
+    # 6 days, same pattern suggestion_email already uses for non-trading
+    # days), so this needs no day-of-week awareness here: a genuine
+    # failure on a Monday still gets caught, and the other 6 days are
+    # never flagged as missed since success is recorded every day
+    # regardless (see app.py's /stocks/starters/send-weekly-email).
+    'starters_weekly_email': {'expected_by_ist_hour': 9, 'label': '9 AM IST'},
     'subscription_reminders': {'expected_by_ist_hour': 11, 'label': '11 AM IST'},
     'fundamentals_rotation': {'expected_by_ist_hour': 12, 'label': '12 PM IST'},
     'market_cap_filter': {'expected_by_ist_hour': 13, 'label': '1 PM IST'},

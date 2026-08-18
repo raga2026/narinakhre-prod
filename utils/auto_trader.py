@@ -101,10 +101,18 @@ STOCK_AUTO_TRADE_ALTER_SQL = [
     'ALTER TABLE stock_auto_trades ADD COLUMN IF NOT EXISTS kite_buy_order_id TEXT',
     'ALTER TABLE stock_auto_trades ADD COLUMN IF NOT EXISTS kite_sell_order_id TEXT',
     'ALTER TABLE stock_auto_trades ADD COLUMN IF NOT EXISTS pending_sell_reason TEXT',
+    # 'manual_exit' -- a discretionary "Sell now" on an open position (see
+    # manual_close_trade), not tied to hitting either the target or the
+    # stop-loss. Added to both CHECK constraints below: the trade's own
+    # final status, and pending_sell_reason (_place_live_sell's `reason`
+    # param becomes one or the other depending on which call site used it).
     "ALTER TABLE stock_auto_trades DROP CONSTRAINT IF EXISTS stock_auto_trades_status_check",
     "ALTER TABLE stock_auto_trades ADD CONSTRAINT stock_auto_trades_status_check "
     "CHECK (status IN ('pending_buy', 'buy_failed', 'open', 'stop_loss_pending', "
-    "'pending_sell', 'target_hit', 'stopped_out'))",
+    "'pending_sell', 'target_hit', 'stopped_out', 'manual_exit'))",
+    "ALTER TABLE stock_auto_trades DROP CONSTRAINT IF EXISTS stock_auto_trades_pending_sell_reason_check",
+    "ALTER TABLE stock_auto_trades ADD CONSTRAINT stock_auto_trades_pending_sell_reason_check "
+    "CHECK (pending_sell_reason IS NULL OR pending_sell_reason IN ('target_hit', 'stopped_out', 'manual_exit'))",
 ]
 
 
@@ -217,6 +225,96 @@ def compute_available_funds(total_capital, deployed_capital):
     return round(total_capital - deployed_capital, 2)
 
 
+def _open_trade(db, suggestion, budget_amount, mode, kite_client=None):
+    """Shared by open_auto_trade_if_enabled (budget/mode read from the
+    global settings row) and open_manual_trade (budget/mode passed in
+    explicitly, bypassing the enabled toggle) -- everything from quantity
+    sizing through the actual insert/live-order-placement is identical
+    between an automatic and a manual buy; only how budget_amount/mode
+    were decided differs, which is entirely the caller's job.
+
+    kite_client is required when mode == 'live' (raises ValueError if
+    missing -- a live-mode call with no client is a caller bug, not a
+    condition to silently skip) and unused/optional otherwise. In live
+    mode this places a REAL market BUY order -- see
+    utils.kite_client.KiteClient.place_market_order. If Kite fills it
+    within the same round trip (the common case for a liquid NSE/BSE
+    equity during market hours), the row is inserted already 'open' with
+    the real average fill price; otherwise it's inserted 'pending_buy' for
+    reconcile_pending_buys to pick up.
+
+    suggestion needs 'suggestion_id' (or 'id'), 'watchlist_id', 'symbol',
+    'exchange', 'buy_price', and optionally 'target_sell_price'/
+    'stop_loss_price'.
+
+    Idempotent: stock_auto_trades has a UNIQUE constraint on suggestion_id,
+    so calling this twice for the same suggestion is a silent no-op the
+    second time, same ON CONFLICT DO NOTHING pattern used elsewhere in this
+    codebase for exactly this reason. Returns the quantity bought, or None
+    if nothing was opened (budget doesn't stretch to even one share, or --
+    live only -- the symbol was never matched to a real Kite tradingsymbol,
+    never guessed at)."""
+    buy_price = suggestion.get('buy_price')
+    quantity = compute_quantity(budget_amount, buy_price)
+    if quantity <= 0:
+        return None
+
+    symbol = suggestion['symbol']
+    exchange = suggestion.get('exchange')
+    suggestion_id = suggestion.get('suggestion_id', suggestion.get('id'))
+    watchlist_id = suggestion['watchlist_id']
+    target_sell_price = suggestion.get('target_sell_price')
+    stop_loss_price = suggestion.get('stop_loss_price')
+
+    if mode == MODE_DRY_RUN:
+        db.execute(
+            '''INSERT INTO stock_auto_trades
+                   (suggestion_id, watchlist_id, symbol, exchange, mode, status,
+                    budget_amount, quantity, buy_price, target_sell_price, stop_loss_price)
+               VALUES (?, ?, ?, ?, 'dry_run', 'open', ?, ?, ?, ?, ?)
+               ON CONFLICT (suggestion_id) DO NOTHING''',
+            (suggestion_id, watchlist_id, symbol, exchange,
+             budget_amount, quantity, buy_price, target_sell_price, stop_loss_price)
+        )
+        db.commit()
+        return quantity
+
+    # Live mode from here.
+    if kite_client is None:
+        raise ValueError('_open_trade: kite_client is required when mode is live.')
+
+    kite_tradingsymbol = get_cached_kite_tradingsymbol(db, symbol, exchange)
+    if kite_tradingsymbol is None:
+        return None  # never matched to a real Kite symbol -- don't guess, don't trade
+
+    order_id = kite_client.place_market_order(kite_tradingsymbol, exchange, 'BUY', quantity)
+    fill = kite_client.get_order_fill(order_id)
+
+    if fill and fill.get('status') == 'COMPLETE':
+        actual_buy_price = fill.get('average_price') or buy_price
+        db.execute(
+            '''INSERT INTO stock_auto_trades
+                   (suggestion_id, watchlist_id, symbol, exchange, mode, status,
+                    budget_amount, quantity, buy_price, target_sell_price, stop_loss_price, kite_buy_order_id)
+               VALUES (?, ?, ?, ?, 'live', 'open', ?, ?, ?, ?, ?, ?)
+               ON CONFLICT (suggestion_id) DO NOTHING''',
+            (suggestion_id, watchlist_id, symbol, exchange,
+             budget_amount, quantity, actual_buy_price, target_sell_price, stop_loss_price, order_id)
+        )
+    else:
+        db.execute(
+            '''INSERT INTO stock_auto_trades
+                   (suggestion_id, watchlist_id, symbol, exchange, mode, status,
+                    budget_amount, quantity, buy_price, target_sell_price, stop_loss_price, kite_buy_order_id)
+               VALUES (?, ?, ?, ?, 'live', 'pending_buy', ?, ?, ?, ?, ?, ?)
+               ON CONFLICT (suggestion_id) DO NOTHING''',
+            (suggestion_id, watchlist_id, symbol, exchange,
+             budget_amount, quantity, buy_price, target_sell_price, stop_loss_price, order_id)
+        )
+    db.commit()
+    return quantity
+
+
 def open_auto_trade_if_enabled(db, created_suggestion, kite_client=None):
     """Called once per newly-created suggestion (see
     generate_daily_suggestions's 'created' list) -- opens a position sized
@@ -236,88 +334,92 @@ def open_auto_trade_if_enabled(db, created_suggestion, kite_client=None):
     into the pool (compute_available_funds is recomputed fresh on every
     call, not read from some stored 'paused' flag).
 
-    kite_client is required when settings['mode'] == 'live' (raises
-    ValueError if missing -- a live-mode call with no client is a caller
-    bug, not a condition to silently skip) and unused/optional otherwise.
-    In live mode this places a REAL market BUY order -- see
-    utils.kite_client.KiteClient.place_market_order. If Kite fills it
-    within the same round trip (the common case for a liquid NSE/BSE
-    equity during market hours), the row is inserted already 'open' with
-    the real average fill price; otherwise it's inserted 'pending_buy' for
-    reconcile_pending_buys to pick up.
-
-    Idempotent: stock_auto_trades has a UNIQUE constraint on suggestion_id,
-    so calling this twice for the same suggestion is a silent no-op the
-    second time, same ON CONFLICT DO NOTHING pattern used elsewhere in this
-    codebase for exactly this reason. Returns the quantity bought, or None
-    if nothing was opened."""
+    Delegates the actual sizing/insert/live-order-placement to
+    _open_trade -- see its docstring for the kite_client contract and the
+    ON CONFLICT (suggestion_id) idempotency guarantee. Returns the
+    quantity bought, or None if nothing was opened."""
     settings = get_auto_trade_settings(db)
     if not settings['enabled']:
-        return None
-
-    buy_price = created_suggestion.get('buy_price')
-    quantity = compute_quantity(settings['budget_per_trade'], buy_price)
-    if quantity <= 0:
         return None
 
     available = compute_available_funds(settings['total_capital'], get_deployed_capital(db, settings['mode']))
     if settings['budget_per_trade'] > available:
         return None
 
-    symbol = created_suggestion['symbol']
-    exchange = created_suggestion.get('exchange')
-    suggestion_id = created_suggestion['suggestion_id']
-    watchlist_id = created_suggestion['watchlist_id']
-    target_sell_price = created_suggestion.get('target_sell_price')
-    stop_loss_price = created_suggestion.get('stop_loss_price')
+    return _open_trade(db, created_suggestion, settings['budget_per_trade'], settings['mode'], kite_client=kite_client)
 
-    if settings['mode'] == MODE_DRY_RUN:
-        db.execute(
-            '''INSERT INTO stock_auto_trades
-                   (suggestion_id, watchlist_id, symbol, exchange, mode, status,
-                    budget_amount, quantity, buy_price, target_sell_price, stop_loss_price)
-               VALUES (?, ?, ?, ?, 'dry_run', 'open', ?, ?, ?, ?, ?)
-               ON CONFLICT (suggestion_id) DO NOTHING''',
-            (suggestion_id, watchlist_id, symbol, exchange,
-             settings['budget_per_trade'], quantity, buy_price, target_sell_price, stop_loss_price)
-        )
-        db.commit()
-        return quantity
 
-    # Live mode from here.
-    if kite_client is None:
-        raise ValueError('open_auto_trade_if_enabled: kite_client is required when mode is live.')
+def open_manual_trade(db, suggestion, budget_amount, mode, kite_client=None):
+    """Discretionary buy triggered by a super_admin clicking "Buy" on a
+    specific recommendation (see the /stocks/suggestions/<id>/buy route),
+    as opposed to open_auto_trade_if_enabled's automatic one-per-suggestion
+    behaviour. Deliberately NOT gated by settings['enabled'] -- a manual
+    click is its own trigger regardless of whether auto-trading is on.
 
-    kite_tradingsymbol = get_cached_kite_tradingsymbol(db, symbol, exchange)
-    if kite_tradingsymbol is None:
-        return None  # never matched to a real Kite symbol -- don't guess, don't trade
+    budget_amount and mode are explicit (not read from the global auto-
+    trade settings) so a specific trade can use a custom amount, though
+    callers typically default budget_amount to
+    get_auto_trade_settings(db)['budget_per_trade'] and mode to the
+    current global mode. Still enforces the same capital-limit guard as
+    the automatic path, against the global total_capital setting.
 
-    order_id = kite_client.place_market_order(kite_tradingsymbol, exchange, 'BUY', quantity)
-    fill = kite_client.get_order_fill(order_id)
+    Returns the quantity bought, or None if nothing was opened (budget
+    doesn't stretch to a share, insufficient capital left, a trade already
+    exists for this suggestion, or -- live only -- no Kite tradingsymbol
+    match)."""
+    settings = get_auto_trade_settings(db)
+    available = compute_available_funds(settings['total_capital'], get_deployed_capital(db, mode))
+    if budget_amount > available:
+        return None
 
-    if fill and fill.get('status') == 'COMPLETE':
-        actual_buy_price = fill.get('average_price') or buy_price
-        db.execute(
-            '''INSERT INTO stock_auto_trades
-                   (suggestion_id, watchlist_id, symbol, exchange, mode, status,
-                    budget_amount, quantity, buy_price, target_sell_price, stop_loss_price, kite_buy_order_id)
-               VALUES (?, ?, ?, ?, 'live', 'open', ?, ?, ?, ?, ?, ?)
-               ON CONFLICT (suggestion_id) DO NOTHING''',
-            (suggestion_id, watchlist_id, symbol, exchange,
-             settings['budget_per_trade'], quantity, actual_buy_price, target_sell_price, stop_loss_price, order_id)
-        )
-    else:
-        db.execute(
-            '''INSERT INTO stock_auto_trades
-                   (suggestion_id, watchlist_id, symbol, exchange, mode, status,
-                    budget_amount, quantity, buy_price, target_sell_price, stop_loss_price, kite_buy_order_id)
-               VALUES (?, ?, ?, ?, 'live', 'pending_buy', ?, ?, ?, ?, ?, ?)
-               ON CONFLICT (suggestion_id) DO NOTHING''',
-            (suggestion_id, watchlist_id, symbol, exchange,
-             settings['budget_per_trade'], quantity, buy_price, target_sell_price, stop_loss_price, order_id)
-        )
+    return _open_trade(db, suggestion, budget_amount, mode, kite_client=kite_client)
+
+
+def manual_close_trade(db, trade_id, kite_client=None):
+    """Discretionary "Sell now" on an open position, triggered by a
+    super_admin -- unlike reconcile_open_trades, this doesn't check
+    whether the target or stop-loss was actually reached; exiting early
+    (or late) for any reason is the whole point. Only acts on a trade
+    whose status is 'open' (returns False for anything else -- already
+    closed, or awaiting a stop-loss decision via
+    confirm_stop_loss_sell/cancel_stop_loss_sell instead).
+
+    dry_run closes immediately at the latest synced daily close (the same
+    price source reconcile_open_trades itself reads -- this app doesn't
+    poll intraday quotes). live places a REAL sell order right now via the
+    shared _place_live_sell helper (kite_client required, raises
+    ValueError if missing), with the same immediate-fill-or-pending_sell
+    handling as every other live sell path in this module. Final status is
+    'manual_exit' either way. Returns True if a trade was found and acted
+    on, False otherwise."""
+    trade = db.execute(
+        '''SELECT t.id, t.mode, t.symbol, t.exchange, t.buy_price, t.quantity, t.watchlist_id,
+                  d.close AS latest_price
+           FROM stock_auto_trades t
+           LEFT JOIN stock_daily_data d ON d.watchlist_id = t.watchlist_id
+               AND d.trade_date = (SELECT MAX(d2.trade_date) FROM stock_daily_data d2 WHERE d2.watchlist_id = t.watchlist_id)
+           WHERE t.id=? AND t.status='open' ''',
+        (trade_id,)
+    ).fetchone()
+    if not trade:
+        return False
+
+    if trade['mode'] == MODE_LIVE:
+        if kite_client is None:
+            raise ValueError('manual_close_trade: kite_client is required for a live trade.')
+        _place_live_sell(db, kite_client, trade, 'manual_exit')
+        return True
+
+    exit_price = trade['latest_price'] if trade['latest_price'] is not None else trade['buy_price']
+    pnl_amount, pnl_pct = compute_pnl(trade['buy_price'], exit_price, trade['quantity'])
+    db.execute(
+        '''UPDATE stock_auto_trades
+           SET status='manual_exit', exit_price=?, pnl_amount=?, pnl_pct=?, closed_at=NOW()
+           WHERE id=?''',
+        (exit_price, pnl_amount, pnl_pct, trade_id)
+    )
     db.commit()
-    return quantity
+    return True
 
 
 def reconcile_pending_buys(db, kite_client):
@@ -449,11 +551,15 @@ def reconcile_open_trades(db, kite_client=None):
     target-hit sell can execute at a materially different intraday price
     than whatever moment actually crossed the target during the day.
 
-    Returns {'checked', 'target_hit', 'stop_loss_pending': [trade dicts]}
-    -- the caller (app.py's reconcile route) is responsible for emailing
-    STOP_LOSS_ALERT_EMAIL for each entry in 'stop_loss_pending', since this
-    module doesn't send email itself (same DB-orchestration-only split as
-    generate_daily_suggestions, whose caller sends the actual email too)."""
+    Returns {'checked', 'target_hit': [trade dicts], 'stop_loss_pending':
+    [trade dicts]} -- the caller (app.py's reconcile route) is responsible
+    for emailing about each entry in both lists, since this module doesn't
+    send email itself (same DB-orchestration-only split as
+    generate_daily_suggestions, whose caller sends the actual email too).
+    A live target-hit sell that doesn't fill within the same round trip is
+    parked as 'pending_sell' same as ever (see reconcile_pending_sells) and
+    is NOT included in 'target_hit' here -- its exit_price/pnl aren't known
+    yet, so there's nothing to report until it actually closes."""
     open_trades = db.execute(
         '''SELECT t.id, t.symbol, t.exchange, t.mode, t.watchlist_id, t.buy_price, t.target_sell_price,
                   t.stop_loss_price, t.quantity, d.close AS latest_price
@@ -463,7 +569,7 @@ def reconcile_open_trades(db, kite_client=None):
            WHERE t.status = 'open' '''
     ).fetchall()
 
-    target_hit_count = 0
+    closed_targets = []
     pending_stop_losses = []
     for trade in open_trades:
         outcome = determine_exit(trade.get('latest_price'), trade.get('target_sell_price'), trade.get('stop_loss_price'))
@@ -474,6 +580,13 @@ def reconcile_open_trades(db, kite_client=None):
                 if kite_client is None:
                     raise ValueError('reconcile_open_trades: kite_client is required to sell an open live trade.')
                 _place_live_sell(db, kite_client, trade, 'target_hit')
+                updated = db.execute(
+                    "SELECT status, exit_price, pnl_amount, pnl_pct FROM stock_auto_trades WHERE id=?",
+                    (trade['id'],)
+                ).fetchone()
+                if updated and updated['status'] == 'target_hit':
+                    closed_targets.append({**trade, **updated})
+                # else parked as 'pending_sell' -- reconcile_pending_sells will finish it later.
             else:
                 exit_price = trade['latest_price']
                 pnl_amount, pnl_pct = compute_pnl(trade['buy_price'], exit_price, trade['quantity'])
@@ -484,7 +597,7 @@ def reconcile_open_trades(db, kite_client=None):
                     (exit_price, pnl_amount, pnl_pct, trade['id'])
                 )
                 db.commit()
-            target_hit_count += 1
+                closed_targets.append({**trade, 'exit_price': exit_price, 'pnl_amount': pnl_amount, 'pnl_pct': pnl_pct})
         else:  # 'stopped_out' -- needs manual confirmation in every mode, never auto-sold
             db.execute(
                 '''UPDATE stock_auto_trades
@@ -495,7 +608,7 @@ def reconcile_open_trades(db, kite_client=None):
             db.commit()
             pending_stop_losses.append({**trade, 'stop_loss_triggered_price': trade['latest_price']})
 
-    return {'checked': len(open_trades), 'target_hit': target_hit_count, 'stop_loss_pending': pending_stop_losses}
+    return {'checked': len(open_trades), 'target_hit': closed_targets, 'stop_loss_pending': pending_stop_losses}
 
 
 def confirm_stop_loss_sell(db, trade_id, kite_client=None):
