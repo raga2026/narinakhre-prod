@@ -22,8 +22,12 @@ STOP_LOSS_MULTIPLIER = 0.97  # -3%, same fallback role
 # of the 1-a-day cap is to work through the qualifying list one stock at a
 # time rather than fixating on the single top-ranked one every single day,
 # so a repeat within this window is skipped in favor of the next-best
-# candidate UNLESS the pick has genuinely changed since then.
-SUGGESTION_REPEAT_WINDOW_DAYS = 30
+# candidate UNLESS the pick has genuinely changed since then. 15 days
+# (not 30) -- a stock that already had its turn shouldn't be locked out
+# for a full month; two weeks is enough of a gap to keep the daily pick
+# from feeling repetitive while still cycling back through the qualifying
+# list reasonably often.
+SUGGESTION_REPEAT_WINDOW_DAYS = 15
 # How much the NNS Score has to move (absolute, 0-10 scale) to count as a
 # genuine change worth resending within the repeat window.
 NNS_SCORE_CHANGE_THRESHOLD = 1.0
