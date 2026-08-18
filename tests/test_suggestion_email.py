@@ -30,7 +30,7 @@ class FakeEmailDB:
     def execute(self, sql, params=None):
         normalized = ' '.join(sql.split())
 
-        if normalized.startswith('SELECT w.id AS watchlist_id, w.symbol, w.exchange, w.name AS company_name, u.id AS universe_id,'):
+        if normalized.startswith('SELECT DISTINCT ON (s.suggestion_date) w.id AS watchlist_id, w.symbol, w.exchange, w.name AS company_name, u.id AS universe_id,'):
             self.last_query_params = params
             return FakeCursor(self.suggestion_rows)
 

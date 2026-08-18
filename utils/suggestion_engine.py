@@ -407,6 +407,23 @@ def get_suggestions(db, start_date=None, end_date=None):
     """Fetches stock_suggestions rows (symbol/exchange joined from
     stock_watchlist), most recent first, optionally bounded by
     suggestion_date on either end (either or both may be omitted).
+
+    DISTINCT ON (s.suggestion_date) -- combined with ORDER BY
+    s.suggestion_date DESC, s.score DESC -- collapses each day down to its
+    single highest-scored row, no matter how many rows actually exist for
+    that date in the table. This is the real, robust guarantee behind
+    "one Pick of the Day": generate_daily_suggestions only ever INSERTS
+    one new row per call, but nothing stops the underlying job from being
+    triggered more than once on the same day (a manual re-run, an admin
+    testing a button, a retried cron) -- if the top-ranked candidate
+    happened to differ between those calls, each call's own top pick gets
+    its own row (ON CONFLICT only dedupes the SAME watchlist_id), leaving
+    more than one row for that date sitting in the table. Filtering here,
+    at the single shared read path every caller goes through (the daily
+    email, /stocks/suggestions/resend, and both viewer pages), is what
+    actually prevents more than one from ever being shown or sent for a
+    given day, regardless of how many accumulated upstream.
+
     universe_id (LEFT JOINed by symbol/exchange, same match as
     _fetch_candidates -- may be None if the company was ever removed from
     stock_universe) is what suggestion_email.py links out to
@@ -427,7 +444,8 @@ def get_suggestions(db, start_date=None, end_date=None):
     where_clause = ('WHERE ' + ' AND '.join(conditions)) if conditions else ''
 
     return db.execute(
-        f'''SELECT w.id AS watchlist_id, w.symbol, w.exchange, w.name AS company_name,
+        f'''SELECT DISTINCT ON (s.suggestion_date)
+                   w.id AS watchlist_id, w.symbol, w.exchange, w.name AS company_name,
                    u.id AS universe_id,
                    s.suggestion_date, s.buy_price,
                    s.target_sell_price, s.stop_loss_price, s.holding_period_days,
