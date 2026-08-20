@@ -23,11 +23,11 @@
         :root {
             --bg: #0f172a; --fg: #e2e8f0;
             --muted-900: #f1f5f9; --muted-700: #cbd5e1; --muted-600: #94a3b8; --muted-500: #7d8aa0;
-            --accent: #38bdf8; --accent-hover: #7dd3fc;
-            --topbar-bg: #1e293b; --topbar-border: #334155;
-            --nav-hover-bg: rgba(56,189,248,0.10); --nav-active-bg: rgba(56,189,248,0.16);
-            --logout-fg: #f87171; --logout-border: #3a4556; --logout-hover-bg: rgba(248,113,113,0.10);
-            --card-bg: #1e293b; --card-border: #334155;
+            --accent: #38bdf8; --accent-hover: #7dd3fc; --accent-shadow: rgba(56,189,248,0.35);
+            --topbar-bg: rgba(30,41,59,0.85); --topbar-border: #334155;
+            --nav-hover-bg: rgba(56,189,248,0.10);
+            --logout-bg: rgba(248,113,113,0.12); --logout-fg: #f87171; --logout-hover-bg: rgba(248,113,113,0.22);
+            --card-bg: #1e293b; --card-border: #2d3a4f; --card-shadow: 0 6px 24px rgba(0,0,0,0.35);
             --input-bg: #16202f; --input-border: #3a4556;
             --row-border: #2d3a4f;
             --flash-bg: #16233a; --flash-fg: #bfdbfe; --flash-border: #2c4570;
@@ -35,11 +35,11 @@
         [data-theme="light"] {
             --bg: #f5f6f8; --fg: #24262d;
             --muted-900: #111827; --muted-700: #374151; --muted-600: #4b5563; --muted-500: #6c7080;
-            --accent: #387ed1; --accent-hover: #2b6cb8;
-            --topbar-bg: #ffffff; --topbar-border: #e6e9ec;
-            --nav-hover-bg: rgba(56,126,209,0.07); --nav-active-bg: rgba(56,126,209,0.12);
-            --logout-fg: #d64534; --logout-border: #d7dbe0; --logout-hover-bg: rgba(214,69,52,0.06);
-            --card-bg: #ffffff; --card-border: #e6e9ec;
+            --accent: #387ed1; --accent-hover: #2b6cb8; --accent-shadow: rgba(56,126,209,0.25);
+            --topbar-bg: rgba(255,255,255,0.85); --topbar-border: #e6e9ec;
+            --nav-hover-bg: rgba(56,126,209,0.07);
+            --logout-bg: rgba(214,69,52,0.08); --logout-fg: #d64534; --logout-hover-bg: rgba(214,69,52,0.16);
+            --card-bg: #ffffff; --card-border: #e6e9ec; --card-shadow: 0 2px 14px rgba(15,23,42,0.07);
             --input-bg: #ffffff; --input-border: #d7dbe0;
             --row-border: #eef0f2;
             --flash-bg: #eff6ff; --flash-fg: #1e3a8a; --flash-border: #bfdbfe;
@@ -48,20 +48,24 @@
         .kite-accent { color: var(--accent); }
         .kite-btn { background: var(--accent); color: white; }
         .kite-btn:hover { background: var(--accent-hover); }
-        .topbar { background: var(--topbar-bg); border-bottom: 1px solid var(--topbar-border); }
-        .topbar-inner { max-width: 42rem; margin: 0 auto; padding: 0.65rem 1.5rem 0.55rem; }
-        .topbar-row1 { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; margin-bottom: 0.5rem; }
-        .brand { font-size: 1.05rem; font-weight: 800; color: var(--accent); text-decoration: none; white-space: nowrap; }
+
+        .topbar { background: var(--topbar-bg); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); border-bottom: 1px solid var(--topbar-border); position: sticky; top: 0; z-index: 10; }
+        .topbar-inner { max-width: 42rem; margin: 0 auto; padding: 0.85rem 1.5rem; }
+        .topbar-row1 { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; margin-bottom: 0.65rem; }
+        .brand { display: flex; align-items: center; gap: 0.6rem; text-decoration: none; }
+        .brand-mark { width: 30px; height: 30px; border-radius: 9px; background: linear-gradient(135deg, var(--accent), var(--accent-hover)); display: flex; align-items: center; justify-content: center; color: #fff; font-weight: 800; font-size: 0.95rem; flex-shrink: 0; box-shadow: 0 2px 10px var(--accent-shadow); }
+        .brand-text { font-size: 1.05rem; font-weight: 800; color: var(--fg); white-space: nowrap; }
+        .logout-link { display: inline-flex; align-items: center; background: var(--logout-bg); color: var(--logout-fg); text-decoration: none; font-size: 0.8rem; font-weight: 700; padding: 0.45rem 1rem; border-radius: 999px; white-space: nowrap; transition: background-color .15s ease; }
+        .logout-link:hover { background: var(--logout-hover-bg); }
         .nav-scroll { display: flex; align-items: center; gap: 0.3rem; overflow-x: auto; -webkit-overflow-scrolling: touch; scrollbar-width: none; }
         .nav-scroll::-webkit-scrollbar { display: none; }
-        .nav-link { color: var(--muted-600); text-decoration: none; font-size: 0.82rem; font-weight: 600; padding: 0.4rem 0.8rem; border-radius: 999px; white-space: nowrap; transition: background-color .15s ease, color .15s ease; }
+        .nav-link { color: var(--muted-600); text-decoration: none; font-size: 0.82rem; font-weight: 600; padding: 0.45rem 0.9rem; border-radius: 999px; white-space: nowrap; transition: all .15s ease; }
         .nav-link:hover { color: var(--accent); background: var(--nav-hover-bg); }
-        .nav-link.active { color: var(--accent); background: var(--nav-active-bg); }
-        .logout-link { color: var(--logout-fg); text-decoration: none; font-size: 0.82rem; font-weight: 700; padding: 0.4rem 0.9rem; border-radius: 999px; border: 1px solid var(--logout-border); white-space: nowrap; transition: background-color .15s ease, border-color .15s ease; }
-        .logout-link:hover { background: var(--logout-hover-bg); border-color: var(--logout-fg); }
-        .card { background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 0.5rem; }
-        a.link { color: var(--accent); text-decoration: underline; }
-        a.link:hover { color: var(--accent-hover); }
+        .nav-link.active { color: #ffffff; background: var(--accent); box-shadow: 0 2px 10px var(--accent-shadow); }
+
+        .card { background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 1rem; box-shadow: var(--card-shadow); }
+        a.link { color: var(--accent); text-decoration: none; font-weight: 600; }
+        a.link:hover { color: var(--accent-hover); text-decoration: underline; }
         .row { padding: 0.6rem 0; border-bottom: 1px solid var(--row-border); }
         .row:last-child { border-bottom: none; }
         .text-gray-900 { color: var(--muted-900); }
@@ -90,7 +94,10 @@
     <div class="topbar">
         <div class="topbar-inner">
             <div class="topbar-row1">
-                <a href="{{ url_for('stocks_home') }}" class="brand">Nari Nakhre Stocks</a>
+                <a href="{{ url_for('stocks_home') }}" class="brand">
+                    <span class="brand-mark">N</span>
+                    <span class="brand-text">Nari Nakhre Stocks</span>
+                </a>
                 <a href="{{ url_for('stocks_admin_logout') }}" class="logout-link">Log out</a>
             </div>
             <nav class="nav-scroll" aria-label="Main">
@@ -113,7 +120,7 @@
         {% endwith %}
 
         <p class="text-gray-500 text-sm mb-4">
-            <a href="{{ url_for('stocks_home') }}" class="link">Back to home</a>
+            <a href="{{ url_for('stocks_home') }}" class="link">&larr; Back to home</a>
         </p>
 
         <div class="card p-5 mb-6">

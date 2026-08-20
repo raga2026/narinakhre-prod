@@ -21,9 +21,9 @@
     <style>
         /* Same Kite-inspired layout as the other viewer-facing pages
            (stocks_my_suggestions.html, stocks_my_history.html) -- kept
-           deliberately airy here (one column, generous spacing, short
-           lists instead of dense tables) since this is meant to be a
-           quick, minimalistic summary, not a working data table.
+           deliberately airy here (one column, generous spacing, card rows
+           instead of a dense table) since this is meant to be a quick,
+           minimalistic summary, not a working data table.
 
            Dark is the default theme (bare :root below) -- [data-theme="light"]
            overrides every variable for a visitor who's toggled it off from
@@ -37,16 +37,16 @@
             --bg: #0f172a; --fg: #e2e8f0;
             --muted-900: #f1f5f9; --muted-800: #e2e8f0; --muted-700: #cbd5e1;
             --muted-600: #94a3b8; --muted-500: #7d8aa0; --muted-400: #64748b;
-            --accent: #38bdf8; --accent-hover: #7dd3fc;
-            --topbar-bg: #1e293b; --topbar-border: #334155;
-            --nav-hover-bg: rgba(56,189,248,0.10); --nav-active-bg: rgba(56,189,248,0.16);
-            --logout-border: #3a4556; --logout-hover-bg: rgba(248,113,113,0.10);
-            --card-bg: #1e293b; --card-border: #334155;
-            --row-border: #2d3a4f;
-            --th-bg: #17223a; --th-fg: #7dd3fc; --row-hover: #1a2540;
+            --accent: #38bdf8; --accent-hover: #7dd3fc; --accent-shadow: rgba(56,189,248,0.35);
+            --topbar-bg: rgba(30,41,59,0.85); --topbar-border: #334155;
+            --nav-hover-bg: rgba(56,189,248,0.10);
+            --logout-bg: rgba(248,113,113,0.12); --logout-fg: #f87171; --logout-hover-bg: rgba(248,113,113,0.22);
+            --card-bg: #1e293b; --card-border: #2d3a4f; --card-shadow: 0 6px 24px rgba(0,0,0,0.35);
+            --row-bg: #16202f; --row-border: #2d3a4f;
             --hero-grad-1: #1e293b; --hero-grad-2: #0f172a; --hero-border: #334155;
             --flash-bg: #16233a; --flash-fg: #bfdbfe; --flash-border: #2c4570;
-            --up: #4ade80; --down: #f87171;
+            --up: #4ade80; --up-bg: rgba(74,222,128,0.10);
+            --down: #f87171; --down-bg: rgba(248,113,113,0.10);
             --badge-golden-bg: #78350f; --badge-golden-fg: #fef3c7;
             --badge-silver-bg: #334155; --badge-silver-fg: #e2e8f0;
         }
@@ -54,48 +54,67 @@
             --bg: #f5f6f8; --fg: #24262d;
             --muted-900: #111827; --muted-800: #1f2937; --muted-700: #374151;
             --muted-600: #4b5563; --muted-500: #6c7080; --muted-400: #9ca3af;
-            --accent: #387ed1; --accent-hover: #2b6cb8;
-            --topbar-bg: #ffffff; --topbar-border: #e6e9ec;
-            --nav-hover-bg: rgba(56,126,209,0.07); --nav-active-bg: rgba(56,126,209,0.12);
-            --logout-border: #d7dbe0; --logout-hover-bg: rgba(214,69,52,0.06);
-            --card-bg: #ffffff; --card-border: #e6e9ec;
-            --row-border: #eef0f2;
-            --th-bg: #fafbfc; --th-fg: #6c7080; --row-hover: #f9fbfd;
+            --accent: #387ed1; --accent-hover: #2b6cb8; --accent-shadow: rgba(56,126,209,0.25);
+            --topbar-bg: rgba(255,255,255,0.85); --topbar-border: #e6e9ec;
+            --nav-hover-bg: rgba(56,126,209,0.07);
+            --logout-bg: rgba(214,69,52,0.08); --logout-fg: #d64534; --logout-hover-bg: rgba(214,69,52,0.16);
+            --card-bg: #ffffff; --card-border: #e6e9ec; --card-shadow: 0 2px 14px rgba(15,23,42,0.07);
+            --row-bg: #f9fafb; --row-border: #eef0f2;
             --hero-grad-1: #eaf2fc; --hero-grad-2: #f5f6f8; --hero-border: #dbe7f7;
             --flash-bg: #eff6ff; --flash-fg: #1e3a8a; --flash-border: #bfdbfe;
-            --up: #00875a; --down: #d64534;
+            --up: #00875a; --up-bg: rgba(0,135,90,0.08);
+            --down: #d64534; --down-bg: rgba(214,69,52,0.08);
             --badge-golden-bg: #fff3cd; --badge-golden-fg: #8a6706;
             --badge-silver-bg: #eceff2; --badge-silver-fg: #4a4f57;
         }
         body { background: var(--bg); color: var(--fg); font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; font-size: 0.9rem; }
-        .kite-accent { color: var(--accent); }
-        .topbar { background: var(--topbar-bg); border-bottom: 1px solid var(--topbar-border); }
-        .topbar-inner { max-width: 42rem; margin: 0 auto; padding: 0.65rem 1.5rem 0.55rem; }
-        .topbar-row1 { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; margin-bottom: 0.5rem; }
-        .brand { font-size: 1.05rem; font-weight: 800; color: var(--accent); text-decoration: none; white-space: nowrap; }
+
+        .topbar { background: var(--topbar-bg); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); border-bottom: 1px solid var(--topbar-border); position: sticky; top: 0; z-index: 10; }
+        .topbar-inner { max-width: 42rem; margin: 0 auto; padding: 0.85rem 1.5rem; }
+        .topbar-row1 { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; margin-bottom: 0.65rem; }
+        .brand { display: flex; align-items: center; gap: 0.6rem; text-decoration: none; }
+        .brand-mark { width: 30px; height: 30px; border-radius: 9px; background: linear-gradient(135deg, var(--accent), var(--accent-hover)); display: flex; align-items: center; justify-content: center; color: #fff; font-weight: 800; font-size: 0.95rem; flex-shrink: 0; box-shadow: 0 2px 10px var(--accent-shadow); }
+        .brand-text { font-size: 1.05rem; font-weight: 800; color: var(--fg); white-space: nowrap; }
+        .logout-link { display: inline-flex; align-items: center; background: var(--logout-bg); color: var(--logout-fg); text-decoration: none; font-size: 0.8rem; font-weight: 700; padding: 0.45rem 1rem; border-radius: 999px; white-space: nowrap; transition: background-color .15s ease; }
+        .logout-link:hover { background: var(--logout-hover-bg); }
         .nav-scroll { display: flex; align-items: center; gap: 0.3rem; overflow-x: auto; -webkit-overflow-scrolling: touch; scrollbar-width: none; }
         .nav-scroll::-webkit-scrollbar { display: none; }
-        .nav-link { color: var(--muted-600); text-decoration: none; font-size: 0.82rem; font-weight: 600; padding: 0.4rem 0.8rem; border-radius: 999px; white-space: nowrap; transition: background-color .15s ease, color .15s ease; }
+        .nav-link { color: var(--muted-600); text-decoration: none; font-size: 0.82rem; font-weight: 600; padding: 0.45rem 0.9rem; border-radius: 999px; white-space: nowrap; transition: all .15s ease; }
         .nav-link:hover { color: var(--accent); background: var(--nav-hover-bg); }
-        .nav-link.active { color: var(--accent); background: var(--nav-active-bg); }
-        .logout-link { color: var(--down); text-decoration: none; font-size: 0.82rem; font-weight: 700; padding: 0.4rem 0.9rem; border-radius: 999px; border: 1px solid var(--logout-border); white-space: nowrap; transition: background-color .15s ease, border-color .15s ease; }
-        .logout-link:hover { background: var(--logout-hover-bg); border-color: var(--down); }
-        .card { background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 0.5rem; }
-        table { border-collapse: collapse; width: 100%; }
-        th, td { text-align: left; padding: 0.6rem 0.75rem; border-bottom: 1px solid var(--row-border); }
-        th { color: var(--th-fg); font-weight: 600; font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.04em; background: var(--th-bg); }
-        td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
-        tbody tr:hover { background: var(--row-hover); }
-        .badge { display:inline-flex; align-items:center; padding:2px 10px; border-radius:999px; font-size:0.7rem; font-weight:700; white-space: nowrap; }
+        .nav-link.active { color: #ffffff; background: var(--accent); box-shadow: 0 2px 10px var(--accent-shadow); }
+
+        .card { background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 1rem; box-shadow: var(--card-shadow); }
+        .hero { background: linear-gradient(135deg, var(--hero-grad-1) 0%, var(--hero-grad-2) 100%); border: 1px solid var(--hero-border); border-radius: 1rem; padding: 1.5rem; }
+
+        .suggestion-card { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 0.6rem 0.9rem; padding: 0.9rem 1.05rem; border-radius: 0.75rem; background: var(--row-bg); border: 1px solid var(--row-border); margin-bottom: 0.55rem; transition: border-color .15s ease; }
+        .suggestion-card:last-child { margin-bottom: 0; }
+        .suggestion-card:hover { border-color: var(--accent); }
+        .suggestion-main { min-width: 0; }
+        .suggestion-name { font-weight: 700; color: var(--muted-900); font-size: 0.92rem; }
+        .suggestion-meta { font-size: 0.76rem; color: var(--muted-500); margin-top: 1px; }
+        .suggestion-prices { font-size: 0.82rem; color: var(--muted-600); white-space: nowrap; }
+        .suggestion-prices .up { font-weight: 700; }
+        .suggestion-analysis-btn { display: inline-flex; align-items: center; background: var(--accent); color: #fff; text-decoration: none; font-size: 0.76rem; font-weight: 700; padding: 0.42rem 0.95rem; border-radius: 999px; white-space: nowrap; transition: background-color .15s ease; }
+        .suggestion-analysis-btn:hover { background: var(--accent-hover); }
+
+        .cta-row { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
+        .cta-btn { display: inline-flex; align-items: center; background: var(--accent); color: #fff; text-decoration: none; font-size: 0.8rem; font-weight: 700; padding: 0.5rem 1.1rem; border-radius: 999px; white-space: nowrap; transition: background-color .15s ease; }
+        .cta-btn:hover { background: var(--accent-hover); }
+
+        .badge { display:inline-flex; align-items:center; padding:2px 10px; border-radius:999px; font-size:0.68rem; font-weight:700; white-space: nowrap; }
         .badge-golden { background: var(--badge-golden-bg); color: var(--badge-golden-fg); }
         .badge-silver { background: var(--badge-silver-bg); color: var(--badge-silver-fg); }
         .up { color: var(--up); font-weight: 600; }
         .down { color: var(--down); font-weight: 600; }
-        .hero { background: linear-gradient(135deg, var(--hero-grad-1) 0%, var(--hero-grad-2) 100%); border: 1px solid var(--hero-border); border-radius: 0.5rem; padding: 1.5rem; }
-        a.link { color: var(--accent); text-decoration: underline; }
-        a.link:hover { color: var(--accent-hover); }
-        .item-row { padding: 0.75rem 0; border-bottom: 1px solid var(--row-border); }
-        .item-row:last-child { border-bottom: none; }
+
+        a.link { color: var(--accent); text-decoration: none; font-weight: 600; }
+        a.link:hover { color: var(--accent-hover); text-decoration: underline; }
+
+        .growth-row { display: flex; align-items: center; justify-content: space-between; padding: 0.55rem 0.8rem; border-radius: 0.6rem; margin-bottom: 0.35rem; }
+        .growth-row:last-child { margin-bottom: 0; }
+        .growth-row.is-up { background: var(--up-bg); }
+        .growth-row.is-down { background: var(--down-bg); }
+
         .text-gray-900 { color: var(--muted-900); }
         .text-gray-800 { color: var(--muted-800); }
         .text-gray-600 { color: var(--muted-600); }
@@ -108,14 +127,12 @@
         /* The Industry Growth section (bottom of the page) can list up to
            5 gainers + 5 losers -- on a small phone screen that gets tall
            and dense fast, so it gets its own tighter spacing/type scale
-           below a phone-width breakpoint. Nothing else on the page is
-           targeted here since only this section was flagged as too large
-           on mobile. */
+           below a phone-width breakpoint. Suggestion cards get slightly
+           tighter padding there too, same reasoning. */
         @media (max-width: 480px) {
-            .growth-card { padding: 0.9rem !important; }
-            .growth-row { padding: 0.4rem 0; font-size: 0.78rem; }
-            .growth-row .badge, .growth-row .up, .growth-row .down { font-size: 0.75rem; }
-            .growth-label { font-size: 0.62rem !important; }
+            .growth-card { padding: 1rem !important; }
+            .growth-row { padding: 0.5rem 0.65rem; font-size: 0.78rem; }
+            .suggestion-card { padding: 0.75rem 0.85rem; }
         }
     </style>
 </head>
@@ -123,7 +140,10 @@
     <div class="topbar">
         <div class="topbar-inner">
             <div class="topbar-row1">
-                <a href="{{ url_for('stocks_home') }}" class="brand">Nari Nakhre Stocks</a>
+                <a href="{{ url_for('stocks_home') }}" class="brand">
+                    <span class="brand-mark">N</span>
+                    <span class="brand-text">Nari Nakhre Stocks</span>
+                </a>
                 <a href="{{ url_for('stocks_admin_logout') }}" class="logout-link">Log out</a>
             </div>
             <nav class="nav-scroll" aria-label="Main">
@@ -163,44 +183,37 @@
             </p>
 
             {% if suggestion_summary.latest %}
-            <div class="overflow-x-auto">
-                <table>
-                    <thead>
-                        <tr>
-                            <th scope="col">Name</th>
-                            <th scope="col">Date</th>
-                            <th scope="col" class="num">Price</th>
-                            <th scope="col" class="num">Target Price</th>
-                            <th scope="col">Analysis</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {% for s in suggestion_summary.latest %}
-                        <tr>
-                            <th scope="row" class="text-gray-900 font-semibold">{{ s.symbol }} <span class="text-gray-400 font-normal">({{ s.exchange }})</span></th>
-                            <td>{{ s.suggestion_date }}</td>
-                            <td class="num">{{ s.buy_price if s.buy_price is not none else '—' }}</td>
-                            <td class="num up">{{ s.target_sell_price if s.target_sell_price is not none else '—' }}</td>
-                            <td><a href="{{ url_for('stocks_suggestion_analysis', source=s.source, suggestion_id=s.suggestion_id) }}" class="link">Analysis</a></td>
-                        </tr>
-                        {% endfor %}
-                    </tbody>
-                </table>
+            <div>
+                {% for s in suggestion_summary.latest %}
+                <div class="suggestion-card">
+                    <div class="suggestion-main">
+                        <div class="suggestion-name">{{ s.company_name or s.symbol }} <span class="text-gray-400 font-normal">({{ s.symbol }})</span></div>
+                        <div class="suggestion-meta">{{ s.suggestion_date }}</div>
+                    </div>
+                    <div class="suggestion-prices">
+                        Buy {{ s.buy_price if s.buy_price is not none else '—' }} &rarr;
+                        <span class="up">{{ s.target_sell_price if s.target_sell_price is not none else '—' }}</span>
+                    </div>
+                    <a href="{{ url_for('stocks_suggestion_analysis', source=s.source, suggestion_id=s.suggestion_id) }}" class="suggestion-analysis-btn">Analysis</a>
+                </div>
+                {% endfor %}
             </div>
             {% endif %}
 
             <p class="text-gray-600 text-sm mt-4">
-                <a href="{{ url_for('stocks_my_history') }}" class="link">View full history</a>
+                <a href="{{ url_for('stocks_my_history') }}" class="link">View full history &rarr;</a>
             </p>
         </div>
         {% endif %}
 
         <div class="card p-5 mb-6">
-            <h2 class="text-base font-bold text-gray-900 mb-1">Quality Stocks</h2>
-            <p class="text-gray-600 text-sm mb-3">Every company currently clearing our golden/silver quality bar, from our full research universe.</p>
-            <p class="text-gray-600 text-sm">
-                <a href="{{ url_for('stocks_quality_stocks') }}" class="link">Browse all quality stocks</a>
-            </p>
+            <div class="cta-row">
+                <div>
+                    <h2 class="text-base font-bold text-gray-900 mb-1">Quality Stocks</h2>
+                    <p class="text-gray-600 text-sm">Every company currently clearing our golden/silver quality bar.</p>
+                </div>
+                <a href="{{ url_for('stocks_quality_stocks') }}" class="cta-btn">Browse &rarr;</a>
+            </div>
         </div>
 
         <div class="card growth-card p-5">
@@ -217,9 +230,9 @@
                 </p>
 
                 {% if industry_growth.gainers %}
-                <p class="growth-label text-gray-500 text-xs uppercase tracking-wide font-semibold mb-1">Top movers up</p>
+                <p class="text-gray-500 text-xs uppercase tracking-wide font-semibold mb-2">Top movers up</p>
                 {% for g in industry_growth.gainers %}
-                <div class="item-row growth-row flex items-center justify-between">
+                <div class="growth-row is-up">
                     <span class="text-gray-800">{{ g.industry }}</span>
                     <span class="up">+{{ g.avg_change_pct }}%</span>
                 </div>
@@ -227,9 +240,9 @@
                 {% endif %}
 
                 {% if industry_growth.losers %}
-                <p class="growth-label text-gray-500 text-xs uppercase tracking-wide font-semibold mb-1 mt-4">Top movers down</p>
+                <p class="text-gray-500 text-xs uppercase tracking-wide font-semibold mb-2 mt-4">Top movers down</p>
                 {% for l in industry_growth.losers %}
-                <div class="item-row growth-row flex items-center justify-between">
+                <div class="growth-row is-down">
                     <span class="text-gray-800">{{ l.industry }}</span>
                     <span class="down">{{ l.avg_change_pct }}%</span>
                 </div>

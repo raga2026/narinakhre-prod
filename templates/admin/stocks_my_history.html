@@ -19,42 +19,92 @@
     <style>
         :root {
             --bg: #0f172a; --fg: #e2e8f0;
-            --muted-900: #f1f5f9; --muted-600: #94a3b8; --muted-500: #7d8aa0; --muted-400: #64748b;
-            --accent: #38bdf8; --accent-hover: #7dd3fc;
-            --card-bg: #1e293b; --card-border: #334155;
+            --muted-900: #f1f5f9; --muted-700: #cbd5e1; --muted-600: #94a3b8; --muted-500: #7d8aa0; --muted-400: #64748b;
+            --accent: #38bdf8; --accent-hover: #7dd3fc; --accent-shadow: rgba(56,189,248,0.35);
+            --topbar-bg: rgba(30,41,59,0.85); --topbar-border: #334155;
+            --nav-hover-bg: rgba(56,189,248,0.10);
+            --logout-bg: rgba(248,113,113,0.12); --logout-fg: #f87171; --logout-hover-bg: rgba(248,113,113,0.22);
+            --card-bg: #1e293b; --card-border: #2d3a4f; --card-shadow: 0 6px 24px rgba(0,0,0,0.35);
             --th-bg: #17223a; --th-fg: #7dd3fc; --row-border: #2d3a4f; --row-hover: #1a2540;
         }
         [data-theme="light"] {
             --bg: #f5f6f8; --fg: #24262d;
-            --muted-900: #111827; --muted-600: #4b5563; --muted-500: #6c7080; --muted-400: #9ca3af;
-            --accent: #387ed1; --accent-hover: #2b6cb8;
-            --card-bg: #ffffff; --card-border: #e6e9ec;
+            --muted-900: #111827; --muted-700: #374151; --muted-600: #4b5563; --muted-500: #6c7080; --muted-400: #9ca3af;
+            --accent: #387ed1; --accent-hover: #2b6cb8; --accent-shadow: rgba(56,126,209,0.25);
+            --topbar-bg: rgba(255,255,255,0.85); --topbar-border: #e6e9ec;
+            --nav-hover-bg: rgba(56,126,209,0.07);
+            --logout-bg: rgba(214,69,52,0.08); --logout-fg: #d64534; --logout-hover-bg: rgba(214,69,52,0.16);
+            --card-bg: #ffffff; --card-border: #e6e9ec; --card-shadow: 0 2px 14px rgba(15,23,42,0.07);
             --th-bg: #fafbfc; --th-fg: #6c7080; --row-border: #eef0f2; --row-hover: #f9fbfd;
         }
         body { background: var(--bg); color: var(--fg); font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; font-size: 0.9rem; }
-        .kite-accent { color: var(--accent); }
-        .card { background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 0.5rem; }
+
+        .topbar { background: var(--topbar-bg); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); border-bottom: 1px solid var(--topbar-border); position: sticky; top: 0; z-index: 10; }
+        .topbar-inner { max-width: 56rem; margin: 0 auto; padding: 0.85rem 1.5rem; }
+        .topbar-row1 { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; margin-bottom: 0.65rem; }
+        .brand { display: flex; align-items: center; gap: 0.6rem; text-decoration: none; }
+        .brand-mark { width: 30px; height: 30px; border-radius: 9px; background: linear-gradient(135deg, var(--accent), var(--accent-hover)); display: flex; align-items: center; justify-content: center; color: #fff; font-weight: 800; font-size: 0.95rem; flex-shrink: 0; box-shadow: 0 2px 10px var(--accent-shadow); }
+        .brand-text { font-size: 1.05rem; font-weight: 800; color: var(--fg); white-space: nowrap; }
+        .logout-link { display: inline-flex; align-items: center; background: var(--logout-bg); color: var(--logout-fg); text-decoration: none; font-size: 0.8rem; font-weight: 700; padding: 0.45rem 1rem; border-radius: 999px; white-space: nowrap; transition: background-color .15s ease; }
+        .logout-link:hover { background: var(--logout-hover-bg); }
+        .nav-scroll { display: flex; align-items: center; gap: 0.3rem; overflow-x: auto; -webkit-overflow-scrolling: touch; scrollbar-width: none; }
+        .nav-scroll::-webkit-scrollbar { display: none; }
+        .nav-link { color: var(--muted-600); text-decoration: none; font-size: 0.82rem; font-weight: 600; padding: 0.45rem 0.9rem; border-radius: 999px; white-space: nowrap; transition: all .15s ease; }
+        .nav-link:hover { color: var(--accent); background: var(--nav-hover-bg); }
+        .nav-link.active { color: #ffffff; background: var(--accent); box-shadow: 0 2px 10px var(--accent-shadow); }
+
+        .card { background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 1rem; box-shadow: var(--card-shadow); }
         table { border-collapse: collapse; width: 100%; }
         th, td { text-align: left; padding: 0.6rem 0.9rem; border-bottom: 1px solid var(--row-border); }
         th { color: var(--th-fg); font-weight: 600; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.04em; background: var(--th-bg); }
         td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
         tbody tr:hover { background: var(--row-hover); }
-        a.link { color: var(--accent); text-decoration: underline; }
-        a.link:hover { color: var(--accent-hover); }
+        a.link { color: var(--accent); text-decoration: none; font-weight: 600; }
+        a.link:hover { color: var(--accent-hover); text-decoration: underline; }
         .text-gray-900 { color: var(--muted-900); }
         .text-gray-600 { color: var(--muted-600); }
         .text-gray-500 { color: var(--muted-500); }
         .text-gray-400 { color: var(--muted-400); }
+
+        /* Popup used by "View Timing"/"View Rationale" below -- see
+           openInfoModal/closeInfoModal. Keeps those two fields (often long
+           free-text) out of the table entirely instead of forcing table
+           cells to wrap awkwardly, which is what skewed this table on
+           mobile before. */
+        .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.55); display: flex; align-items: center; justify-content: center; z-index: 50; padding: 1.25rem; }
+        .modal-overlay[hidden] { display: none; }
+        .modal-box { background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 1rem; box-shadow: var(--card-shadow); max-width: 26rem; width: 100%; padding: 1.25rem; }
+        .modal-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 0.75rem; margin-bottom: 0.75rem; }
+        .modal-title { font-size: 1rem; font-weight: 700; color: var(--muted-900); margin: 0; }
+        .modal-close { background: none; border: none; color: var(--muted-500); font-size: 1.35rem; line-height: 1; cursor: pointer; padding: 0.15rem 0.45rem; border-radius: 0.4rem; }
+        .modal-close:hover { color: var(--fg); background: var(--nav-hover-bg); }
+        .modal-body { color: var(--muted-700); font-size: 0.88rem; line-height: 1.55; white-space: pre-line; margin: 0; }
+        .modal-footer { display: flex; justify-content: flex-end; margin-top: 1.15rem; }
+        .modal-ok-btn { background: var(--accent); color: #fff; border: none; font-size: 0.82rem; font-weight: 700; padding: 0.5rem 1.3rem; border-radius: 999px; cursor: pointer; }
+        .modal-ok-btn:hover { background: var(--accent-hover); }
     </style>
 </head>
 <body class="min-h-screen">
-    <div class="max-w-4xl mx-auto p-6">
-        <div class="flex items-center justify-between mb-6">
-            <h1 class="text-xl font-bold kite-accent">Suggestion History</h1>
-            <a href="{{ url_for('stocks_admin_logout') }}" class="text-sm text-gray-500 hover:underline">Log out</a>
+    <div class="topbar">
+        <div class="topbar-inner">
+            <div class="topbar-row1">
+                <a href="{{ url_for('stocks_home') }}" class="brand">
+                    <span class="brand-mark">N</span>
+                    <span class="brand-text">Nari Nakhre Stocks</span>
+                </a>
+                <a href="{{ url_for('stocks_admin_logout') }}" class="logout-link">Log out</a>
+            </div>
+            <nav class="nav-scroll" aria-label="Main">
+                <a href="{{ url_for('stocks_my_suggestions') }}" class="nav-link">Recommendations</a>
+                <a href="{{ url_for('stocks_universe_list') }}" class="nav-link">Browse All Companies</a>
+                <a href="{{ url_for('stocks_profile') }}" class="nav-link">Profile</a>
+            </nav>
         </div>
-        <p class="text-gray-500 text-sm mb-6">
-            <a href="{{ url_for('stocks_my_suggestions') }}" class="link">Back to recent suggestions</a>
+    </div>
+
+    <div class="max-w-4xl mx-auto p-6">
+        <p class="text-gray-500 text-sm mb-4">
+            <a href="{{ url_for('stocks_my_suggestions') }}" class="link">&larr; Back to recent suggestions</a>
         </p>
 
         <div class="card p-5 overflow-x-auto">
@@ -87,6 +137,7 @@
                 </thead>
                 <tbody>
                     {% for s in suggestions %}
+                    {% set timing_text = s.pattern_note if s.pattern_name else (s.holding_period_days ~ '-day typical holding period, based on the flat target used when no confirmed chart pattern applies.') %}
                     <tr>
                         <th scope="row" class="text-gray-900">{{ s.symbol }} <span class="text-gray-400 font-normal">({{ s.exchange }})</span></th>
                         <td>{{ s.suggestion_date }}</td>
@@ -105,23 +156,12 @@
                             {% if s.projection %}
                                 <div>{{ s.projection.mid_period.label }}: <strong class="text-gray-900">{{ s.projection.mid_period.price }}</strong></div>
                                 <div>{{ s.projection.long_term.label }}: <strong class="text-gray-900">{{ s.projection.long_term.price }}</strong></div>
-                                <div class="text-gray-400" style="margin-top:2px;">
-                                    {% if s.projection.method == 'pattern' %}Based on its own detected pattern
-                                    {% else %}Extrapolated -- no confirmed pattern
-                                    {% endif %}
-                                </div>
                             {% else %}
                                 <span class="text-gray-400">—</span>
                             {% endif %}
                         </td>
-                        <td>
-                            {% if s.pattern_name %}
-                                <span class="text-gray-500 text-xs">{{ s.pattern_note }}</span>
-                            {% else %}
-                                {{ s.holding_period_days }} days
-                            {% endif %}
-                        </td>
-                        <td class="text-gray-600">{{ s.rationale }}</td>
+                        <td><a href="javascript:void(0)" class="link" onclick="openInfoModal('Timing', {{ timing_text|tojson }}, this)">View Timing</a></td>
+                        <td><a href="javascript:void(0)" class="link" onclick="openInfoModal('Rationale', {{ s.rationale|tojson }}, this)">View Rationale</a></td>
                         <td>{{ s.status | title }}</td>
                     </tr>
                     {% else %}
@@ -133,5 +173,59 @@
             </table>
         </div>
     </div>
+
+    <div id="info-modal-overlay" class="modal-overlay" hidden>
+        <div class="modal-box" role="dialog" aria-modal="true" aria-labelledby="info-modal-title">
+            <div class="modal-header">
+                <h3 id="info-modal-title" class="modal-title"></h3>
+                <button type="button" class="modal-close" onclick="closeInfoModal()" aria-label="Close">&times;</button>
+            </div>
+            <p id="info-modal-body" class="modal-body"></p>
+            <div class="modal-footer">
+                <button type="button" class="modal-ok-btn" onclick="closeInfoModal()">OK</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+    var infoModalLastFocused = null;
+
+    function openInfoModal(title, text, triggerEl) {
+        infoModalLastFocused = triggerEl || document.activeElement;
+        document.getElementById('info-modal-title').textContent = title;
+        document.getElementById('info-modal-body').textContent = text;
+        document.getElementById('info-modal-overlay').hidden = false;
+        document.querySelector('.modal-close').focus();
+    }
+
+    function closeInfoModal() {
+        document.getElementById('info-modal-overlay').hidden = true;
+        if (infoModalLastFocused) { infoModalLastFocused.focus(); }
+    }
+
+    document.getElementById('info-modal-overlay').addEventListener('click', function (e) {
+        if (e.target === this) { closeInfoModal(); }
+    });
+
+    document.addEventListener('keydown', function (e) {
+        var overlay = document.getElementById('info-modal-overlay');
+        if (overlay.hidden) { return; }
+        if (e.key === 'Escape') {
+            closeInfoModal();
+            return;
+        }
+        if (e.key === 'Tab') {
+            var closeBtn = document.querySelector('.modal-close');
+            var okBtn = document.querySelector('.modal-ok-btn');
+            if (e.shiftKey && document.activeElement === closeBtn) {
+                e.preventDefault();
+                okBtn.focus();
+            } else if (!e.shiftKey && document.activeElement === okBtn) {
+                e.preventDefault();
+                closeBtn.focus();
+            }
+        }
+    });
+    </script>
 </body>
 </html>
