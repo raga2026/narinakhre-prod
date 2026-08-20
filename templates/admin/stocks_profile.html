@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <script>
+    // Dark mode is the default (see the bare :root block below) -- see
+    // stocks_home.html's copy of this same script for the full comment.
+    // This page ALSO has the toggle button that writes to localStorage
+    // (see stocksToggleTheme near the bottom) -- every other viewer page
+    // just reads what's stored here.
+    (function () {
+        try {
+            if (localStorage.getItem('nn_stocks_theme') === 'light') {
+                document.documentElement.setAttribute('data-theme', 'light');
+            }
+        } catch (e) {}
+    })();
+    </script>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Profile - Nari Nakhre Stocks</title>
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+    <style>
+        :root {
+            --bg: #0f172a; --fg: #e2e8f0;
+            --muted-900: #f1f5f9; --muted-700: #cbd5e1; --muted-600: #94a3b8; --muted-500: #7d8aa0;
+            --accent: #38bdf8; --accent-hover: #7dd3fc;
+            --topbar-bg: #1e293b; --topbar-border: #334155;
+            --card-bg: #1e293b; --card-border: #334155;
+            --input-bg: #16202f; --input-border: #3a4556;
+            --row-border: #2d3a4f;
+            --flash-bg: #16233a; --flash-fg: #bfdbfe; --flash-border: #2c4570;
+        }
+        [data-theme="light"] {
+            --bg: #f5f6f8; --fg: #24262d;
+            --muted-900: #111827; --muted-700: #374151; --muted-600: #4b5563; --muted-500: #6c7080;
+            --accent: #387ed1; --accent-hover: #2b6cb8;
+            --topbar-bg: #ffffff; --topbar-border: #e6e9ec;
+            --card-bg: #ffffff; --card-border: #e6e9ec;
+            --input-bg: #ffffff; --input-border: #d7dbe0;
+            --row-border: #eef0f2;
+            --flash-bg: #eff6ff; --flash-fg: #1e3a8a; --flash-border: #bfdbfe;
+        }
+        body { background: var(--bg); color: var(--fg); font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; font-size: 0.9rem; }
+        .kite-accent { color: var(--accent); }
+        .kite-btn { background: var(--accent); color: white; }
+        .kite-btn:hover { background: var(--accent-hover); }
+        .topbar { background: var(--topbar-bg); border-bottom: 1px solid var(--topbar-border); }
+        .nav-link { color: var(--muted-600); text-decoration: none; }
+        .nav-link:hover { color: var(--accent); }
+        .card { background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 0.5rem; }
+        a.link { color: var(--accent); text-decoration: underline; }
+        a.link:hover { color: var(--accent-hover); }
+        .row { padding: 0.6rem 0; border-bottom: 1px solid var(--row-border); }
+        .row:last-child { border-bottom: none; }
+        .text-gray-900 { color: var(--muted-900); }
+        .text-gray-700 { color: var(--muted-700); }
+        .text-gray-600 { color: var(--muted-600); }
+        .text-gray-500 { color: var(--muted-500); }
+        .bg-gray-50 { background-color: var(--input-bg); }
+        .border-gray-300 { border-color: var(--input-border); }
+        .bg-blue-50 { background-color: var(--flash-bg); }
+        .text-blue-900 { color: var(--flash-fg); }
+        .border-blue-200 { border-color: var(--flash-border); }
+    </style>
+</head>
+<body class="min-h-screen">
+    <div class="topbar">
+        <div class="max-w-2xl mx-auto px-6 py-3 flex items-center justify-between flex-wrap gap-y-2">
+            <a href="{{ url_for('stocks_home') }}" class="text-lg font-bold kite-accent no-underline">Nari Nakhre Stocks</a>
+            <nav class="flex items-center gap-4 text-sm flex-wrap" aria-label="Main">
+                <a href="{{ url_for('stocks_my_suggestions') }}" class="nav-link">Recommendations</a>
+                <a href="{{ url_for('stocks_universe_list') }}" class="nav-link">Browse All Companies</a>
+                <a href="{{ url_for('stocks_profile') }}" class="nav-link">Profile</a>
+                <a href="{{ url_for('stocks_admin_logout') }}" class="text-gray-500 hover:kite-accent underline">Log out</a>
+            </nav>
+        </div>
+    </div>
+
+    <div class="max-w-2xl mx-auto p-6">
+        {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+            <div class="mb-6" role="alert" aria-live="assertive">
+            {% for category, msg in messages %}
+                <div class="bg-blue-50 text-blue-900 border border-blue-200 rounded-md p-3 mb-2 text-sm">{{ msg }}</div>
+            {% endfor %}
+            </div>
+        {% endif %}
+        {% endwith %}
+
+        <p class="text-gray-500 text-sm mb-4">
+            <a href="{{ url_for('stocks_home') }}" class="link">Back to home</a>
+        </p>
+
+        <div class="card p-5 mb-6">
+            <h1 class="text-base font-bold text-gray-900 mb-3">Account</h1>
+            <div class="row flex items-center justify-between">
+                <span class="text-gray-500">Username</span>
+                <span class="text-gray-900 font-semibold">{{ username }}</span>
+            </div>
+            {% if plan %}
+            <div class="row flex items-center justify-between">
+                <span class="text-gray-500">Plan</span>
+                <span class="text-gray-900 font-semibold">{{ 'Starters -- Rs 99/mo' if plan == 'starters' else 'Standard -- Rs 299/mo' }}</span>
+            </div>
+            {% endif %}
+            {% if subscription_period_end_label %}
+            <div class="row flex items-center justify-between">
+                <span class="text-gray-500">Subscription</span>
+                <span class="text-gray-900 font-semibold text-right">
+                    {% if subscription_status == 'active' %}Renews {{ subscription_period_end_label }}
+                    {% elif subscription_status == 'cancelled' %}Cancelled -- access ends {{ subscription_period_end_label }}
+                    {% elif subscription_status == 'halted' %}Payment failed -- access ended {{ subscription_period_end_label }}
+                    {% endif %}
+                </span>
+            </div>
+            {% if subscription_status == 'halted' %}
+            <div class="row">
+                <a href="{{ url_for('stocks_signup') }}" class="link">Renew now</a>
+            </div>
+            {% endif %}
+            {% endif %}
+            <div class="row">
+                <a href="{{ url_for('stocks_change_password') }}" class="link">Change password</a>
+            </div>
+            <div class="row flex items-center justify-between">
+                <span class="text-gray-500">Theme</span>
+                <button type="button" id="theme-toggle-btn" onclick="stocksToggleTheme()" class="kite-btn rounded-md px-4 py-2 text-sm font-semibold">
+                    <span id="theme-toggle-label">Switch to light theme</span>
+                </button>
+            </div>
+        </div>
+
+        <div class="card p-5">
+            <h2 class="text-base font-bold text-gray-900 mb-2">Refer people, earn a free month</h2>
+            <p class="text-gray-600 text-sm mb-3">
+                Refer {{ referrals_per_free_month }} people who subscribe and get 1 month free -- they get their
+                first month for Rs 199 instead of Rs 299 when they sign up with your link or code.
+            </p>
+            <div class="flex flex-wrap items-center gap-2 mb-3">
+                <input id="referral-link" type="text" readonly value="{{ referral_link }}"
+                       class="flex-1 min-w-0 border border-gray-300 rounded-md px-3 py-2 text-sm bg-gray-50 text-gray-700"
+                       onclick="this.select();" aria-label="Your referral link">
+                <button type="button" onclick="stocksCopyReferralLink()" class="kite-btn rounded-md px-4 py-2 text-sm font-semibold">
+                    Copy link
+                </button>
+            </div>
+            <p class="text-gray-600 text-sm mb-3">
+                Or share the code directly: <strong class="text-gray-900">{{ referral_code }}</strong>
+            </p>
+            <p class="text-gray-600 text-sm">
+                Qualified referrals (people who've paid at least once): <strong class="text-gray-900">{{ qualified_referrals }}</strong>
+                &nbsp;·&nbsp;
+                Free months available: <strong class="text-gray-900">{{ available_referral_credits }}</strong>
+                {% if available_referral_credits %}
+                    <span class="text-gray-500">(applied automatically to extend your access when you cancel)</span>
+                {% endif %}
+            </p>
+        </div>
+    </div>
+
+    <script>
+    function stocksCopyReferralLink() {
+        var input = document.getElementById('referral-link');
+        if (!input) { return; }
+        input.select();
+        input.setSelectionRange(0, 99999);
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText(input.value).catch(function () {
+                document.execCommand('copy');
+            });
+        } else {
+            document.execCommand('copy');
+        }
+    }
+
+    function stocksThemeIsLight() {
+        return document.documentElement.getAttribute('data-theme') === 'light';
+    }
+
+    function stocksApplyThemeLabel() {
+        var label = document.getElementById('theme-toggle-label');
+        if (!label) { return; }
+        label.textContent = stocksThemeIsLight() ? 'Switch to dark theme' : 'Switch to light theme';
+    }
+
+    function stocksToggleTheme() {
+        if (stocksThemeIsLight()) {
+            document.documentElement.removeAttribute('data-theme');
+            try { localStorage.setItem('nn_stocks_theme', 'dark'); } catch (e) {}
+        } else {
+            document.documentElement.setAttribute('data-theme', 'light');
+            try { localStorage.setItem('nn_stocks_theme', 'light'); } catch (e) {}
+        }
+        stocksApplyThemeLabel();
+    }
+
+    stocksApplyThemeLabel();
+    </script>
+</body>
+</html>

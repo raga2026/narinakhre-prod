@@ -1,32 +1,78 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
+    <script>
+    // Dark mode is the default (see the bare :root block below) -- see
+    // stocks_home.html's copy of this same script for the full comment.
+    (function () {
+        try {
+            if (localStorage.getItem('nn_stocks_theme') === 'light') {
+                document.documentElement.setAttribute('data-theme', 'light');
+            }
+        } catch (e) {}
+    })();
+    </script>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{{ company.name or company.symbol }} - Nari Nakhre Stocks</title>
     <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
     <style>
-        body { background: #f5f6f8; color: #24262d; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; font-size: 0.9rem; }
-        .kite-accent, .stocks-accent { color: #387ed1; }
+        :root {
+            --bg: #0f172a; --fg: #e2e8f0;
+            --muted-900: #f1f5f9; --muted-700: #cbd5e1; --muted-600: #94a3b8;
+            --muted-500: #7d8aa0; --muted-400: #64748b;
+            --accent: #38bdf8; --accent-hover: #7dd3fc;
+            --card-bg: #1e293b; --card-border: #334155;
+            --th-fg: #7dd3fc; --row-border: #2d3a4f;
+            --chart-bg: #172033; --chart-border: #2d3a4f;
+            --flash-bg: #16233a; --flash-fg: #bfdbfe; --flash-border: #2c4570;
+            --up: #4ade80; --down: #f87171;
+            --badge-rec-bg: #166534; --badge-rec-fg: #dcfce7;
+            --badge-notrec-bg: #1e293b; --badge-notrec-fg: #94a3b8; --badge-notrec-border: rgba(148,163,184,0.3);
+        }
+        [data-theme="light"] {
+            --bg: #f5f6f8; --fg: #24262d;
+            --muted-900: #111827; --muted-700: #374151; --muted-600: #4b5563;
+            --muted-500: #6c7080; --muted-400: #9ca3af;
+            --accent: #387ed1; --accent-hover: #2b6cb8;
+            --card-bg: #ffffff; --card-border: #e6e9ec;
+            --th-fg: #6c7080; --row-border: #eef0f2;
+            --chart-bg: #fafbfc; --chart-border: #eef0f2;
+            --flash-bg: #eff6ff; --flash-fg: #1e3a8a; --flash-border: #bfdbfe;
+            --up: #00875a; --down: #d64534;
+            --badge-rec-bg: #00875a; --badge-rec-fg: #ffffff;
+            --badge-notrec-bg: #eceff2; --badge-notrec-fg: #6c7080; --badge-notrec-border: #d7dbe0;
+        }
+        body { background: var(--bg); color: var(--fg); font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; font-size: 0.9rem; }
+        .kite-accent, .stocks-accent { color: var(--accent); }
         table { border-collapse: collapse; width: 100%; }
-        th, td { text-align: left; padding: 0.6rem 0.9rem; border-bottom: 1px solid #eef0f2; }
-        th { color: #6c7080; font-weight: 600; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.04em; }
+        th, td { text-align: left; padding: 0.6rem 0.9rem; border-bottom: 1px solid var(--row-border); }
+        th { color: var(--th-fg); font-weight: 600; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.04em; }
         .badge { display:inline-flex; align-items:center; padding:4px 12px; border-radius:999px; font-size:0.78rem; font-weight:700; white-space: nowrap; }
         .badge-golden_cross    { background:#dcfce7; color:#15803d; }
         .badge-death_cross     { background:#fee2e2; color:#b91c1c; }
         .badge-no_clear_trend  { background:#eceff2; color:#4a4f57; }
-        .badge-recommended     { background:#00875a; color:#ffffff; }
-        .badge-not-recommended { background:#eceff2; color:#6c7080; border:1px solid #d7dbe0; }
-        .metric-note { font-size: 0.75rem; color: #6c7080; display: block; margin-top: 2px; }
-        .stat-card { background: #ffffff; border: 1px solid #e6e9ec; border-radius: 0.5rem; padding: 1.1rem 1.25rem; }
-        .stat-label { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.04em; color: #6c7080; font-weight: 600; }
-        .stat-value { font-size: 1.4rem; font-weight: 800; margin-top: 4px; color: #24262d; }
-        .stat-value.up { color: #00875a; }
-        .stat-value.down { color: #d64534; }
-        .section-card { background: #ffffff; border: 1px solid #e6e9ec; border-radius: 0.5rem; padding: 1.5rem; }
-        .chart-wrap { background: #fafbfc; border: 1px solid #eef0f2; border-radius: 0.375rem; padding: 0.5rem; }
-        a.link { color: #387ed1; text-decoration: underline; }
-        a.link:hover { color: #2b6cb8; }
+        .badge-recommended     { background: var(--badge-rec-bg); color: var(--badge-rec-fg); }
+        .badge-not-recommended { background: var(--badge-notrec-bg); color: var(--badge-notrec-fg); border:1px solid var(--badge-notrec-border); }
+        .metric-note { font-size: 0.75rem; color: var(--muted-600); display: block; margin-top: 2px; }
+        .stat-card { background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 0.5rem; padding: 1.1rem 1.25rem; }
+        .stat-label { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted-600); font-weight: 600; }
+        .stat-value { font-size: 1.4rem; font-weight: 800; margin-top: 4px; color: var(--fg); }
+        .stat-value.up { color: var(--up); }
+        .stat-value.down { color: var(--down); }
+        .section-card { background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 0.5rem; padding: 1.5rem; }
+        .chart-wrap { background: var(--chart-bg); border: 1px solid var(--chart-border); border-radius: 0.375rem; padding: 0.5rem; }
+        a.link { color: var(--accent); text-decoration: underline; }
+        a.link:hover { color: var(--accent-hover); }
+        .text-gray-900 { color: var(--muted-900); }
+        .text-gray-700 { color: var(--muted-700); }
+        .text-gray-500 { color: var(--muted-500); }
+        .text-gray-400 { color: var(--muted-400); }
+        .bg-blue-50 { background-color: var(--flash-bg); }
+        .text-blue-900 { color: var(--flash-fg); }
+        .border-blue-200 { border-color: var(--flash-border); }
+        .text-green-600 { color: var(--up); }
+        .text-red-600 { color: var(--down); }
     </style>
 </head>
 <body class="min-h-screen p-6">

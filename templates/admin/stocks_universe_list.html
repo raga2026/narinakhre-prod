@@ -1,31 +1,69 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
+    <script>
+    // Dark mode is the default (see the bare :root block below) -- see
+    // stocks_home.html's copy of this same script for the full comment.
+    (function () {
+        try {
+            if (localStorage.getItem('nn_stocks_theme') === 'light') {
+                document.documentElement.setAttribute('data-theme', 'light');
+            }
+        } catch (e) {}
+    })();
+    </script>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>All Companies - Nari Nakhre Stocks</title>
     <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
     <style>
-        body { background: #f5f6f8; color: #24262d; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; font-size: 0.9rem; }
-        .kite-accent { color: #387ed1; }
-        .card { background: #ffffff; border: 1px solid #e6e9ec; border-radius: 0.5rem; }
+        :root {
+            --bg: #0f172a; --fg: #e2e8f0;
+            --muted-600: #94a3b8; --muted-500: #7d8aa0; --muted-400: #64748b;
+            --accent: #38bdf8; --accent-hover: #7dd3fc;
+            --card-bg: #1e293b; --card-border: #334155;
+            --input-bg: #16202f; --input-border: #3a4556;
+            --th-bg: #17223a; --th-fg: #7dd3fc; --row-border: #2d3a4f; --row-hover: #1a2540;
+            --flash-bg: #16233a; --flash-fg: #bfdbfe; --flash-border: #2c4570;
+            --danger: #f87171;
+        }
+        [data-theme="light"] {
+            --bg: #f5f6f8; --fg: #24262d;
+            --muted-600: #4b5563; --muted-500: #6c7080; --muted-400: #9ca3af;
+            --accent: #387ed1; --accent-hover: #2b6cb8;
+            --card-bg: #ffffff; --card-border: #e6e9ec;
+            --input-bg: #ffffff; --input-border: #d7dbe0;
+            --th-bg: #fafbfc; --th-fg: #6c7080; --row-border: #eef0f2; --row-hover: #f9fbfd;
+            --flash-bg: #eff6ff; --flash-fg: #1e3a8a; --flash-border: #bfdbfe;
+            --danger: #dc2626;
+        }
+        body { background: var(--bg); color: var(--fg); font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; font-size: 0.9rem; }
+        .kite-accent { color: var(--accent); }
+        .card { background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 0.5rem; }
         table { border-collapse: collapse; width: 100%; }
-        th, td { text-align: left; padding: 0.6rem 0.9rem; border-bottom: 1px solid #eef0f2; }
-        th { color: #6c7080; font-weight: 600; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.04em; background: #fafbfc; }
+        th, td { text-align: left; padding: 0.6rem 0.9rem; border-bottom: 1px solid var(--row-border); }
+        th { color: var(--th-fg); font-weight: 600; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.04em; background: var(--th-bg); }
         td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
-        tbody tr:hover { background: #f9fbfd; }
+        tbody tr:hover { background: var(--row-hover); }
         .badge { display:inline-flex; align-items:center; padding:2px 10px; border-radius:999px; font-size:0.7rem; font-weight:700; white-space: nowrap; }
         .badge-golden_cross    { background:#dcfce7; color:#15803d; }
         .badge-death_cross     { background:#fee2e2; color:#b91c1c; }
         .badge-no_clear_trend  { background:#eceff2; color:#4a4f57; }
-        .search-input { background:#ffffff; border:1px solid #d7dbe0; color:#24262d; border-radius:0.375rem; padding:0.55rem 0.9rem; width:100%; max-width: 22rem; }
-        .filter-select { background:#ffffff; border:1px solid #d7dbe0; color:#24262d; border-radius:0.375rem; padding:0.55rem 0.9rem; }
-        .kite-btn { background: #387ed1; color: white; border-radius: 0.375rem; }
-        .kite-btn:hover { background: #2b6cb8; }
-        a.link { color: #387ed1; text-decoration: underline; }
-        a.link:hover { color: #2b6cb8; }
-        .page-link { padding: 5px 14px; border-radius: 999px; font-size: 0.82rem; font-weight: 600; border: 1px solid #d7dbe0; color: #387ed1; }
+        .search-input { background: var(--input-bg); border:1px solid var(--input-border); color: var(--fg); border-radius:0.375rem; padding:0.55rem 0.9rem; width:100%; max-width: 22rem; }
+        .filter-select { background: var(--input-bg); border:1px solid var(--input-border); color: var(--fg); border-radius:0.375rem; padding:0.55rem 0.9rem; }
+        .kite-btn { background: var(--accent); color: white; border-radius: 0.375rem; }
+        .kite-btn:hover { background: var(--accent-hover); }
+        a.link { color: var(--accent); text-decoration: underline; }
+        a.link:hover { color: var(--accent-hover); }
+        .page-link { padding: 5px 14px; border-radius: 999px; font-size: 0.82rem; font-weight: 600; border: 1px solid var(--input-border); color: var(--accent); }
         .page-link[aria-disabled="true"] { opacity: 0.4; pointer-events: none; }
+        .text-gray-600 { color: var(--muted-600); }
+        .text-gray-500 { color: var(--muted-500); }
+        .text-gray-400 { color: var(--muted-400); }
+        .bg-blue-50 { background-color: var(--flash-bg); }
+        .text-blue-900 { color: var(--flash-fg); }
+        .border-blue-200 { border-color: var(--flash-border); }
+        .text-red-600 { color: var(--danger); }
     </style>
 </head>
 <body class="min-h-screen p-6">

@@ -8336,6 +8336,63 @@ def stocks_quality_stocks():
     return render_template('admin/stocks_quality_stocks.html', quality_stocks=quality_stocks)
 
 
+def _stocks_viewer_account_summary(db, admin_id):
+    """Subscription status/renewal + referral code/link/stats for a
+    logged-in Stocks account -- shared by stocks_my_suggestions and
+    stocks_profile so this lookup isn't duplicated across both. Returns a
+    flat dict whose keys match the template variable names both pages
+    already use (subscription_status, subscription_period_end_label,
+    referral_code, referral_link, qualified_referrals,
+    available_referral_credits, referrals_per_free_month) -- callers pass
+    it straight through to render_template via **."""
+    subscription_row = db.execute(
+        'SELECT subscription_status, subscription_current_period_end FROM stocks_admin_users WHERE id=?',
+        (admin_id,)
+    ).fetchone()
+    subscription_period_end_label = None
+    if subscription_row and subscription_row.get('subscription_status') in ('active', 'cancelled', 'halted') \
+            and subscription_row.get('subscription_current_period_end'):
+        end_value = subscription_row['subscription_current_period_end']
+        end_dt = datetime.fromisoformat(str(end_value).replace('Z', '+00:00')) if isinstance(end_value, str) else end_value
+        subscription_period_end_label = end_dt.strftime('%d %b %Y')
+
+    # Referral status (see utils/stocks_referrals.py) -- lazily generates a
+    # code on first view for an account that's never had one (existing
+    # accounts predating this feature weren't backfilled).
+    referral_code = get_or_create_referral_code(db, admin_id)
+    referral_link = f'https://narinakhre.com/stocks/signup?ref={referral_code}'
+    qualified_referrals = count_qualified_referrals(db, admin_id)
+    available_credits = available_referral_credits(db, admin_id)
+
+    return {
+        'subscription_status': subscription_row.get('subscription_status') if subscription_row else None,
+        'subscription_period_end_label': subscription_period_end_label,
+        'referral_code': referral_code, 'referral_link': referral_link,
+        'qualified_referrals': qualified_referrals, 'available_referral_credits': available_credits,
+        'referrals_per_free_month': REFERRALS_PER_FREE_MONTH,
+    }
+
+
+@app.route('/stocks/profile', methods=['GET'])
+@stocks_login_required
+def stocks_profile():
+    """Account/profile page -- username, role/plan, subscription status
+    and renewal date, and referral code/link/stats, all in one place --
+    linked from the Stocks nav bar (see stocks_home.html). Reuses the
+    exact same subscription/referral lookup stocks_my_suggestions already
+    does (see _stocks_viewer_account_summary) rather than duplicating it."""
+    db = get_db()
+    admin_id = session.get('stocks_admin_id')
+    account_summary = _stocks_viewer_account_summary(db, admin_id)
+    return render_template(
+        'admin/stocks_profile.html',
+        username=session.get('stocks_admin_username'),
+        role=session.get('stocks_admin_role'),
+        plan=session.get('stocks_plan'),
+        **account_summary,
+    )
+
+
 @app.route('/stocks/my/suggestions', methods=['GET'])
 @stocks_login_required
 def stocks_my_suggestions():
@@ -8364,32 +8421,11 @@ def stocks_my_suggestions():
         start_date = (date.today() - timedelta(days=HOLDING_PERIOD_DAYS)).isoformat()
         suggestions = _annotate_suggestions_with_projection(get_suggestions(db, start_date=start_date))
 
-    subscription_row = db.execute(
-        'SELECT subscription_status, subscription_current_period_end FROM stocks_admin_users WHERE id=?',
-        (admin_id,)
-    ).fetchone()
-    subscription_period_end_label = None
-    if subscription_row and subscription_row.get('subscription_status') in ('active', 'cancelled', 'halted') \
-            and subscription_row.get('subscription_current_period_end'):
-        end_value = subscription_row['subscription_current_period_end']
-        end_dt = datetime.fromisoformat(str(end_value).replace('Z', '+00:00')) if isinstance(end_value, str) else end_value
-        subscription_period_end_label = end_dt.strftime('%d %b %Y')
-
-    # Referral status (see utils/stocks_referrals.py) -- lazily generates a
-    # code on first view for an account that's never had one (existing
-    # accounts predating this feature weren't backfilled).
-    referral_code = get_or_create_referral_code(db, admin_id)
-    referral_link = f'https://narinakhre.com/stocks/signup?ref={referral_code}'
-    qualified_referrals = count_qualified_referrals(db, admin_id)
-    available_credits = available_referral_credits(db, admin_id)
+    account_summary = _stocks_viewer_account_summary(db, admin_id)
 
     return render_template(
         'admin/stocks_my_suggestions.html', suggestions=suggestions, is_starters=is_starters,
-        subscription_status=subscription_row.get('subscription_status') if subscription_row else None,
-        subscription_period_end_label=subscription_period_end_label,
-        referral_code=referral_code, referral_link=referral_link,
-        qualified_referrals=qualified_referrals, available_referral_credits=available_credits,
-        referrals_per_free_month=REFERRALS_PER_FREE_MONTH,
+        **account_summary,
     )
 
 
