@@ -12,6 +12,7 @@ from utils.suggestion_engine import (
     find_pending_target_hit_suggestions,
     generate_daily_suggestions,
     get_suggestion_by_id,
+    get_top_stocks,
     is_suggestion_eligible,
     mark_suggestions_target_hit,
     passes_hard_filters,
@@ -647,5 +648,73 @@ def test_mark_suggestions_target_hit_is_a_no_op_on_empty_list():
     db = _FakeTargetHitDB([_target_hit_row()])
     mark_suggestions_target_hit(db, [])  # must not raise or touch the DB
     assert db.rows[0]['status'] == 'pending'
+
+
+def _golden_scoring_candidate(watchlist_id, symbol, **overrides):
+    # Same fixture shape test_starters_engine.py's _golden_candidate uses
+    # (clears NNS_GOLDEN_MIN, 8.0+) -- duplicated here rather than imported
+    # to avoid a test-module-to-test-module import for one small fixture.
+    return _candidate(
+        watchlist_id, symbol,
+        peg_ratio=0.1, quarterly_profit_growth_pct=35, quarterly_revenue_growth_pct=30,
+        opm_pct=45, roce_pct=30, roa_pct=20, rsi_14=52.5, pe_ratio=12, price_to_book=2,
+        **overrides
+    )
+
+
+def test_get_top_stocks_returns_only_golden_and_silver_tier_highest_first():
+    golden = _golden_scoring_candidate(1, 'GOLDCO', company_name='Gold Company Ltd')
+    silver = _candidate(2, 'SILVERCO', company_name='Silver Company Ltd')  # plain fixture scores ~6.9 (silver)
+    bronze = _candidate(3, 'BRONZECO', peg_ratio=1.5, quarterly_profit_growth_pct=1,
+                         quarterly_revenue_growth_pct=1, opm_pct=5, roce_pct=2, roa_pct=1)
+    db = FakeSuggestionDB([bronze, silver, golden])
+
+    top = get_top_stocks(db)
+
+    symbols = [t['symbol'] for t in top]
+    assert 'GOLDCO' in symbols
+    assert 'SILVERCO' in symbols
+    assert 'BRONZECO' not in symbols
+    assert symbols[0] == 'GOLDCO'  # highest-scored first
+    assert top[0]['nns_tier'] == 'golden'
+    assert top[0]['company_name'] == 'Gold Company Ltd'
+    # The raw NNS Score number itself must never be exposed here -- only
+    # the tier badge, same policy as the rest of the viewer-facing surface.
+    assert 'nns_score' not in top[0]
+
+
+def test_get_top_stocks_falls_back_to_symbol_when_no_company_name():
+    golden = _golden_scoring_candidate(1, 'GOLDCO')  # no company_name key at all
+    db = FakeSuggestionDB([golden])
+
+    top = get_top_stocks(db)
+
+    assert top[0]['company_name'] == 'GOLDCO'
+
+
+def test_get_top_stocks_respects_the_limit_param():
+    candidates = [_golden_scoring_candidate(i, f'SYM{i}') for i in range(8)]
+    db = FakeSuggestionDB(candidates)
+
+    top = get_top_stocks(db, limit=3)
+
+    assert len(top) == 3
+
+
+def test_get_top_stocks_limit_none_returns_the_full_uncapped_list():
+    candidates = [_golden_scoring_candidate(i, f'SYM{i}') for i in range(8)]
+    db = FakeSuggestionDB(candidates)
+
+    top = get_top_stocks(db, limit=None)
+
+    assert len(top) == 8
+
+
+def test_get_top_stocks_empty_when_nothing_clears_silver():
+    bronze_only = _candidate(1, 'WEAKCO', peg_ratio=1.5, quarterly_profit_growth_pct=1,
+                              quarterly_revenue_growth_pct=1, opm_pct=5, roce_pct=2, roa_pct=1)
+    db = FakeSuggestionDB([bronze_only])
+
+    assert get_top_stocks(db) == []
 
 

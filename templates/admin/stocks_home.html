@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Home - Nari Nakhre Stocks</title>
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+    <style>
+        /* Same Kite-inspired light theme as the other viewer-facing pages
+           (stocks_my_suggestions.html, stocks_my_history.html) -- kept
+           deliberately airy here (one column, generous spacing, short
+           lists instead of dense tables) since this is meant to be a
+           quick, minimalistic summary, not a working data table. */
+        body { background: #f5f6f8; color: #24262d; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; font-size: 0.9rem; }
+        .kite-accent { color: #387ed1; }
+        .topbar { background: #ffffff; border-bottom: 1px solid #e6e9ec; }
+        .card { background: #ffffff; border: 1px solid #e6e9ec; border-radius: 0.5rem; }
+        .badge { display:inline-flex; align-items:center; padding:2px 10px; border-radius:999px; font-size:0.7rem; font-weight:700; white-space: nowrap; }
+        .badge-golden { background:#fff3cd; color:#8a6706; }
+        .badge-silver { background:#eceff2; color:#4a4f57; }
+        .up { color: #00875a; font-weight: 600; }
+        .down { color: #d64534; font-weight: 600; }
+        .hero { background: linear-gradient(135deg, #eaf2fc 0%, #f5f6f8 100%); border: 1px solid #dbe7f7; border-radius: 0.5rem; padding: 1.5rem; }
+        a.link { color: #387ed1; text-decoration: underline; }
+        a.link:hover { color: #2b6cb8; }
+        .item-row { padding: 0.75rem 0; border-bottom: 1px solid #eef0f2; }
+        .item-row:last-child { border-bottom: none; }
+    </style>
+</head>
+<body class="min-h-screen">
+    <div class="topbar">
+        <div class="max-w-2xl mx-auto px-6 py-4 flex items-center justify-between">
+            <a href="{{ url_for('stocks_home') }}" class="text-lg font-bold kite-accent no-underline">Nari Nakhre Stocks</a>
+            <a href="{{ url_for('stocks_admin_logout') }}" class="text-sm text-gray-500 hover:kite-accent underline">Log out</a>
+        </div>
+    </div>
+
+    <div class="max-w-2xl mx-auto p-6">
+        {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+            <div class="mb-6" role="alert" aria-live="assertive">
+            {% for category, msg in messages %}
+                <div class="bg-blue-50 text-blue-900 border border-blue-200 rounded-md p-3 mb-2 text-sm">{{ msg }}</div>
+            {% endfor %}
+            </div>
+        {% endif %}
+        {% endwith %}
+
+        <div class="hero mb-6">
+            <h1 class="text-lg font-bold text-gray-900">Welcome back{{ ', ' ~ session.stocks_admin_username if session.stocks_admin_username }}</h1>
+            <p class="text-gray-600 text-sm mt-2">A quick summary of your suggestions, our current top stocks, and how different industries are moving.</p>
+        </div>
+
+        {% if suggestion_summary is not none %}
+        <div class="card p-5 mb-6">
+            <h2 class="text-base font-bold text-gray-900 mb-1">Your Suggestions</h2>
+            <p class="text-gray-600 text-sm mb-4">
+                {% if suggestion_summary.count %}
+                    {{ suggestion_summary.count }} suggestion{{ 's' if suggestion_summary.count != 1 }} recently --
+                    {% if suggestion_summary.is_starters %}your last ~9 weeks of weekly picks.{% else %}your last 10 days of picks, including any bonus large-cap picks.{% endif %}
+                {% else %}
+                    No suggestions in this window yet -- check back after the next screening run.
+                {% endif %}
+            </p>
+
+            {% for s in suggestion_summary.latest %}
+            <div class="item-row">
+                <span class="text-gray-900 font-semibold">{{ s.symbol }}</span>
+                <span class="text-gray-400">({{ s.exchange }})</span>
+                <span class="text-gray-500">-- {{ s.suggestion_date }}</span>
+                {% if s.buy_price is not none and s.target_sell_price is not none %}
+                <div class="text-gray-600 mt-1">Buy {{ s.buy_price }} &rarr; Target <span class="up">{{ s.target_sell_price }}</span></div>
+                {% endif %}
+            </div>
+            {% endfor %}
+
+            <p class="text-gray-600 text-sm mt-4">
+                <a href="{{ url_for('stocks_my_suggestions') }}" class="link">View recent suggestions</a>
+                &nbsp;·&nbsp;
+                <a href="{{ url_for('stocks_my_history') }}" class="link">View full history</a>
+            </p>
+        </div>
+        {% endif %}
+
+        <div class="card p-5 mb-6">
+            <h2 class="text-base font-bold text-gray-900 mb-1">Quality Stocks</h2>
+            <p class="text-gray-600 text-sm mb-3">Every company currently clearing our golden/silver quality bar, from our full research universe.</p>
+            <p class="text-gray-600 text-sm">
+                <a href="{{ url_for('stocks_quality_stocks') }}" class="link">Browse all quality stocks</a>
+                &nbsp;·&nbsp;
+                <a href="{{ url_for('stocks_universe_list') }}" class="link">Browse all companies</a>
+            </p>
+        </div>
+
+        <div class="card p-5">
+            <h2 class="text-base font-bold text-gray-900 mb-1">Industry Growth</h2>
+            {% if industry_growth.available %}
+                <p class="text-gray-500 text-xs mb-4">
+                    Based on our own tracked universe of companies (not official Nifty/Sensex/Bank Nifty index values --
+                    we don't have live market-index data), comparing {{ industry_growth.latest_date }} to {{ industry_growth.previous_date }}.
+                    {% if industry_growth.overall_avg_change_pct is not none %}
+                        Overall, our tracked universe moved
+                        <span class="{{ 'up' if industry_growth.overall_avg_change_pct >= 0 else 'down' }}">{{ '+' if industry_growth.overall_avg_change_pct >= 0 }}{{ industry_growth.overall_avg_change_pct }}%</span>
+                        on average.
+                    {% endif %}
+                </p>
+
+                {% if industry_growth.gainers %}
+                <p class="text-gray-500 text-xs uppercase tracking-wide font-semibold mb-1">Top movers up</p>
+                {% for g in industry_growth.gainers %}
+                <div class="item-row flex items-center justify-between">
+                    <span class="text-gray-800">{{ g.industry }}</span>
+                    <span class="up">+{{ g.avg_change_pct }}%</span>
+                </div>
+                {% endfor %}
+                {% endif %}
+
+                {% if industry_growth.losers %}
+                <p class="text-gray-500 text-xs uppercase tracking-wide font-semibold mb-1 mt-4">Top movers down</p>
+                {% for l in industry_growth.losers %}
+                <div class="item-row flex items-center justify-between">
+                    <span class="text-gray-800">{{ l.industry }}</span>
+                    <span class="down">{{ l.avg_change_pct }}%</span>
+                </div>
+                {% endfor %}
+                {% endif %}
+            {% else %}
+                <p class="text-gray-500 text-sm">Not enough price history yet to show industry trends -- check back after tomorrow's price sync.</p>
+            {% endif %}
+        </div>
+    </div>
+</body>
+</html>

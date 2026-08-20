@@ -184,7 +184,9 @@ from utils.suggestion_engine import (
     get_recommendation_tracker,
     compute_tracker_row_stats,
     compute_watchlist_nns_scores,
+    get_top_stocks,
 )
+from utils.industry_growth import compute_industry_growth
 from utils.suggestion_email import (
     initialize_stocks_email_recipients_table_if_needed,
     send_daily_suggestions_email,
@@ -8266,6 +8268,74 @@ def _annotate_suggestions_with_projection(suggestions):
     return annotated
 
 
+@app.route('/stocks/home', methods=['GET'])
+@stocks_login_required
+def stocks_home():
+    """The post-login landing page for viewer accounts (see
+    stocks_admin_login's redirect below) -- a minimalistic summary
+    combining how many suggestions this subscriber has personally received
+    recently, a link out to browse every currently quality-screened stock
+    (see stocks_quality_stocks below -- kept as a link rather than an
+    inline widget here, to keep this page light), and an industry-wise
+    growth snapshot built from our own tracked universe (see
+    utils/industry_growth.py -- NOT real Nifty/Bank Nifty/Sensex index
+    values; there is no live market-index data source anywhere in this
+    codebase, so the template labels this explicitly as our own
+    tracked-universe average, not an official index).
+
+    Staff (super_admin/child_admin) can reach this too (no role gate,
+    consistent with stocks_my_suggestions/stocks_my_history below) but
+    their own post-login redirect still goes straight to
+    stocks_admin_dashboard -- landing here is only ever a deliberate visit
+    for them, so the personal-suggestions section is skipped entirely
+    (staff accounts don't have suggestions genuinely "sent to them")."""
+    db = get_db()
+    is_viewer = session.get('stocks_admin_role') == 'viewer'
+
+    suggestion_summary = None
+    if is_viewer:
+        is_starters = session.get('stocks_plan') == 'starters'
+        if is_starters:
+            start_date = (date.today() - timedelta(days=63)).isoformat()
+            recent_suggestions = list(get_starters_suggestions(db, start_date=start_date))
+        else:
+            start_date = (date.today() - timedelta(days=HOLDING_PERIOD_DAYS)).isoformat()
+            recent_suggestions = list(get_suggestions(db, start_date=start_date))
+        recent_bonus = []
+        if session.get('stocks_plan') == 'standard':
+            bonus_start_date = (date.today() - timedelta(days=30)).isoformat()
+            recent_bonus = list(get_large_cap_bonus_suggestions(db, start_date=bonus_start_date))
+        combined = recent_suggestions + recent_bonus
+        combined.sort(key=lambda r: r['suggestion_date'], reverse=True)
+        suggestion_summary = {
+            'count': len(combined),
+            'latest': combined[:3],
+            'is_starters': is_starters,
+        }
+
+    industry_growth = compute_industry_growth(db, top_n=5)
+
+    return render_template(
+        'admin/stocks_home.html',
+        suggestion_summary=suggestion_summary,
+        industry_growth=industry_growth,
+    )
+
+
+@app.route('/stocks/quality-stocks', methods=['GET'])
+@stocks_login_required
+def stocks_quality_stocks():
+    """Full, uncapped list of every stock currently clearing our
+    golden/silver NNS Score bar (see get_top_stocks) -- linked from the
+    Stocks home page as "Browse all quality stocks" (replaces what was
+    previously a capped "Top Stocks" preview widget directly on the home
+    page). Same viewer-safe policy as get_top_stocks itself: tier badge
+    only, never the raw score."""
+    db = get_db()
+    quality_stocks = get_top_stocks(db, limit=None)
+    return render_template('admin/stocks_quality_stocks.html', quality_stocks=quality_stocks)
+
+
 @app.route('/stocks/my/suggestions', methods=['GET'])
 @stocks_login_required
 def stocks_my_suggestions():
@@ -9190,12 +9260,12 @@ def stocks_admin_login():
         return redirect(url_for('stocks_change_password'))
     if next_url:
         return redirect(next_url)
-    # viewer accounts land on their own read-only suggestions page, not the
-    # staff dashboard (there was no per-role redirect at all before this --
-    # super_admin/child_admin both just went to stocks_admin_dashboard,
-    # which they still do, unchanged).
+    # viewer accounts land on their own minimalistic home/summary page, not
+    # the staff dashboard (there was no per-role redirect at all before
+    # this -- super_admin/child_admin both just went to
+    # stocks_admin_dashboard, which they still do, unchanged).
     if admin_row['role'] == 'viewer':
-        return redirect(url_for('stocks_my_suggestions'))
+        return redirect(url_for('stocks_home'))
     return redirect(url_for('stocks_admin_dashboard'))
 
 

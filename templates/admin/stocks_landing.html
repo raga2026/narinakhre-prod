@@ -24,7 +24,7 @@
     <!-- Nav -->
     <div class="border-b border-sky-500/10">
         <div class="max-w-6xl mx-auto px-6 py-5 flex items-center justify-between">
-            <span class="text-xl font-extrabold stocks-accent font-serif">Nari Nakhre Stocks</span>
+            <a href="{{ url_for('stocks_landing') }}" class="text-xl font-extrabold stocks-accent font-serif no-underline">Nari Nakhre Stocks</a>
             <a href="{{ url_for('stocks_admin_login') }}" class="text-sm font-semibold text-slate-300 hover:text-sky-400 border border-sky-500/30 rounded-full px-4 py-2 transition">Login</a>
         </div>
     </div>

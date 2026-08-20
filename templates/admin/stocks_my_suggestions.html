@@ -37,7 +37,7 @@
 <body class="min-h-screen">
     <div class="topbar">
         <div class="max-w-4xl mx-auto px-6 py-4 flex items-center justify-between">
-            <span class="text-lg font-bold kite-accent">Nari Nakhre Stocks</span>
+            <a href="{{ url_for('stocks_home') }}" class="text-lg font-bold kite-accent no-underline">Nari Nakhre Stocks</a>
             <a href="{{ url_for('stocks_admin_logout') }}" class="text-sm text-gray-500 hover:kite-accent underline">Log out</a>
         </div>
     </div>
@@ -100,9 +100,9 @@
         </div>
 
         <div class="card p-5 mb-6">
-            <h2 class="text-lg font-bold text-gray-900 mb-2">Refer friends, earn a free month</h2>
+            <h2 class="text-lg font-bold text-gray-900 mb-2">Refer people, earn a free month</h2>
             <p class="text-gray-600 text-sm mb-3">
-                Refer {{ referrals_per_free_month }} friends who subscribe and get 1 month free -- they get their
+                Refer {{ referrals_per_free_month }} people who subscribe and get 1 month free -- they get their
                 first month for Rs 199 instead of Rs 299 when they sign up with your link or code.
             </p>
             <div class="flex flex-wrap items-center gap-2 mb-3">
@@ -117,7 +117,7 @@
                 Or share the code directly: <strong class="text-gray-900">{{ referral_code }}</strong>
             </p>
             <p class="text-gray-600 text-sm">
-                Qualified referrals (friends who've paid at least once): <strong class="text-gray-900">{{ qualified_referrals }}</strong>
+                Qualified referrals (people who've paid at least once): <strong class="text-gray-900">{{ qualified_referrals }}</strong>
                 &nbsp;·&nbsp;
                 Free months available: <strong class="text-gray-900">{{ available_referral_credits }}</strong>
                 {% if available_referral_credits %}

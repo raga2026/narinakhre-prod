@@ -313,7 +313,8 @@ def _fetch_candidates(db, market_cap_tier=None):
     tier_clause = ' AND w.market_cap_tier = ?' if market_cap_tier else ''
     params = (today, fundamentals_cutoff) + ((market_cap_tier,) if market_cap_tier else ())
     return db.execute(
-        f'''SELECT w.id AS watchlist_id, w.symbol, w.exchange, w.fundamental_tier, w.market_cap_tier,
+        f'''SELECT w.id AS watchlist_id, w.symbol, w.exchange, w.name AS company_name,
+                  w.fundamental_tier, w.market_cap_tier,
                   u.id AS universe_id, u.industry,
                   i.rsi_14, i.cross_status, i.volume_trend,
                   f.pe_ratio, f.peg_ratio, f.opm_pct, f.roce_pct, f.roa_pct,
@@ -411,6 +412,38 @@ def compute_watchlist_nns_scores(db, watchlist_rows):
         row['nns_score'] = score
         row['nns_tier'] = nns_tier(score)
     return rows
+
+
+def get_top_stocks(db, limit=5):
+    """Viewer-safe 'quality stocks' data (see app.py's /stocks/quality-stocks)
+    -- reuses the exact same candidate pool and NNS scoring as the daily
+    suggestion engine (_fetch_candidates/compute_watchlist_nns_scores), but
+    returns only each stock's tier badge, never the raw NNS Score number --
+    same "viewers see is_recommended/tier, not the score itself" policy
+    compute_watchlist_nns_scores' own docstring already describes for the
+    staff-only /stocks/watchlist page.
+
+    Golden/silver tier only (bronze is "included only because nothing
+    stronger cleared the bar today" territory in the daily engine -- not a
+    genuine highlight worth surfacing here), sorted highest-scored first.
+    limit=5 (the default) caps the result -- pass limit=None for the full,
+    uncapped list (relies on Python's list[:None] slicing meaning "no
+    bound", not a special case here) which is what
+    /stocks/quality-stocks' full browse page uses. Returns [] on a day
+    nothing silver-or-better is currently in the watchlist -- expected
+    some days, not an error."""
+    candidates = _fetch_candidates(db)
+    scored_rows = compute_watchlist_nns_scores(db, candidates)
+    qualifying = [r for r in scored_rows if r.get('nns_tier') in ('golden', 'silver')]
+    qualifying.sort(key=lambda r: r['nns_score'], reverse=True)
+    return [
+        {
+            'symbol': r['symbol'], 'exchange': r['exchange'],
+            'company_name': r.get('company_name') or r['symbol'],
+            'nns_tier': r['nns_tier'], 'latest_close': r.get('latest_close'),
+        }
+        for r in qualifying[:limit]
+    ]
 
 
 def get_suggestions(db, start_date=None, end_date=None):

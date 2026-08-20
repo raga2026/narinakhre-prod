@@ -9,9 +9,9 @@ from utils.price_pattern import compute_projection_targets
 from utils.stocks_referrals import REFERRALS_PER_FREE_MONTH, get_or_create_referral_code
 
 DISCLAIMER = (
-    "This is personal market analysis shared informally among friends, not "
-    "professional investment advice. Please do your own research before "
-    "making any investment decision."
+    "This is independent market research and analysis, not professional "
+    "investment advice. Please do your own research before making any "
+    "investment decision."
 )
 
 # Shown once per email whenever any suggestion has a projection attached
@@ -920,7 +920,7 @@ def _referral_footer_text(referral_code):
     code shared by mistake can't be attributed to the right referrer."""
     link = f'{STOCKS_BASE_URL}/stocks/signup?ref={referral_code}'
     return (
-        f'Refer {REFERRALS_PER_FREE_MONTH} friends who subscribe and get a month free -- they get their first '
+        f'Refer {REFERRALS_PER_FREE_MONTH} people who subscribe and get a month free -- they get their first '
         f'month for Rs 199 instead of Rs 299 with your link: {link} (or share code {referral_code}).'
     )
 
@@ -930,7 +930,7 @@ def _referral_footer_html(referral_code):
     return (
         '<p style="color:#64748b;font-size:0.8em;margin-top:16px;font-family:Arial,Helvetica,sans-serif;'
         'border-top:1px solid #e2e8f0;padding-top:12px;">'
-        f'Refer {REFERRALS_PER_FREE_MONTH} friends who subscribe and get a month free -- they get their first month '
+        f'Refer {REFERRALS_PER_FREE_MONTH} people who subscribe and get a month free -- they get their first month '
         f'for Rs 199 instead of Rs 299 with <a href="{link}" style="color:#0ea5e9;">your referral link</a> '
         f'(or share code <strong>{referral_code}</strong>).</p>'
     )
