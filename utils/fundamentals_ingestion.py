@@ -59,6 +59,19 @@ STOCK_FUNDAMENTALS_ALTER_SQL = [
     'ALTER TABLE stock_fundamentals ADD COLUMN IF NOT EXISTS universe_id BIGINT REFERENCES stock_universe(id)',
     '''CREATE UNIQUE INDEX IF NOT EXISTS stock_fundamentals_universe_snapshot_uniq
        ON stock_fundamentals (universe_id, snapshot_date) WHERE universe_id IS NOT NULL''',
+    # Institutional-holding scoring (see utils/fundamental_screen.py's
+    # score_institutional_holding stub and the promoter-pledge hard
+    # disqualifier) -- both nullable, additive. dii_holding_pct is scraped
+    # the same way fii_holding_pct already is (same #shareholding table,
+    # confirmed against a real fetched page -- see
+    # screener_client._parse_shareholding). promoter_pledge_pct is NOT
+    # currently populated by the scraper -- confirmed against a real
+    # Screener.in page (including one with historically very high pledge)
+    # that pledge data isn't present anywhere in that page's HTML, so this
+    # column exists ready for whenever a real source is confirmed, but
+    # stays NULL until then.
+    'ALTER TABLE stock_fundamentals ADD COLUMN IF NOT EXISTS dii_holding_pct NUMERIC',
+    'ALTER TABLE stock_fundamentals ADD COLUMN IF NOT EXISTS promoter_pledge_pct NUMERIC',
 ]
 
 # Every column stock_fundamentals tracks beyond (id, watchlist_id,
@@ -70,6 +83,7 @@ FUNDAMENTALS_COLUMNS = [
     'roce_pct', 'roa_pct', 'current_ratio', 'tol_by_tnw',
     'promoter_holding_pct', 'fii_holding_pct', 'public_holding_pct',
     'quarterly_profit_growth_pct', 'quarterly_revenue_growth_pct', 'free_cash_flow',
+    'dii_holding_pct', 'promoter_pledge_pct',
 ]
 
 # How many of the scrape-eligible stock_universe rows to refresh per

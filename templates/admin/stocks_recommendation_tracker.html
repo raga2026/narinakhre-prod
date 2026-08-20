@@ -44,7 +44,9 @@
                         <th scope="col">Date</th>
                         <th scope="col">Days</th>
                         <th scope="col">Buy</th>
-                        <th scope="col">Target</th>
+                        <th scope="col">Near-term Target</th>
+                        <th scope="col">Mid-term Target</th>
+                        <th scope="col">Long-term Target</th>
                         <th scope="col">Stop-loss</th>
                         <th scope="col">Current</th>
                         <th scope="col">P/L %</th>
@@ -64,7 +66,26 @@
                         <td>{{ r.suggestion_date }}</td>
                         <td>{{ r.days_elapsed }}</td>
                         <td>{{ r.buy_price if r.buy_price is not none else '—' }}</td>
-                        <td>{{ r.target_sell_price if r.target_sell_price is not none else '—' }}</td>
+                        <td>
+                            {% if r.target_sell_price is not none %}
+                                {{ r.target_sell_price }}
+                                <div class="text-xs text-slate-400">
+                                    {{ 'Target' if r.pattern_name else (r.holding_period_days ~ '-day') }}
+                                </div>
+                            {% else %}—{% endif %}
+                        </td>
+                        <td>
+                            {% if r.projection and r.projection.mid_period %}
+                                {{ r.projection.mid_period.price }}
+                                <div class="text-xs text-slate-400">{{ r.projection.mid_period.label }}</div>
+                            {% else %}—{% endif %}
+                        </td>
+                        <td>
+                            {% if r.projection and r.projection.long_term %}
+                                {{ r.projection.long_term.price }}
+                                <div class="text-xs text-slate-400">{{ r.projection.long_term.label }}</div>
+                            {% else %}—{% endif %}
+                        </td>
                         <td>{{ r.stop_loss_price if r.stop_loss_price is not none else '—' }}</td>
                         <td>{{ r.latest_price if r.latest_price is not none else '—' }}</td>
                         <td>
@@ -88,7 +109,7 @@
                     </tr>
                     {% else %}
                     <tr>
-                        <td colspan="11" class="text-slate-400">No recommendations sent yet.</td>
+                        <td colspan="13" class="text-slate-400">No recommendations sent yet.</td>
                     </tr>
                     {% endfor %}
                 </tbody>

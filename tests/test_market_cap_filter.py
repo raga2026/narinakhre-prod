@@ -1,4 +1,4 @@
-from utils.stock_universe import refresh_market_cap_filter
+from utils.stock_universe import rebucket_large_cap_eligibility, refresh_market_cap_filter
 
 
 class FakeCursor:
@@ -44,6 +44,15 @@ class FakeUniverseDB:
 
         if normalized.startswith('SELECT COUNT(*) AS count FROM stock_universe WHERE is_scrape_eligible = true'):
             count = sum(1 for r in self.rows if r.get('is_scrape_eligible'))
+            return FakeCursor([{'count': count}])
+
+        if normalized.startswith('UPDATE stock_universe SET is_large_cap_eligible ='):
+            for r in self.rows:
+                r['is_large_cap_eligible'] = r['last_market_cap'] is not None and r['last_market_cap'] > 30000
+            return FakeCursor([])
+
+        if normalized.startswith('SELECT COUNT(*) AS count FROM stock_universe WHERE is_large_cap_eligible = true'):
+            count = sum(1 for r in self.rows if r.get('is_large_cap_eligible'))
             return FakeCursor([{'count': count}])
 
         raise AssertionError(f'Unexpected SQL in test: {sql}')
@@ -142,3 +151,57 @@ def test_eligible_count_only_includes_the_5000_to_30000cr_band():
     assert bands['XYZ'] == 'unknown'
     assert bands['SMALL'] == 'below_5000cr'
     assert bands['BIG'] == 'above_30000cr'
+
+
+# --- Large-cap eligibility (entirely parallel to the bucketing above) ------
+
+def test_rebucket_large_cap_eligibility_has_no_upper_bound():
+    rows = [
+        {'id': 1, 'symbol': 'SMALL', 'exchange': 'NSE', 'isin': 'INE003',
+         'last_market_cap': 2000.0, 'last_market_cap_date': '2026-08-15'},
+        {'id': 2, 'symbol': 'MID', 'exchange': 'NSE', 'isin': 'INE004',
+         'last_market_cap': 15000.0, 'last_market_cap_date': '2026-08-15'},
+        {'id': 3, 'symbol': 'BIG', 'exchange': 'NSE', 'isin': 'INE005',
+         'last_market_cap': 30001.0, 'last_market_cap_date': '2026-08-15'},
+        {'id': 4, 'symbol': 'HUGE', 'exchange': 'NSE', 'isin': 'INE006',
+         'last_market_cap': 1000000.0, 'last_market_cap_date': '2026-08-15'},
+        {'id': 5, 'symbol': 'UNKNOWN', 'exchange': 'NSE', 'isin': 'INE007',
+         'last_market_cap': None, 'last_market_cap_date': None},
+    ]
+    db = FakeUniverseDB(rows)
+
+    count = rebucket_large_cap_eligibility(db)
+
+    assert count == 2  # BIG, HUGE
+    eligible = {r['symbol']: r['is_large_cap_eligible'] for r in rows}
+    assert eligible == {
+        'SMALL': False, 'MID': False, 'BIG': True, 'HUGE': True, 'UNKNOWN': False,
+    }
+
+
+def test_rebucket_large_cap_eligibility_boundary_exactly_30000_is_not_eligible():
+    # Matches market_cap_band's own boundary -- exactly 30000 is
+    # '5000_to_30000cr', not 'above_30000cr'.
+    rows = [{'id': 1, 'symbol': 'EDGE', 'exchange': 'NSE', 'isin': 'INE008',
+             'last_market_cap': 30000.0, 'last_market_cap_date': '2026-08-15'}]
+    db = FakeUniverseDB(rows)
+
+    rebucket_large_cap_eligibility(db)
+
+    assert rows[0]['is_large_cap_eligible'] is False
+
+
+def test_rebucket_large_cap_eligibility_is_independent_of_market_cap_band_rebucketing():
+    # rebucket_large_cap_eligibility must give the right answer even if
+    # rebucket_market_cap_bands (via refresh_market_cap_filter) never ran
+    # at all -- it derives straight from last_market_cap, not from
+    # market_cap_band.
+    rows = [{'id': 1, 'symbol': 'BIG', 'exchange': 'NSE', 'isin': 'INE009',
+             'last_market_cap': 50000.0, 'last_market_cap_date': '2026-08-15',
+             'market_cap_band': 'unknown'}]  # never rebucketed
+    db = FakeUniverseDB(rows)
+
+    rebucket_large_cap_eligibility(db)
+
+    assert rows[0]['is_large_cap_eligible'] is True
+    assert rows[0]['market_cap_band'] == 'unknown'  # untouched by this function

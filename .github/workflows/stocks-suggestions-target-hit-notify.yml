@@ -1,0 +1,28 @@
+name: Stocks suggestions target-hit notify
+
+on:
+  schedule:
+    # 02:05 UTC daily = 07:35 IST -- a few minutes after
+    # stocks-suggestions-email.yml (02:00 UTC), well after price_sync has
+    # updated today's stock_daily_data closes. Triggers
+    # POST /stocks/suggestions/notify-target-hits, which checks every
+    # still-pending recommendation against today's close and emails every
+    # current Standard-plan (Rs 299/mo) subscriber about any target hit.
+    - cron: '5 2 * * *'
+  workflow_dispatch: {}  # lets you trigger it manually from the Actions tab
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: POST to /stocks/suggestions/notify-target-hits
+        run: |
+          status=$(curl -s -o /tmp/response.txt -w "%{http_code}" --max-time 120 -X POST \
+            -H "X-Cron-Secret: ${{ secrets.STOCKS_FUNDAMENTALS_CRON_SECRET }}" \
+            https://narinakhre.com/stocks/suggestions/notify-target-hits)
+          echo "HTTP status: $status"
+          cat /tmp/response.txt
+          if [ "$status" != "200" ]; then
+            echo "Request failed"
+            exit 1
+          fi

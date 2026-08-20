@@ -34,6 +34,7 @@
         .btn-proceed { background: #7f1d1d; color: #fecaca; }
         .btn-cancel { background: #334155; color: #e2e8f0; }
         .btn-sell-now { background: #164e63; color: #a5f3fc; }
+        .btn-buy { background: #14532d; color: #bbf7d0; text-decoration: none; display: inline-block; }
     </style>
 </head>
 <body class="min-h-screen p-8">
@@ -255,6 +256,61 @@
                     {% else %}
                     <tr>
                         <td colspan="9" class="text-slate-400">No simulated trades yet -- enable the setting above and wait for the next Pick of the Day.</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+
+        <div class="card overflow-x-auto mt-6">
+            <table>
+                <caption class="text-left text-slate-400 text-sm mb-3">
+                    Recent recommendations you can manually invest in -- target only, no stop-loss is tracked for
+                    these positions. Already-bought and already-resolved (target/stop-loss already reached at the
+                    latest synced price) recommendations are left off this list.
+                </caption>
+                <thead>
+                    <tr>
+                        <th scope="col">Company</th>
+                        <th scope="col">Date</th>
+                        <th scope="col">Buy</th>
+                        <th scope="col">Current</th>
+                        <th scope="col">Target</th>
+                        <th scope="col">Timing</th>
+                        <th scope="col">NNS</th>
+                        <th scope="col"></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for r in buyable_recommendations %}
+                    <tr>
+                        <th scope="row">
+                            <a href="{{ url_for('stocks_company_detail', watchlist_id=r.watchlist_id) }}" class="text-sky-400 hover:text-sky-300 underline">
+                                {{ r.symbol }} ({{ r.exchange }})
+                            </a>
+                        </th>
+                        <td>{{ r.suggestion_date }}</td>
+                        <td>₹{{ r.buy_price if r.buy_price is not none else '—' }}</td>
+                        <td class="{{ 'up' if r.pct_change and r.pct_change >= 0 else 'down' if r.pct_change else '' }}">
+                            {% if r.latest_price is not none %}₹{{ r.latest_price }}{% else %}—{% endif %}
+                            {% if r.pct_change is not none %}({{ '+' if r.pct_change >= 0 }}{{ r.pct_change }}%){% endif %}
+                        </td>
+                        <td>₹{{ r.target_sell_price if r.target_sell_price is not none else '—' }}</td>
+                        <td class="text-xs">
+                            {% if r.pattern_name %}
+                                {{ r.pattern_note }}
+                            {% else %}
+                                {{ r.holding_period_days }} days
+                            {% endif %}
+                        </td>
+                        <td>{{ r.nns_tier | title if r.nns_tier else '—' }} {{ r.nns_score if r.nns_score is not none else '' }}</td>
+                        <td>
+                            <a href="{{ url_for('stocks_suggestion_buy', suggestion_id=r.id) }}" class="btn-small btn-buy">Buy</a>
+                        </td>
+                    </tr>
+                    {% else %}
+                    <tr>
+                        <td colspan="8" class="text-slate-400">Nothing currently actionable -- every recent recommendation is already bought or already resolved.</td>
                     </tr>
                     {% endfor %}
                 </tbody>

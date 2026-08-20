@@ -78,6 +78,21 @@ JOB_EXPECTATIONS = {
     # never flagged as missed since success is recorded every day
     # regardless (see app.py's /stocks/starters/send-weekly-email).
     'starters_weekly_email': {'expected_by_ist_hour': 9, 'label': '9 AM IST'},
+    # Standard-tier (Rs 299/mo) bonus large-cap pick -- runs daily (same
+    # cron as suggestion_email) but only does real work on a Tuesday or
+    # Friday trading day (see app.py's LARGE_CAP_BONUS_WEEKDAYS and
+    # /stocks/large-cap-bonus/send-email), recording success on every
+    # other day too -- same reasoning as starters_weekly_email above, just
+    # two qualifying weekdays instead of one.
+    'large_cap_bonus_email': {'expected_by_ist_hour': 9, 'label': '9 AM IST'},
+    # Checks stock_suggestions against the day's synced close and emails
+    # every current Standard-plan subscriber about any target hit -- see
+    # app.py's /stocks/suggestions/notify-target-hits. Runs every day
+    # (there's no "not a trading day" skip written into that job the way
+    # suggestion_email has -- if nothing hit target that day it still
+    # completes normally with target_hits=0, which is a genuine success,
+    # not a skip).
+    'suggestion_target_hit_notify': {'expected_by_ist_hour': 9, 'label': '9 AM IST'},
     'subscription_reminders': {'expected_by_ist_hour': 11, 'label': '11 AM IST'},
     'fundamentals_rotation': {'expected_by_ist_hour': 12, 'label': '12 PM IST'},
     'market_cap_filter': {'expected_by_ist_hour': 13, 'label': '1 PM IST'},

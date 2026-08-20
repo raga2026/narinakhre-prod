@@ -225,13 +225,25 @@ def compute_available_funds(total_capital, deployed_capital):
     return round(total_capital - deployed_capital, 2)
 
 
-def _open_trade(db, suggestion, budget_amount, mode, kite_client=None):
+def _open_trade(db, suggestion, budget_amount, mode, kite_client=None, use_stop_loss=True):
     """Shared by open_auto_trade_if_enabled (budget/mode read from the
     global settings row) and open_manual_trade (budget/mode passed in
     explicitly, bypassing the enabled toggle) -- everything from quantity
     sizing through the actual insert/live-order-placement is identical
     between an automatic and a manual buy; only how budget_amount/mode
     were decided differs, which is entirely the caller's job.
+
+    use_stop_loss=False (open_manual_trade's default) stores
+    stop_loss_price as NULL regardless of what the suggestion itself
+    computed -- these are manually-placed investment positions with a
+    target only, no stop-loss, per instruction (recommendations aren't
+    trading calls with a defined exit level). determine_exit already
+    treats a None stop_loss_price as "never trips stopped_out" (see its
+    own docstring), so a manual trade simply can't ever reach
+    'stop_loss_pending' -- only 'target_hit' or manual Sell-now closes it.
+    open_auto_trade_if_enabled keeps use_stop_loss=True -- the automatic
+    buy-on-new-suggestion path's own stop-loss review/Proceed-Cancel safety
+    net (see this module's docstring) is unchanged.
 
     kite_client is required when mode == 'live' (raises ValueError if
     missing -- a live-mode call with no client is a caller bug, not a
@@ -264,7 +276,7 @@ def _open_trade(db, suggestion, budget_amount, mode, kite_client=None):
     suggestion_id = suggestion.get('suggestion_id', suggestion.get('id'))
     watchlist_id = suggestion['watchlist_id']
     target_sell_price = suggestion.get('target_sell_price')
-    stop_loss_price = suggestion.get('stop_loss_price')
+    stop_loss_price = suggestion.get('stop_loss_price') if use_stop_loss else None
 
     if mode == MODE_DRY_RUN:
         db.execute(
@@ -346,15 +358,25 @@ def open_auto_trade_if_enabled(db, created_suggestion, kite_client=None):
     if settings['budget_per_trade'] > available:
         return None
 
-    return _open_trade(db, created_suggestion, settings['budget_per_trade'], settings['mode'], kite_client=kite_client)
+    return _open_trade(
+        db, created_suggestion, settings['budget_per_trade'], settings['mode'],
+        kite_client=kite_client, use_stop_loss=True,
+    )
 
 
 def open_manual_trade(db, suggestion, budget_amount, mode, kite_client=None):
     """Discretionary buy triggered by a super_admin clicking "Buy" on a
-    specific recommendation (see the /stocks/suggestions/<id>/buy route),
-    as opposed to open_auto_trade_if_enabled's automatic one-per-suggestion
-    behaviour. Deliberately NOT gated by settings['enabled'] -- a manual
-    click is its own trigger regardless of whether auto-trading is on.
+    specific recommendation (see the /stocks/suggestions/<id>/buy route and
+    the auto-trader dashboard's own recommendations list), as opposed to
+    open_auto_trade_if_enabled's automatic one-per-suggestion behaviour.
+    Deliberately NOT gated by settings['enabled'] -- a manual click is its
+    own trigger regardless of whether auto-trading is on.
+
+    Always opens with NO stop-loss (_open_trade's use_stop_loss=False) --
+    a manual buy is an investment position with a target only, never a
+    stop-loss level, per instruction. It can still only ever close via
+    target-hit (automatic, both modes) or an explicit manual Sell-now
+    (manual_close_trade) -- it will never land in 'stop_loss_pending'.
 
     budget_amount and mode are explicit (not read from the global auto-
     trade settings) so a specific trade can use a custom amount, though
@@ -372,7 +394,7 @@ def open_manual_trade(db, suggestion, budget_amount, mode, kite_client=None):
     if budget_amount > available:
         return None
 
-    return _open_trade(db, suggestion, budget_amount, mode, kite_client=kite_client)
+    return _open_trade(db, suggestion, budget_amount, mode, kite_client=kite_client, use_stop_loss=False)
 
 
 def manual_close_trade(db, trade_id, kite_client=None):
@@ -674,7 +696,7 @@ def cancel_stop_loss_sell(db, trade_id):
 
 def list_auto_trades(db):
     return db.execute(
-        '''SELECT t.id, t.symbol, t.exchange, t.mode, t.status, t.budget_amount, t.quantity,
+        '''SELECT t.id, t.suggestion_id, t.symbol, t.exchange, t.mode, t.status, t.budget_amount, t.quantity,
                   t.buy_price, t.target_sell_price, t.stop_loss_price,
                   t.stop_loss_triggered_price, t.stop_loss_triggered_at,
                   t.exit_price, t.pnl_amount, t.pnl_pct, t.opened_at, t.closed_at, t.watchlist_id,

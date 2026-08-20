@@ -79,6 +79,12 @@ from utils.starters_engine import (
     get_starters_suggestions,
     initialize_starters_suggestions_table_if_needed,
 )
+from utils.large_cap_engine import (
+    LARGE_CAP_BONUS_REPEAT_WINDOW_DAYS,
+    generate_large_cap_bonus_pick,
+    get_large_cap_bonus_suggestions,
+    initialize_large_cap_bonus_suggestions_table_if_needed,
+)
 from utils.saved_filters import (
     initialize_saved_filters_table_if_needed,
     list_saved_stock_filters,
@@ -139,8 +145,9 @@ from utils.fundamentals_ingestion import (
 from utils.stock_universe import (
     initialize_stock_universe_table_if_needed,
     refresh_market_cap_filter,
+    rebucket_large_cap_eligibility,
 )
-from utils.stock_shortlist import run_fundamental_shortlist, get_golden_cross_not_qualified
+from utils.stock_shortlist import run_fundamental_shortlist, get_golden_cross_not_qualified, run_large_cap_shortlist
 from utils.fundamental_screen import get_metric_note
 from utils.watchlist_view import enrich_and_sort_watchlist_rows, redact_recommendation_signals
 from utils.price_pattern import (
@@ -170,6 +177,8 @@ from utils.suggestion_engine import (
     generate_daily_suggestions,
     get_suggestions,
     get_suggestion_by_id,
+    find_pending_target_hit_suggestions,
+    mark_suggestions_target_hit,
     passes_hard_filters,
     HOLDING_PERIOD_DAYS,
     get_recommendation_tracker,
@@ -187,7 +196,9 @@ from utils.suggestion_email import (
     send_admin_subscription_cancelled_email,
     send_trading_alert_email,
     send_target_hit_email,
+    send_target_achieved_email,
     send_weekly_starters_email,
+    send_large_cap_bonus_email,
     STOCKS_BASE_URL,
 )
 from utils.trading_calendar import is_trading_day
@@ -909,6 +920,7 @@ initialize_stocks_email_recipients_table_if_needed(get_supabase())
 initialize_saved_filters_table_if_needed(get_supabase())
 initialize_auto_trade_tables_if_needed(get_supabase())
 initialize_starters_suggestions_table_if_needed(get_supabase())
+initialize_large_cap_bonus_suggestions_table_if_needed(get_supabase())
 
 
 def calculate_inclusive_gst(display_cart, discount=0.0, full_subtotal=0.0):
@@ -7085,6 +7097,45 @@ def stocks_watchlist_refresh_shortlist():
     return _dispatch_stocks_job(db, is_cron, 'shortlist_refresh', _job)
 
 
+@app.route('/stocks/watchlist/refresh-large-cap-shortlist', methods=['POST'])
+def stocks_watchlist_refresh_large_cap_shortlist():
+    """Large-cap counterpart of /stocks/watchlist/refresh-shortlist above --
+    entirely new, parallel route; that route/run_fundamental_shortlist are
+    not touched or called by this one. Re-buckets is_large_cap_eligible
+    from the current last_market_cap (see
+    utils.stock_universe.rebucket_large_cap_eligibility), then runs
+    fundamental_screen.score_fundamentals_large_cap over every eligible
+    company (above 30000cr, no upper bound) and syncs stock_watchlist --
+    see utils.stock_shortlist.run_large_cap_shortlist for exactly what
+    "syncs" means (same upsert/deactivate-diff behavior as the mid-cap
+    pipeline, just scoped to its own LARGE_CAP_SHORTLIST_SOURCE so the two
+    pipelines' watchlist rows never collide). Same dual auth as
+    /stocks/watchlist/refresh-shortlist: a valid X-Cron-Secret header or an
+    active Stocks login session, either sufficient.
+
+    Session-triggered runs happen on a background thread -- see
+    _dispatch_stocks_job / utils/background_jobs.py."""
+    is_cron = has_valid_cron_secret(request.headers, STOCKS_FUNDAMENTALS_CRON_SECRET)
+    if not is_cron and not session.get('stocks_admin_id'):
+        return redirect(url_for('stocks_admin_login'))
+
+    db = get_db()
+
+    def _job(job_db):
+        try:
+            eligible_count = rebucket_large_cap_eligibility(job_db)
+            summary = run_large_cap_shortlist(job_db)
+            summary['large_cap_eligible_count'] = eligible_count
+        except Exception as e:
+            app.logger.error(f'Large-cap shortlist refresh failed: {e}')
+            alert_job_error(job_db, 'large_cap_shortlist_refresh', str(e))
+            raise
+        record_job_success(job_db, 'large_cap_shortlist_refresh')
+        return summary
+
+    return _dispatch_stocks_job(db, is_cron, 'large_cap_shortlist_refresh', _job)
+
+
 @app.route('/stocks/suggestions/generate', methods=['POST'])
 def stocks_suggestions_generate():
     """Runs the suggestion engine (see utils/suggestion_engine.py) over
@@ -7210,6 +7261,101 @@ def stocks_starters_send_weekly_email():
         return summary
 
     return _dispatch_stocks_job(db, is_cron, 'starters_weekly_email', _job)
+
+
+# Tuesday and Friday -- the two runs a week that produce a bonus large-cap
+# pick for Standard-plan subscribers (see stocks_large_cap_bonus_send_email
+# below). date.weekday(): Monday=0 ... Sunday=6.
+LARGE_CAP_BONUS_WEEKDAYS = (1, 4)
+
+
+@app.route('/stocks/large-cap-bonus/send-email', methods=['POST'])
+def stocks_large_cap_bonus_send_email():
+    """Standard-tier (Rs 299/mo) bonus large-cap pick, sent TWICE A WEEK
+    (Tuesday and Friday) IN ADDITION TO the regular daily Pick of the Day
+    -- generates a pick drawn only from the large-cap tier (see
+    utils/large_cap_engine.py) and emails every active stocks_plan='standard'
+    viewer. Same dual cron/session auth as every other Stocks job route.
+
+    Triggered by a DAILY cron (same 02:00 UTC slot as the daily suggestion
+    email), not a Tuesday/Friday-only one -- this job body itself checks
+    the weekday (LARGE_CAP_BONUS_WEEKDAYS) and is_trading_day() and always
+    calls record_job_success either way, exactly mirroring how
+    stocks_starters_send_weekly_email already handles its own Monday-only
+    cadence (see JOB_EXPECTATIONS in utils/stock_alerting.py for why this
+    needs no day-of-week awareness there)."""
+    is_cron = has_valid_cron_secret(request.headers, STOCKS_FUNDAMENTALS_CRON_SECRET)
+    if not is_cron and not session.get('stocks_admin_id'):
+        return redirect(url_for('stocks_admin_login'))
+
+    db = get_db()
+
+    def _job(job_db):
+        if date.today().weekday() not in LARGE_CAP_BONUS_WEEKDAYS or not is_trading_day():
+            record_job_success(job_db, 'large_cap_bonus_email')
+            return {'status': 'skipped', 'reason': 'not a Tuesday/Friday trading day'}
+        try:
+            generate_large_cap_bonus_pick(job_db)
+            summary = send_large_cap_bonus_email(job_db)
+        except Exception as e:
+            app.logger.error(f'Large-cap bonus email failed: {e}')
+            alert_job_error(job_db, 'large_cap_bonus_email', str(e))
+            raise
+        record_job_success(job_db, 'large_cap_bonus_email')
+        return summary
+
+    return _dispatch_stocks_job(db, is_cron, 'large_cap_bonus_email', _job)
+
+
+@app.route('/stocks/suggestions/notify-target-hits', methods=['POST'])
+def stocks_suggestions_notify_target_hits():
+    """Checks every still-'pending' stock_suggestions row against the
+    latest synced close (see suggestion_engine.find_pending_target_hit_suggestions)
+    and, for any that have reached target, emails every CURRENT
+    stocks_plan='standard' (Rs 299/mo) subscriber -- one email per
+    recipient bundling every hit found this run, not one email per stock
+    -- with the recommended day/price, target price, achieved day, time
+    taken, and profit at today's close, prompting them to consider
+    booking profit themselves (see send_target_achieved_email). Every
+    notified suggestion is then marked status='target_hit'
+    (mark_suggestions_target_hit) so it's never re-notified about.
+
+    Deliberately a separate job/route from send-daily-email -- doesn't
+    touch that job's own logic at all. Same dual cron/session auth as
+    every other Stocks job route."""
+    is_cron = has_valid_cron_secret(request.headers, STOCKS_FUNDAMENTALS_CRON_SECRET)
+    if not is_cron and not session.get('stocks_admin_id'):
+        return redirect(url_for('stocks_admin_login'))
+
+    db = get_db()
+
+    def _job(job_db):
+        try:
+            hits = find_pending_target_hit_suggestions(job_db)
+            sent = 0
+            failed = 0
+            if hits:
+                recipients = job_db.execute(
+                    "SELECT id, username AS email, name FROM stocks_admin_users "
+                    "WHERE role='viewer' AND is_active=1 AND stocks_plan='standard'"
+                ).fetchall()
+                for r in recipients:
+                    ok, detail = send_target_achieved_email(r['email'], r.get('name'), hits)
+                    if ok:
+                        sent += 1
+                    else:
+                        failed += 1
+                        app.logger.warning(f'Target-achieved email failed for {r["email"]}: {detail}')
+                mark_suggestions_target_hit(job_db, [h['id'] for h in hits])
+            summary = {'target_hits': len(hits), 'recipients_sent': sent, 'recipients_failed': failed}
+        except Exception as e:
+            app.logger.error(f'Target-hit notification job failed: {e}')
+            alert_job_error(job_db, 'suggestion_target_hit_notify', str(e))
+            raise
+        record_job_success(job_db, 'suggestion_target_hit_notify')
+        return summary
+
+    return _dispatch_stocks_job(db, is_cron, 'suggestion_target_hit_notify', _job)
 
 
 @app.route('/stocks/suggestions/resend', methods=['GET', 'POST'])
@@ -8219,6 +8365,9 @@ def stocks_recommendations_tracker():
             row.get('buy_price'), row.get('target_sell_price'), row.get('stop_loss_price'),
             row.get('latest_price'), row['suggestion_date'],
         ))
+        row['projection'] = compute_projection_targets(
+            row.get('buy_price'), row.get('target_sell_price'), row.get('pattern_name')
+        )
         tracker_rows.append(row)
     return render_template('admin/stocks_recommendation_tracker.html', tracker_rows=tracker_rows)
 
@@ -8237,6 +8386,12 @@ def _kite_client_for_auto_trade(db, settings):
     return KiteClient(access_token=access_token)
 
 
+# How many recent, still-actionable recommendations the auto-trader
+# dashboard's quick-buy list shows at once (see stocks_auto_trader below) --
+# a cap, not a business rule; just keeps the list from growing unbounded.
+BUYABLE_RECOMMENDATIONS_LIMIT = 20
+
+
 @app.route('/stocks/auto-trader', methods=['GET'])
 @stocks_role_required('super_admin')
 def stocks_auto_trader():
@@ -8244,7 +8399,9 @@ def stocks_auto_trader():
     module docstring for exactly what dry_run vs live mode each do, and the
     stop-loss handling that's identical in both: never auto-sold, always a
     manual Proceed/Cancel). Shows every trade ever opened, newest first,
-    with running P&L."""
+    with running P&L, plus a quick-buy list of recent recommendations below
+    (see BUYABLE_RECOMMENDATIONS_LIMIT) so a manual buy doesn't require a
+    trip to the separate Recommendation Tracker page."""
     db = get_db()
     settings = get_auto_trade_settings(db)
     trades = list_auto_trades(db)
@@ -8255,11 +8412,35 @@ def stocks_auto_trader():
     win_count = sum(1 for t in closed_trades if t['status'] == 'target_hit')
     deployed_capital = get_deployed_capital(db, settings['mode'])
     available_funds = compute_available_funds(settings['total_capital'], deployed_capital)
+
+    # Quick-buy list: recent recommendations that are still "live" (haven't
+    # already hit target or what would've been their stop-loss level, per
+    # the latest synced price) and don't already have a trade against them
+    # -- capped to the most recent BUYABLE_RECOMMENDATIONS_LIMIT so this
+    # doesn't turn into the full all-time tracker. Manual buys placed from
+    # here (or from the tracker page) never carry a stop-loss -- see
+    # open_manual_trade.
+    already_bought_suggestion_ids = {t['suggestion_id'] for t in trades if t.get('suggestion_id')}
+    buyable_recommendations = []
+    for row in get_recommendation_tracker(db):
+        if row['id'] in already_bought_suggestion_ids:
+            continue
+        stats = compute_tracker_row_stats(
+            row.get('buy_price'), row.get('target_sell_price'), row.get('stop_loss_price'),
+            row.get('latest_price'), row['suggestion_date'],
+        )
+        if stats['outcome'] not in ('open', 'unknown'):
+            continue
+        buyable_recommendations.append({**row, **stats})
+        if len(buyable_recommendations) >= BUYABLE_RECOMMENDATIONS_LIMIT:
+            break
+
     return render_template(
         'admin/stocks_auto_trader.html', settings=settings, trades=trades,
         open_count=open_count, pending_count=pending_count, closed_count=len(closed_trades),
         total_pnl=total_pnl, win_count=win_count, stop_loss_alert_email=STOP_LOSS_ALERT_EMAIL,
         deployed_capital=deployed_capital, available_funds=available_funds,
+        buyable_recommendations=buyable_recommendations,
     )
 
 

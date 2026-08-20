@@ -72,6 +72,18 @@ STOCK_WATCHLIST_ALTER_SQL = [
     # were never screened at all.
     "ALTER TABLE stock_watchlist ADD COLUMN IF NOT EXISTS fundamental_tier TEXT "
     "CHECK (fundamental_tier IS NULL OR fundamental_tier IN ('golden', 'silver'))",
+    # Which screening pipeline a watchlist row came from -- the original
+    # 5000-30000cr mid-cap pipeline (run_fundamental_shortlist) or the new,
+    # wholly parallel above-30000cr large-cap one (run_large_cap_shortlist,
+    # utils/stock_shortlist.py). DEFAULT 'mid_cap' retroactively backfills
+    # every existing row (all of them came from the mid-cap pipeline, the
+    # only one that existed before this column) with no separate UPDATE
+    # needed. run_fundamental_shortlist() itself is untouched -- its INSERT
+    # doesn't mention this column at all, so its rows simply keep getting
+    # this same DEFAULT; only run_large_cap_shortlist()'s INSERT sets
+    # 'large_cap' explicitly.
+    "ALTER TABLE stock_watchlist ADD COLUMN IF NOT EXISTS market_cap_tier TEXT DEFAULT 'mid_cap' "
+    "CHECK (market_cap_tier IN ('mid_cap', 'large_cap'))",
 ]
 
 # Same watchlist_id/universe_id duality as stock_fundamentals (see

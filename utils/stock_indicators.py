@@ -1,6 +1,13 @@
 from datetime import date
 
-from utils.indicator_engine import calculate_moving_averages, calculate_rsi, detect_cross_status, detect_volume_trend
+from utils.indicator_engine import (
+    calculate_moving_averages,
+    calculate_rsi,
+    detect_consolidation,
+    detect_cross_status,
+    detect_rounding_bottom,
+    detect_volume_trend,
+)
 from utils.job_progress import report as report_progress
 
 # How many trailing rows of stock_daily_data to pull per symbol -- 200 days
@@ -8,6 +15,18 @@ from utils.job_progress import report as report_progress
 # short-changing the longest window.
 PRICE_HISTORY_LOOKBACK_ROWS = 250
 MIN_DAYS_REQUIRED = 21
+
+# How much price history the NEW pattern-detection scores (rounding
+# bottom, consolidation) need -- deliberately a SEPARATE constant/fetch
+# from PRICE_HISTORY_LOOKBACK_ROWS above, not a bigger shared one.
+# calculate_rsi seeds its Wilder smoothing from the OLDEST days in
+# whatever `closes` list it's handed, so simply widening the existing
+# closes/volumes lists that feed _compute_indicators would silently shift
+# the RSI value already being computed and stored today -- which "do not
+# modify the existing MA/RSI/cross-status code path" rules out. Comfortably
+# above detect_rounding_bottom's own min_days=750 default, with headroom
+# for holidays/gaps in the trading calendar.
+PATTERN_LOOKBACK_ROWS = 800
 
 STOCK_INDICATORS_TABLE_SQL = [
     '''CREATE TABLE IF NOT EXISTS stock_indicators (
@@ -39,6 +58,12 @@ STOCK_INDICATORS_ALTER_SQL = [
     'ALTER TABLE stock_indicators ADD COLUMN IF NOT EXISTS ma_5 NUMERIC(12,2)',
     '''CREATE UNIQUE INDEX IF NOT EXISTS stock_indicators_universe_calc_date_uniq
        ON stock_indicators (universe_id, calc_date) WHERE universe_id IS NOT NULL''',
+    # New pattern-detection scores (see utils.indicator_engine.detect_rounding_bottom/
+    # detect_consolidation) -- both nullable, additive, and NOT wired into
+    # the suggestion engine's overall scoring yet (see run_indicator_calculation's
+    # docstring). 0-100, same scale reasoning as NNS Score's own sub-scores.
+    'ALTER TABLE stock_indicators ADD COLUMN IF NOT EXISTS rounding_bottom_score NUMERIC(5,2)',
+    'ALTER TABLE stock_indicators ADD COLUMN IF NOT EXISTS consolidation_score NUMERIC(5,2)',
 ]
 
 
@@ -95,50 +120,79 @@ def _upsert_indicator_snapshot(db, calc_date, data, watchlist_id=None, universe_
     """Upserts one stock_indicators row, keyed by whichever identity
     applies -- same dual-path reasoning as
     fundamentals_ingestion._upsert_fundamentals_snapshot and
-    stock_ingestion._upsert_daily_candle."""
+    stock_ingestion._upsert_daily_candle.
+
+    rounding_bottom_score/consolidation_score are read via data.get(...)
+    (default None), not data[...] -- only run_indicator_calculation's
+    watchlist-scoped path currently populates them (see PATTERN_LOOKBACK_ROWS
+    above); run_indicator_calculation_universe's data dicts simply don't
+    have these keys yet, and correctly get NULL written for them rather
+    than a KeyError, exactly as before this phase for that code path."""
     if watchlist_id is None and universe_id is None:
         raise ValueError('_upsert_indicator_snapshot requires watchlist_id and/or universe_id')
+
+    rounding_bottom_score = data.get('rounding_bottom_score')
+    consolidation_score = data.get('consolidation_score')
 
     if watchlist_id is not None:
         db.execute(
             '''INSERT INTO stock_indicators
                    (watchlist_id, universe_id, calc_date, ma_5, ma_21, ma_50, ma_200, rsi_14,
-                    volume_avg_20d, volume_trend, cross_status)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    volume_avg_20d, volume_trend, cross_status, rounding_bottom_score, consolidation_score)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                ON CONFLICT (watchlist_id, calc_date) DO UPDATE SET
                    universe_id = EXCLUDED.universe_id,
                    ma_5 = EXCLUDED.ma_5, ma_21 = EXCLUDED.ma_21, ma_50 = EXCLUDED.ma_50,
                    ma_200 = EXCLUDED.ma_200, rsi_14 = EXCLUDED.rsi_14,
                    volume_avg_20d = EXCLUDED.volume_avg_20d, volume_trend = EXCLUDED.volume_trend,
-                   cross_status = EXCLUDED.cross_status''',
+                   cross_status = EXCLUDED.cross_status,
+                   rounding_bottom_score = EXCLUDED.rounding_bottom_score,
+                   consolidation_score = EXCLUDED.consolidation_score''',
             (watchlist_id, universe_id, calc_date, data['ma_5'], data['ma_21'], data['ma_50'], data['ma_200'],
-             data['rsi_14'], data['volume_avg_20d'], data['volume_trend'], data['cross_status'])
+             data['rsi_14'], data['volume_avg_20d'], data['volume_trend'], data['cross_status'],
+             rounding_bottom_score, consolidation_score)
         )
     else:
         db.execute(
             '''INSERT INTO stock_indicators
                    (universe_id, calc_date, ma_5, ma_21, ma_50, ma_200, rsi_14,
-                    volume_avg_20d, volume_trend, cross_status)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    volume_avg_20d, volume_trend, cross_status, rounding_bottom_score, consolidation_score)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                ON CONFLICT (universe_id, calc_date) WHERE universe_id IS NOT NULL DO UPDATE SET
                    ma_5 = EXCLUDED.ma_5, ma_21 = EXCLUDED.ma_21, ma_50 = EXCLUDED.ma_50,
                    ma_200 = EXCLUDED.ma_200, rsi_14 = EXCLUDED.rsi_14,
                    volume_avg_20d = EXCLUDED.volume_avg_20d, volume_trend = EXCLUDED.volume_trend,
-                   cross_status = EXCLUDED.cross_status''',
+                   cross_status = EXCLUDED.cross_status,
+                   rounding_bottom_score = EXCLUDED.rounding_bottom_score,
+                   consolidation_score = EXCLUDED.consolidation_score''',
             (universe_id, calc_date, data['ma_5'], data['ma_21'], data['ma_50'], data['ma_200'],
-             data['rsi_14'], data['volume_avg_20d'], data['volume_trend'], data['cross_status'])
+             data['rsi_14'], data['volume_avg_20d'], data['volume_trend'], data['cross_status'],
+             rounding_bottom_score, consolidation_score)
         )
     db.commit()
 
 
 def run_indicator_calculation(db):
-    """For every active stock_watchlist row, pulls up to the last
-    PRICE_HISTORY_LOOKBACK_ROWS trading days of close/volume from
+    """For every active stock_watchlist row (both market_cap_tier='mid_cap'
+    and 'large_cap' -- there's no tier-based branching needed at all, this
+    already selects every active row regardless of tier), pulls up to the
+    last PRICE_HISTORY_LOOKBACK_ROWS trading days of close/volume from
     stock_daily_data (oldest first) and computes MAs/RSI/cross status/
-    volume trend, upserting one row per symbol per day into
-    stock_indicators (keyed on watchlist_id, calc_date=today). Symbols with
-    fewer than MIN_DAYS_REQUIRED days of price history are skipped
-    (logged, not crashed) -- nothing at all is computable below that."""
+    volume trend EXACTLY as before this phase -- that fetch, slicing, and
+    _compute_indicators call are completely untouched. Symbols with fewer
+    than MIN_DAYS_REQUIRED days of price history are skipped (logged, not
+    crashed) -- nothing at all is computable below that.
+
+    Additionally computes the two new pattern-detection scores
+    (detect_rounding_bottom/detect_consolidation, utils/indicator_engine.py)
+    from a SEPARATE, independent, longer price/volume fetch (see
+    PATTERN_LOOKBACK_ROWS) -- deliberately not reusing the closes/volumes
+    above, since RSI's Wilder-smoothing seed depends on how much history
+    precedes the window it's given, so widening that shared list would
+    silently change the RSI value already being stored. Both new scores
+    are still purely additional stored fields this phase -- see
+    utils/indicator_engine.py's module docstring for that section; nothing
+    downstream (the suggestion engine) reads them yet."""
     watchlist_rows = db.execute(
         'SELECT id, symbol, exchange FROM stock_watchlist WHERE is_active=1'
     ).fetchall()
@@ -171,6 +225,21 @@ def run_indicator_calculation(db):
                 print(f'Indicator calc skipped for {symbol}: only {len(closes)} days '
                       f'of price history (need {MIN_DAYS_REQUIRED}+).')
                 continue
+
+            # New pattern-detection scores -- own separate fetch, see the
+            # docstring above for why this can't reuse closes/volumes.
+            pattern_rows = db.execute(
+                '''SELECT close, volume FROM stock_daily_data
+                   WHERE watchlist_id=?
+                   ORDER BY trade_date ASC''',
+                (watchlist_id,)
+            ).fetchall()
+            if len(pattern_rows) > PATTERN_LOOKBACK_ROWS:
+                pattern_rows = pattern_rows[-PATTERN_LOOKBACK_ROWS:]
+            pattern_closes = [float(r['close']) for r in pattern_rows if r['close'] is not None]
+            pattern_volumes = [int(r['volume']) for r in pattern_rows if r['volume'] is not None]
+            data['rounding_bottom_score'] = detect_rounding_bottom(pattern_closes)
+            data['consolidation_score'] = detect_consolidation(pattern_closes, pattern_volumes)
 
             _upsert_indicator_snapshot(db, today, data, watchlist_id=watchlist_id)
             calculated += 1

@@ -5,6 +5,20 @@ stock_universe/stock_fundamentals and synced into stock_watchlist)."""
 
 PEG_MAX = 1
 QUARTERLY_GROWTH_MIN = 10
+# Large-cap tier only (see score_fundamentals_large_cap below) -- a
+# separate, lower growth floor for the above-30000cr companies, which
+# structurally grow slower than mid-caps off a much bigger revenue base.
+# QUARTERLY_GROWTH_MIN above is untouched and still governs the original
+# mid-cap pipeline (evaluate_fundamentals/classify_fundamental_tier).
+MINIMUM_GROWTH_PCT_LARGE_CAP = 5.0
+# Hard disqualifier, shared by both evaluate_fundamentals() and
+# evaluate_fundamentals_large_cap() -- promoter_pledge_pct at or above this
+# level fails outright, never forgiven at silver/bronze (see
+# SILVER_ELIGIBLE_CRITERIA/BRONZE_ELIGIBLE_CRITERIA below, which
+# deliberately does NOT include 'promoter pledge'), same as PEG or EPS.
+# NULL pledge data (no confirmed source yet -- see screener_client.py's
+# _parse_shareholding) is treated as 0%, not disqualifying.
+PROMOTER_PLEDGE_MAX_PCT = 10
 OPM_MIN_PCT = 25
 # Floor for OPM to still qualify for the 'silver' tier (see
 # classify_fundamental_tier below) -- below this, OPM fails outright same as
@@ -145,6 +159,14 @@ def evaluate_fundamentals(fundamentals_row, previous_fundamentals_row=None, indu
     ):
         failed.append('price-to-book range')
 
+    # Hard disqualifier -- see PROMOTER_PLEDGE_MAX_PCT above. NULL (no
+    # confirmed data source yet) is treated as 0%, the opposite of every
+    # other None-means-fail check in this function -- missing pledge data
+    # is not itself a red flag the way a missing PE or EPS is.
+    promoter_pledge_pct = fundamentals_row.get('promoter_pledge_pct')
+    if promoter_pledge_pct is not None and promoter_pledge_pct >= PROMOTER_PLEDGE_MAX_PCT:
+        failed.append('promoter pledge')
+
     if previous_fundamentals_row is not None:
         promoter_now = fundamentals_row.get('promoter_holding_pct')
         promoter_before = previous_fundamentals_row.get('promoter_holding_pct')
@@ -267,3 +289,194 @@ def classify_fundamental_tier(fundamentals_row, previous_fundamentals_row=None, 
         return 'bronze', failed_criteria
 
     return None, failed_criteria
+
+
+# ---------------------------------------------------------------------------
+# Large-cap tier (above 30000cr, see utils/stock_universe.py's
+# is_large_cap_eligible and utils/stock_shortlist.py's run_large_cap_shortlist)
+# -- entirely new, parallel functions below. evaluate_fundamentals() and
+# classify_fundamental_tier() above are NOT modified, called, or depended on
+# by anything in this section; evaluate_fundamentals_large_cap/
+# score_fundamentals_large_cap duplicate their structure deliberately
+# (rather than parametrizing the originals) so the original mid-cap pipeline
+# stays byte-for-byte exactly as it already worked.
+# ---------------------------------------------------------------------------
+
+def evaluate_fundamentals_large_cap(fundamentals_row, previous_fundamentals_row=None, industry_benchmarks=None):
+    """Large-cap counterpart of evaluate_fundamentals() above -- identical
+    in every respect (PE industry-relative band, PEG, OPM, ROCE, ROA, EPS,
+    price-to-book industry-relative band, promoter/FII holding trends)
+    EXCEPT the quarterly profit/revenue growth floor, which uses
+    MINIMUM_GROWTH_PCT_LARGE_CAP (5%) instead of QUARTERLY_GROWTH_MIN
+    (10%) -- mature large-cap companies structurally grow slower than
+    mid-caps off a much bigger revenue base, so the mid-cap tier's 10%
+    floor would exclude nearly all of them for a reason that isn't
+    actually a quality signal at this size.
+
+    See evaluate_fundamentals's own docstring for the full criteria list
+    and argument shapes -- unchanged here. Returns (passes: bool,
+    failed_criteria: list[str])."""
+    industry_benchmarks = industry_benchmarks or {}
+    failed = []
+
+    pe_ratio = fundamentals_row.get('pe_ratio')
+    if not _passes_industry_band(
+        pe_ratio, industry_benchmarks.get('pe_ratio'),
+        PE_FLOOR_MULTIPLIER, PE_CEILING_MULTIPLIER, PE_FALLBACK_MIN, PE_FALLBACK_MAX
+    ):
+        failed.append('PE range')
+
+    peg_ratio = fundamentals_row.get('peg_ratio')
+    if peg_ratio is None or peg_ratio >= PEG_MAX:
+        failed.append('PEG')
+
+    profit_growth = fundamentals_row.get('quarterly_profit_growth_pct')
+    if profit_growth is None or profit_growth < MINIMUM_GROWTH_PCT_LARGE_CAP:
+        failed.append('quarterly profit growth')
+
+    revenue_growth = fundamentals_row.get('quarterly_revenue_growth_pct')
+    if revenue_growth is None or revenue_growth < MINIMUM_GROWTH_PCT_LARGE_CAP:
+        failed.append('quarterly revenue growth')
+
+    opm_pct = fundamentals_row.get('opm_pct')
+    if opm_pct is None or opm_pct < OPM_MIN_PCT:
+        failed.append('OPM')
+
+    if not _positive(fundamentals_row.get('roce_pct')):
+        failed.append('ROCE')
+
+    if not _positive(fundamentals_row.get('roa_pct')):
+        failed.append('ROA')
+
+    if not _positive(fundamentals_row.get('eps')):
+        failed.append('EPS')
+
+    price_to_book = fundamentals_row.get('price_to_book')
+    if not _passes_industry_band(
+        price_to_book, industry_benchmarks.get('price_to_book'),
+        0, PRICE_TO_BOOK_CEILING_MULTIPLIER, 0, PRICE_TO_BOOK_FALLBACK_MAX
+    ):
+        failed.append('price-to-book range')
+
+    # Hard disqualifier -- see PROMOTER_PLEDGE_MAX_PCT and
+    # evaluate_fundamentals's identical check above for the full reasoning
+    # (NULL treated as 0%, never forgiven at any tier).
+    promoter_pledge_pct = fundamentals_row.get('promoter_pledge_pct')
+    if promoter_pledge_pct is not None and promoter_pledge_pct >= PROMOTER_PLEDGE_MAX_PCT:
+        failed.append('promoter pledge')
+
+    if previous_fundamentals_row is not None:
+        promoter_now = fundamentals_row.get('promoter_holding_pct')
+        promoter_before = previous_fundamentals_row.get('promoter_holding_pct')
+        if promoter_now is not None and promoter_before is not None and promoter_now < promoter_before:
+            failed.append('promoter holding trend')
+
+        fii_now = fundamentals_row.get('fii_holding_pct')
+        fii_before = previous_fundamentals_row.get('fii_holding_pct')
+        if fii_now is not None and fii_before is not None and not (fii_now > fii_before):
+            failed.append('FII holding trend')
+
+    return (len(failed) == 0, failed)
+
+
+def score_fundamentals_large_cap(fundamentals_row, previous_fundamentals_row=None, industry_benchmarks=None):
+    """Large-cap counterpart of classify_fundamental_tier() above -- same
+    golden/silver/bronze graduated tiering (same SILVER_ELIGIBLE_CRITERIA/
+    BRONZE_ELIGIBLE_CRITERIA forgiveness sets and the same PE/OPM
+    missing-data floor via _fails_pe_or_opm_data_floor, all reused
+    unchanged), scored via evaluate_fundamentals_large_cap's lower growth
+    floor instead of evaluate_fundamentals's. This is the function
+    run_large_cap_shortlist() (utils/stock_shortlist.py) actually calls,
+    mirroring how run_fundamental_shortlist() calls
+    classify_fundamental_tier().
+
+    Returns (tier, failed_criteria) -- same shape as
+    classify_fundamental_tier()."""
+    passes, failed_criteria = evaluate_fundamentals_large_cap(
+        fundamentals_row, previous_fundamentals_row, industry_benchmarks
+    )
+    if passes:
+        return 'golden', failed_criteria
+
+    failed_set = set(failed_criteria)
+
+    if not failed_set - SILVER_ELIGIBLE_CRITERIA:
+        if _fails_pe_or_opm_data_floor(fundamentals_row, failed_criteria):
+            return None, failed_criteria
+        return 'silver', failed_criteria
+
+    if not failed_set - BRONZE_ELIGIBLE_CRITERIA:
+        if _fails_pe_or_opm_data_floor(fundamentals_row, failed_criteria):
+            return None, failed_criteria
+        return 'bronze', failed_criteria
+
+    return None, failed_criteria
+
+
+# ---------------------------------------------------------------------------
+# Institutional holding (FII/DII) -- diagnostic + stub only in this phase.
+# No scoring bands exist yet; compute_holding_percentiles is what informs
+# what those bands should actually be, from real data, before any are
+# hardcoded. score_institutional_holding is deliberately not called from
+# anywhere yet (see its own docstring) -- neither evaluate_fundamentals()
+# nor evaluate_fundamentals_large_cap() reference it.
+# ---------------------------------------------------------------------------
+
+def _percentile(sorted_values, pct):
+    """Linear-interpolation percentile (the same method numpy.percentile's
+    default uses) over an already-sorted list. pct is 0-100. Assumes
+    sorted_values is non-empty -- callers (compute_holding_percentiles)
+    check that first."""
+    if len(sorted_values) == 1:
+        return sorted_values[0]
+    k = (len(sorted_values) - 1) * (pct / 100)
+    lower = int(k)
+    upper = min(lower + 1, len(sorted_values) - 1)
+    if lower == upper:
+        return sorted_values[lower]
+    return sorted_values[lower] + (sorted_values[upper] - sorted_values[lower]) * (k - lower)
+
+
+def compute_holding_percentiles(rows, field):
+    """10th/25th/50th/75th/90th percentile distribution of `field`
+    ('fii_holding_pct' or 'dii_holding_pct') across rows -- purely a
+    reporting/diagnostic tool to inform what score_institutional_holding's
+    eventual thresholds should actually be, not a screening decision
+    itself. Deliberately takes plain rows + a field name rather than being
+    hardcoded to one column, so the same function reports both FII and DII
+    distributions, and can be run separately over the mid-cap and
+    large-cap candidate pools (institutional ownership patterns likely
+    differ between the two tiers -- see the caller in
+    utils/stock_shortlist.py or a one-off script).
+
+    rows: list of dict-likes with .get(field). A row missing the field
+    (None) is excluded from the distribution entirely -- NOT treated as 0,
+    since "FII didn't disclose/hasn't been scraped yet" is not the same
+    claim as "FII holds 0%" the way it would distort percentiles built
+    from a small early-days sample.
+
+    Returns {'count', 'p10', 'p25', 'p50', 'p75', 'p90'} -- every
+    percentile is None (count=0) when no row has a value for this field at
+    all."""
+    values = sorted(v for v in (row.get(field) for row in rows) if v is not None)
+    if not values:
+        return {'count': 0, 'p10': None, 'p25': None, 'p50': None, 'p75': None, 'p90': None}
+    return {
+        'count': len(values),
+        'p10': round(_percentile(values, 10), 2),
+        'p25': round(_percentile(values, 25), 2),
+        'p50': round(_percentile(values, 50), 2),
+        'p75': round(_percentile(values, 75), 2),
+        'p90': round(_percentile(values, 90), 2),
+    }
+
+
+def score_institutional_holding(row):
+    """Stub -- always returns 0. Plumbing for a future FII/DII-based
+    scoring component, not wired into evaluate_fundamentals(),
+    evaluate_fundamentals_large_cap(), classify_fundamental_tier(), or
+    score_fundamentals_large_cap() anywhere yet. Real thresholds come in a
+    follow-up phase once compute_holding_percentiles' real distribution
+    (mid-cap and large-cap pools, reported separately) has actually been
+    reviewed -- deliberately not guessed at here."""
+    return 0

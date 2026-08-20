@@ -1,10 +1,12 @@
 import re
 
 from utils.stock_shortlist import (
+    LARGE_CAP_SHORTLIST_SOURCE,
     SHORTLIST_SOURCE,
     _compute_industry_benchmarks,
     get_golden_cross_not_qualified,
     run_fundamental_shortlist,
+    run_large_cap_shortlist,
 )
 
 
@@ -66,9 +68,16 @@ class FakeShortlistDB:
 
         if normalized.startswith('SELECT u.id AS universe_id, u.symbol, u.exchange, u.company_name, u.isin'):
             (cutoff,) = params
+            # run_large_cap_shortlist's candidate query is identical in
+            # shape/prefix to run_fundamental_shortlist's, just filtered on
+            # is_large_cap_eligible instead of is_scrape_eligible -- branch
+            # on which WHERE clause is actually in the SQL text so the fake
+            # exercises the right eligibility flag for whichever function
+            # is under test.
+            eligibility_key = 'is_large_cap_eligible' if 'is_large_cap_eligible = true' in normalized else 'is_scrape_eligible'
             rows = []
             for u in self.universe:
-                if not u['is_scrape_eligible']:
+                if not u.get(eligibility_key):
                     continue
                 snaps = [f for f in self.fundamentals if f['universe_id'] == u['id']]
                 if not snaps:
@@ -117,18 +126,31 @@ class FakeShortlistDB:
         if normalized.startswith('INSERT INTO stock_watchlist'):
             (symbol, exchange, name, insert_source, insert_tier,
              update_source, update_tier, guard_source) = params
+            # run_large_cap_shortlist's INSERT additionally sets
+            # market_cap_tier='large_cap' as a literal (not a bind param) --
+            # detected from the SQL text itself, same reasoning as the
+            # eligibility_key branch above. run_fundamental_shortlist's own
+            # INSERT never mentions the column at all, so its rows simply
+            # don't get this key -- matching the real column's DEFAULT
+            # 'mid_cap' (nothing in this fake needs to simulate the DEFAULT
+            # itself, since no existing test asserts on mid-cap rows'
+            # market_cap_tier).
+            market_cap_tier = 'large_cap' if 'market_cap_tier' in normalized else None
             key = (symbol, exchange)
             existing = self.watchlist.get(key)
             if existing is None:
                 self.watchlist[key] = {
                     'symbol': symbol, 'exchange': exchange, 'name': name,
                     'is_active': 1, 'source': insert_source, 'fundamental_tier': insert_tier,
+                    'market_cap_tier': market_cap_tier,
                 }
             elif existing['source'] == guard_source or existing['source'] is None:
                 existing['is_active'] = 1
                 existing['source'] = update_source
                 existing['name'] = name
                 existing['fundamental_tier'] = update_tier
+                if market_cap_tier:
+                    existing['market_cap_tier'] = market_cap_tier
             # else: a different source (e.g. 'manual') -- left untouched.
             return FakeCursor([])
 
@@ -414,6 +436,115 @@ def test_existing_duplicate_pair_self_heals_on_rerun():
     active = [key for key, w in db.watchlist.items() if w['is_active'] == 1]
     assert len(active) == 1
     assert active[0] == ('ACME', 'NSE')  # NSE wins by default (no kite_map set)
+
+
+# --- Large-cap tier (entirely parallel to everything above) ----------------
+# 6% growth is the whole point of this tier: below QUARTERLY_GROWTH_MIN (10%,
+# the mid-cap floor) but above MINIMUM_GROWTH_PCT_LARGE_CAP (5%) -- passes
+# score_fundamentals_large_cap, would fail evaluate_fundamentals/
+# classify_fundamental_tier outright.
+LARGE_CAP_PASSING_FUNDAMENTALS = {
+    **PASSING_FUNDAMENTALS,
+    'quarterly_profit_growth_pct': 6, 'quarterly_revenue_growth_pct': 6,
+}
+
+
+def test_large_cap_shortlist_only_sources_from_large_cap_eligible_universe_rows():
+    # is_scrape_eligible=True (mid-cap) but NOT is_large_cap_eligible --
+    # must be invisible to run_large_cap_shortlist even though it would
+    # otherwise pass every criterion.
+    universe = [
+        {'id': 1, 'symbol': 'MIDCAPCO', 'exchange': 'NSE', 'company_name': 'Mid Cap Co Ltd',
+         'is_scrape_eligible': True, 'is_large_cap_eligible': False},
+    ]
+    fundamentals = [{'universe_id': 1, 'snapshot_date': '2026-08-10', **PASSING_FUNDAMENTALS}]
+    db = FakeShortlistDB(universe, fundamentals, watchlist_rows=[])
+
+    summary = run_large_cap_shortlist(db)
+
+    assert summary['evaluated'] == 0
+    assert summary['passed'] == 0
+    assert db.watchlist == {}
+
+
+def test_six_percent_growth_passes_large_cap_but_would_fail_mid_cap_floor():
+    # The core requirement: a large-cap company growing at 6% clears
+    # score_fundamentals_large_cap (5% floor) but would be excluded outright
+    # by the mid-cap pipeline's 10% floor -- proven here by running the
+    # SAME fundamentals through BOTH pipelines against separately-eligible
+    # universe rows.
+    universe = [
+        {'id': 1, 'symbol': 'BIGCO', 'exchange': 'NSE', 'company_name': 'Big Co Ltd',
+         'is_scrape_eligible': False, 'is_large_cap_eligible': True},
+    ]
+    fundamentals = [{'universe_id': 1, 'snapshot_date': '2026-08-10', **LARGE_CAP_PASSING_FUNDAMENTALS}]
+    db = FakeShortlistDB(universe, fundamentals, watchlist_rows=[])
+
+    large_cap_summary = run_large_cap_shortlist(db)
+    assert large_cap_summary['evaluated'] == 1
+    assert large_cap_summary['passed'] == 1
+    assert large_cap_summary['golden'] == 1
+    bigco = db.watchlist[('BIGCO', 'NSE')]
+    assert bigco['is_active'] == 1
+    assert bigco['source'] == LARGE_CAP_SHORTLIST_SOURCE
+    assert bigco['market_cap_tier'] == 'large_cap'
+
+    # Same fundamentals, but now make this row mid-cap-eligible instead and
+    # run it through the UNCHANGED mid-cap pipeline -- 6% growth must fail
+    # outright there (QUARTERLY_GROWTH_MIN is still 10%, untouched).
+    universe[0]['is_scrape_eligible'] = True
+    universe[0]['is_large_cap_eligible'] = False
+    db2 = FakeShortlistDB(universe, fundamentals, watchlist_rows=[])
+    mid_cap_summary = run_fundamental_shortlist(db2)
+    assert mid_cap_summary['passed'] == 0
+    assert mid_cap_summary['failed'] == 1
+    assert 'quarterly profit growth' in mid_cap_summary['failed_criteria_counts']
+    assert 'quarterly revenue growth' in mid_cap_summary['failed_criteria_counts']
+    assert ('BIGCO', 'NSE') not in db2.watchlist
+
+
+def test_large_cap_shortlist_never_touches_mid_cap_sourced_rows():
+    # The two pipelines' diff/deactivation steps must never cross-contaminate
+    # each other's watchlist rows -- a mid-cap-sourced row that no longer
+    # qualifies for the large-cap run (it was never large-cap eligible in
+    # the first place) must stay exactly as it was.
+    universe = [
+        {'id': 1, 'symbol': 'BIGCO', 'exchange': 'NSE', 'company_name': 'Big Co Ltd',
+         'is_scrape_eligible': False, 'is_large_cap_eligible': True},
+    ]
+    fundamentals = [{'universe_id': 1, 'snapshot_date': '2026-08-10', **LARGE_CAP_PASSING_FUNDAMENTALS}]
+    watchlist = [
+        {'symbol': 'OLDMIDCAP', 'exchange': 'NSE', 'name': 'Old Mid Cap Ltd', 'is_active': 1, 'source': SHORTLIST_SOURCE},
+    ]
+    db = FakeShortlistDB(universe, fundamentals, watchlist)
+
+    run_large_cap_shortlist(db)
+
+    # The mid-cap-sourced row is untouched -- run_large_cap_shortlist's own
+    # deactivation UPDATE only ever matches source=LARGE_CAP_SHORTLIST_SOURCE.
+    assert db.watchlist[('OLDMIDCAP', 'NSE')]['is_active'] == 1
+    assert db.watchlist[('OLDMIDCAP', 'NSE')]['source'] == SHORTLIST_SOURCE
+
+
+def test_large_cap_shortlist_bronze_and_silver_tiers_work_the_same_as_mid_cap():
+    universe = [
+        {'id': 1, 'symbol': 'SILVERBIG', 'exchange': 'NSE', 'company_name': 'Silver Big Ltd',
+         'is_large_cap_eligible': True},
+        {'id': 2, 'symbol': 'BRONZEBIG', 'exchange': 'NSE', 'company_name': 'Bronze Big Ltd',
+         'is_large_cap_eligible': True},
+    ]
+    fundamentals = [
+        {'universe_id': 1, 'snapshot_date': '2026-08-10', **{**LARGE_CAP_PASSING_FUNDAMENTALS, 'pe_ratio': 45}},
+        {'universe_id': 2, 'snapshot_date': '2026-08-10', **{**LARGE_CAP_PASSING_FUNDAMENTALS, 'roce_pct': -1}},
+    ]
+    db = FakeShortlistDB(universe, fundamentals, watchlist_rows=[])
+
+    summary = run_large_cap_shortlist(db)
+
+    assert summary['silver'] == 1
+    assert summary['bronze'] == 1
+    assert db.watchlist[('SILVERBIG', 'NSE')]['fundamental_tier'] == 'silver'
+    assert db.watchlist[('BRONZEBIG', 'NSE')]['fundamental_tier'] == 'bronze'
 
 
 def test_dedup_winner_display_name_comes_from_kite_not_the_source_list():

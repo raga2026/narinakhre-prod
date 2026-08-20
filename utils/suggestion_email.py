@@ -4,6 +4,7 @@ from utils.stock_alerting import send_zeptomail_stocks_email
 from utils.suggestion_chart import build_prediction_chart_data_uri
 from utils.suggestion_engine import get_suggestions
 from utils.starters_engine import get_starters_suggestions
+from utils.large_cap_engine import get_large_cap_bonus_suggestions
 from utils.price_pattern import compute_projection_targets
 from utils.stocks_referrals import REFERRALS_PER_FREE_MONTH, get_or_create_referral_code
 
@@ -51,6 +52,18 @@ _PATTERN_DISPLAY_NAMES = {
     'head_and_shoulders_bottom': 'reverse head-and-shoulders pattern',
     'rounding_bottom': 'rounding-bottom pattern',
 }
+
+
+def _pct_increase(buy_price, target_price):
+    """'+12.3%' style figure for how much higher a target/projection price
+    is than the buy price -- shown beside each of the near-term/mid-period/
+    long-term target values so a reader can gauge the size of the move
+    without doing the arithmetic themselves. Returns None when buy_price
+    isn't a usable positive number (mirrors compute_projection_targets'
+    own guard) rather than raising or dividing by zero."""
+    if not buy_price or buy_price <= 0 or target_price is None:
+        return None
+    return round((target_price - buy_price) / buy_price * 100, 1)
 
 
 def _projection_method_note(projection):
@@ -232,6 +245,124 @@ def send_target_hit_email(to_email, trade, pnl_amount, pnl_pct):
     return send_zeptomail_stocks_email(
         to_email=to_email, to_name=to_email, subject=subject,
         textbody=text_body, htmlbody=body_html, sender_name='Nari Nakhre Stocks Auto-Trader',
+    )
+
+
+def send_target_achieved_email(to_email, to_name, achievements):
+    """Sent to every CURRENT Standard-plan (Rs 299/month) subscriber when
+    one or more daily recommendations reaches its target price -- app.py's
+    /stocks/suggestions/notify-target-hits job, one email per recipient
+    per day, bundling every entry from
+    suggestion_engine.find_pending_target_hit_suggestions that landed that
+    day (in the rare case more than one hits the same day) rather than
+    sending a separate email per stock. Deliberately goes to every current
+    Standard subscriber, not just whoever happened to receive the original
+    pick's email -- broadcasting a win to the whole current plan
+    population, per instruction.
+
+    Unlike send_target_hit_email above (the auto-trader's OWN position,
+    sold automatically the moment target is reached), this is purely
+    informational -- it doesn't buy or sell anything on the subscriber's
+    behalf. It's telling them a recommendation played out and prompting
+    them to decide for themselves whether to book profit.
+
+    achievements: list of dicts with company_name, symbol, exchange,
+    suggestion_date, buy_price, target_sell_price, latest_price,
+    latest_price_date (see find_pending_target_hit_suggestions). Days
+    taken and profit % are computed here from suggestion_date/
+    latest_price_date and buy_price/latest_price -- the actual latest
+    close, not target_sell_price itself, since the close that triggered
+    this is usually at or slightly past target, and showing what a
+    subscriber would actually book today is more honest than the
+    theoretical target figure."""
+    greeting = to_name or to_email
+    count = len(achievements)
+    if count == 1:
+        name = achievements[0].get('company_name') or achievements[0]['symbol']
+        subject = f'Nari Nakhre Stocks -- {name} hit its target'
+    else:
+        subject = f'Nari Nakhre Stocks -- {count} of your recommendations hit target'
+
+    cards_text = []
+    cards_html = []
+    for a in achievements:
+        name = a.get('company_name') or a['symbol']
+        suggestion_date = a['suggestion_date']
+        if isinstance(suggestion_date, str):
+            suggestion_date = date.fromisoformat(suggestion_date[:10])
+        achieved_date = a['latest_price_date']
+        if isinstance(achieved_date, str):
+            achieved_date = date.fromisoformat(achieved_date[:10])
+        days_taken = max(0, (achieved_date - suggestion_date).days)
+        buy_price = a['buy_price']
+        latest_price = a['latest_price']
+        profit_pct = round((latest_price - buy_price) / buy_price * 100, 2) if buy_price else None
+        profit_str = f"{'+' if profit_pct is not None and profit_pct >= 0 else ''}{profit_pct}%" if profit_pct is not None else 'n/a'
+        day_word = 'day' if days_taken == 1 else 'days'
+
+        cards_text.append(
+            f"{name} ({a['symbol']} · {a['exchange']})\n"
+            f"  Recommended: {suggestion_date.strftime('%d %b %Y')} at Rs {buy_price}\n"
+            f"  Target: Rs {a['target_sell_price']}\n"
+            f"  Achieved: {achieved_date.strftime('%d %b %Y')} at Rs {latest_price} "
+            f"({days_taken} {day_word}, {profit_str} profit)"
+        )
+        cards_html.append(
+            '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" '
+            'style="max-width:600px;width:100%;margin:0 0 16px 0;border:1px solid #e2e8f0;border-radius:12px;'
+            'overflow:hidden;font-family:Arial,Helvetica,sans-serif;">'
+            '<tr><td style="background:#14532d;padding:12px 18px;">'
+            f'<div style="color:#f8fafc;font-size:16px;font-weight:bold;">{name}</div>'
+            f'<div style="color:#bbf7d0;font-size:12px;margin-top:2px;">{a["symbol"]} · {a["exchange"]} -- target reached</div>'
+            '</td></tr>'
+            '<tr><td style="padding:14px 18px;">'
+            '<table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr>'
+            '<td style="width:33%;"><div style="color:#64748b;font-size:11px;text-transform:uppercase;letter-spacing:.03em;">Recommended</div>'
+            f'<div style="font-size:15px;font-weight:bold;color:#0f172a;">Rs {buy_price}</div>'
+            f'<div style="color:#94a3b8;font-size:11px;">{suggestion_date.strftime("%d %b %Y")}</div></td>'
+            '<td style="width:34%;"><div style="color:#64748b;font-size:11px;text-transform:uppercase;letter-spacing:.03em;">Target</div>'
+            f'<div style="font-size:15px;font-weight:bold;color:#0f172a;">Rs {a["target_sell_price"]}</div></td>'
+            '<td style="width:33%;"><div style="color:#64748b;font-size:11px;text-transform:uppercase;letter-spacing:.03em;">Achieved</div>'
+            f'<div style="font-size:15px;font-weight:bold;color:#15803d;">Rs {latest_price}</div>'
+            f'<div style="color:#94a3b8;font-size:11px;">{achieved_date.strftime("%d %b %Y")}</div></td>'
+            '</tr></table>'
+            f'<div style="margin-top:10px;color:#334155;font-size:13px;">'
+            f'Took {days_taken} {day_word} — {profit_str} profit at today\'s price.</div>'
+            '</td></tr></table>'
+        )
+
+    intro_line = (
+        'Your recommendation has reached its target:' if count == 1
+        else f'{count} of your recommendations have reached target:'
+    )
+    intro_text = f'Hi {greeting},\n\n{intro_line}\n\n'
+    intro_html = (
+        f'<p style="font-family:Arial,Helvetica,sans-serif;font-size:16px;color:#0f172a;">Hi {greeting},</p>'
+        f'<p style="font-family:Arial,Helvetica,sans-serif;font-size:16px;color:#0f172a;">{intro_line}</p>'
+    )
+
+    cta_line = (
+        "Worth considering booking profit on this now -- reaching target doesn't guarantee the price holds "
+        "from here; this is a point to review and decide for yourself whether to sell, hold, or book partial "
+        "profit."
+    )
+    cta_html = (
+        f'<p style="font-family:Arial,Helvetica,sans-serif;color:#334155;font-size:13px;line-height:1.5;'
+        f'background:#f0fdf4;border-left:3px solid #15803d;border-radius:4px;padding:10px 14px;margin-top:8px;">'
+        f'{cta_line}</p>'
+    )
+
+    text_body = intro_text + '\n\n'.join(cards_text) + f'\n\n{cta_line}\n\n{DISCLAIMER}\n'
+    html_inner = (
+        intro_html
+        + ''.join(cards_html)
+        + cta_html
+        + f'<p style="color:#64748b;font-size:0.85em;margin-top:16px;font-family:Arial,Helvetica,sans-serif;">{DISCLAIMER}</p>'
+    )
+
+    return send_zeptomail_stocks_email(
+        to_email=to_email, to_name=greeting, subject=subject,
+        textbody=text_body, htmlbody=_wrap_email_html(html_inner), sender_name='Nari Nakhre Stocks',
     )
 
 
@@ -594,17 +725,23 @@ def _render_stock_card_text(s):
     if fundamentals_note:
         lines.append(f'  {_capitalize_first(fundamentals_note)}')
     target_label = 'Target' if s.get('pattern_name') else f"Target ({s['holding_period_days']}-day)"
+    target_pct = _pct_increase(s.get('buy_price'), s.get('target_sell_price'))
+    target_pct_text = f' (+{target_pct}%)' if target_pct is not None else ''
     lines.append(
-        f"  Buy: Rs {s['buy_price']}   {target_label}: Rs {s['target_sell_price']}"
+        f"  Buy: Rs {s['buy_price']}   {target_label}: Rs {s['target_sell_price']}{target_pct_text}"
     )
     highlights = _highlights(s)
     if highlights:
         lines.append('  ' + '   '.join(f'{label}: {value}' for label, value in highlights))
     if projection:
         mid, long_term = projection['mid_period'], projection['long_term']
+        mid_pct = _pct_increase(s.get('buy_price'), mid['price'])
+        long_pct = _pct_increase(s.get('buy_price'), long_term['price'])
+        mid_pct_text = f' (+{mid_pct}%)' if mid_pct is not None else ''
+        long_pct_text = f' (+{long_pct}%)' if long_pct is not None else ''
         lines.append(
-            f"  Projected price -- {mid['label']}: Rs {mid['price']:g} | "
-            f"{long_term['label']}: Rs {long_term['price']:g} ({_projection_method_note(projection)})"
+            f"  Projected price -- {mid['label']}: Rs {mid['price']:g}{mid_pct_text} | "
+            f"{long_term['label']}: Rs {long_term['price']:g}{long_pct_text} ({_projection_method_note(projection)})"
         )
     lines.append(f'  {_timing_text(s)}')
     lines.append(f'  Why: {s["rationale"]}')
@@ -639,12 +776,18 @@ def _render_stock_card_html(s):
     badge_bg, badge_fg = _TREND_BADGE_COLORS.get(trend, _TREND_BADGE_COLORS['Recommended'])
     fundamentals_note = _fundamentals_note(s)
     target_label = 'Target' if s.get('pattern_name') else f"Target ({s['holding_period_days']}-day)"
+    target_pct = _pct_increase(s.get('buy_price'), s.get('target_sell_price'))
+    target_pct_html = f' <span style="color:#15803d;font-size:13px;font-weight:normal;">(+{target_pct}%)</span>' if target_pct is not None else ''
     projection = compute_projection_targets(s.get('buy_price'), s.get('target_sell_price'), s.get('pattern_name'))
     chart_uri = build_prediction_chart_data_uri(s.get('buy_price'), projection)
 
     horizon_block = ''
     if projection:
         mid, long_term = projection['mid_period'], projection['long_term']
+        mid_pct = _pct_increase(s.get('buy_price'), mid['price'])
+        long_pct = _pct_increase(s.get('buy_price'), long_term['price'])
+        mid_pct_html = f' <span style="color:#94a3b8;font-weight:normal;">(+{mid_pct}%)</span>' if mid_pct is not None else ''
+        long_pct_html = f' <span style="color:#94a3b8;font-weight:normal;">(+{long_pct}%)</span>' if long_pct is not None else ''
         horizon_block = (
             '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" '
             'style="margin-top:14px;border-top:1px solid #e2e8f0;">'
@@ -652,8 +795,8 @@ def _render_stock_card_html(s):
             f'<td style="padding:6px 10px;color:#64748b;font-size:11px;text-transform:uppercase;letter-spacing:.03em;">{mid["label"]}</td>'
             f'<td style="padding:6px 10px;color:#64748b;font-size:11px;text-transform:uppercase;letter-spacing:.03em;">{long_term["label"]}</td>'
             '</tr><tr>'
-            f'<td style="padding:2px 10px 0;color:#0f172a;font-size:15px;font-weight:bold;">Rs {mid["price"]:g}</td>'
-            f'<td style="padding:2px 10px 0;color:#0f172a;font-size:15px;font-weight:bold;">Rs {long_term["price"]:g}</td>'
+            f'<td style="padding:2px 10px 0;color:#0f172a;font-size:15px;font-weight:bold;">Rs {mid["price"]:g}{mid_pct_html}</td>'
+            f'<td style="padding:2px 10px 0;color:#0f172a;font-size:15px;font-weight:bold;">Rs {long_term["price"]:g}{long_pct_html}</td>'
             '</tr></table>'
             f'<div style="margin-top:4px;color:#94a3b8;font-size:11px;">{_capitalize_first(_projection_method_note(projection))}</div>'
         )
@@ -712,7 +855,7 @@ def _render_stock_card_html(s):
         '<td style="width:50%;"><div style="color:#64748b;font-size:11px;text-transform:uppercase;letter-spacing:.03em;">Buy</div>'
         f'<div style="font-size:19px;font-weight:bold;color:#0f172a;">Rs {s["buy_price"]}</div></td>'
         f'<td style="width:50%;"><div style="color:#64748b;font-size:11px;text-transform:uppercase;letter-spacing:.03em;">{target_label}</div>'
-        f'<div style="font-size:19px;font-weight:bold;color:#15803d;">Rs {s["target_sell_price"]}</div></td>'
+        f'<div style="font-size:19px;font-weight:bold;color:#15803d;">Rs {s["target_sell_price"]}{target_pct_html}</div></td>'
         '</tr></table>'
         f'{highlights_block}'
         f'{horizon_block}'
@@ -1055,6 +1198,134 @@ def send_weekly_starters_email(db, target_date=None, recipient_ids=None):
         recipients = db.execute(
             "SELECT id, username AS email, name FROM stocks_admin_users "
             "WHERE role='viewer' AND is_active=1 AND stocks_plan='starters'"
+        ).fetchall()
+
+    sent = 0
+    failed = 0
+    failures = []
+    for r in recipients:
+        try:
+            referral_code = get_or_create_referral_code(db, r['id'])
+        except Exception:
+            referral_code = None
+        if referral_code:
+            text_body = f'{text_body_base}\n\n{_referral_footer_text(referral_code)}\n'
+            html_body = _wrap_email_html(html_inner_base + _referral_footer_html(referral_code))
+        else:
+            text_body = text_body_base
+            html_body = _wrap_email_html(html_inner_base)
+
+        ok, detail = send_zeptomail_stocks_email(
+            to_email=r['email'],
+            to_name=r.get('name') or r['email'],
+            subject=subject,
+            textbody=text_body,
+            htmlbody=html_body,
+            sender_name='Nari Nakhre Stocks',
+        )
+        if ok:
+            sent += 1
+        else:
+            failed += 1
+            failures.append({'email': r['email'], 'error': detail})
+
+    return {
+        'suggestion_count': len(suggestions),
+        'recipient_count': len(recipients),
+        'sent': sent,
+        'failed': failed,
+        'failures': failures,
+    }
+
+
+def _build_large_cap_bonus_email_content(suggestions, date_label):
+    """Same rendering as _build_email_content's non-empty branch, with
+    copy that makes clear this is a BONUS pick on top of the day's regular
+    Pick of the Day -- drawn only from the large-cap (>Rs 30,000cr) tier
+    (see utils.large_cap_engine) -- not a replacement for it. Only ever
+    called with a non-empty suggestions list (see send_large_cap_bonus_email,
+    which sends nothing at all on a run with no qualifying large-cap pick,
+    same silent-no-op precedent as the Starters weekly email)."""
+    company = _company_display_name(suggestions[0])
+    subject = f"Nari Nakhre Stocks — Bonus Large-Cap Pick: {company} ({date_label})"
+
+    intro_text = (
+        'A bonus pick, exclusive to Standard-plan subscribers, on top of your regular Pick of the Day -- '
+        'drawn only from large, established companies (market cap above Rs 30,000 crore).'
+    )
+    any_horizon_targets = any(
+        compute_projection_targets(s.get('buy_price'), s.get('target_sell_price'), s.get('pattern_name'))
+        for s in suggestions
+    )
+
+    text_lines = [f'Bonus Large-Cap Pick ({date_label}):', intro_text, '']
+    for s in suggestions:
+        text_lines.append(_render_stock_card_text(s))
+        text_lines.append('')
+    if any_horizon_targets:
+        text_lines.append(HORIZON_DISCLAIMER)
+        text_lines.append('')
+    text_lines.append(DISCLAIMER)
+    text_body = '\n'.join(text_lines)
+
+    horizon_note_html = (
+        f'<p style="color:#64748b;font-size:0.8em;line-height:1.5;font-family:Arial,Helvetica,sans-serif;">{HORIZON_DISCLAIMER}</p>'
+        if any_horizon_targets else ''
+    )
+    html_inner = (
+        f'<p style="font-family:Arial,Helvetica,sans-serif;font-size:16px;color:#0f172a;">Bonus Large-Cap Pick:</p>'
+        f'<p style="font-family:Arial,Helvetica,sans-serif;font-size:13px;color:#64748b;margin-top:-6px;">{intro_text}</p>'
+        + ''.join(_render_stock_card_html(s) for s in suggestions)
+        + horizon_note_html
+        + f'<p style="color:#64748b;font-size:0.85em;margin-top:16px;font-family:Arial,Helvetica,sans-serif;">{DISCLAIMER}</p>'
+    )
+    return subject, text_body, html_inner
+
+
+def send_large_cap_bonus_email(db, target_date=None, recipient_ids=None):
+    """The Standard-tier (Rs 299/mo) bonus large-cap pick email -- fetches
+    target_date's pick via utils.large_cap_engine.get_large_cap_bonus_suggestions
+    and emails every active stocks_admin_users row with
+    stocks_plan='standard'. Sent twice a week (see app.py's
+    /stocks/large-cap-bonus/send-email), IN ADDITION TO the regular daily
+    Pick of the Day -- never replaces it.
+
+    Diverges from the daily email on purpose, same as the Starters weekly
+    email: when there's nothing to send (no large-cap candidate cleared
+    the bar this run), this sends NOTHING at all rather than the daily
+    email's always-send-something "nothing cleared the bar" notice -- a
+    bonus extra shouldn't arrive as a "sorry, nothing" email.
+
+    target_date/recipient_ids have the exact same meaning as
+    send_daily_suggestions_email's own params."""
+    if target_date is None:
+        target_date = date.today()
+    elif isinstance(target_date, str):
+        target_date = date.fromisoformat(target_date[:10])
+    date_iso = target_date.isoformat()
+    date_label = target_date.strftime('%d %b %Y')
+
+    suggestions = get_large_cap_bonus_suggestions(db, start_date=date_iso, end_date=date_iso)
+    if not suggestions:
+        return {'suggestion_count': 0, 'recipient_count': 0, 'sent': 0, 'failed': 0, 'failures': []}
+
+    subject, text_body_base, html_inner_base = _build_large_cap_bonus_email_content(suggestions, date_label)
+
+    if recipient_ids is not None:
+        recipient_ids = list(recipient_ids)
+        if recipient_ids:
+            placeholders = ','.join('?' * len(recipient_ids))
+            recipients = db.execute(
+                f"SELECT id, username AS email, name FROM stocks_admin_users "
+                f"WHERE role='viewer' AND is_active=1 AND stocks_plan='standard' AND id IN ({placeholders})",
+                tuple(recipient_ids)
+            ).fetchall()
+        else:
+            recipients = []
+    else:
+        recipients = db.execute(
+            "SELECT id, username AS email, name FROM stocks_admin_users "
+            "WHERE role='viewer' AND is_active=1 AND stocks_plan='standard'"
         ).fetchall()
 
     sent = 0

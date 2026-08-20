@@ -7,10 +7,13 @@ from utils.suggestion_engine import (
     TARGET_PRICE_CHANGE_THRESHOLD_PCT,
     TOP_N_SUGGESTIONS,
     _build_rationale,
+    _fetch_candidates,
     _is_genuine_change,
+    find_pending_target_hit_suggestions,
     generate_daily_suggestions,
     get_suggestion_by_id,
     is_suggestion_eligible,
+    mark_suggestions_target_hit,
     passes_hard_filters,
     score_candidates,
     select_top_suggestions,
@@ -37,6 +40,49 @@ def _candidate(watchlist_id, symbol, **overrides):
     }
     row.update(overrides)
     return row
+
+
+class _SqlCapturingDB:
+    """Records every (sql, params) passed to execute() without simulating
+    any real query result -- used only to verify _fetch_candidates builds
+    the right SQL/params for its optional market_cap_tier filter, not to
+    exercise any business logic (see FakeSuggestionDB below for that)."""
+
+    def __init__(self):
+        self.calls = []
+
+    def execute(self, sql, params=None):
+        self.calls.append((' '.join(sql.split()), params or ()))
+        return _EmptyCursor()
+
+
+class _EmptyCursor:
+    def fetchall(self):
+        return []
+
+    def fetchone(self):
+        return None
+
+
+def test_fetch_candidates_with_no_tier_filter_unchanged_from_before():
+    # market_cap_tier=None (every caller before this param existed) must
+    # produce the exact same WHERE clause -- no "AND w.market_cap_tier ="
+    # filter fragment at all (market_cap_tier is still SELECTed as a plain
+    # column, that's expected) -- so generate_daily_suggestions' candidate
+    # pool is untouched by this addition.
+    db = _SqlCapturingDB()
+    _fetch_candidates(db)
+    sql, params = db.calls[0]
+    assert 'AND w.market_cap_tier = ?' not in sql
+    assert len(params) == 2  # today, fundamentals_cutoff -- no tier param appended
+
+
+def test_fetch_candidates_with_large_cap_tier_filters_in_sql():
+    db = _SqlCapturingDB()
+    _fetch_candidates(db, market_cap_tier='large_cap')
+    sql, params = db.calls[0]
+    assert 'AND w.market_cap_tier = ?' in sql
+    assert params[-1] == 'large_cap'
 
 
 def test_scoring_picks_the_objectively_better_candidate():
@@ -479,5 +525,127 @@ def test_get_suggestion_by_id_returns_the_matching_row():
 def test_get_suggestion_by_id_returns_none_when_not_found():
     db = _FakeByIdDB([{'suggestion_id': 1, 'symbol': 'GOODCO', 'watchlist_id': 10, 'buy_price': 412}])
     assert get_suggestion_by_id(db, 999) is None
+
+
+# --- find_pending_target_hit_suggestions / mark_suggestions_target_hit -----
+
+class _FakeMultiCursor:
+    def __init__(self, rows):
+        self._rows = rows
+
+    def fetchall(self):
+        return self._rows
+
+    def fetchone(self):
+        return self._rows[0] if self._rows else None
+
+
+class _FakeTargetHitDB:
+    """rows: list of dicts with id, status, suggestion_date, target_sell_price,
+    latest_price (plus whatever else the caller wants on the row -- the
+    fake's own SELECT filtering only looks at those four)."""
+
+    def __init__(self, rows):
+        self.rows = rows
+
+    def execute(self, sql, params=None):
+        params = params or ()
+        normalized = ' '.join(sql.split())
+
+        if normalized.startswith('SELECT s.id, w.id AS watchlist_id, w.symbol, w.exchange, w.name AS company_name,'):
+            matches = [
+                r for r in self.rows
+                if r['status'] == 'pending'
+                and r.get('target_sell_price') is not None
+                and r.get('latest_price') is not None
+                and r['latest_price'] >= r['target_sell_price']
+            ]
+            matches.sort(key=lambda r: (r['suggestion_date'], r['id']))
+            return _FakeMultiCursor(matches)
+
+        if normalized.startswith('UPDATE stock_suggestions SET'):
+            ids = set(params)
+            for r in self.rows:
+                if r['id'] in ids:
+                    r['status'] = 'target_hit'
+            return _FakeMultiCursor([])
+
+        raise AssertionError(f'Unexpected SQL in test: {sql}')
+
+    def commit(self):
+        pass
+
+
+def _target_hit_row(**overrides):
+    row = {
+        'id': 1, 'symbol': 'GOODCO', 'exchange': 'NSE', 'company_name': 'Good Co Ltd',
+        'watchlist_id': 10, 'status': 'pending', 'suggestion_date': '2026-08-01',
+        'buy_price': 100, 'target_sell_price': 110,
+        'latest_price': 112, 'latest_price_date': '2026-08-10',
+    }
+    row.update(overrides)
+    return row
+
+
+def test_finds_a_pending_suggestion_whose_target_was_reached():
+    db = _FakeTargetHitDB([_target_hit_row()])
+    hits = find_pending_target_hit_suggestions(db)
+    assert len(hits) == 1
+    assert hits[0]['symbol'] == 'GOODCO'
+
+
+def test_does_not_find_a_pending_suggestion_still_below_target():
+    db = _FakeTargetHitDB([_target_hit_row(latest_price=105, target_sell_price=110)])
+    assert find_pending_target_hit_suggestions(db) == []
+
+
+def test_does_not_re_find_a_suggestion_already_marked_target_hit():
+    # The whole point of checking status='pending' -- a suggestion already
+    # notified about (or otherwise no longer pending) must never show up
+    # again even if price stays above target indefinitely.
+    db = _FakeTargetHitDB([_target_hit_row(status='target_hit')])
+    assert find_pending_target_hit_suggestions(db) == []
+
+
+def test_suggestion_with_no_target_price_is_never_a_hit():
+    db = _FakeTargetHitDB([_target_hit_row(target_sell_price=None)])
+    assert find_pending_target_hit_suggestions(db) == []
+
+
+def test_suggestion_with_no_synced_price_yet_is_never_a_hit():
+    db = _FakeTargetHitDB([_target_hit_row(latest_price=None)])
+    assert find_pending_target_hit_suggestions(db) == []
+
+
+def test_multiple_hits_are_sorted_oldest_suggestion_first():
+    db = _FakeTargetHitDB([
+        _target_hit_row(id=1, symbol='NEWER', suggestion_date='2026-08-10'),
+        _target_hit_row(id=2, symbol='OLDER', suggestion_date='2026-07-01'),
+    ])
+    hits = find_pending_target_hit_suggestions(db)
+    assert [h['symbol'] for h in hits] == ['OLDER', 'NEWER']
+
+
+def test_mark_suggestions_target_hit_updates_status():
+    db = _FakeTargetHitDB([_target_hit_row(id=1), _target_hit_row(id=2, symbol='OTHERCO')])
+    mark_suggestions_target_hit(db, [1])
+    assert db.rows[0]['status'] == 'target_hit'
+    assert db.rows[1]['status'] == 'pending'  # untouched
+
+
+def test_mark_suggestions_target_hit_prevents_rediscovery():
+    db = _FakeTargetHitDB([_target_hit_row(id=1)])
+    hits = find_pending_target_hit_suggestions(db)
+    assert len(hits) == 1
+
+    mark_suggestions_target_hit(db, [h['id'] for h in hits])
+
+    assert find_pending_target_hit_suggestions(db) == []
+
+
+def test_mark_suggestions_target_hit_is_a_no_op_on_empty_list():
+    db = _FakeTargetHitDB([_target_hit_row()])
+    mark_suggestions_target_hit(db, [])  # must not raise or touch the DB
+    assert db.rows[0]['status'] == 'pending'
 
 

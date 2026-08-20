@@ -1,4 +1,15 @@
-from utils.fundamental_screen import classify_fundamental_tier, evaluate_fundamentals, get_metric_note
+from utils.fundamental_screen import (
+    MINIMUM_GROWTH_PCT_LARGE_CAP,
+    PROMOTER_PLEDGE_MAX_PCT,
+    QUARTERLY_GROWTH_MIN,
+    classify_fundamental_tier,
+    compute_holding_percentiles,
+    evaluate_fundamentals,
+    evaluate_fundamentals_large_cap,
+    get_metric_note,
+    score_fundamentals_large_cap,
+    score_institutional_holding,
+)
 
 PASSING_ROW = {
     'pe_ratio': 20,
@@ -457,4 +468,301 @@ def test_classify_uses_industry_benchmark_when_given():
     tier, failed = classify_fundamental_tier(row, previous_fundamentals_row=None, industry_benchmarks=benchmark)
 
     assert tier == 'golden'
+
+
+# --- Large-cap tier (entirely parallel; evaluate_fundamentals/
+# classify_fundamental_tier above are never called by any of this) --------
+
+def test_growth_floor_constants_are_independent():
+    # The whole point of this tier -- a separate, lower constant, with the
+    # original left completely alone.
+    assert QUARTERLY_GROWTH_MIN == 10
+    assert MINIMUM_GROWTH_PCT_LARGE_CAP == 5.0
+
+
+def test_six_percent_growth_passes_large_cap_evaluation():
+    # Below QUARTERLY_GROWTH_MIN (10%) but above MINIMUM_GROWTH_PCT_LARGE_CAP
+    # (5%) -- the central requirement for this tier.
+    row = {**PASSING_ROW, 'quarterly_profit_growth_pct': 6, 'quarterly_revenue_growth_pct': 6}
+
+    passes, failed = evaluate_fundamentals_large_cap(row, PASSING_PREVIOUS_ROW)
+
+    assert passes is True
     assert failed == []
+
+
+def test_six_percent_growth_fails_the_original_mid_cap_evaluation():
+    # The exact same row, run through the UNCHANGED original function --
+    # must still fail on both growth checks, proving evaluate_fundamentals
+    # itself was never touched.
+    row = {**PASSING_ROW, 'quarterly_profit_growth_pct': 6, 'quarterly_revenue_growth_pct': 6}
+
+    passes, failed = evaluate_fundamentals(row, PASSING_PREVIOUS_ROW)
+
+    assert passes is False
+    assert 'quarterly profit growth' in failed
+    assert 'quarterly revenue growth' in failed
+
+
+def test_four_percent_growth_still_fails_large_cap_floor():
+    # Below MINIMUM_GROWTH_PCT_LARGE_CAP too -- the large-cap tier isn't a
+    # blank check, it just has a lower bar, not no bar.
+    row = {**PASSING_ROW, 'quarterly_profit_growth_pct': 4, 'quarterly_revenue_growth_pct': 4}
+
+    passes, failed = evaluate_fundamentals_large_cap(row, PASSING_PREVIOUS_ROW)
+
+    assert passes is False
+    assert 'quarterly profit growth' in failed
+    assert 'quarterly revenue growth' in failed
+
+
+def test_large_cap_evaluation_still_enforces_every_other_criterion():
+    # Growth floor is lower, but PEG/OPM/ROCE/etc. are all identical to the
+    # mid-cap version -- a row failing PEG must still fail here.
+    row = {
+        **PASSING_ROW, 'quarterly_profit_growth_pct': 6, 'quarterly_revenue_growth_pct': 6,
+        'peg_ratio': 2.0,
+    }
+
+    passes, failed = evaluate_fundamentals_large_cap(row, PASSING_PREVIOUS_ROW)
+
+    assert passes is False
+    assert failed == ['PEG']
+
+
+def test_score_fundamentals_large_cap_all_passing_is_golden():
+    row = {**PASSING_ROW, 'quarterly_profit_growth_pct': 6, 'quarterly_revenue_growth_pct': 6}
+
+    tier, failed = score_fundamentals_large_cap(row, PASSING_PREVIOUS_ROW)
+
+    assert tier == 'golden'
+    assert failed == []
+
+
+def test_score_fundamentals_large_cap_pe_only_failure_is_silver():
+    row = {
+        **PASSING_ROW, 'quarterly_profit_growth_pct': 6, 'quarterly_revenue_growth_pct': 6,
+        'pe_ratio': 30,
+    }
+
+    tier, failed = score_fundamentals_large_cap(row, previous_fundamentals_row=None)
+
+    assert tier == 'silver'
+    assert failed == ['PE range']
+
+
+def test_score_fundamentals_large_cap_roce_only_failure_is_bronze():
+    row = {
+        **PASSING_ROW, 'quarterly_profit_growth_pct': 6, 'quarterly_revenue_growth_pct': 6,
+        'roce_pct': -1,
+    }
+
+    tier, failed = score_fundamentals_large_cap(row, previous_fundamentals_row=None)
+
+    assert tier == 'bronze'
+    assert failed == ['ROCE']
+
+
+def test_score_fundamentals_large_cap_growth_failure_is_excluded_outright():
+    # Growth isn't in SILVER_ELIGIBLE_CRITERIA/BRONZE_ELIGIBLE_CRITERIA --
+    # failing it (even under the lower large-cap floor) still means outright
+    # exclusion, same as every other non-forgiven criterion.
+    row = {**PASSING_ROW, 'quarterly_profit_growth_pct': 2, 'quarterly_revenue_growth_pct': 2}
+
+    tier, failed = score_fundamentals_large_cap(row, previous_fundamentals_row=None)
+
+    assert tier is None
+    assert 'quarterly profit growth' in failed
+
+
+def test_score_fundamentals_large_cap_uses_industry_benchmark_when_given():
+    row = {**PASSING_ROW, 'quarterly_profit_growth_pct': 6, 'quarterly_revenue_growth_pct': 6, 'pe_ratio': 35}
+    benchmark = {'pe_ratio': {'avg': 30, 'count': 5}, 'price_to_book': None}
+
+    tier, failed = score_fundamentals_large_cap(row, previous_fundamentals_row=None, industry_benchmarks=benchmark)
+
+    assert tier == 'golden'
+    assert failed == []
+
+
+# --- Promoter pledge hard disqualifier (mid-cap and large-cap) -------------
+
+def test_promoter_pledge_max_is_ten_percent():
+    assert PROMOTER_PLEDGE_MAX_PCT == 10
+
+
+def test_twelve_percent_pledge_disqualifies_mid_cap_despite_every_other_strength():
+    row = {**PASSING_ROW, 'promoter_pledge_pct': 12}
+
+    passes, failed = evaluate_fundamentals(row, PASSING_PREVIOUS_ROW)
+
+    assert passes is False
+    assert 'promoter pledge' in failed
+
+    tier, failed = classify_fundamental_tier(row, PASSING_PREVIOUS_ROW)
+    assert tier is None  # never forgiven at silver or bronze, unlike ROCE/ROA
+
+
+def test_twelve_percent_pledge_disqualifies_large_cap_despite_every_other_strength():
+    row = {
+        **PASSING_ROW, 'quarterly_profit_growth_pct': 6, 'quarterly_revenue_growth_pct': 6,
+        'promoter_pledge_pct': 12,
+    }
+
+    passes, failed = evaluate_fundamentals_large_cap(row, PASSING_PREVIOUS_ROW)
+
+    assert passes is False
+    assert 'promoter pledge' in failed
+
+    tier, failed = score_fundamentals_large_cap(row, PASSING_PREVIOUS_ROW)
+    assert tier is None
+
+
+def test_pledge_exactly_at_the_threshold_disqualifies():
+    row = {**PASSING_ROW, 'promoter_pledge_pct': 10}
+
+    passes, failed = evaluate_fundamentals(row, PASSING_PREVIOUS_ROW)
+
+    assert passes is False
+    assert 'promoter pledge' in failed
+
+
+def test_pledge_just_below_the_threshold_does_not_disqualify():
+    row = {**PASSING_ROW, 'promoter_pledge_pct': 9.9}
+
+    passes, failed = evaluate_fundamentals(row, PASSING_PREVIOUS_ROW)
+
+    assert passes is True
+    assert failed == []
+
+
+def test_null_pledge_is_not_disqualifying_mid_cap():
+    row = {**PASSING_ROW, 'promoter_pledge_pct': None}
+
+    passes, failed = evaluate_fundamentals(row, PASSING_PREVIOUS_ROW)
+
+    assert passes is True
+    assert 'promoter pledge' not in failed
+
+
+def test_missing_pledge_key_entirely_is_not_disqualifying_mid_cap():
+    # PASSING_ROW itself never sets promoter_pledge_pct at all -- .get()
+    # returns None the same as an explicit None, must not be disqualifying.
+    assert 'promoter_pledge_pct' not in PASSING_ROW
+
+    passes, failed = evaluate_fundamentals(PASSING_ROW, PASSING_PREVIOUS_ROW)
+
+    assert passes is True
+    assert failed == []
+
+
+def test_null_pledge_is_not_disqualifying_large_cap():
+    row = {**PASSING_ROW, 'quarterly_profit_growth_pct': 6, 'quarterly_revenue_growth_pct': 6,
+           'promoter_pledge_pct': None}
+
+    passes, failed = evaluate_fundamentals_large_cap(row, PASSING_PREVIOUS_ROW)
+
+    assert passes is True
+    assert failed == []
+
+
+def test_pledge_failure_combined_with_a_forgivable_criterion_is_still_excluded():
+    # Pledge is not in SILVER_ELIGIBLE_CRITERIA/BRONZE_ELIGIBLE_CRITERIA --
+    # failing it alongside something silver would otherwise forgive (PE)
+    # must still mean outright exclusion, not silver.
+    row = {**PASSING_ROW, 'pe_ratio': 30, 'promoter_pledge_pct': 15}
+
+    tier, failed = classify_fundamental_tier(row, previous_fundamentals_row=None)
+
+    assert tier is None
+    assert set(failed) == {'PE range', 'promoter pledge'}
+
+
+# --- score_institutional_holding stub (unwired) -----------------------------
+
+def test_score_institutional_holding_stub_always_returns_zero():
+    assert score_institutional_holding({'fii_holding_pct': 25, 'dii_holding_pct': 15}) == 0
+    assert score_institutional_holding({}) == 0
+    assert score_institutional_holding({'fii_holding_pct': None}) == 0
+
+
+def test_score_institutional_holding_is_not_referenced_by_the_main_evaluators():
+    # Confirms the stub is genuinely unwired -- a row with terrible FII/DII
+    # holding must not be penalized by evaluate_fundamentals/
+    # evaluate_fundamentals_large_cap in this phase. previous_fundamentals_row=
+    # None so this only isolates the (nonexistent) level check, not the
+    # separate, pre-existing FII holding TREND check (which would otherwise
+    # itself fail here since 0 isn't an increase over PASSING_PREVIOUS_ROW's
+    # 15 -- unrelated to score_institutional_holding).
+    row = {**PASSING_ROW, 'fii_holding_pct': 0, 'dii_holding_pct': 0}
+    passes, failed = evaluate_fundamentals(row, previous_fundamentals_row=None)
+    assert passes is True
+
+    row_large_cap = {**row, 'quarterly_profit_growth_pct': 6, 'quarterly_revenue_growth_pct': 6}
+    passes, failed = evaluate_fundamentals_large_cap(row_large_cap, previous_fundamentals_row=None)
+    assert passes is True
+
+
+# --- compute_holding_percentiles diagnostic ---------------------------------
+
+def test_compute_holding_percentiles_on_synthetic_data():
+    # 1..100 -> well-known percentile positions, easy to verify by hand.
+    rows = [{'fii_holding_pct': v} for v in range(1, 101)]
+
+    result = compute_holding_percentiles(rows, 'fii_holding_pct')
+
+    assert result['count'] == 100
+    assert result['p50'] == 50.5   # linear interpolation between 50 and 51
+    assert result['p10'] < result['p25'] < result['p50'] < result['p75'] < result['p90']
+
+
+def test_compute_holding_percentiles_excludes_none_values_not_zero():
+    rows = [
+        {'fii_holding_pct': 10}, {'fii_holding_pct': None}, {'fii_holding_pct': 20},
+        {'fii_holding_pct': None}, {'fii_holding_pct': 30},
+    ]
+
+    result = compute_holding_percentiles(rows, 'fii_holding_pct')
+
+    assert result['count'] == 3  # the two Nones are excluded, not counted as 0
+    assert result['p50'] == 20
+
+
+def test_compute_holding_percentiles_empty_input_returns_none_percentiles():
+    result = compute_holding_percentiles([], 'fii_holding_pct')
+    assert result == {'count': 0, 'p10': None, 'p25': None, 'p50': None, 'p75': None, 'p90': None}
+
+
+def test_compute_holding_percentiles_all_none_returns_none_percentiles():
+    rows = [{'fii_holding_pct': None}, {'fii_holding_pct': None}]
+    result = compute_holding_percentiles(rows, 'fii_holding_pct')
+    assert result['count'] == 0
+    assert result['p50'] is None
+
+
+def test_compute_holding_percentiles_works_for_dii_field_too():
+    rows = [{'dii_holding_pct': 5}, {'dii_holding_pct': 15}, {'dii_holding_pct': 25}]
+
+    result = compute_holding_percentiles(rows, 'dii_holding_pct')
+
+    assert result['count'] == 3
+    assert result['p50'] == 15
+
+
+def test_compute_holding_percentiles_single_value():
+    rows = [{'fii_holding_pct': 42}]
+    result = compute_holding_percentiles(rows, 'fii_holding_pct')
+    assert result == {'count': 1, 'p10': 42, 'p25': 42, 'p50': 42, 'p75': 42, 'p90': 42}
+
+
+def test_compute_holding_percentiles_mid_cap_and_large_cap_pools_are_independent():
+    # Mirrors the real diagnostic's use case: same function, two separate
+    # calls, one per pool -- confirms there's no shared/leaked state.
+    mid_cap_rows = [{'fii_holding_pct': v} for v in (5, 10, 15)]
+    large_cap_rows = [{'fii_holding_pct': v} for v in (30, 40, 50)]
+
+    mid_cap_result = compute_holding_percentiles(mid_cap_rows, 'fii_holding_pct')
+    large_cap_result = compute_holding_percentiles(large_cap_rows, 'fii_holding_pct')
+
+    assert mid_cap_result['p50'] == 10
+    assert large_cap_result['p50'] == 40

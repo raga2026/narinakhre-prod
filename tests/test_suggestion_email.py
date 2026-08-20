@@ -6,11 +6,14 @@ from utils.suggestion_email import (
     send_admin_subscription_cancelled_email,
     send_daily_suggestions_email,
     send_subscription_welcome_email,
+    send_target_achieved_email,
     send_target_hit_email,
     send_trading_alert_email,
     send_viewer_welcome_email,
     send_weekly_starters_email,
+    send_large_cap_bonus_email,
 )
+from utils.price_pattern import compute_projection_targets
 
 
 class FakeCursor:
@@ -324,7 +327,36 @@ def test_short_term_target_price_is_shown_alongside_buy_and_stop_loss():
     htmlbody = mock_send.call_args.kwargs['htmlbody']
     assert 'Target (10-day): Rs 105.0' in textbody
     assert '>Target (10-day)<' in htmlbody
-    assert '>Rs 105.0<' in htmlbody
+    assert '>Rs 105.0' in htmlbody
+    # % increase from buy price (100.0 -> 105.0 is +5.0%) shown beside the target.
+    assert '(+5.0%)' in textbody
+    assert '(+5.0%)' in htmlbody
+
+
+def test_projection_prices_show_pct_increase_from_buy_price():
+    # Regression: mid-period/long-term projected prices must each show how
+    # much higher they are than the buy price, not just the bare Rs figure.
+    buy_price, target_price = 100.0, 105.0
+    db = FakeEmailDB(
+        suggestion_rows=[
+            {'symbol': 'GLD', 'exchange': 'NSE', 'buy_price': buy_price, 'target_sell_price': target_price,
+             'stop_loss_price': 97.0, 'holding_period_days': 10, 'rationale': 'Golden cross with confirming volume'},
+        ],
+        recipient_rows=[{'email': 'a@example.com', 'name': 'A'}],
+    )
+    projection = compute_projection_targets(buy_price, target_price, None)
+    mid_pct = round((projection['mid_period']['price'] - buy_price) / buy_price * 100, 1)
+    long_pct = round((projection['long_term']['price'] - buy_price) / buy_price * 100, 1)
+
+    with patch('utils.suggestion_email.send_zeptomail_stocks_email', return_value=(True, 'ok')) as mock_send:
+        send_daily_suggestions_email(db)
+
+    textbody = mock_send.call_args.kwargs['textbody']
+    htmlbody = mock_send.call_args.kwargs['htmlbody']
+    assert f'(+{mid_pct}%)' in textbody
+    assert f'(+{long_pct}%)' in textbody
+    assert f'(+{mid_pct}%)' in htmlbody
+    assert f'(+{long_pct}%)' in htmlbody
 
 
 def test_pattern_based_suggestion_target_label_has_no_day_count_claim():
@@ -749,6 +781,65 @@ def test_target_hit_email_reports_the_pnl_and_links_to_the_dashboard():
     assert '/stocks/auto-trader' in kwargs['textbody']
 
 
+def test_target_achieved_email_single_achievement():
+    achievement = {
+        'symbol': 'GLD', 'exchange': 'NSE', 'company_name': 'Golden Co Ltd',
+        'suggestion_date': '2026-08-01', 'buy_price': 100.0, 'target_sell_price': 110.0,
+        'latest_price': 112.0, 'latest_price_date': '2026-08-11',
+    }
+    with patch('utils.suggestion_email.send_zeptomail_stocks_email', return_value=(True, 'ok')) as mock_send:
+        send_target_achieved_email('sub@example.com', 'A Subscriber', [achievement])
+
+    kwargs = mock_send.call_args.kwargs
+    assert kwargs['to_email'] == 'sub@example.com'
+    assert 'Golden Co Ltd' in kwargs['subject']
+    assert 'hit its target' in kwargs['subject'].lower()
+    assert 'Golden Co Ltd' in kwargs['textbody']
+    assert 'Rs 100.0' in kwargs['textbody']  # recommended price
+    assert 'Rs 110.0' in kwargs['textbody']  # target price
+    assert 'Rs 112.0' in kwargs['textbody']  # achieved/latest price
+    assert '10 days' in kwargs['textbody']   # Aug 1 -> Aug 11
+    assert '+12.0%' in kwargs['textbody']    # (112-100)/100
+    assert 'booking profit' in kwargs['textbody'].lower()
+    assert kwargs['htmlbody'].strip().startswith('<!doctype html>')
+    assert 'Golden Co Ltd' in kwargs['htmlbody']
+    assert DISCLAIMER in kwargs['textbody']
+
+
+def test_target_achieved_email_bundles_multiple_achievements_in_one_email():
+    achievements = [
+        {'symbol': 'GLD', 'exchange': 'NSE', 'company_name': 'Golden Co Ltd',
+         'suggestion_date': '2026-08-01', 'buy_price': 100.0, 'target_sell_price': 110.0,
+         'latest_price': 111.0, 'latest_price_date': '2026-08-08'},
+        {'symbol': 'SLV', 'exchange': 'NSE', 'company_name': 'Silver Star Ltd',
+         'suggestion_date': '2026-07-20', 'buy_price': 50.0, 'target_sell_price': 55.0,
+         'latest_price': 56.0, 'latest_price_date': '2026-08-08'},
+    ]
+    with patch('utils.suggestion_email.send_zeptomail_stocks_email', return_value=(True, 'ok')) as mock_send:
+        send_target_achieved_email('sub@example.com', 'A Subscriber', achievements)
+
+    kwargs = mock_send.call_args.kwargs
+    assert '2 of your recommendations' in kwargs['subject']
+    assert 'Golden Co Ltd' in kwargs['textbody']
+    assert 'Silver Star Ltd' in kwargs['textbody']
+    assert 'Golden Co Ltd' in kwargs['htmlbody']
+    assert 'Silver Star Ltd' in kwargs['htmlbody']
+
+
+def test_target_achieved_email_falls_back_to_symbol_when_no_company_name():
+    achievement = {
+        'symbol': 'GLD', 'exchange': 'NSE', 'company_name': None,
+        'suggestion_date': '2026-08-01', 'buy_price': 100.0, 'target_sell_price': 110.0,
+        'latest_price': 112.0, 'latest_price_date': '2026-08-11',
+    }
+    with patch('utils.suggestion_email.send_zeptomail_stocks_email', return_value=(True, 'ok')) as mock_send:
+        send_target_achieved_email('sub@example.com', None, [achievement])
+
+    kwargs = mock_send.call_args.kwargs
+    assert 'GLD' in kwargs['subject']
+    assert kwargs['to_name'] == 'sub@example.com'  # falls back to email when no name given
+
+
 def test_daily_email_includes_each_recipients_own_referral_footer():
     db = FakeEmailDB(
         suggestion_rows=[
@@ -890,3 +981,84 @@ def test_weekly_starters_email_includes_both_picks_when_two_cleared_the_bar():
     assert '2 Picks' in kwargs['subject']
     assert 'Golden Co Ltd' in kwargs['textbody']
     assert 'Silver Star Ltd' in kwargs['textbody']
+
+
+class FakeLargeCapBonusEmailDB:
+    """Same shape as FakeStartersEmailDB, but for send_large_cap_bonus_email
+    -- get_large_cap_bonus_suggestions' SELECT is textually IDENTICAL to
+    get_suggestions' up through the same prefix (both mirror the same
+    column list), so matching also requires 'stock_large_cap_bonus_suggestions'
+    to appear in the SQL text -- proving this reads from the bonus table,
+    not stock_suggestions. Likewise the recipient query must literally
+    filter on stocks_plan='standard', not just 'every active viewer'."""
+
+    def __init__(self, suggestion_rows, recipient_rows):
+        self.suggestion_rows = suggestion_rows
+        self.recipient_rows = recipient_rows
+
+    def execute(self, sql, params=None):
+        normalized = ' '.join(sql.split())
+
+        if (normalized.startswith('SELECT DISTINCT ON (s.suggestion_date) w.id AS watchlist_id, w.symbol, w.exchange, w.name AS company_name,')
+                and 'stock_large_cap_bonus_suggestions' in normalized):
+            return FakeCursor(self.suggestion_rows)
+
+        if "stocks_plan='standard'" in normalized and normalized.startswith("SELECT id, username AS email, name FROM stocks_admin_users WHERE role='viewer'"):
+            if 'AND id IN (' in normalized:
+                wanted = set(params)
+                return FakeCursor([r for r in self.recipient_rows if r.get('id') in wanted])
+            return FakeCursor(self.recipient_rows)
+
+        if normalized.startswith('SELECT referral_code FROM stocks_admin_users WHERE id=?'):
+            admin_id, = params
+            matches = [r for r in self.recipient_rows if r.get('id') == admin_id and r.get('referral_code')]
+            return FakeCursor(matches[:1])
+        if normalized.startswith('SELECT id FROM stocks_admin_users WHERE referral_code=?'):
+            code, = params
+            matches = [r for r in self.recipient_rows if r.get('referral_code') == code]
+            return FakeCursor(matches[:1])
+        if normalized.startswith('UPDATE stocks_admin_users SET referral_code=?'):
+            code, admin_id = params
+            for r in self.recipient_rows:
+                if r.get('id') == admin_id:
+                    r['referral_code'] = code
+            return FakeCursor([])
+
+        raise AssertionError(f'Unexpected SQL in test: {sql}')
+
+    def commit(self):
+        pass
+
+
+def test_large_cap_bonus_email_sends_nothing_when_no_pick_cleared_the_bar():
+    db = FakeLargeCapBonusEmailDB(suggestion_rows=[], recipient_rows=[{'id': 1, 'email': 'a@example.com', 'name': 'A'}])
+
+    with patch('utils.suggestion_email.send_zeptomail_stocks_email', return_value=(True, 'ok')) as mock_send:
+        summary = send_large_cap_bonus_email(db)
+
+    mock_send.assert_not_called()
+    assert summary == {'suggestion_count': 0, 'recipient_count': 0, 'sent': 0, 'failed': 0, 'failures': []}
+
+
+def test_large_cap_bonus_email_sends_only_to_standard_recipients():
+    db = FakeLargeCapBonusEmailDB(
+        suggestion_rows=[
+            {'symbol': 'BIGC', 'exchange': 'NSE', 'company_name': 'Big Cap Ltd', 'buy_price': 200.0,
+             'target_sell_price': 210.0, 'stop_loss_price': 194.0, 'holding_period_days': 10,
+             'nns_tier': 'golden', 'rationale': 'Golden cross with confirming volume'},
+        ],
+        recipient_rows=[{'id': 1, 'email': 'standard@example.com', 'name': 'Standard Sub'}],
+    )
+
+    with patch('utils.suggestion_email.send_zeptomail_stocks_email', return_value=(True, 'ok')) as mock_send:
+        summary = send_large_cap_bonus_email(db)
+
+    assert summary['sent'] == 1
+    kwargs = mock_send.call_args.kwargs
+    assert kwargs['to_email'] == 'standard@example.com'
+    assert 'Bonus Large-Cap Pick' in kwargs['subject']
+    assert 'Big Cap Ltd' in kwargs['subject']
+    assert 'Big Cap Ltd' in kwargs['textbody']
+    assert 'Bonus Large-Cap Pick' in kwargs['textbody']
+    assert kwargs['htmlbody'].strip().startswith('<!doctype html>')
+    assert DISCLAIMER in kwargs['textbody']

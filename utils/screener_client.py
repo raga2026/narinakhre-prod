@@ -224,22 +224,44 @@ def _parse_free_cash_flow(soup):
 
 
 def _parse_shareholding(soup):
-    """Latest Promoters/FIIs/Public holding %, from #shareholding -- that
-    section actually has TWO tables (quarterly view and yearly view); the
-    quarterly one omits Promoters/Government entirely (confirmed against a
-    real page), so this searches both via _row_values' list support rather
-    than just the first table. The yearly table also carries several years
-    of history in one fetch -- only the latest column is captured here,
-    matching what stock_fundamentals stores per snapshot; the promoter/FII
-    trend checks in fundamental_screen.py compare across our own
-    accumulated stock_fundamentals snapshots over time instead of reaching
-    back into this table's own history."""
+    """Latest Promoters/FIIs/DIIs/Public holding %, from #shareholding --
+    that section actually has TWO tables (quarterly view and yearly view);
+    the quarterly one omits Promoters/Government entirely (confirmed
+    against a real page), so this searches both via _row_values' list
+    support rather than just the first table. The yearly table also
+    carries several years of history in one fetch -- only the latest
+    column is captured here, matching what stock_fundamentals stores per
+    snapshot; the promoter/FII trend checks in fundamental_screen.py
+    compare across our own accumulated stock_fundamentals snapshots over
+    time instead of reaching back into this table's own history.
+
+    DIIs is a plain row in the same table as Promoters/FIIs/Public --
+    confirmed against a real fetched page (screener.in/company/RPOWER/,
+    quarterly shareholding table: Promoters, FIIs, DIIs, Government,
+    Public, No. of Shareholders, in that order) -- captured the exact
+    same way as the other three, no new parsing approach needed.
+
+    promoter_pledge_pct is deliberately NOT parsed here -- confirmed
+    against that same real page (a full raw-HTML search for "pledge",
+    case-insensitive, across the entire fetched page) that Screener's
+    public company page doesn't contain any promoter pledge data at all,
+    for a company (Reliance Power) with a well-documented history of very
+    high promoter pledge -- if it were on this page in any form, it should
+    have shown up there. The stock_fundamentals.promoter_pledge_pct column
+    exists (see STOCK_FUNDAMENTALS_ALTER_SQL) ready for whenever a real,
+    confirmed source is found; it's simply never set by this function, so
+    it stays NULL rather than guessing a selector that was never actually
+    verified."""
     tables = _get_section_tables(soup, 'shareholding')
-    result = {'promoter_holding_pct': None, 'fii_holding_pct': None, 'public_holding_pct': None}
+    result = {
+        'promoter_holding_pct': None, 'fii_holding_pct': None,
+        'dii_holding_pct': None, 'public_holding_pct': None,
+    }
     if not tables:
         return result
     result['promoter_holding_pct'] = _latest_numeric(_row_values(tables, 'Promoters'))
     result['fii_holding_pct'] = _latest_numeric(_row_values(tables, 'FIIs'))
+    result['dii_holding_pct'] = _latest_numeric(_row_values(tables, 'DIIs'))
     result['public_holding_pct'] = _latest_numeric(_row_values(tables, 'Public'))
     return result
 

@@ -48,7 +48,7 @@
             {% if suggestion.nns_tier %}
             <span class="badge badge-{{ suggestion.nns_tier }}">{{ suggestion.nns_tier | title }}</span>
             {% endif %}
-            <div class="grid grid-cols-3 gap-4 mt-4">
+            <div class="grid grid-cols-2 gap-4 mt-4">
                 <div>
                     <p class="stat-label">Buy price</p>
                     <p class="stat-value">&#8377;{{ suggestion.buy_price }}</p>
@@ -57,11 +57,8 @@
                     <p class="stat-label">Target</p>
                     <p class="stat-value" style="color:#4ade80;">&#8377;{{ suggestion.target_sell_price if suggestion.target_sell_price is not none else '&mdash;' }}</p>
                 </div>
-                <div>
-                    <p class="stat-label">Stop-loss</p>
-                    <p class="stat-value" style="color:#f87171;">&#8377;{{ suggestion.stop_loss_price if suggestion.stop_loss_price is not none else '&mdash;' }}</p>
-                </div>
             </div>
+            <p class="text-slate-500 text-xs mt-3">Target only -- no stop-loss is tracked for this position. It closes automatically at target, or manually via "Sell now" on the Auto-Trader dashboard.</p>
             {% if suggestion.rationale %}
             <p class="text-slate-300 text-sm mt-4">{{ suggestion.rationale }}</p>
             {% endif %}

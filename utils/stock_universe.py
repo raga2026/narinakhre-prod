@@ -45,6 +45,14 @@ STOCK_UNIVERSE_ALTER_SQL = [
     # scraped. Feeds fundamental_screen.py's industry-relative PE/
     # price-to-book screening (see stock_shortlist._compute_industry_benchmarks).
     "ALTER TABLE stock_universe ADD COLUMN IF NOT EXISTS industry TEXT",
+    # Large-cap tier (see rebucket_large_cap_eligibility below and
+    # utils/fundamental_screen.py's score_fundamentals_large_cap) -- a
+    # wholly separate, parallel eligibility flag alongside is_scrape_eligible
+    # above, not a replacement for it. True whenever last_market_cap is
+    # above 30000cr (same threshold market_cap_band's 'above_30000cr' band
+    # already uses), with NO upper bound, unlike is_scrape_eligible's
+    # 5000-30000cr window.
+    "ALTER TABLE stock_universe ADD COLUMN IF NOT EXISTS is_large_cap_eligible BOOLEAN DEFAULT false",
 ]
 
 
@@ -260,6 +268,41 @@ def rebucket_market_cap_bands(db):
     eligible_count = (eligible['count'] if eligible else 0) or 0
 
     print(f'Market cap re-bucketing complete. {eligible_count} rows are scrape-eligible (5000-30000cr band).')
+    return eligible_count
+
+
+def rebucket_large_cap_eligibility(db):
+    """Recomputes is_large_cap_eligible for every stock_universe row from
+    its current last_market_cap -- a wholly separate, parallel companion to
+    rebucket_market_cap_bands() above, not a modification of it: this
+    deliberately does not call, depend on, or need to run before/after
+    that function. Both are derived independently from the same
+    last_market_cap column, so either can run in any order, or one could
+    even be skipped entirely, without affecting the other's result.
+
+    True whenever last_market_cap is above 30000 (crore) -- same threshold
+    market_cap_band's 'above_30000cr' band already uses -- with NO upper
+    bound on this tier (unlike is_scrape_eligible's 5000-30000cr window,
+    a large-cap company doesn't stop being large-cap eligible just because
+    it grows further).
+
+    Same WHERE id IS NOT NULL safety-guard reasoning as
+    rebucket_market_cap_bands (the execute_sql RPC function this app calls
+    through rejects any UPDATE with no WHERE clause at all)."""
+    db.execute(
+        '''UPDATE stock_universe
+           SET is_large_cap_eligible = (last_market_cap IS NOT NULL AND last_market_cap > 30000),
+               updated_at = NOW()
+           WHERE id IS NOT NULL'''
+    )
+    db.commit()
+
+    eligible = db.execute(
+        'SELECT COUNT(*) AS count FROM stock_universe WHERE is_large_cap_eligible = true'
+    ).fetchone()
+    eligible_count = (eligible['count'] if eligible else 0) or 0
+
+    print(f'Large-cap eligibility re-bucketing complete. {eligible_count} rows are large-cap eligible (above 30000cr).')
     return eligible_count
 
 

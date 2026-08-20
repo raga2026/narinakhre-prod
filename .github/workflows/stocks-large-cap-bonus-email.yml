@@ -1,0 +1,29 @@
+name: Stocks large-cap bonus email
+
+on:
+  schedule:
+    # 02:00 UTC daily = 07:30 IST -- same slot as stocks-suggestions-email.yml
+    # (needs the same day's stock_indicators rows). Runs every day, not just
+    # Tuesday/Friday: /stocks/large-cap-bonus/send-email's own job body
+    # checks the weekday (LARGE_CAP_BONUS_WEEKDAYS) and is_trading_day() and
+    # only does real work on those two trading days, recording success
+    # either way -- see utils/stock_alerting.py's JOB_EXPECTATIONS comment
+    # for why this needs no day-of-week awareness here.
+    - cron: '0 2 * * *'
+  workflow_dispatch: {}  # lets you trigger it manually from the Actions tab
+
+jobs:
+  send:
+    runs-on: ubuntu-latest
+    steps:
+      - name: POST to /stocks/large-cap-bonus/send-email
+        run: |
+          status=$(curl -s -o /tmp/response.txt -w "%{http_code}" --max-time 120 -X POST \
+            -H "X-Cron-Secret: ${{ secrets.STOCKS_FUNDAMENTALS_CRON_SECRET }}" \
+            https://narinakhre.com/stocks/large-cap-bonus/send-email)
+          echo "HTTP status: $status"
+          cat /tmp/response.txt
+          if [ "$status" != "200" ]; then
+            echo "Request failed"
+            exit 1
+          fi

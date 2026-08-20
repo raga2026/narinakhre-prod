@@ -1,10 +1,15 @@
 from datetime import date, timedelta
 
-from utils.fundamental_screen import classify_fundamental_tier
+from utils.fundamental_screen import classify_fundamental_tier, score_fundamentals_large_cap
 from utils.kite_instrument_map import get_cached_instrument_token, get_cached_kite_name
 from utils.job_progress import report as report_progress
 
 SHORTLIST_SOURCE = 'auto_fundamental_shortlist'
+# Large-cap tier's own source value (see run_large_cap_shortlist below) --
+# deliberately distinct from SHORTLIST_SOURCE so the two pipelines' watchlist
+# rows never collide: each pipeline's own diff/deactivation step only ever
+# touches rows carrying its own source value, never the other's.
+LARGE_CAP_SHORTLIST_SOURCE = 'auto_large_cap_shortlist'
 # How stale a stock_fundamentals snapshot can be and still count for
 # screening -- older than this, the company is treated as not-yet-evaluated
 # this run rather than screened on stale data.
@@ -293,6 +298,155 @@ def run_fundamental_shortlist(db):
             f'''UPDATE stock_watchlist SET is_active=0, updated_at=NOW()
                 WHERE source=? AND is_active=1 AND (symbol, exchange) NOT IN ({pairs_sql})''',
             (SHORTLIST_SOURCE,)
+        )
+        db.commit()
+
+    return {
+        'evaluated': len(candidates),
+        'passed': passed,
+        'golden': tier_counts['golden'],
+        'silver': tier_counts['silver'],
+        'bronze': tier_counts['bronze'],
+        'deduped': deduped,
+        'failed': failed,
+        'failed_criteria_counts': failed_criteria_counts,
+    }
+
+
+def run_large_cap_shortlist(db):
+    """Large-cap counterpart of run_fundamental_shortlist() above --
+    entirely new, parallel logic; run_fundamental_shortlist() itself is not
+    called, modified, or depended on by this function in any way, and the
+    two pipelines never touch each other's stock_watchlist rows (see
+    LARGE_CAP_SHORTLIST_SOURCE).
+
+    Same structure as run_fundamental_shortlist() throughout -- same
+    snapshot-freshness window (MAX_SNAPSHOT_AGE_DAYS), same industry-relative
+    PE/price-to-book benchmarking (_compute_industry_benchmarks), same
+    batched previous-snapshot lookup for the promoter/FII holding-trend
+    checks, same ISIN-based NSE/BSE dedup (_pick_canonical_listing), same
+    activate-winners-first-then-deactivate-losers ordering (see that
+    function's docstring for why) -- with exactly two differences:
+      - Sourced from stock_universe WHERE is_large_cap_eligible = true
+        (see utils.stock_universe.rebucket_large_cap_eligibility), not
+        is_scrape_eligible.
+      - Classified via fundamental_screen.score_fundamentals_large_cap
+        (lower MINIMUM_GROWTH_PCT_LARGE_CAP growth floor), not
+        classify_fundamental_tier.
+
+    Every upserted stock_watchlist row is tagged market_cap_tier='large_cap'
+    (see STOCK_WATCHLIST_ALTER_SQL in utils/stock_ingestion.py) so
+    downstream code (the suggestion engine, emails) can tell which
+    pipeline a company came from -- mid-cap rows (from the unmodified
+    run_fundamental_shortlist above) stay market_cap_tier='mid_cap' via
+    that column's own DEFAULT, untouched by this function.
+
+    Returns the same summary shape as run_fundamental_shortlist()."""
+    cutoff = (date.today() - timedelta(days=MAX_SNAPSHOT_AGE_DAYS)).isoformat()
+    candidates = db.execute(
+        '''SELECT u.id AS universe_id, u.symbol, u.exchange, u.company_name, u.isin, u.industry,
+                  f.pe_ratio, f.peg_ratio, f.eps, f.opm_pct, f.roce_pct, f.roa_pct,
+                  f.price_to_book, f.promoter_holding_pct, f.fii_holding_pct,
+                  f.quarterly_profit_growth_pct, f.quarterly_revenue_growth_pct,
+                  f.snapshot_date
+           FROM stock_universe u
+           JOIN stock_fundamentals f ON f.universe_id = u.id
+               AND f.snapshot_date = (
+                   SELECT MAX(f2.snapshot_date) FROM stock_fundamentals f2 WHERE f2.universe_id = u.id
+               )
+           WHERE u.is_large_cap_eligible = true
+             AND f.snapshot_date >= ?''',
+        (cutoff,)
+    ).fetchall()
+
+    industry_benchmarks = _compute_industry_benchmarks(candidates)
+
+    previous_snapshots_by_universe = {}
+    universe_ids = [row['universe_id'] for row in candidates]
+    if universe_ids:
+        ids_sql = ','.join(str(int(uid)) for uid in universe_ids)
+        all_snapshots = db.execute(
+            f'''SELECT universe_id, promoter_holding_pct, fii_holding_pct, snapshot_date
+                FROM stock_fundamentals
+                WHERE universe_id IN ({ids_sql})
+                ORDER BY universe_id, snapshot_date DESC'''
+        ).fetchall()
+        for snap in all_snapshots:
+            previous_snapshots_by_universe.setdefault(snap['universe_id'], []).append(snap)
+
+    def _previous_snapshot(universe_id, current_snapshot_date):
+        for snap in previous_snapshots_by_universe.get(universe_id, []):
+            if snap['snapshot_date'] < current_snapshot_date:
+                return snap
+        return None
+
+    tier_counts = {'golden': 0, 'silver': 0, 'bronze': 0}
+    failed = 0
+    failed_criteria_counts = {}
+    qualifying_by_isin = {}
+    ungrouped_qualifying = []
+
+    for i, row in enumerate(candidates):
+        report_progress(i + 1, len(candidates))
+
+        universe_id = row['universe_id']
+        previous = _previous_snapshot(universe_id, row['snapshot_date'])
+
+        tier, failed_criteria = score_fundamentals_large_cap(
+            row, previous, industry_benchmarks=industry_benchmarks.get(row.get('industry'))
+        )
+
+        if not tier:
+            failed += 1
+            for criterion in failed_criteria:
+                failed_criteria_counts[criterion] = failed_criteria_counts.get(criterion, 0) + 1
+            continue
+
+        tier_counts[tier] += 1
+
+        row_with_tier = {**row, '_tier': tier}
+        isin = (row.get('isin') or '').strip()
+        if isin:
+            qualifying_by_isin.setdefault(isin, []).append(row_with_tier)
+        else:
+            ungrouped_qualifying.append(_apply_kite_name(db, row_with_tier))
+
+    to_watchlist = list(ungrouped_qualifying)
+    deduped = 0
+    for isin, rows_for_isin in qualifying_by_isin.items():
+        winner = _pick_canonical_listing(db, rows_for_isin)
+        to_watchlist.append(winner)
+        deduped += len(rows_for_isin) - 1
+
+    passed = len(to_watchlist) + deduped
+
+    for row in to_watchlist:
+        tier = row['_tier']
+        db.execute(
+            '''INSERT INTO stock_watchlist (symbol, exchange, name, is_active, source, fundamental_tier, market_cap_tier)
+               VALUES (?, ?, ?, 1, ?, ?, 'large_cap')
+               ON CONFLICT (symbol, exchange) DO UPDATE SET
+                   is_active = 1,
+                   source = ?,
+                   name = EXCLUDED.name,
+                   fundamental_tier = ?,
+                   market_cap_tier = 'large_cap',
+                   updated_at = NOW()
+               WHERE stock_watchlist.source = ? OR stock_watchlist.source IS NULL''',
+            (row['symbol'], row['exchange'], row.get('company_name'), LARGE_CAP_SHORTLIST_SOURCE, tier,
+             LARGE_CAP_SHORTLIST_SOURCE, tier, LARGE_CAP_SHORTLIST_SOURCE)
+        )
+        db.commit()
+
+    if to_watchlist:
+        pairs_sql = ','.join(
+            f"('{_escape_sql_literal(row['symbol'])}','{_escape_sql_literal(row['exchange'])}')"
+            for row in to_watchlist
+        )
+        db.execute(
+            f'''UPDATE stock_watchlist SET is_active=0, updated_at=NOW()
+                WHERE source=? AND is_active=1 AND (symbol, exchange) NOT IN ({pairs_sql})''',
+            (LARGE_CAP_SHORTLIST_SOURCE,)
         )
         db.commit()
 

@@ -225,7 +225,7 @@ class FakeAutoTraderDB:
             return FakeCursor([])
 
         # --- list ---
-        if normalized.startswith('SELECT t.id, t.symbol, t.exchange, t.mode, t.status'):
+        if normalized.startswith('SELECT t.id, t.suggestion_id, t.symbol, t.exchange, t.mode, t.status'):
             rows = sorted(self.trades, key=lambda t: t['opened_at'], reverse=True)
             return FakeCursor(rows)
 
@@ -458,6 +458,29 @@ def test_open_manual_trade_uses_the_explicit_budget_not_the_global_setting():
     }, budget_amount=10000, mode='dry_run')
     assert quantity == 24  # 10000 // 412, not the 50000 configured budget
     assert db.trades[0]['budget_amount'] == 10000
+
+
+def test_open_manual_trade_never_stores_a_stop_loss():
+    # Manual buys are investment positions -- target only, no stop-loss,
+    # even though the suggestion itself computed one.
+    db = FakeAutoTraderDB(settings={'enabled': False, 'mode': 'dry_run', 'budget_per_trade': 50000, 'total_capital': 200000})
+    open_manual_trade(db, {
+        'suggestion_id': 1, 'watchlist_id': 10, 'symbol': 'GOODCO', 'exchange': 'NSE',
+        'buy_price': 412, 'target_sell_price': 450, 'stop_loss_price': 396,
+    }, budget_amount=50000, mode='dry_run')
+    assert db.trades[0]['stop_loss_price'] is None
+    assert db.trades[0]['target_sell_price'] == 450
+
+
+def test_open_auto_trade_still_stores_a_stop_loss():
+    # Unlike manual buys, the automatic buy-on-new-suggestion path keeps
+    # its existing stop-loss review/Proceed-Cancel safety net unchanged.
+    db = FakeAutoTraderDB(settings={'enabled': True, 'mode': 'dry_run', 'budget_per_trade': 50000, 'total_capital': 200000})
+    open_auto_trade_if_enabled(db, {
+        'suggestion_id': 1, 'watchlist_id': 10, 'symbol': 'GOODCO', 'exchange': 'NSE',
+        'buy_price': 412, 'target_sell_price': 450, 'stop_loss_price': 396,
+    })
+    assert db.trades[0]['stop_loss_price'] == 396
 
 
 def test_open_manual_trade_is_idempotent_per_suggestion():
@@ -705,6 +728,7 @@ def test_list_auto_trades_newest_first():
 
     listed = list_auto_trades(db)
     assert [t['symbol'] for t in listed] == ['SECOND', 'FIRST']
+    assert [t['suggestion_id'] for t in listed] == [2, 1]  # needed to cross-reference against recommendations
 
 
 # --- live mode: buying ----------------------------------------------------

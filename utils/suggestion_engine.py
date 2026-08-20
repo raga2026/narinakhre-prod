@@ -299,11 +299,21 @@ def _fetch_price_history(db, watchlist_id, lookback_days=PATTERN_LOOKBACK_DAYS):
     return list(reversed(closes_desc))
 
 
-def _fetch_candidates(db):
+def _fetch_candidates(db, market_cap_tier=None):
+    """market_cap_tier=None (every existing caller today) fetches the same
+    mixed mid-cap/large-cap pool as always -- passing 'large_cap' or
+    'mid_cap' additionally restricts to stock_watchlist rows tagged that
+    tier (see utils.stock_shortlist.run_large_cap_shortlist/
+    run_fundamental_shortlist), for utils.large_cap_engine's twice-weekly
+    bonus pick, which must only ever draw from the large-cap tier. Adding
+    this as an optional filter (rather than a separate query) keeps this
+    the single shared candidate-fetch path for every engine."""
     today = date.today().isoformat()
     fundamentals_cutoff = (date.today() - timedelta(days=20)).isoformat()
+    tier_clause = ' AND w.market_cap_tier = ?' if market_cap_tier else ''
+    params = (today, fundamentals_cutoff) + ((market_cap_tier,) if market_cap_tier else ())
     return db.execute(
-        '''SELECT w.id AS watchlist_id, w.symbol, w.exchange, w.fundamental_tier,
+        f'''SELECT w.id AS watchlist_id, w.symbol, w.exchange, w.fundamental_tier, w.market_cap_tier,
                   u.id AS universe_id, u.industry,
                   i.rsi_14, i.cross_status, i.volume_trend,
                   f.pe_ratio, f.peg_ratio, f.opm_pct, f.roce_pct, f.roa_pct,
@@ -322,8 +332,8 @@ def _fetch_candidates(db):
                AND d.trade_date = (
                    SELECT MAX(d2.trade_date) FROM stock_daily_data d2 WHERE d2.watchlist_id = w.id
                )
-           WHERE w.is_active = 1''',
-        (today, fundamentals_cutoff)
+           WHERE w.is_active = 1{tier_clause}''',
+        params
     ).fetchall()
 
 
@@ -539,11 +549,18 @@ def get_recommendation_tracker(db):
     watchlisted and in the universe has ONE stock_daily_data row keyed by
     watchlist_id with universe_id also stamped, so joining on watchlist_id
     alone is sufficient here since every suggestion candidate is by
-    definition a watchlist row)."""
+    definition a watchlist row).
+
+    holding_period_days/pattern_note (added alongside the rest -- same
+    "timing" pair _timing_text in utils/suggestion_email.py already reads
+    off a stock_suggestions row) are what let a caller show how long a
+    pick is expected to take, e.g. the auto-trader dashboard's own
+    buy-list of recent recommendations."""
     return db.execute(
         '''SELECT s.id, w.id AS watchlist_id, w.symbol, w.exchange, s.suggestion_date,
                   s.buy_price, s.target_sell_price, s.stop_loss_price, s.status,
-                  s.nns_tier, s.score AS nns_score, s.pattern_name, s.rationale,
+                  s.nns_tier, s.score AS nns_score, s.pattern_name, s.pattern_note,
+                  s.holding_period_days, s.rationale,
                   d.close AS latest_price, d.trade_date AS price_date
            FROM stock_suggestions s
            JOIN stock_watchlist w ON w.id = s.watchlist_id
@@ -555,17 +572,72 @@ def get_recommendation_tracker(db):
     ).fetchall()
 
 
-def _rank_todays_candidates(db):
+def find_pending_target_hit_suggestions(db):
+    """Pending (status='pending') stock_suggestions rows whose
+    target_sell_price has been reached at the latest synced close --
+    checked once a day against the daily close, same "not intraday"
+    caveat as everywhere else in this codebase that compares a price
+    level against stock_daily_data (see e.g. utils.auto_trader.determine_exit).
+    This is what actually gives stock_suggestions.status a real meaning
+    for the first time -- every row previously stayed 'pending' forever
+    (see get_recommendation_tracker's note on this) since nothing ever
+    moved it. Only status='pending' rows are considered, so a row already
+    marked 'target_hit' by a previous run of this same check (see
+    mark_suggestions_target_hit) is never re-detected/re-notified about.
+
+    Returns a list of dicts: id, watchlist_id, symbol, exchange,
+    company_name, suggestion_date, buy_price, target_sell_price,
+    latest_price, latest_price_date -- everything
+    send_target_achieved_email needs to build one subscriber-facing
+    achievement entry, sorted oldest suggestion first."""
+    return db.execute(
+        '''SELECT s.id, w.id AS watchlist_id, w.symbol, w.exchange, w.name AS company_name,
+                  s.suggestion_date, s.buy_price, s.target_sell_price,
+                  d.close AS latest_price, d.trade_date AS latest_price_date
+           FROM stock_suggestions s
+           JOIN stock_watchlist w ON w.id = s.watchlist_id
+           JOIN stock_daily_data d ON d.watchlist_id = w.id
+               AND d.trade_date = (
+                   SELECT MAX(d2.trade_date) FROM stock_daily_data d2 WHERE d2.watchlist_id = w.id
+               )
+           WHERE s.status = 'pending'
+             AND s.target_sell_price IS NOT NULL
+             AND d.close >= s.target_sell_price
+           ORDER BY s.suggestion_date ASC, s.id ASC'''
+    ).fetchall()
+
+
+def mark_suggestions_target_hit(db, suggestion_ids):
+    """Sets status='target_hit' for the given stock_suggestions ids --
+    the other half of find_pending_target_hit_suggestions, called once
+    those suggestions have actually been emailed about (see app.py's
+    /stocks/suggestions/notify-target-hits) so the same target hit is
+    never notified about twice. No-op on an empty list -- callers don't
+    need to guard against that themselves."""
+    suggestion_ids = list(suggestion_ids)
+    if not suggestion_ids:
+        return
+    placeholders = ','.join('?' * len(suggestion_ids))
+    db.execute(
+        f"UPDATE stock_suggestions SET status='target_hit' WHERE id IN ({placeholders})",
+        tuple(suggestion_ids)
+    )
+    db.commit()
+
+
+def _rank_todays_candidates(db, market_cap_tier=None):
     """Fetches today's candidate pool and scores it -- shared by
-    generate_daily_suggestions below and
-    utils.starters_engine.generate_weekly_starters_pick, which reuses the
-    exact same universe/scoring and only differs in what it does with the
-    ranked list afterward (a stricter golden-tier-only bar and a weekly
-    instead of daily cadence). Returns [(candidate, score), ...] sorted
-    highest score first, already excluding anything that doesn't clear
-    NNS_BRONZE_MIN or isn't golden-cross -- see is_suggestion_eligible/
-    score_candidates."""
-    candidates = _fetch_candidates(db)
+    generate_daily_suggestions below, utils.starters_engine.generate_weekly_starters_pick,
+    and utils.large_cap_engine.generate_large_cap_bonus_pick, all of which
+    reuse the exact same universe/scoring and only differ in what they do
+    with the ranked list afterward (a stricter golden-tier-only bar and
+    weekly cadence for Starters; a market_cap_tier='large_cap' restriction
+    and twice-weekly cadence for the bonus pick). market_cap_tier=None (the
+    daily/Starters case) scores the full mixed pool exactly as before this
+    param existed. Returns [(candidate, score), ...] sorted highest score
+    first, already excluding anything that doesn't clear NNS_BRONZE_MIN or
+    isn't golden-cross -- see is_suggestion_eligible/score_candidates."""
+    candidates = _fetch_candidates(db, market_cap_tier=market_cap_tier)
     previous_snapshots_by_watchlist = _fetch_previous_snapshots(db, candidates)
     industry_benchmarks_by_industry = _compute_industry_benchmarks(candidates)
     eligible = [c for c in candidates if is_suggestion_eligible(c)]
