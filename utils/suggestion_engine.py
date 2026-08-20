@@ -488,6 +488,7 @@ def get_suggestions(db, start_date=None, end_date=None):
 
     return db.execute(
         f'''SELECT DISTINCT ON (s.suggestion_date)
+                   s.id AS suggestion_id,
                    w.id AS watchlist_id, w.symbol, w.exchange, w.name AS company_name,
                    u.id AS universe_id,
                    s.suggestion_date, s.buy_price,

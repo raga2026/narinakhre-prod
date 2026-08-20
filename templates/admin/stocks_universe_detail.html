@@ -147,6 +147,33 @@
             </div>
         </div>
 
+        {% if suggestion_history %}
+        <div class="section-card mb-6">
+            <h2 class="text-lg font-bold text-gray-900 mb-2">Recommendation History</h2>
+            <div class="overflow-x-auto">
+                <table>
+                    <caption class="sr-only">Recommendation history for {{ company.name or company.symbol }}</caption>
+                    <thead>
+                        <tr>
+                            <th scope="col">Recommended On</th>
+                            <th scope="col">Type</th>
+                            <th scope="col">Analysis</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for h in suggestion_history %}
+                        <tr>
+                            <th scope="row">{{ h.date }}</th>
+                            <td>{{ analysis_source_labels[h.source] }}</td>
+                            <td><a href="{{ url_for('stocks_suggestion_analysis', source=h.source, suggestion_id=h.suggestion_id) }}" class="link">View analysis for this pick</a></td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+        {% endif %}
+
         <div class="section-card mb-6">
             <h2 class="text-lg font-bold text-gray-900 mb-2">Price chart</h2>
             {% if sparkline_summary %}

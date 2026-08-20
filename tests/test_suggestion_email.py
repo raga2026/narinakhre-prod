@@ -36,7 +36,8 @@ class FakeEmailDB:
     def execute(self, sql, params=None):
         normalized = ' '.join(sql.split())
 
-        if normalized.startswith('SELECT DISTINCT ON (s.suggestion_date) w.id AS watchlist_id, w.symbol, w.exchange, w.name AS company_name, u.id AS universe_id,'):
+        if (normalized.startswith('SELECT DISTINCT ON (s.suggestion_date) s.id AS suggestion_id,')
+                and 'FROM stock_suggestions s' in normalized):
             self.last_query_params = params
             return FakeCursor(self.suggestion_rows)
 
@@ -897,7 +898,7 @@ class FakeStartersEmailDB:
     def execute(self, sql, params=None):
         normalized = ' '.join(sql.split())
 
-        if normalized.startswith('SELECT watchlist_id, symbol, exchange, company_name, universe_id,'):
+        if normalized.startswith('SELECT suggestion_id, watchlist_id, symbol, exchange, company_name, universe_id,'):
             return FakeCursor(self.suggestion_rows)
 
         if "stocks_plan='starters'" in normalized and normalized.startswith("SELECT id, username AS email, name FROM stocks_admin_users WHERE role='viewer'"):
@@ -999,7 +1000,7 @@ class FakeLargeCapBonusEmailDB:
     def execute(self, sql, params=None):
         normalized = ' '.join(sql.split())
 
-        if (normalized.startswith('SELECT DISTINCT ON (s.suggestion_date) w.id AS watchlist_id, w.symbol, w.exchange, w.name AS company_name,')
+        if (normalized.startswith('SELECT DISTINCT ON (s.suggestion_date) s.id AS suggestion_id,')
                 and 'stock_large_cap_bonus_suggestions' in normalized):
             return FakeCursor(self.suggestion_rows)
 

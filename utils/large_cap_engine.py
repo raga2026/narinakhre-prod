@@ -206,6 +206,7 @@ def get_large_cap_bonus_suggestions(db, start_date=None, end_date=None):
 
     return db.execute(
         f'''SELECT DISTINCT ON (s.suggestion_date)
+                   s.id AS suggestion_id,
                    w.id AS watchlist_id, w.symbol, w.exchange, w.name AS company_name,
                    u.id AS universe_id,
                    s.suggestion_date, s.buy_price,
@@ -221,3 +222,29 @@ def get_large_cap_bonus_suggestions(db, start_date=None, end_date=None):
             ORDER BY s.suggestion_date DESC, s.score DESC''',
         tuple(params)
     ).fetchall()
+
+
+def get_large_cap_bonus_suggestion_by_id(db, suggestion_id):
+    """Single stock_large_cap_bonus_suggestions row, by its own id -- for
+    the recommendation-analysis detail page (see app.py's
+    /stocks/analysis/<source>/<id>). Mirrors
+    utils.suggestion_engine.get_suggestion_by_id's shape/columns exactly
+    so both (and utils.starters_engine.get_starters_suggestion_by_id) can
+    feed the same analysis template regardless of which of the three
+    suggestion engines produced the pick. Returns None if no such row
+    exists."""
+    return db.execute(
+        '''SELECT s.id AS suggestion_id, w.id AS watchlist_id, w.symbol, w.exchange, w.name AS company_name,
+                  u.id AS universe_id,
+                  s.suggestion_date, s.buy_price,
+                  s.target_sell_price, s.stop_loss_price, s.holding_period_days,
+                  s.rsi_at_suggestion, s.pe_at_suggestion, s.peg_at_suggestion,
+                  s.opm_at_suggestion, s.fundamental_tier,
+                  s.pattern_name, s.pattern_note,
+                  s.score AS nns_score, s.nns_tier, s.rationale, s.status
+           FROM stock_large_cap_bonus_suggestions s
+           JOIN stock_watchlist w ON w.id = s.watchlist_id
+           LEFT JOIN stock_universe u ON u.symbol = w.symbol AND u.exchange = w.exchange
+           WHERE s.id = ?''',
+        (suggestion_id,)
+    ).fetchone()

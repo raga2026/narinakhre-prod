@@ -25,6 +25,8 @@
             --muted-900: #f1f5f9; --muted-700: #cbd5e1; --muted-600: #94a3b8; --muted-500: #7d8aa0;
             --accent: #38bdf8; --accent-hover: #7dd3fc;
             --topbar-bg: #1e293b; --topbar-border: #334155;
+            --nav-hover-bg: rgba(56,189,248,0.10); --nav-active-bg: rgba(56,189,248,0.16);
+            --logout-fg: #f87171; --logout-border: #3a4556; --logout-hover-bg: rgba(248,113,113,0.10);
             --card-bg: #1e293b; --card-border: #334155;
             --input-bg: #16202f; --input-border: #3a4556;
             --row-border: #2d3a4f;
@@ -35,6 +37,8 @@
             --muted-900: #111827; --muted-700: #374151; --muted-600: #4b5563; --muted-500: #6c7080;
             --accent: #387ed1; --accent-hover: #2b6cb8;
             --topbar-bg: #ffffff; --topbar-border: #e6e9ec;
+            --nav-hover-bg: rgba(56,126,209,0.07); --nav-active-bg: rgba(56,126,209,0.12);
+            --logout-fg: #d64534; --logout-border: #d7dbe0; --logout-hover-bg: rgba(214,69,52,0.06);
             --card-bg: #ffffff; --card-border: #e6e9ec;
             --input-bg: #ffffff; --input-border: #d7dbe0;
             --row-border: #eef0f2;
@@ -45,8 +49,16 @@
         .kite-btn { background: var(--accent); color: white; }
         .kite-btn:hover { background: var(--accent-hover); }
         .topbar { background: var(--topbar-bg); border-bottom: 1px solid var(--topbar-border); }
-        .nav-link { color: var(--muted-600); text-decoration: none; }
-        .nav-link:hover { color: var(--accent); }
+        .topbar-inner { max-width: 42rem; margin: 0 auto; padding: 0.65rem 1.5rem 0.55rem; }
+        .topbar-row1 { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; margin-bottom: 0.5rem; }
+        .brand { font-size: 1.05rem; font-weight: 800; color: var(--accent); text-decoration: none; white-space: nowrap; }
+        .nav-scroll { display: flex; align-items: center; gap: 0.3rem; overflow-x: auto; -webkit-overflow-scrolling: touch; scrollbar-width: none; }
+        .nav-scroll::-webkit-scrollbar { display: none; }
+        .nav-link { color: var(--muted-600); text-decoration: none; font-size: 0.82rem; font-weight: 600; padding: 0.4rem 0.8rem; border-radius: 999px; white-space: nowrap; transition: background-color .15s ease, color .15s ease; }
+        .nav-link:hover { color: var(--accent); background: var(--nav-hover-bg); }
+        .nav-link.active { color: var(--accent); background: var(--nav-active-bg); }
+        .logout-link { color: var(--logout-fg); text-decoration: none; font-size: 0.82rem; font-weight: 700; padding: 0.4rem 0.9rem; border-radius: 999px; border: 1px solid var(--logout-border); white-space: nowrap; transition: background-color .15s ease, border-color .15s ease; }
+        .logout-link:hover { background: var(--logout-hover-bg); border-color: var(--logout-fg); }
         .card { background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 0.5rem; }
         a.link { color: var(--accent); text-decoration: underline; }
         a.link:hover { color: var(--accent-hover); }
@@ -61,17 +73,30 @@
         .bg-blue-50 { background-color: var(--flash-bg); }
         .text-blue-900 { color: var(--flash-fg); }
         .border-blue-200 { border-color: var(--flash-border); }
+
+        /* Account rows pair a short label with a value on the right via
+           Tailwind's flex/justify-between -- fine at desktop width, but a
+           longer value (the subscription-status sentence, or the plan
+           name) gets squeezed against the label on a phone screen instead
+           of wrapping cleanly. Below a phone-width breakpoint, stack each
+           row's label above its value instead. */
+        @media (max-width: 480px) {
+            .row.flex { flex-direction: column; align-items: flex-start !important; gap: 0.2rem; }
+            .row.flex .text-right { text-align: left !important; }
+        }
     </style>
 </head>
 <body class="min-h-screen">
     <div class="topbar">
-        <div class="max-w-2xl mx-auto px-6 py-3 flex items-center justify-between flex-wrap gap-y-2">
-            <a href="{{ url_for('stocks_home') }}" class="text-lg font-bold kite-accent no-underline">Nari Nakhre Stocks</a>
-            <nav class="flex items-center gap-4 text-sm flex-wrap" aria-label="Main">
+        <div class="topbar-inner">
+            <div class="topbar-row1">
+                <a href="{{ url_for('stocks_home') }}" class="brand">Nari Nakhre Stocks</a>
+                <a href="{{ url_for('stocks_admin_logout') }}" class="logout-link">Log out</a>
+            </div>
+            <nav class="nav-scroll" aria-label="Main">
                 <a href="{{ url_for('stocks_my_suggestions') }}" class="nav-link">Recommendations</a>
                 <a href="{{ url_for('stocks_universe_list') }}" class="nav-link">Browse All Companies</a>
-                <a href="{{ url_for('stocks_profile') }}" class="nav-link">Profile</a>
-                <a href="{{ url_for('stocks_admin_logout') }}" class="text-gray-500 hover:kite-accent underline">Log out</a>
+                <a href="{{ url_for('stocks_profile') }}" class="nav-link active" aria-current="page">Profile</a>
             </nav>
         </div>
     </div>

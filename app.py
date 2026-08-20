@@ -77,12 +77,14 @@ from utils.starters_engine import (
     STARTERS_REPEAT_WINDOW_DAYS,
     generate_weekly_starters_pick,
     get_starters_suggestions,
+    get_starters_suggestion_by_id,
     initialize_starters_suggestions_table_if_needed,
 )
 from utils.large_cap_engine import (
     LARGE_CAP_BONUS_REPEAT_WINDOW_DAYS,
     generate_large_cap_bonus_pick,
     get_large_cap_bonus_suggestions,
+    get_large_cap_bonus_suggestion_by_id,
     initialize_large_cap_bonus_suggestions_table_if_needed,
 )
 from utils.saved_filters import (
@@ -8125,6 +8127,45 @@ def stocks_universe_filters_delete(filter_id):
     return redirect(url_for('stocks_universe_list'))
 
 
+def _suggestion_history_for_company(db, watchlist_id):
+    """Every recommendation ever made for this company, across all three
+    suggestion engines (daily Pick of the Day, Starters weekly pick,
+    Standard-tier bonus large-cap pick) -- shown on the company/universe
+    detail page as "Recommended on [date] -- view analysis for this pick"
+    (see stocks_universe_detail below), so a reader sees a company's full
+    recommendation history in one place without three separate sections
+    duplicating the same table shape per engine. watchlist_id is None for
+    a universe-only company that's never been shortlisted -- returns []
+    immediately rather than querying three tables for nothing.
+
+    Returns [{'source', 'suggestion_id', 'date'}, ...], most recent
+    first -- source matches _ANALYSIS_SOURCE_LABELS' keys, used both for
+    that label and to build the /stocks/analysis/<source>/<id> link."""
+    if not watchlist_id:
+        return []
+    history = []
+    daily = db.execute(
+        'SELECT id AS suggestion_id, suggestion_date AS date FROM stock_suggestions '
+        'WHERE watchlist_id=? ORDER BY suggestion_date DESC',
+        (watchlist_id,)
+    ).fetchall()
+    history += [{'source': 'daily', 'suggestion_id': r['suggestion_id'], 'date': r['date']} for r in daily]
+    starters = db.execute(
+        'SELECT id AS suggestion_id, week_start_date AS date FROM stock_starters_suggestions '
+        'WHERE watchlist_id=? ORDER BY week_start_date DESC',
+        (watchlist_id,)
+    ).fetchall()
+    history += [{'source': 'starters', 'suggestion_id': r['suggestion_id'], 'date': r['date']} for r in starters]
+    large_cap = db.execute(
+        'SELECT id AS suggestion_id, suggestion_date AS date FROM stock_large_cap_bonus_suggestions '
+        'WHERE watchlist_id=? ORDER BY suggestion_date DESC',
+        (watchlist_id,)
+    ).fetchall()
+    history += [{'source': 'large_cap', 'suggestion_id': r['suggestion_id'], 'date': r['date']} for r in large_cap]
+    history.sort(key=lambda r: r['date'], reverse=True)
+    return history
+
+
 @app.route('/stocks/universe/<int:universe_id>', methods=['GET'])
 @stocks_login_required
 def stocks_universe_detail(universe_id):
@@ -8238,6 +8279,15 @@ def stocks_universe_detail(universe_id):
     rounding_pattern = detect_rounding_pattern(closes_oldest_first)
     recent_prices = price_history[:15]
 
+    # A universe-only company (never shortlisted to stock_watchlist) has no
+    # watchlist_id and therefore no suggestion history at all -- see
+    # _suggestion_history_for_company's own None-guard.
+    watchlist_row = db.execute(
+        'SELECT id FROM stock_watchlist WHERE symbol=? AND exchange=?',
+        (company['symbol'], company['exchange'])
+    ).fetchone()
+    suggestion_history = _suggestion_history_for_company(db, watchlist_row['id'] if watchlist_row else None)
+
     if not can_view_signals:
         company = redact_recommendation_signals([company], can_view_signals=False)[0]
 
@@ -8246,6 +8296,7 @@ def stocks_universe_detail(universe_id):
         company=company, recent_prices=recent_prices,
         sparkline_svg=sparkline_svg, sparkline_summary=sparkline_summary, backtest=backtest,
         rounding_pattern=rounding_pattern, can_view_signals=can_view_signals,
+        suggestion_history=suggestion_history, analysis_source_labels=_ANALYSIS_SOURCE_LABELS,
     )
 
 
@@ -8297,14 +8348,14 @@ def stocks_home():
         is_starters = session.get('stocks_plan') == 'starters'
         if is_starters:
             start_date = (date.today() - timedelta(days=63)).isoformat()
-            recent_suggestions = list(get_starters_suggestions(db, start_date=start_date))
+            recent_suggestions = [dict(r, source='starters') for r in get_starters_suggestions(db, start_date=start_date)]
         else:
             start_date = (date.today() - timedelta(days=HOLDING_PERIOD_DAYS)).isoformat()
-            recent_suggestions = list(get_suggestions(db, start_date=start_date))
+            recent_suggestions = [dict(r, source='daily') for r in get_suggestions(db, start_date=start_date)]
         recent_bonus = []
         if session.get('stocks_plan') == 'standard':
             bonus_start_date = (date.today() - timedelta(days=30)).isoformat()
-            recent_bonus = list(get_large_cap_bonus_suggestions(db, start_date=bonus_start_date))
+            recent_bonus = [dict(r, source='large_cap') for r in get_large_cap_bonus_suggestions(db, start_date=bonus_start_date)]
         combined = recent_suggestions + recent_bonus
         combined.sort(key=lambda r: r['suggestion_date'], reverse=True)
         suggestion_summary = {
@@ -8334,6 +8385,80 @@ def stocks_quality_stocks():
     db = get_db()
     quality_stocks = get_top_stocks(db, limit=None)
     return render_template('admin/stocks_quality_stocks.html', quality_stocks=quality_stocks)
+
+
+def _pct_increase(buy_price, price):
+    """'+12.3' style figure for how much higher a target/projection price
+    is than the buy price -- used by stocks_suggestion_analysis below to
+    show the same %-increase context the daily/Starters/bonus emails
+    already show beside each target value (see
+    utils.suggestion_email._pct_increase, which this mirrors -- kept as
+    its own copy rather than importing that module's underscore-prefixed,
+    email-specific helper). Returns None when buy_price isn't a usable
+    positive number."""
+    if not buy_price or buy_price <= 0 or price is None:
+        return None
+    return round((price - buy_price) / buy_price * 100, 1)
+
+
+# Which suggestion table/engine each /stocks/analysis/<source>/<id> URL
+# reads from -- see stocks_suggestion_analysis below. Also doubles as the
+# human-readable label shown on that page and in the suggestion-history
+# table on the company/universe detail page.
+_ANALYSIS_SOURCE_LABELS = {
+    'daily': 'Pick of the Day',
+    'starters': 'Starters Weekly Pick',
+    'large_cap': 'Bonus Large-Cap Pick',
+}
+
+
+@app.route('/stocks/analysis/<source>/<int:suggestion_id>', methods=['GET'])
+@stocks_login_required
+def stocks_suggestion_analysis(source, suggestion_id):
+    """Full explanation for one specific recommendation -- company, date,
+    buy/target price, tier, rationale, chart-pattern note (or plain
+    holding-period timing), and mid/long-term projection with % increase
+    from the buy price, the same figures the emails already show (see
+    utils.suggestion_email._render_stock_card_html). Linked from the
+    Stocks home page's Your Suggestions table ("Analysis") and from the
+    company/universe detail page's own suggestion-history table ("View
+    analysis for this pick").
+
+    source picks which of the three suggestion tables/engines this id
+    belongs to -- 'daily' (stock_suggestions, the regular Pick of the
+    Day), 'starters' (stock_starters_suggestions, the Rs 99/mo weekly
+    pick), or 'large_cap' (stock_large_cap_bonus_suggestions, the
+    Standard-tier bonus pick) -- since a bare integer id alone can't
+    disambiguate between three separate tables each with their own
+    independent id sequence."""
+    if source not in _ANALYSIS_SOURCE_LABELS:
+        flash('Unknown recommendation type.', 'error')
+        return redirect(url_for('stocks_home'))
+
+    db = get_db()
+    if source == 'daily':
+        suggestion = get_suggestion_by_id(db, suggestion_id)
+    elif source == 'starters':
+        suggestion = get_starters_suggestion_by_id(db, suggestion_id)
+    else:
+        suggestion = get_large_cap_bonus_suggestion_by_id(db, suggestion_id)
+
+    if not suggestion:
+        flash('No such recommendation.', 'error')
+        return redirect(url_for('stocks_home'))
+
+    projection = compute_projection_targets(
+        suggestion.get('buy_price'), suggestion.get('target_sell_price'), suggestion.get('pattern_name')
+    )
+    target_pct = _pct_increase(suggestion.get('buy_price'), suggestion.get('target_sell_price'))
+    mid_pct = _pct_increase(suggestion.get('buy_price'), projection.get('mid_period', {}).get('price')) if projection else None
+    long_pct = _pct_increase(suggestion.get('buy_price'), projection.get('long_term', {}).get('price')) if projection else None
+
+    return render_template(
+        'admin/stocks_suggestion_analysis.html',
+        s=suggestion, source=source, source_label=_ANALYSIS_SOURCE_LABELS[source],
+        projection=projection, target_pct=target_pct, mid_pct=mid_pct, long_pct=long_pct,
+    )
 
 
 def _stocks_viewer_account_summary(db, admin_id):

@@ -221,13 +221,13 @@ def get_starters_suggestions(db, start_date=None, end_date=None):
     where_clause = ('WHERE ' + ' AND '.join(conditions)) if conditions else ''
 
     return db.execute(
-        f'''SELECT watchlist_id, symbol, exchange, company_name, universe_id,
+        f'''SELECT suggestion_id, watchlist_id, symbol, exchange, company_name, universe_id,
                    suggestion_date, buy_price, target_sell_price, stop_loss_price,
                    holding_period_days, rsi_at_suggestion, pe_at_suggestion,
                    peg_at_suggestion, opm_at_suggestion, fundamental_tier,
                    pattern_name, pattern_note, nns_score, nns_tier, rationale, status
             FROM (
-                SELECT w.id AS watchlist_id, w.symbol, w.exchange, w.name AS company_name,
+                SELECT s.id AS suggestion_id, w.id AS watchlist_id, w.symbol, w.exchange, w.name AS company_name,
                        u.id AS universe_id,
                        s.week_start_date AS suggestion_date, s.buy_price,
                        s.target_sell_price, s.stop_loss_price, s.holding_period_days,
@@ -245,3 +245,30 @@ def get_starters_suggestions(db, start_date=None, end_date=None):
             ORDER BY suggestion_date DESC, nns_score DESC''',
         tuple(params)
     ).fetchall()
+
+
+def get_starters_suggestion_by_id(db, suggestion_id):
+    """Single stock_starters_suggestions row, by its own id -- for the
+    recommendation-analysis detail page (see app.py's
+    /stocks/analysis/<source>/<id>). Mirrors
+    utils.suggestion_engine.get_suggestion_by_id's shape/columns exactly
+    (suggestion_date aliased from week_start_date) so both (and
+    utils.large_cap_engine.get_large_cap_bonus_suggestion_by_id) can feed
+    the same analysis template regardless of which of the three
+    suggestion engines produced the pick. Returns None if no such row
+    exists."""
+    return db.execute(
+        '''SELECT s.id AS suggestion_id, w.id AS watchlist_id, w.symbol, w.exchange, w.name AS company_name,
+                  u.id AS universe_id,
+                  s.week_start_date AS suggestion_date, s.buy_price,
+                  s.target_sell_price, s.stop_loss_price, s.holding_period_days,
+                  s.rsi_at_suggestion, s.pe_at_suggestion, s.peg_at_suggestion,
+                  s.opm_at_suggestion, s.fundamental_tier,
+                  s.pattern_name, s.pattern_note,
+                  s.score AS nns_score, s.nns_tier, s.rationale, s.status
+           FROM stock_starters_suggestions s
+           JOIN stock_watchlist w ON w.id = s.watchlist_id
+           LEFT JOIN stock_universe u ON u.symbol = w.symbol AND u.exchange = w.exchange
+           WHERE s.id = ?''',
+        (suggestion_id,)
+    ).fetchone()

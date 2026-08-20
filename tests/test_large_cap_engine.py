@@ -12,6 +12,7 @@ from utils.large_cap_engine import (
     LARGE_CAP_BONUS_REPEAT_WINDOW_DAYS,
     TOP_N_LARGE_CAP_BONUS,
     generate_large_cap_bonus_pick,
+    get_large_cap_bonus_suggestion_by_id,
 )
 
 
@@ -182,3 +183,39 @@ def test_pick_outside_the_repeat_window_is_resent_even_if_unchanged():
     )
     summary = generate_large_cap_bonus_pick(db, pick_date=later_pick_date)
     assert len(summary['created']) == 1
+
+
+class _FakeCursor:
+    def __init__(self, rows):
+        self._rows = rows
+
+    def fetchone(self):
+        return self._rows[0] if self._rows else None
+
+
+class _FakeByIdDB:
+    def __init__(self, rows):
+        self.rows = rows
+
+    def execute(self, sql, params=None):
+        normalized = ' '.join(sql.split())
+        if normalized.startswith('SELECT s.id AS suggestion_id, w.id AS watchlist_id, w.symbol, w.exchange, w.name AS company_name,'):
+            suggestion_id, = params
+            matches = [r for r in self.rows if r['suggestion_id'] == suggestion_id]
+            return _FakeCursor(matches)
+        raise AssertionError(f'Unexpected SQL in test: {sql}')
+
+
+def test_get_large_cap_bonus_suggestion_by_id_returns_the_matching_row():
+    db = _FakeByIdDB([
+        {'suggestion_id': 1, 'symbol': 'GOODCO', 'watchlist_id': 10, 'buy_price': 412},
+        {'suggestion_id': 2, 'symbol': 'OTHERCO', 'watchlist_id': 11, 'buy_price': 200},
+    ])
+    row = get_large_cap_bonus_suggestion_by_id(db, 2)
+    assert row['symbol'] == 'OTHERCO'
+    assert row['watchlist_id'] == 11
+
+
+def test_get_large_cap_bonus_suggestion_by_id_returns_none_when_not_found():
+    db = _FakeByIdDB([{'suggestion_id': 1, 'symbol': 'GOODCO', 'watchlist_id': 10, 'buy_price': 412}])
+    assert get_large_cap_bonus_suggestion_by_id(db, 999) is None
