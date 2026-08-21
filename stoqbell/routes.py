@@ -13,6 +13,7 @@ alongside this file being introduced.
 """
 import json
 import os
+import re
 import time
 from datetime import date, datetime, timedelta, timezone
 from urllib.parse import urlencode
@@ -21,7 +22,7 @@ from flask import Blueprint, current_app, g, jsonify, redirect, render_template,
 
 import auth_providers
 from db import get_db, get_supabase, SupabaseDB
-from razorpay_shared import get_razorpay_client
+from razorpay_shared import get_razorpay_client, RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET
 from recaptcha_shared import verify_recaptcha, STOCKS_RECAPTCHA_SITE_KEY, STOCKS_RECAPTCHA_SECRET_KEY
 
 from stoqbell.utils.stock_ingestion import initialize_stock_tables_if_needed, sync_daily_data, sync_daily_data_universe
@@ -227,6 +228,12 @@ stocks_bp = Blueprint(
 # app.py) since it's specifically Stocks' own branding, not a storefront
 # concern.
 STOCKS_DOMAIN = 'www.stoqbell.com'
+
+# Used by /stocks/signup's password-based signup form to reject an
+# obviously-malformed email before ever creating a row. Defined here
+# (not imported from app.py, which has its own separate copies for the
+# storefront's own forms) so stoqbell/ stays self-contained.
+EMAIL_RE = re.compile(r'^[^@\s]+@[^@\s]+\.[^@\s]+$')
 
 razorpay_client = get_razorpay_client()
 
