@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="420" viewBox="0 0 900 420">
+  <!-- Dark background -->
+  <rect width="900" height="420" fill="#0B192C"/>
+
+  <!-- Bell icon group -->
+  <g transform="translate(100,60)">
+    <!-- Bell outline (light for contrast on dark bg) -->
+    <path d="M100 20
+             C 60 20 35 55 35 100
+             C 35 150 20 175 10 190
+             L 190 190
+             C 180 175 165 150 165 100
+             C 165 55 140 20 100 20 Z"
+          fill="none" stroke="#F8F9FA" stroke-width="10" stroke-linejoin="round"/>
+    <!-- Bell top knob -->
+    <circle cx="100" cy="14" r="9" fill="#F8F9FA"/>
+    <rect x="94" y="0" width="12" height="14" rx="3" fill="#F8F9FA"/>
+    <!-- Bell bottom lip -->
+    <path d="M5 190 L195 190 C195 205 178 216 100 216 C22 216 5 205 5 190 Z" fill="#F8F9FA"/>
+
+    <!-- Clapper as upward trending arrow (bright neon green, glowing) -->
+    <g transform="translate(100,150)">
+      <polyline points="-38,20 -12,-6 8,14 40,-24" fill="none" stroke="#39FF14" stroke-width="10" stroke-linecap="round" stroke-linejoin="round"/>
+      <polyline points="18,-24 40,-24 40,-2" fill="none" stroke="#39FF14" stroke-width="10" stroke-linecap="round" stroke-linejoin="round"/>
+    </g>
+  </g>
+
+  <!-- Wordmark -->
+  <text x="330" y="200" font-size="88" font-family="Arial, Helvetica, sans-serif" font-weight="800" fill="#F8F9FA">Stoq<tspan fill="#39FF14">Bell</tspan></text>
+
+  <!-- Tagline -->
+  <text x="333" y="245" font-size="24" font-family="Arial, Helvetica, sans-serif" fill="#9CA3AF" letter-spacing="1">Trade the swings, own the future.</text>
+</svg>

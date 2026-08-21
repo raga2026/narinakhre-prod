@@ -582,6 +582,88 @@ def send_admin_subscription_cancelled_email(email, name):
     )
 
 
+def send_rebrand_announcement_email(to_email, to_name):
+    """One-time announcement (2026-08-21) that Nari Nakhre Stocks has been
+    renamed StoqBell, with its own domain (www.stoqbell.com) and its own
+    sending address (support-noreply@stoqbell.com, see
+    utils/stock_alerting.py's STOCKS_SMTP_FROM_EMAIL -- the same Zeptomail
+    Mail Agent/token as before, just a newly-verified sender identity
+    under it) -- nothing about the recipient's account, login, or
+    subscription changes. See send_rebrand_announcement_to_all_viewers
+    below for the actual batch send this is meant to go out through."""
+    greeting = to_name or to_email
+    subject = "We've rebranded: Nari Nakhre Stocks is now StoqBell"
+    text_body = (
+        f'Hi {greeting},\n\n'
+        f'Nari Nakhre Stocks has a new name: StoqBell -- Trade the swings, own the future.\n\n'
+        f"Nothing about your account changes -- same login, same subscription, same daily "
+        f"pick. What's new is just the branding and where things live:\n\n"
+        f'- New home: {STOCKS_BASE_URL}\n'
+        f'- New login page: {STOCKS_LOGIN_URL}\n'
+        f"- You'll now receive emails from support-noreply@stoqbell.com instead of an "
+        f"narinakhre.com address -- please whitelist/allow this new address so future "
+        f"picks and updates don't land in spam.\n\n"
+        f'{DISCLAIMER}\n'
+    )
+    html_body = (
+        f'{_stoqbell_logo_header_html()}'
+        f'<p>Hi {greeting},</p>'
+        f'<p>Nari Nakhre Stocks has a new name: <strong>StoqBell</strong> -- '
+        f'<em>Trade the swings, own the future.</em></p>'
+        f"<p>Nothing about your account changes -- same login, same subscription, same "
+        f"daily pick. What's new is just the branding and where things live:</p>"
+        f'<ul style="padding-left:20px;color:#334155;line-height:1.7;">'
+        f'<li>New home: <a href="{STOCKS_BASE_URL}">{STOCKS_BASE_URL}</a></li>'
+        f'<li>New login page: <a href="{STOCKS_LOGIN_URL}">{STOCKS_LOGIN_URL}</a></li>'
+        f'<li>You will now receive emails from <strong>support-noreply@stoqbell.com</strong> '
+        f"instead of a narinakhre.com address -- please whitelist this new address so "
+        f"future picks and updates don't land in spam.</li>"
+        f'</ul>'
+        f'<p style="color:#64748b;font-size:0.85em;margin-top:16px;">{DISCLAIMER}</p>'
+    )
+    return send_zeptomail_stocks_email(
+        to_email=to_email, to_name=greeting, subject=subject,
+        textbody=text_body, htmlbody=html_body, sender_name='StoqBell',
+    )
+
+
+def send_rebrand_announcement_to_all_viewers(db, recipient_ids=None):
+    """Batch-sends send_rebrand_announcement_email to every active viewer
+    (or a specific subset via recipient_ids -- same convention as
+    send_daily_suggestions_email's recipient_ids param). Meant to be run
+    ONCE, manually triggered (see app.py's
+    /stocks/announcements/send-rebrand, super_admin-only) -- not on any
+    recurring schedule, unlike the daily/weekly/bonus suggestion emails."""
+    if recipient_ids is not None:
+        recipient_ids = list(recipient_ids)
+        if recipient_ids:
+            placeholders = ','.join('?' * len(recipient_ids))
+            recipients = db.execute(
+                f"SELECT id, username AS email, name FROM stocks_admin_users "
+                f"WHERE role='viewer' AND is_active=1 AND id IN ({placeholders})",
+                tuple(recipient_ids)
+            ).fetchall()
+        else:
+            recipients = []
+    else:
+        recipients = db.execute(
+            "SELECT id, username AS email, name FROM stocks_admin_users WHERE role='viewer' AND is_active=1"
+        ).fetchall()
+
+    sent = 0
+    failed = 0
+    failures = []
+    for r in recipients:
+        ok, detail = send_rebrand_announcement_email(r['email'], r.get('name') or r['email'])
+        if ok:
+            sent += 1
+        else:
+            failed += 1
+            failures.append({'email': r['email'], 'error': detail})
+
+    return {'recipient_count': len(recipients), 'sent': sent, 'failed': failed, 'failures': failures}
+
+
 # DEPRECATED as of the viewer-role migration -- recipients now live as
 # role='viewer' rows in stocks_admin_users (utils/stock_auth.py), which
 # supports real login, not just an email address. This table and the three

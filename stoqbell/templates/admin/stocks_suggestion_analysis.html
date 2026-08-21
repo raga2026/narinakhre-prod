@@ -13,6 +13,7 @@
     })();
     </script>
     <meta charset="UTF-8">
+    <link rel="icon" type="image/png" href="{{ url_for('stocks.static', filename='assets/stoqbell-icon.png') }}">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{{ s.symbol }} Recommendation Analysis - StoqBell</title>
     <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
@@ -95,7 +96,7 @@
         <div class="topbar-inner">
             <div class="topbar-row1">
                 <a href="{{ url_for('stocks.stocks_home') }}" class="brand">
-                    <img src="{{ url_for('stocks.static', filename='assets/stoqbell-icon.png') }}" alt="" class="brand-mark">
+                    <img src="{{ url_for('stocks.static', filename='assets/stoqbell-icon-dark.svg') }}" alt="" class="brand-mark">
                     <span class="brand-text">StoqBell</span>
                 </a>
                 <a href="{{ url_for('stocks.stocks_admin_logout') }}" class="logout-link">Log out</a>

@@ -2,6 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
+    <link rel="icon" type="image/png" href="{{ url_for('stocks.static', filename='assets/stoqbell-icon.png') }}">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Checkout - StoqBell</title>
     <script src="https://checkout.razorpay.com/v1/checkout.js"></script>
@@ -21,7 +22,7 @@
 <body>
     <div class="card">
         <h1 style="display:flex;align-items:center;justify-content:center;gap:8px;">
-            <img src="{{ url_for('stocks.static', filename='assets/stoqbell-icon.png') }}" alt="" width="28" height="28">
+            <img src="{{ url_for('stocks.static', filename='assets/stoqbell-icon-dark.svg') }}" alt="" width="28" height="28">
             <span class="accent">StoqBell</span>
         </h1>
         <p>Complete payment to activate your {{ price_display }}/month subscription. A secure Razorpay window will open automatically.</p>

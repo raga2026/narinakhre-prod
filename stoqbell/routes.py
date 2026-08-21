@@ -204,6 +204,7 @@ from stoqbell.utils.suggestion_email import (
     send_target_achieved_email,
     send_weekly_starters_email,
     send_large_cap_bonus_email,
+    send_rebrand_announcement_to_all_viewers,
     STOCKS_BASE_URL,
 )
 from stoqbell.utils.trading_calendar import is_trading_day
@@ -792,6 +793,25 @@ def stocks_suggestions_notify_target_hits():
         return summary
 
     return _dispatch_stocks_job(db, is_cron, 'suggestion_target_hit_notify', _job)
+
+
+@stocks_bp.route('/stocks/announcements/send-rebrand', methods=['POST'])
+@stocks_role_required('super_admin')
+def stocks_announcements_send_rebrand():
+    """One-time manual trigger: emails every active viewer that Nari Nakhre
+    Stocks has been renamed StoqBell, with its own domain and its own
+    sending address (see utils/suggestion_email.py's
+    send_rebrand_announcement_to_all_viewers/send_rebrand_announcement_email).
+    super_admin-only, no cron path -- unlike the daily/weekly/bonus
+    suggestion emails, this isn't meant to ever run again on a schedule.
+    Runs on a background thread like the dashboard's other job buttons
+    (see _dispatch_stocks_job) since it may be emailing a large recipient
+    list; poll /stocks/jobs/rebrand_announcement/status for the result."""
+    db = get_db()
+    return _dispatch_stocks_job(
+        db, is_cron=False, job_name='rebrand_announcement',
+        job_fn=send_rebrand_announcement_to_all_viewers,
+    )
 
 
 @stocks_bp.route('/stocks/suggestions/resend', methods=['GET', 'POST'])

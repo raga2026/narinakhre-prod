@@ -2,6 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
+    <link rel="icon" type="image/png" href="{{ url_for('stocks.static', filename='assets/stoqbell-icon.png') }}">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Stocks Dashboard - StoqBell</title>
     <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
@@ -16,7 +17,7 @@
         <div class="flex items-center justify-between mb-8">
             <div>
                 <h1 class="text-2xl font-extrabold stocks-accent font-serif flex items-center gap-2">
-                    <img src="{{ url_for('stocks.static', filename='assets/stoqbell-icon.png') }}" alt="" width="26" height="26">
+                    <img src="{{ url_for('stocks.static', filename='assets/stoqbell-icon-dark.svg') }}" alt="" width="26" height="26">
                     StoqBell
                 </h1>
                 <p class="text-slate-400 text-sm mt-1">Signed in as {{ username }} ({{ role }})</p>
@@ -99,6 +100,23 @@
                   data-job-form data-job-name="suggestion_email" data-job-label="Generate and send Pick of the Day">
                 <button type="submit" class="stocks-btn py-3 px-6 rounded-2xl font-bold transition hover:opacity-90">
                     Generate and send Pick of the Day
+                </button>
+            </form>
+        </section>
+
+        <section class="bg-slate-800 rounded-2xl p-6 border border-amber-500/40 mb-6" aria-labelledby="announcements-heading">
+            <h2 id="announcements-heading" class="text-lg font-bold text-slate-200 mb-2">Announcements</h2>
+            <p class="text-slate-400 text-sm mb-3">
+                One-time email to every active viewer: Nari Nakhre Stocks has been renamed StoqBell, with its own
+                domain and its own sending address. This is meant to be sent ONCE -- re-running it emails everyone
+                again, so only use this if the first send genuinely failed for most recipients.
+            </p>
+            <form method="POST" action="{{ url_for('stocks.stocks_announcements_send_rebrand') }}"
+                  data-job-form data-job-name="rebrand_announcement" data-job-label="Send rebrand announcement"
+                  onsubmit="return confirm('Send the StoqBell rebrand announcement to every active viewer? This should only be done once.');">
+                <button type="submit" class="py-3 px-6 rounded-2xl font-bold transition hover:opacity-90"
+                        style="background:linear-gradient(90deg,#b45309 0%,#d97706 100%);color:white;">
+                    Send rebrand announcement to all viewers
                 </button>
             </form>
         </section>

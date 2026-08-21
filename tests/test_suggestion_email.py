@@ -6,6 +6,8 @@ from stoqbell.utils.suggestion_email import (
     send_admin_new_subscriber_email,
     send_admin_subscription_cancelled_email,
     send_daily_suggestions_email,
+    send_rebrand_announcement_email,
+    send_rebrand_announcement_to_all_viewers,
     send_subscription_welcome_email,
     send_target_achieved_email,
     send_target_hit_email,
@@ -769,6 +771,72 @@ def test_admin_cancellation_email_goes_to_the_fixed_admin_address():
     assert kwargs['to_email'] == 'narinakhre@gmail.com'
     assert 'Leaving User' in kwargs['subject']
     assert 'cancelled' in kwargs['textbody'].lower()
+
+
+def test_rebrand_announcement_mentions_new_name_domain_sender_and_tagline():
+    with patch('stoqbell.utils.suggestion_email.send_zeptomail_stocks_email', return_value=(True, 'ok')) as mock_send:
+        send_rebrand_announcement_email('viewer@example.com', 'A Viewer')
+
+    kwargs = mock_send.call_args.kwargs
+    assert kwargs['to_email'] == 'viewer@example.com'
+    assert 'StoqBell' in kwargs['subject']
+    for body in (kwargs['textbody'], kwargs['htmlbody']):
+        assert 'Nari Nakhre Stocks' in body
+        assert 'StoqBell' in body
+        assert 'Trade the swings, own the future.' in body
+        assert 'www.stoqbell.com' in body
+        assert 'support-noreply@stoqbell.com' in body
+    assert DISCLAIMER in kwargs['textbody']
+
+
+def test_rebrand_announcement_batch_sends_to_every_active_viewer():
+    db = FakeEmailDB(
+        suggestion_rows=[],
+        recipient_rows=[
+            {'id': 1, 'email': 'a@example.com', 'name': 'A'},
+            {'id': 2, 'email': 'b@example.com', 'name': 'B'},
+        ],
+    )
+
+    with patch('stoqbell.utils.suggestion_email.send_zeptomail_stocks_email', return_value=(True, 'ok')) as mock_send:
+        summary = send_rebrand_announcement_to_all_viewers(db)
+
+    assert mock_send.call_count == 2
+    sent_to = {call.kwargs['to_email'] for call in mock_send.call_args_list}
+    assert sent_to == {'a@example.com', 'b@example.com'}
+    assert summary == {'recipient_count': 2, 'sent': 2, 'failed': 0, 'failures': []}
+
+
+def test_rebrand_announcement_batch_can_target_specific_recipients():
+    db = FakeEmailDB(
+        suggestion_rows=[],
+        recipient_rows=[
+            {'id': 1, 'email': 'a@example.com', 'name': 'A'},
+            {'id': 2, 'email': 'b@example.com', 'name': 'B'},
+        ],
+    )
+
+    with patch('stoqbell.utils.suggestion_email.send_zeptomail_stocks_email', return_value=(True, 'ok')) as mock_send:
+        summary = send_rebrand_announcement_to_all_viewers(db, recipient_ids=[2])
+
+    assert mock_send.call_count == 1
+    assert mock_send.call_args.kwargs['to_email'] == 'b@example.com'
+    assert summary['recipient_count'] == 1
+
+
+def test_rebrand_announcement_batch_reports_per_recipient_failures():
+    db = FakeEmailDB(
+        suggestion_rows=[],
+        recipient_rows=[{'id': 1, 'email': 'a@example.com', 'name': 'A'}],
+    )
+
+    with patch('stoqbell.utils.suggestion_email.send_zeptomail_stocks_email',
+               return_value=(False, 'Zeptomail HTTP 401: unauthorized')):
+        summary = send_rebrand_announcement_to_all_viewers(db)
+
+    assert summary['sent'] == 0
+    assert summary['failed'] == 1
+    assert summary['failures'] == [{'email': 'a@example.com', 'error': 'Zeptomail HTTP 401: unauthorized'}]
 
 
 def test_trading_alert_email_includes_the_stock_card_and_buy_link():

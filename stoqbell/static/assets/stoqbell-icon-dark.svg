@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="240" height="260" viewBox="0 0 240 260">
+  <!-- Standalone icon-only crop of stoqbell-logo-dark.svg's bell mark
+       (same geometry as stoqbell-icon.svg, colors matched to the
+       logo-dark variant) -- for the app's dark (#0f172a) pages, where the
+       original navy (#0B192C) icon is nearly invisible. Transparent
+       background, unlike stoqbell-logo-dark.svg/.png which bakes in a
+       solid navy rect (that one's sized/composed for a wide banner, not a
+       small inline nav icon). -->
+  <g transform="translate(20,40)">
+    <!-- Bell outline -->
+    <path d="M100 20
+             C 60 20 35 55 35 100
+             C 35 150 20 175 10 190
+             L 190 190
+             C 180 175 165 150 165 100
+             C 165 55 140 20 100 20 Z"
+          fill="none" stroke="#F8F9FA" stroke-width="10" stroke-linejoin="round"/>
+    <!-- Bell top knob -->
+    <circle cx="100" cy="14" r="9" fill="#F8F9FA"/>
+    <rect x="94" y="0" width="12" height="14" rx="3" fill="#F8F9FA"/>
+    <!-- Bell bottom lip -->
+    <path d="M5 190 L195 190 C195 205 178 216 100 216 C22 216 5 205 5 190 Z" fill="#F8F9FA"/>
+
+    <!-- Clapper as upward trending arrow (neon green, matches logo-dark) -->
+    <g transform="translate(100,150)">
+      <polyline points="-38,20 -12,-6 8,14 40,-24" fill="none" stroke="#39FF14" stroke-width="10" stroke-linecap="round" stroke-linejoin="round"/>
+      <polyline points="18,-24 40,-24 40,-2" fill="none" stroke="#39FF14" stroke-width="10" stroke-linecap="round" stroke-linejoin="round"/>
+    </g>
+  </g>
+</svg>
