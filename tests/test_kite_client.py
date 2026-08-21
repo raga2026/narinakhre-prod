@@ -99,6 +99,38 @@ def test_pre_resolved_instrument_token_skips_ltp_lookup_entirely():
     assert candles[0]['close'] == 10.5
 
 
+# --- fetch_ltp_batch --------------------------------------------------------
+
+def test_fetch_ltp_batch_passes_the_whole_list_in_one_call():
+    fake_kite = FakeKite(ltp_response={
+        'NSE:RELIANCE': {'instrument_token': 1, 'last_price': 2500.5},
+        'NSE:TCS': {'instrument_token': 2, 'last_price': 3600.0},
+    })
+    client = KiteClient(kite=fake_kite)
+
+    prices = client.fetch_ltp_batch(['NSE:RELIANCE', 'NSE:TCS'])
+
+    assert fake_kite.ltp_call_count == 1  # one batched call, not one per symbol
+    assert prices == {'NSE:RELIANCE': 2500.5, 'NSE:TCS': 3600.0}
+
+
+def test_fetch_ltp_batch_omits_symbols_kite_has_no_quote_for():
+    fake_kite = FakeKite(ltp_response={'NSE:RELIANCE': {'instrument_token': 1, 'last_price': 2500.5}})
+    client = KiteClient(kite=fake_kite)
+
+    prices = client.fetch_ltp_batch(['NSE:RELIANCE', 'BSE:532835'])
+
+    assert prices == {'NSE:RELIANCE': 2500.5}
+
+
+def test_fetch_ltp_batch_empty_input_makes_no_kite_call():
+    fake_kite = FakeKite()
+    client = KiteClient(kite=fake_kite)
+
+    assert client.fetch_ltp_batch([]) == {}
+    assert fake_kite.ltp_call_count == 0
+
+
 def test_fetch_instruments_returns_kite_instrument_list_as_is():
     fake_kite = FakeKite(instruments_response=[
         {'tradingsymbol': 'BLISSGVS', 'name': 'BLISS GVS PHARMA LIMITED', 'instrument_token': 999, 'exchange': 'BSE'},

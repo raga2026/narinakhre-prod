@@ -2,6 +2,7 @@
 Python (no DB access) so it's directly unit-testable; generate_daily_suggestions()
 at the bottom is the only DB-orchestrating piece, mirroring the split already
 used elsewhere in this codebase (e.g. fundamental_screen.py vs stock_shortlist.py)."""
+import random
 from datetime import date, timedelta
 
 from stoqbell.utils.price_pattern import compute_suggestion_pricing
@@ -100,6 +101,19 @@ STOCK_SUGGESTIONS_ALTER_SQL = [
     # suggestion only ever needs the one current "the score".
     "ALTER TABLE stock_suggestions ADD COLUMN IF NOT EXISTS nns_tier TEXT "
     "CHECK (nns_tier IS NULL OR nns_tier IN ('golden', 'silver', 'bronze'))",
+    # Set only by the intraday (every-5-minutes, market hours only) live
+    # target-hit check (see utils/admin_alerts.py's
+    # find_and_notify_intraday_target_hits) once it's emailed Raghav that
+    # this suggestion reached its target -- deliberately NOT the same as
+    # `status` turning 'target_hit', which only the existing once-daily
+    # customer-facing check (find_pending_target_hit_suggestions) sets.
+    # Keeping these two independent means the intraday check can tell
+    # Raghav promptly without ever causing the once-daily customer
+    # notification to skip this row as already-handled -- see
+    # find_and_notify_intraday_target_hits' own docstring for the full
+    # reasoning. NULL means "not yet alerted intraday"; once set, this
+    # row is never re-checked/re-emailed by the intraday job again.
+    'ALTER TABLE stock_suggestions ADD COLUMN IF NOT EXISTS intraday_alert_sent_at TIMESTAMP',
 ]
 
 
@@ -731,71 +745,13 @@ def generate_daily_suggestions(db):
         if len(created) >= TOP_N_SUGGESTIONS:
             break
 
-        watchlist_id = candidate['watchlist_id']
-
-        price_history = _fetch_price_history(db, watchlist_id)
-        pricing = compute_suggestion_pricing(
-            price_history, candidate['latest_close'], TARGET_MULTIPLIER, STOP_LOSS_MULTIPLIER
+        created_row, skipped_row = _create_or_update_suggestion(
+            db, candidate, nns_score, today, repeat_window_cutoff
         )
-
-        buy_price = pricing['buy_price']
-        target_sell_price = pricing['target_sell_price']
-        stop_loss_price = pricing['stop_loss_price']
-        pattern_name = pricing['pattern_name']
-
-        existing_recent = db.execute(
-            '''SELECT score, target_sell_price, pattern_name FROM stock_suggestions
-               WHERE watchlist_id=? AND suggestion_date >= ? AND suggestion_date < ?
-               ORDER BY suggestion_date DESC LIMIT 1''',
-            (watchlist_id, repeat_window_cutoff, today)
-        ).fetchone()
-        if existing_recent and not _is_genuine_change(existing_recent, nns_score, target_sell_price):
-            skipped_duplicates.append({
-                'watchlist_id': watchlist_id, 'symbol': candidate['symbol'], 'exchange': candidate['exchange'],
-            })
-            continue
-
-        pattern_note = _build_pattern_note(pattern_name, pricing['pattern_research'])
-        tier = nns_tier(nns_score)
-        rationale = _build_rationale(candidate, tier)
-
-        db.execute(
-            '''INSERT INTO stock_suggestions
-                   (watchlist_id, suggestion_date, buy_price, target_sell_price,
-                    stop_loss_price, holding_period_days, rsi_at_suggestion,
-                    pe_at_suggestion, peg_at_suggestion, opm_at_suggestion,
-                    fundamental_tier, pattern_name, pattern_note, score, nns_tier, rationale, status)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')
-               ON CONFLICT (watchlist_id, suggestion_date) DO UPDATE SET
-                   buy_price = EXCLUDED.buy_price,
-                   target_sell_price = EXCLUDED.target_sell_price,
-                   stop_loss_price = EXCLUDED.stop_loss_price,
-                   rsi_at_suggestion = EXCLUDED.rsi_at_suggestion,
-                   pe_at_suggestion = EXCLUDED.pe_at_suggestion,
-                   peg_at_suggestion = EXCLUDED.peg_at_suggestion,
-                   opm_at_suggestion = EXCLUDED.opm_at_suggestion,
-                   fundamental_tier = EXCLUDED.fundamental_tier,
-                   pattern_name = EXCLUDED.pattern_name,
-                   pattern_note = EXCLUDED.pattern_note,
-                   score = EXCLUDED.score,
-                   nns_tier = EXCLUDED.nns_tier,
-                   rationale = EXCLUDED.rationale''',
-            (watchlist_id, today, buy_price, target_sell_price, stop_loss_price,
-             HOLDING_PERIOD_DAYS, candidate['rsi_14'], candidate['pe_ratio'],
-             candidate['peg_ratio'], candidate['opm_pct'], candidate.get('fundamental_tier'),
-             pattern_name, pattern_note, nns_score, tier, rationale)
-        )
-        db.commit()
-        suggestion_row = db.execute(
-            'SELECT id FROM stock_suggestions WHERE watchlist_id=? AND suggestion_date=?',
-            (watchlist_id, today)
-        ).fetchone()
-        created.append({
-            'suggestion_id': suggestion_row['id'] if suggestion_row else None,
-            'watchlist_id': watchlist_id, 'symbol': candidate['symbol'], 'exchange': candidate['exchange'],
-            'buy_price': buy_price, 'target_sell_price': target_sell_price, 'stop_loss_price': stop_loss_price,
-            'nns_score': nns_score, 'nns_tier': tier, 'pattern_name': pattern_name,
-        })
+        if created_row:
+            created.append(created_row)
+        else:
+            skipped_duplicates.append(skipped_row)
 
     return {
         # Candidates that cleared golden-cross + the NNS_BRONZE_MIN scoring
@@ -806,3 +762,259 @@ def generate_daily_suggestions(db):
         'created': created,
         'skipped_duplicates': skipped_duplicates,
     }
+
+
+def _create_or_update_suggestion(db, candidate, nns_score, today, repeat_window_cutoff):
+    """Shared per-candidate row-creation logic, extracted from
+    generate_daily_suggestions's loop so get_candidates_for_manual_pick/
+    create_manual_suggestions (the notifications-page manual picker) can
+    create a stock_suggestions row for an admin-CHOSEN candidate the exact
+    same way the automatic daily job creates one for its algorithmically-
+    top-ranked candidate -- same pricing computation, same cooldown/
+    duplicate check, same upsert. today/repeat_window_cutoff are ISO date
+    strings (today = date.today().isoformat()).
+
+    Returns (created_dict, None) on success, or (None, skipped_dict) if this
+    candidate's own last suggestion is within the repeat window and isn't a
+    genuine change (see _is_genuine_change) -- the caller decides what to do
+    with a skip (generate_daily_suggestions moves on to the next-ranked
+    candidate; the manual picker instead reports it so the admin knows why
+    a chosen stock didn't go out)."""
+    watchlist_id = candidate['watchlist_id']
+
+    price_history = _fetch_price_history(db, watchlist_id)
+    pricing = compute_suggestion_pricing(
+        price_history, candidate['latest_close'], TARGET_MULTIPLIER, STOP_LOSS_MULTIPLIER
+    )
+
+    buy_price = pricing['buy_price']
+    target_sell_price = pricing['target_sell_price']
+    stop_loss_price = pricing['stop_loss_price']
+    pattern_name = pricing['pattern_name']
+
+    existing_recent = db.execute(
+        '''SELECT score, target_sell_price, pattern_name FROM stock_suggestions
+           WHERE watchlist_id=? AND suggestion_date >= ? AND suggestion_date < ?
+           ORDER BY suggestion_date DESC LIMIT 1''',
+        (watchlist_id, repeat_window_cutoff, today)
+    ).fetchone()
+    if existing_recent and not _is_genuine_change(existing_recent, nns_score, target_sell_price):
+        return None, {
+            'watchlist_id': watchlist_id, 'symbol': candidate['symbol'], 'exchange': candidate['exchange'],
+        }
+
+    pattern_note = _build_pattern_note(pattern_name, pricing['pattern_research'])
+    tier = nns_tier(nns_score)
+    rationale = _build_rationale(candidate, tier)
+
+    db.execute(
+        '''INSERT INTO stock_suggestions
+               (watchlist_id, suggestion_date, buy_price, target_sell_price,
+                stop_loss_price, holding_period_days, rsi_at_suggestion,
+                pe_at_suggestion, peg_at_suggestion, opm_at_suggestion,
+                fundamental_tier, pattern_name, pattern_note, score, nns_tier, rationale, status)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')
+           ON CONFLICT (watchlist_id, suggestion_date) DO UPDATE SET
+               buy_price = EXCLUDED.buy_price,
+               target_sell_price = EXCLUDED.target_sell_price,
+               stop_loss_price = EXCLUDED.stop_loss_price,
+               rsi_at_suggestion = EXCLUDED.rsi_at_suggestion,
+               pe_at_suggestion = EXCLUDED.pe_at_suggestion,
+               peg_at_suggestion = EXCLUDED.peg_at_suggestion,
+               opm_at_suggestion = EXCLUDED.opm_at_suggestion,
+               fundamental_tier = EXCLUDED.fundamental_tier,
+               pattern_name = EXCLUDED.pattern_name,
+               pattern_note = EXCLUDED.pattern_note,
+               score = EXCLUDED.score,
+               nns_tier = EXCLUDED.nns_tier,
+               rationale = EXCLUDED.rationale''',
+        (watchlist_id, today, buy_price, target_sell_price, stop_loss_price,
+         HOLDING_PERIOD_DAYS, candidate['rsi_14'], candidate['pe_ratio'],
+         candidate['peg_ratio'], candidate['opm_pct'], candidate.get('fundamental_tier'),
+         pattern_name, pattern_note, nns_score, tier, rationale)
+    )
+    db.commit()
+    suggestion_row = db.execute(
+        'SELECT id FROM stock_suggestions WHERE watchlist_id=? AND suggestion_date=?',
+        (watchlist_id, today)
+    ).fetchone()
+    return {
+        'suggestion_id': suggestion_row['id'] if suggestion_row else None,
+        'watchlist_id': watchlist_id, 'symbol': candidate['symbol'], 'exchange': candidate['exchange'],
+        'buy_price': buy_price, 'target_sell_price': target_sell_price, 'stop_loss_price': stop_loss_price,
+        'nns_score': nns_score, 'nns_tier': tier, 'pattern_name': pattern_name,
+    }, None
+
+
+def _todays_eligible_candidates_off_cooldown(db):
+    """Shared by get_candidates_for_manual_pick/create_manual_suggestions:
+    today's ranked, golden-cross-eligible candidates (see
+    _rank_todays_candidates), minus any currently on cooldown (the same
+    repeat-window/genuine-change check _create_or_update_suggestion applies)
+    -- so the manual picker never offers, or tries to create a row for, a
+    stock that would just get silently skipped as a duplicate anyway.
+    Returns the filtered [(candidate, nns_score), ...] list, still sorted by
+    score descending."""
+    ranked = _rank_todays_candidates(db)
+    today_date = date.today()
+    today = today_date.isoformat()
+    repeat_window_cutoff = (today_date - timedelta(days=SUGGESTION_REPEAT_WINDOW_DAYS)).isoformat()
+
+    off_cooldown = []
+    for candidate, nns_score in ranked:
+        watchlist_id = candidate['watchlist_id']
+        existing_recent = db.execute(
+            '''SELECT score, target_sell_price, pattern_name FROM stock_suggestions
+               WHERE watchlist_id=? AND suggestion_date >= ? AND suggestion_date < ?
+               ORDER BY suggestion_date DESC LIMIT 1''',
+            (watchlist_id, repeat_window_cutoff, today)
+        ).fetchone()
+        # Reuses compute_suggestion_pricing's target price would require a
+        # price-history fetch per candidate just to filter -- cheap enough
+        # given the candidate pool is already small (golden-cross + NNS_BRONZE_MIN
+        # gated), so this filter step pays that cost once per candidate,
+        # not per pick request.
+        if existing_recent:
+            price_history = _fetch_price_history(db, watchlist_id)
+            pricing = compute_suggestion_pricing(
+                price_history, candidate['latest_close'], TARGET_MULTIPLIER, STOP_LOSS_MULTIPLIER
+            )
+            if not _is_genuine_change(existing_recent, nns_score, pricing['target_sell_price']):
+                continue
+        off_cooldown.append((candidate, nns_score))
+
+    return off_cooldown
+
+
+def get_candidates_for_manual_pick(db, count=2, mode='top'):
+    """Powers the Notifications page's manual pick-and-send flow (see
+    app.py's /stocks/notifications/preview-picks): surfaces `count` of
+    today's golden-cross-eligible, off-cooldown candidates for a super_admin
+    to review before choosing which (if any) to actually send -- distinct
+    from generate_daily_suggestions, which always takes the single top-ranked
+    one automatically. mode='top' returns the `count` highest-scored
+    candidates (same ordering the daily job would walk); mode='random'
+    samples `count` of them at random, still only from the same eligible/
+    off-cooldown pool -- "random" narrows which stock is picked, not the
+    quality bar it had to clear.
+
+    Returns [{watchlist_id, symbol, exchange, company_name, nns_score,
+    nns_tier, buy_price, target_sell_price, pattern_name}, ...], length
+    min(count, however many are currently eligible) -- may be shorter than
+    requested, or empty, exactly like generate_daily_suggestions can produce
+    zero rows on a day nothing qualifies."""
+    pool = _todays_eligible_candidates_off_cooldown(db)
+
+    if mode == 'random':
+        picks = random.sample(pool, min(count, len(pool)))
+    else:
+        picks = pool[:count]
+
+    results = []
+    for candidate, nns_score in picks:
+        watchlist_id = candidate['watchlist_id']
+        price_history = _fetch_price_history(db, watchlist_id)
+        pricing = compute_suggestion_pricing(
+            price_history, candidate['latest_close'], TARGET_MULTIPLIER, STOP_LOSS_MULTIPLIER
+        )
+        results.append({
+            'watchlist_id': watchlist_id, 'symbol': candidate['symbol'], 'exchange': candidate['exchange'],
+            'company_name': candidate.get('company_name'),
+            'nns_score': nns_score, 'nns_tier': nns_tier(nns_score),
+            'buy_price': pricing['buy_price'], 'target_sell_price': pricing['target_sell_price'],
+            'pattern_name': pricing['pattern_name'],
+        })
+    return results
+
+
+def create_manual_suggestions(db, watchlist_ids):
+    """Creates today's stock_suggestions row(s) for admin-chosen
+    watchlist_ids (from the Notifications page's preview step, see
+    get_candidates_for_manual_pick) -- rebuilds today's eligible/off-cooldown
+    pool fresh (not trusting scoring/pricing from the earlier preview HTTP
+    round-trip, in case anything changed in between) and creates a row via
+    _create_or_update_suggestion for each requested id found in it, via the
+    exact same insert path generate_daily_suggestions uses. A requested id
+    that's no longer eligible (or fell onto cooldown) between preview and
+    send is simply absent from the pool and gets reported skipped, not
+    silently dropped -- and one that isn't found in today's pool at all
+    (bad id, or eligibility changed) is also reported skipped rather than
+    raising, since this is admin-facing and the caller needs to report a
+    clear per-stock outcome either way.
+
+    Returns {'created': [...], 'skipped': [...]}, same dict shapes
+    generate_daily_suggestions produces."""
+    pool = _todays_eligible_candidates_off_cooldown(db)
+    pool_by_watchlist_id = {candidate['watchlist_id']: (candidate, nns_score) for candidate, nns_score in pool}
+
+    today_date = date.today()
+    today = today_date.isoformat()
+    repeat_window_cutoff = (today_date - timedelta(days=SUGGESTION_REPEAT_WINDOW_DAYS)).isoformat()
+
+    created = []
+    skipped = []
+    for watchlist_id in watchlist_ids:
+        entry = pool_by_watchlist_id.get(watchlist_id)
+        if entry is None:
+            skipped.append({'watchlist_id': watchlist_id, 'symbol': None, 'exchange': None})
+            continue
+        candidate, nns_score = entry
+        created_row, skipped_row = _create_or_update_suggestion(
+            db, candidate, nns_score, today, repeat_window_cutoff
+        )
+        if created_row:
+            created.append(created_row)
+        else:
+            skipped.append(skipped_row)
+
+    return {'created': created, 'skipped': skipped}
+
+
+def get_all_highly_recommended_today(db):
+    """Powers utils/admin_alerts.py's record_and_send_highly_recommended_alerts
+    -- every one of today's golden-cross-eligible candidates (see
+    _rank_todays_candidates) whose NNS tier is 'golden' or 'silver'
+    ("Highly Recommended", same bucket _trend_label shows customers),
+    uncapped, for Raghav's own alert inbox (raga2020@gmail.com). Unlike
+    generate_daily_suggestions/_create_or_update_suggestion, this
+    deliberately does NOT apply the repeat-window/cooldown check -- Raghav
+    wants every qualifying stock every day regardless of whether it (or the
+    customer-facing Pick of the Day) already covered it recently; his alerts
+    and the customer rotation are meant to be completely independent.
+
+    Returns dicts with every field utils/suggestion_email.py's
+    send_trading_alert_email (via _render_stock_card_html/_render_stock_card_text)
+    needs to render exactly like a real stock_suggestions row -- watchlist_id,
+    symbol, exchange, company_name, universe_id, buy_price, target_sell_price,
+    stop_loss_price, holding_period_days, rsi_at_suggestion, pe_at_suggestion,
+    peg_at_suggestion, opm_at_suggestion, fundamental_tier, pattern_name,
+    pattern_note, score, nns_tier, rationale -- built the same way
+    _create_or_update_suggestion builds a row to insert, just never inserted
+    (see utils/admin_alerts.py, which stores these in its own
+    stock_admin_alerts table instead). Uncapped -- may be empty on a day
+    nothing clears the silver bar."""
+    ranked = _rank_todays_candidates(db)
+    results = []
+    for candidate, nns_score in ranked:
+        tier = nns_tier(nns_score)
+        if tier not in ('golden', 'silver'):
+            continue
+        watchlist_id = candidate['watchlist_id']
+        price_history = _fetch_price_history(db, watchlist_id)
+        pricing = compute_suggestion_pricing(
+            price_history, candidate['latest_close'], TARGET_MULTIPLIER, STOP_LOSS_MULTIPLIER
+        )
+        pattern_note = _build_pattern_note(pricing['pattern_name'], pricing['pattern_research'])
+        rationale = _build_rationale(candidate, tier)
+        results.append({
+            'watchlist_id': watchlist_id, 'symbol': candidate['symbol'], 'exchange': candidate['exchange'],
+            'company_name': candidate.get('company_name'), 'universe_id': candidate.get('universe_id'),
+            'buy_price': pricing['buy_price'], 'target_sell_price': pricing['target_sell_price'],
+            'stop_loss_price': pricing['stop_loss_price'], 'holding_period_days': HOLDING_PERIOD_DAYS,
+            'rsi_at_suggestion': candidate['rsi_14'], 'pe_at_suggestion': candidate['pe_ratio'],
+            'peg_at_suggestion': candidate['peg_ratio'], 'opm_at_suggestion': candidate['opm_pct'],
+            'fundamental_tier': candidate.get('fundamental_tier'),
+            'pattern_name': pricing['pattern_name'], 'pattern_note': pattern_note,
+            'score': nns_score, 'nns_tier': tier, 'rationale': rationale,
+        })
+    return results

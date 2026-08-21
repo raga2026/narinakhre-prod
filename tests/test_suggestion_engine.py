@@ -9,8 +9,11 @@ from stoqbell.utils.suggestion_engine import (
     _build_rationale,
     _fetch_candidates,
     _is_genuine_change,
+    create_manual_suggestions,
     find_pending_target_hit_suggestions,
     generate_daily_suggestions,
+    get_all_highly_recommended_today,
+    get_candidates_for_manual_pick,
     get_suggestion_by_id,
     get_top_stocks,
     is_suggestion_eligible,
@@ -718,3 +721,181 @@ def test_get_top_stocks_empty_when_nothing_clears_silver():
     assert get_top_stocks(db) == []
 
 
+# --- Notifications page: manual pick-and-send (get_candidates_for_manual_pick / create_manual_suggestions) ---
+
+def test_manual_pick_top_mode_returns_highest_ranked_candidates_in_order():
+    strong = _candidate(1, 'STRONGCO')
+    weaker = _candidate(2, 'WEAKERCO', peg_ratio=0.9, quarterly_profit_growth_pct=11,
+                         opm_pct=26, roce_pct=10, roa_pct=5)
+    weakest = _candidate(3, 'WEAKESTCO', peg_ratio=1.2, quarterly_profit_growth_pct=6,
+                          opm_pct=18, roce_pct=6, roa_pct=3)
+    db = FakeSuggestionDB([strong, weaker, weakest])
+
+    picks = get_candidates_for_manual_pick(db, count=2, mode='top')
+
+    assert [p['symbol'] for p in picks] == ['STRONGCO', 'WEAKERCO']
+    assert picks[0]['nns_score'] >= picks[1]['nns_score']
+
+
+def test_manual_pick_top_mode_count_larger_than_pool_returns_whatever_is_available():
+    candidates = [_candidate(i, f'SYM{i}') for i in range(2)]
+    db = FakeSuggestionDB(candidates)
+
+    picks = get_candidates_for_manual_pick(db, count=5, mode='top')
+
+    assert len(picks) == 2
+
+
+def test_manual_pick_random_mode_draws_only_from_the_eligible_pool_without_duplicates():
+    candidates = [_candidate(i, f'SYM{i}') for i in range(5)]
+    db = FakeSuggestionDB(candidates)
+
+    picks = get_candidates_for_manual_pick(db, count=3, mode='random')
+
+    assert len(picks) == 3
+    picked_symbols = [p['symbol'] for p in picks]
+    assert len(set(picked_symbols)) == 3  # no duplicates
+    assert set(picked_symbols) <= {f'SYM{i}' for i in range(5)}
+
+
+def test_manual_pick_excludes_candidates_currently_on_cooldown():
+    on_cooldown = _candidate(1, 'COOLDOWNCO')
+    fresh = _candidate(2, 'FRESHCO', peg_ratio=0.9, quarterly_profit_growth_pct=11,
+                        opm_pct=26, roce_pct=10, roa_pct=5)
+
+    baseline = FakeSuggestionDB([on_cooldown])
+    generate_daily_suggestions(baseline)
+    seeded_score = baseline.suggestions[0]['score']
+    seeded_target = baseline.suggestions[0]['target_sell_price']
+
+    within_window = (date.today() - timedelta(days=3)).isoformat()
+    db = FakeSuggestionDB([on_cooldown, fresh], existing_suggestions=[{
+        'id': 99, 'watchlist_id': 1, 'suggestion_date': within_window,
+        'score': seeded_score, 'target_sell_price': seeded_target, 'pattern_name': None, 'status': 'pending',
+    }])
+
+    picks = get_candidates_for_manual_pick(db, count=5, mode='top')
+
+    assert [p['symbol'] for p in picks] == ['FRESHCO']
+
+
+def test_manual_pick_empty_when_nothing_is_off_cooldown():
+    candidate = _candidate(1, 'ONLYCO')
+    baseline = FakeSuggestionDB([candidate])
+    generate_daily_suggestions(baseline)
+    seeded_score = baseline.suggestions[0]['score']
+    seeded_target = baseline.suggestions[0]['target_sell_price']
+
+    within_window = (date.today() - timedelta(days=1)).isoformat()
+    db = FakeSuggestionDB([candidate], existing_suggestions=[{
+        'id': 99, 'watchlist_id': 1, 'suggestion_date': within_window,
+        'score': seeded_score, 'target_sell_price': seeded_target, 'pattern_name': None, 'status': 'pending',
+    }])
+
+    assert get_candidates_for_manual_pick(db, count=2, mode='random') == []
+
+
+def test_create_manual_suggestions_creates_rows_only_for_requested_watchlist_ids():
+    picked = _candidate(1, 'PICKEDCO')
+    unpicked = _candidate(2, 'UNPICKEDCO', peg_ratio=0.9, quarterly_profit_growth_pct=11,
+                           opm_pct=26, roce_pct=10, roa_pct=5)
+    db = FakeSuggestionDB([picked, unpicked])
+
+    summary = create_manual_suggestions(db, [1])
+
+    assert len(summary['created']) == 1
+    assert summary['created'][0]['symbol'] == 'PICKEDCO'
+    assert summary['skipped'] == []
+    assert len(db.suggestions) == 1
+
+
+def test_create_manual_suggestions_reports_an_unknown_watchlist_id_as_skipped_not_an_error():
+    candidate = _candidate(1, 'REALCO')
+    db = FakeSuggestionDB([candidate])
+
+    summary = create_manual_suggestions(db, [1, 999])
+
+    assert len(summary['created']) == 1
+    assert summary['created'][0]['symbol'] == 'REALCO'
+    assert summary['skipped'] == [{'watchlist_id': 999, 'symbol': None, 'exchange': None}]
+
+
+def test_create_manual_suggestions_skips_a_watchlist_id_that_fell_onto_cooldown():
+    candidate = _candidate(1, 'STABLECO')
+    baseline = FakeSuggestionDB([candidate])
+    generate_daily_suggestions(baseline)
+    seeded_score = baseline.suggestions[0]['score']
+    seeded_target = baseline.suggestions[0]['target_sell_price']
+
+    within_window = (date.today() - timedelta(days=3)).isoformat()
+    db = FakeSuggestionDB([candidate], existing_suggestions=[{
+        'id': 99, 'watchlist_id': 1, 'suggestion_date': within_window,
+        'score': seeded_score, 'target_sell_price': seeded_target, 'pattern_name': None, 'status': 'pending',
+    }])
+
+    summary = create_manual_suggestions(db, [1])
+
+    assert summary['created'] == []
+    assert len(summary['skipped']) == 1
+    assert summary['skipped'][0]['watchlist_id'] == 1
+
+
+
+
+# --- get_all_highly_recommended_today (Raghav's uncapped Highly Recommended alerts) ---
+
+def test_get_all_highly_recommended_today_returns_every_golden_and_silver_candidate_uncapped():
+    golden = _golden_scoring_candidate(1, 'GOLDCO')
+    silver = _candidate(2, 'SILVERCO')  # plain fixture scores silver, see test_get_top_stocks' own comment
+    bronze = _candidate(3, 'BRONZECO', peg_ratio=1.5, quarterly_profit_growth_pct=1,
+                         quarterly_revenue_growth_pct=1, opm_pct=5, roce_pct=2, roa_pct=1)
+    db = FakeSuggestionDB([golden, silver, bronze])
+
+    results = get_all_highly_recommended_today(db)
+
+    symbols = {r['symbol'] for r in results}
+    assert symbols == {'GOLDCO', 'SILVERCO'}  # bronze excluded, nothing capped to just one
+    for r in results:
+        assert r['nns_tier'] in ('golden', 'silver')
+
+
+def test_get_all_highly_recommended_today_ignores_the_repeat_window_cooldown():
+    # The whole point: unlike the customer-facing pick, Raghav's alerts are
+    # NOT suppressed just because this stock was already suggested/alerted
+    # recently -- deliberately does not call _is_genuine_change at all.
+    candidate = _golden_scoring_candidate(1, 'REPEATCO')
+    baseline = FakeSuggestionDB([candidate])
+    generate_daily_suggestions(baseline)
+    seeded_score = baseline.suggestions[0]['score']
+    seeded_target = baseline.suggestions[0]['target_sell_price']
+
+    within_window = (date.today() - timedelta(days=1)).isoformat()
+    db = FakeSuggestionDB([candidate], existing_suggestions=[{
+        'id': 99, 'watchlist_id': 1, 'suggestion_date': within_window,
+        'score': seeded_score, 'target_sell_price': seeded_target, 'pattern_name': None, 'status': 'pending',
+    }])
+
+    results = get_all_highly_recommended_today(db)
+
+    assert [r['symbol'] for r in results] == ['REPEATCO']
+
+
+def test_get_all_highly_recommended_today_includes_fields_send_trading_alert_email_needs():
+    golden = _golden_scoring_candidate(1, 'GOLDCO', company_name='Gold Company Ltd')
+    db = FakeSuggestionDB([golden])
+
+    result = get_all_highly_recommended_today(db)[0]
+
+    for field in ('watchlist_id', 'symbol', 'exchange', 'company_name', 'buy_price',
+                  'target_sell_price', 'stop_loss_price', 'holding_period_days',
+                  'rsi_at_suggestion', 'pe_at_suggestion', 'peg_at_suggestion', 'opm_at_suggestion',
+                  'fundamental_tier', 'pattern_name', 'pattern_note', 'score', 'nns_tier', 'rationale'):
+        assert field in result, f'missing {field}'
+
+
+def test_get_all_highly_recommended_today_empty_when_nothing_clears_silver():
+    bronze_only = _candidate(1, 'WEAKCO', peg_ratio=1.5, quarterly_profit_growth_pct=1,
+                              quarterly_revenue_growth_pct=1, opm_pct=5, roce_pct=2, roa_pct=1)
+    db = FakeSuggestionDB([bronze_only])
+
+    assert get_all_highly_recommended_today(db) == []

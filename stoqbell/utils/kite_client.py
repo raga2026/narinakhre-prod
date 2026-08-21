@@ -101,6 +101,25 @@ class KiteClient:
             })
         return records
 
+    def fetch_ltp_batch(self, instrument_keys):
+        """instrument_keys: list of 'EXCHANGE:SYMBOL' strings (e.g.
+        'NSE:RELIANCE'). One Kite ltp() call for all of them -- Kite's API
+        already accepts a list, every existing call site in this file
+        (fetch_daily_candles) only ever passed one at a time since it was
+        just resolving a single instrument_token. Used by
+        utils/admin_alerts.py's intraday (every-5-minutes, market hours
+        only) target-hit check, where checking many pending stocks one
+        quote at a time would be both slow and needlessly heavy on Kite's
+        rate limits.
+
+        Returns {instrument_key: last_price} -- a key Kite has no quote for
+        is simply absent from the result, not raised, same tolerance
+        fetch_daily_candles already has for an untradable symbol."""
+        if not instrument_keys:
+            return {}
+        quotes = self._kite.ltp(instrument_keys)
+        return {key: data['last_price'] for key, data in quotes.items()}
+
     def place_market_order(self, tradingsymbol, exchange, transaction_type, quantity):
         """Places a real, immediate-execution market order -- BUY or SELL
         (transaction_type), product=CNC (equity delivery/investment, held

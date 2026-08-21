@@ -188,6 +188,8 @@ from stoqbell.utils.suggestion_engine import (
     compute_tracker_row_stats,
     compute_watchlist_nns_scores,
     get_top_stocks,
+    get_candidates_for_manual_pick,
+    create_manual_suggestions,
 )
 from stoqbell.utils.industry_growth import compute_industry_growth
 from stoqbell.utils.suggestion_email import (
@@ -199,15 +201,18 @@ from stoqbell.utils.suggestion_email import (
     send_stop_loss_review_email,
     send_admin_new_subscriber_email,
     send_admin_subscription_cancelled_email,
-    send_trading_alert_email,
     send_target_hit_email,
     send_target_achieved_email,
     send_weekly_starters_email,
     send_large_cap_bonus_email,
     send_rebrand_announcement_to_all_viewers,
-    STOCKS_BASE_URL,
 )
-from stoqbell.utils.trading_calendar import is_trading_day
+from stoqbell.utils.trading_calendar import is_trading_day, is_within_trading_hours
+from stoqbell.utils.admin_alerts import (
+    initialize_admin_alerts_table_if_needed,
+    record_and_send_highly_recommended_alerts,
+    find_and_notify_intraday_target_hits,
+)
 
 
 stocks_bp = Blueprint(
@@ -287,6 +292,7 @@ def init_stocks_tables():
     initialize_auto_trade_tables_if_needed(client)
     initialize_starters_suggestions_table_if_needed(client)
     initialize_large_cap_bonus_suggestions_table_if_needed(client)
+    initialize_admin_alerts_table_if_needed(client)
 
 
 _LEGACY_STOCKS_ROUTES = [
@@ -639,20 +645,19 @@ def stocks_suggestions_send_daily_email():
                             open_auto_trade_if_enabled(job_db, created, kite_client=auto_trade_kite_client)
                         except Exception as e:
                             current_app.logger.error(f'Auto-trade open failed for {created.get("symbol")}: {e}')
-                # A "Highly Recommended" pick (golden/silver -- same bucket
-                # _trend_label shows the customer) also gets a separate
-                # trading alert to whoever places manual orders, with a
-                # direct link to buy it -- never blocks the actual daily
-                # email below on a failure here.
-                for created in generation_summary['created']:
-                    if created.get('nns_tier') in ('golden', 'silver'):
-                        try:
-                            full_suggestion = get_suggestion_by_id(job_db, created['suggestion_id'])
-                            if full_suggestion:
-                                buy_link = f'{STOCKS_BASE_URL}/stocks/suggestions/{created["suggestion_id"]}/buy'
-                                send_trading_alert_email(STOP_LOSS_ALERT_EMAIL, full_suggestion, buy_link)
-                        except Exception as e:
-                            current_app.logger.warning(f'Trading alert email failed for {created.get("symbol")}: {e}')
+            # Raghav's own uncapped "Highly Recommended" alerts (see
+            # utils/admin_alerts.py) -- every golden/silver candidate from
+            # today's analysis, not just the one that became the customer
+            # Pick of the Day above (that pick can be empty on a day
+            # everything qualifying is on cooldown for customers, while
+            # Raghav's own list -- which ignores that cooldown entirely --
+            # still has entries), so this runs unconditionally, not nested
+            # under generation_summary['created']. Never blocks the actual
+            # daily customer email below on a failure here.
+            try:
+                record_and_send_highly_recommended_alerts(job_db)
+            except Exception as e:
+                current_app.logger.warning(f'Highly Recommended alert emails failed: {e}')
             summary = send_daily_suggestions_email(job_db)
         except Exception as e:
             current_app.logger.error(f'Daily suggestions email failed: {e}')
@@ -812,6 +817,99 @@ def stocks_announcements_send_rebrand():
         db, is_cron=False, job_name='rebrand_announcement',
         job_fn=send_rebrand_announcement_to_all_viewers,
     )
+
+
+@stocks_bp.route('/stocks/notifications', methods=['GET'])
+@stocks_role_required('super_admin')
+def stocks_notifications():
+    """super_admin-only: manual pick-and-send page, distinct from the fully
+    automatic daily job (generate_daily_suggestions always takes the single
+    top-ranked golden-cross candidate) -- lets the admin choose how many
+    recommendations to send today, either the top-ranked one(s) or a random
+    sample from today's golden-cross-eligible pool, review the specific
+    stock(s) surfaced (see /stocks/notifications/preview-picks) before
+    committing, and choose which viewers receive them (see
+    /stocks/notifications/send). Same recipient list as the resend page."""
+    db = get_db()
+    recipients = [v for v in list_viewers(db) if v.get('is_active')]
+    return render_template('admin/stocks_notifications.html', recipients=recipients)
+
+
+@stocks_bp.route('/stocks/notifications/preview-picks', methods=['POST'])
+@stocks_role_required('super_admin')
+def stocks_notifications_preview_picks():
+    """AJAX endpoint for the Notifications page: surfaces candidates for the
+    admin to review, without creating any stock_suggestions row yet (see
+    get_candidates_for_manual_pick) -- committing only happens at
+    /stocks/notifications/send, once the admin has picked which of these to
+    actually send."""
+    mode = request.form.get('mode') or 'top'
+    if mode not in ('top', 'random'):
+        mode = 'top'
+    try:
+        count = int(request.form.get('count', 2))
+    except ValueError:
+        count = 2
+    count = max(1, min(count, 5))
+
+    db = get_db()
+    candidates = get_candidates_for_manual_pick(db, count=count, mode=mode)
+    return jsonify({'status': 'ok', 'candidates': candidates})
+
+
+@stocks_bp.route('/stocks/notifications/send', methods=['POST'])
+@stocks_role_required('super_admin')
+def stocks_notifications_send():
+    """super_admin-only: creates today's stock_suggestions row(s) for the
+    admin-chosen watchlist_ids (see create_manual_suggestions) and emails
+    them to the chosen recipients via the SAME send path the automatic daily
+    job uses (send_daily_suggestions_email(target_date=today,
+    recipient_ids=...)) -- no separate email-building code. Runs
+    synchronously, same reasoning as /stocks/suggestions/resend: a handful
+    of stocks and recipients, not a slow sync job worth backgrounding."""
+    db = get_db()
+
+    raw_watchlist_ids = request.form.getlist('watchlist_ids')
+    if not raw_watchlist_ids:
+        flash('Please select at least one stock to send.', 'error')
+        return redirect(url_for('stocks.stocks_notifications'))
+    try:
+        watchlist_ids = [int(v) for v in raw_watchlist_ids]
+    except ValueError:
+        flash('Invalid stock selection.', 'error')
+        return redirect(url_for('stocks.stocks_notifications'))
+
+    raw_recipient_ids = request.form.getlist('recipient_ids')
+    if not raw_recipient_ids:
+        flash('Please select at least one recipient.', 'error')
+        return redirect(url_for('stocks.stocks_notifications'))
+    try:
+        recipient_ids = [int(v) for v in raw_recipient_ids]
+    except ValueError:
+        flash('Invalid recipient selection.', 'error')
+        return redirect(url_for('stocks.stocks_notifications'))
+
+    try:
+        creation_summary = create_manual_suggestions(db, watchlist_ids)
+        send_summary = send_daily_suggestions_email(
+            db, target_date=date.today(), recipient_ids=recipient_ids
+        )
+    except Exception as e:
+        current_app.logger.error(f'Manual notification send failed: {e}')
+        flash(f'Send failed: {e}', 'error')
+        return redirect(url_for('stocks.stocks_notifications'))
+
+    created_symbols = ', '.join(f"{c['symbol']} ({c['exchange']})" for c in creation_summary['created'])
+    skipped_count = len(creation_summary['skipped'])
+    message = (
+        f"Sent {created_symbols or 'nothing'} to {send_summary['sent']} of "
+        f"{send_summary['recipient_count']} selected recipients"
+        + (f", {send_summary['failed']} failed" if send_summary['failed'] else '')
+        + (f'. {skipped_count} chosen stock(s) were skipped (already suggested recently, no genuine change).'
+           if skipped_count else '.')
+    )
+    flash(message, 'error' if (send_summary['failed'] or not creation_summary['created']) else 'info')
+    return redirect(url_for('stocks.stocks_notifications'))
 
 
 @stocks_bp.route('/stocks/suggestions/resend', methods=['GET', 'POST'])
@@ -1044,6 +1142,34 @@ def stocks_indicators_calculate_universe():
     return _dispatch_stocks_job(
         db, is_cron=False, job_name='indicator_calc_universe', job_fn=run_indicator_calculation_universe
     )
+
+
+@stocks_bp.route('/stocks/notifications/check-intraday-hits', methods=['POST'])
+def stocks_notifications_check_intraday_hits():
+    """Every-5-minutes, market-hours-only intraday target-hit check (see
+    utils/admin_alerts.find_and_notify_intraday_target_hits) -- cron-only,
+    same convention as /stocks/alerts/check-missed-jobs, called by its own
+    GitHub Actions workflow (stocks-intraday-target-hit-check.yml), never
+    from the dashboard. Skips (without error) outside actual trading
+    hours/days -- the cron schedule itself is deliberately a little
+    generous around NSE/BSE's 09:15-15:30 IST session, this is the precise
+    gate. A Kite session issue (expired daily access token -- see
+    KiteClient) is reported as an error but never raises past this route,
+    since a stuck cron step here would otherwise fail every run for the
+    rest of the day until someone notices."""
+    if not has_valid_cron_secret(request.headers, STOCKS_FUNDAMENTALS_CRON_SECRET):
+        return jsonify({'status': 'error', 'message': 'Unauthorized'}), 403
+
+    if not is_trading_day() or not is_within_trading_hours():
+        return jsonify({'status': 'skipped', 'reason': 'outside trading hours'})
+
+    db = get_db()
+    try:
+        summary = find_and_notify_intraday_target_hits(db)
+    except Exception as e:
+        current_app.logger.error(f'Intraday target-hit check failed: {e}')
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+    return jsonify({'status': 'ok', **summary})
 
 
 @stocks_bp.route('/stocks/alerts/check-missed-jobs', methods=['POST'])

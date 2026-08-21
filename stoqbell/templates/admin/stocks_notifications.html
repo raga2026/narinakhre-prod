@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <link rel="icon" type="image/png" href="{{ url_for('stocks.static', filename='assets/stoqbell-icon.png') }}">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Notifications - StoqBell</title>
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+    <style>
+        body { background: #0f172a; color: #f8fafc; }
+        .stocks-accent { color: #0ea5e9; }
+        .stocks-btn { background: linear-gradient(90deg, #0891b2 0%, #0ea5e9 100%); color: white; }
+        .stocks-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+        input[type="number"] { background: #1e293b; color: #f8fafc; border: 1px solid #334155; }
+        .recipient-list, .candidate-list { max-height: 280px; overflow-y: auto; background: #1e293b; border: 1px solid #334155; border-radius: 0.75rem; }
+        .recipient-row, .candidate-row { display: flex; align-items: center; gap: 0.6rem; padding: 0.6rem 0.9rem; border-bottom: 1px solid #334155; }
+        .recipient-row:last-child, .candidate-row:last-child { border-bottom: none; }
+        .toggle-btn { font-size: 0.8rem; color: #38bdf8; text-decoration: underline; background: none; border: none; cursor: pointer; padding: 0; }
+        .badge { display:inline-flex; align-items:center; padding:2px 10px; border-radius:999px; font-size:0.7rem; font-weight:700; white-space: nowrap; }
+        .badge-golden { background:#78350f; color:#fef3c7; }
+        .badge-silver { background:#334155; color:#e2e8f0; }
+        .badge-bronze { background:#7c2d12; color:#fed7aa; }
+    </style>
+</head>
+<body class="min-h-screen p-8">
+    <div class="max-w-2xl mx-auto">
+        <div class="flex items-center justify-between mb-8">
+            <div>
+                <h1 class="text-2xl font-extrabold stocks-accent font-serif">Notifications</h1>
+                <p class="text-slate-400 text-sm mt-1">Manually choose and send today's stock recommendation(s), instead of waiting on the automatic daily pick.</p>
+            </div>
+            <a href="{{ url_for('stocks.stocks_admin_dashboard') }}" class="text-sm text-slate-400 hover:text-sky-400 underline">Back to dashboard</a>
+        </div>
+
+        {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+            <div class="mb-6" role="alert" aria-live="assertive">
+            {% for category, msg in messages %}
+                <div class="{{ 'bg-rose-900/40 text-rose-200 border border-rose-500/30' if category == 'error' else 'bg-sky-900/40 text-sky-200 border border-sky-500/30' }} rounded-xl p-3 mb-2 text-sm">{{ msg }}</div>
+            {% endfor %}
+            </div>
+        {% endif %}
+        {% endwith %}
+
+        <div class="bg-slate-800 rounded-2xl p-6 border border-sky-500/20 mb-6">
+            <p class="text-slate-400 text-sm mb-4">
+                "Top-ranked" reviews the same candidate(s) the automatic daily job would pick, in order. "Random from
+                golden-cross candidates" instead shows a random sample from today's full golden-cross-eligible pool --
+                every candidate shown either way has already cleared the same golden-cross + StoqBell Score bar the
+                daily job requires; random only changes which qualifying stock gets picked, not the quality bar it
+                had to clear. Nothing is sent until you review the stock(s) below and click Send.
+            </p>
+
+            <div class="flex flex-wrap items-end gap-6 mb-4">
+                <div>
+                    <label class="block text-sm text-slate-300 mb-2">Source</label>
+                    <div class="flex gap-4">
+                        <label class="flex items-center gap-2 text-sm text-slate-200">
+                            <input type="radio" name="pick-mode" value="top" checked> Top-ranked
+                        </label>
+                        <label class="flex items-center gap-2 text-sm text-slate-200">
+                            <input type="radio" name="pick-mode" value="random"> Random from golden-cross candidates
+                        </label>
+                    </div>
+                </div>
+                <div>
+                    <label for="pick-count" class="block text-sm text-slate-300 mb-2">How many to review</label>
+                    <input type="number" id="pick-count" min="1" max="5" value="2" class="rounded-xl px-4 py-2 w-20">
+                </div>
+                <button type="button" id="get-candidates-btn" class="stocks-btn py-2.5 px-5 rounded-2xl font-bold transition hover:opacity-90">
+                    Get candidates
+                </button>
+            </div>
+
+            <p id="candidates-status" class="text-slate-400 text-sm mb-3"></p>
+            <div id="candidates-container"></div>
+        </div>
+
+        <form method="POST" action="{{ url_for('stocks.stocks_notifications_send') }}" id="notifications-send-form"
+              onsubmit="return confirmSend();">
+            <div id="candidates-checkbox-list"></div>
+
+            <div class="bg-slate-800 rounded-2xl p-6 border border-sky-500/20 mb-6">
+                <div class="flex items-center justify-between mb-2">
+                    <label class="block text-sm text-slate-300">Recipients</label>
+                    {% if recipients %}
+                    <span>
+                        <button type="button" class="toggle-btn" onclick="setAllRecipients(true)">Select all</button>
+                        <span class="text-slate-600 mx-1">&middot;</span>
+                        <button type="button" class="toggle-btn" onclick="setAllRecipients(false)">Deselect all</button>
+                    </span>
+                    {% endif %}
+                </div>
+
+                {% if not recipients %}
+                    <p class="text-slate-400 text-sm mb-4">No active viewers to send to.</p>
+                {% else %}
+                    <div class="recipient-list mb-2">
+                        {% for v in recipients %}
+                        <label class="recipient-row">
+                            <input type="checkbox" name="recipient_ids" value="{{ v.id }}" checked onchange="updateRecipientCount()">
+                            <span class="text-slate-200 text-sm">{{ v.name or v.username }}</span>
+                            <span class="text-slate-500 text-xs">{{ v.username }}</span>
+                        </label>
+                        {% endfor %}
+                    </div>
+                    <p class="text-slate-500 text-xs mb-4"><span id="recipient-count">{{ recipients | length }}</span> of {{ recipients | length }} selected</p>
+                {% endif %}
+            </div>
+
+            <button type="submit" id="send-btn" class="stocks-btn py-3 px-6 rounded-2xl font-bold transition hover:opacity-90" disabled>
+                Send selected recommendation(s)
+            </button>
+        </form>
+    </div>
+
+    <script>
+        function setAllRecipients(checked) {
+            document.querySelectorAll('input[name="recipient_ids"]').forEach(function (cb) { cb.checked = checked; });
+            updateRecipientCount();
+        }
+        function updateRecipientCount() {
+            var countEl = document.getElementById('recipient-count');
+            if (!countEl) { return; }
+            countEl.textContent = document.querySelectorAll('input[name="recipient_ids"]:checked').length;
+        }
+
+        function badgeClass(tier) {
+            if (tier === 'golden') return 'badge-golden';
+            if (tier === 'silver') return 'badge-silver';
+            return 'badge-bronze';
+        }
+
+        function renderCandidates(candidates) {
+            var listEl = document.getElementById('candidates-container');
+            var checkboxListEl = document.getElementById('candidates-checkbox-list');
+            var sendBtn = document.getElementById('send-btn');
+            listEl.innerHTML = '';
+            checkboxListEl.innerHTML = '';
+
+            if (!candidates.length) {
+                document.getElementById('candidates-status').textContent =
+                    "Nothing qualifies right now -- every golden-cross candidate is either on cooldown or none clear the bar today.";
+                sendBtn.disabled = true;
+                return;
+            }
+            document.getElementById('candidates-status').textContent =
+                candidates.length + ' candidate(s) found -- review below, uncheck any you don\'t want to send.';
+
+            var wrap = document.createElement('div');
+            wrap.className = 'candidate-list';
+            candidates.forEach(function (c, i) {
+                var row = document.createElement('label');
+                row.className = 'candidate-row';
+                row.innerHTML =
+                    '<input type="checkbox" name="watchlist_ids" value="' + c.watchlist_id + '" checked ' +
+                    'form="notifications-send-form" onchange="updateSendButtonState()">' +
+                    '<span class="text-slate-200 text-sm font-semibold">' + (c.company_name || c.symbol) + '</span>' +
+                    '<span class="text-slate-500 text-xs">' + c.symbol + ' &middot; ' + c.exchange + '</span>' +
+                    '<span class="badge ' + badgeClass(c.nns_tier) + '">' + c.nns_tier + '</span>' +
+                    '<span class="text-slate-400 text-xs ml-auto">Buy Rs ' + c.buy_price + ' &rarr; Target Rs ' + c.target_sell_price + '</span>';
+                wrap.appendChild(row);
+            });
+            listEl.appendChild(wrap);
+            updateSendButtonState();
+        }
+
+        function updateSendButtonState() {
+            var anyChecked = document.querySelectorAll('input[name="watchlist_ids"]:checked').length > 0;
+            document.getElementById('send-btn').disabled = !anyChecked;
+        }
+
+        document.getElementById('get-candidates-btn').addEventListener('click', function () {
+            var mode = document.querySelector('input[name="pick-mode"]:checked').value;
+            var count = document.getElementById('pick-count').value;
+            var btn = this;
+            btn.disabled = true;
+            document.getElementById('candidates-status').textContent = 'Loading candidates...';
+
+            var body = new URLSearchParams();
+            body.set('mode', mode);
+            body.set('count', count);
+
+            fetch('{{ url_for("stocks.stocks_notifications_preview_picks") }}', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                body: body.toString(),
+            }).then(function (r) { return r.json(); }).then(function (data) {
+                btn.disabled = false;
+                if (data.status !== 'ok') {
+                    document.getElementById('candidates-status').textContent = 'Could not load candidates.';
+                    return;
+                }
+                renderCandidates(data.candidates);
+            }).catch(function () {
+                btn.disabled = false;
+                document.getElementById('candidates-status').textContent = 'Could not load candidates -- please try again.';
+            });
+        });
+
+        function confirmSend() {
+            var stockCount = document.querySelectorAll('input[name="watchlist_ids"]:checked').length;
+            var recipientCount = document.querySelectorAll('input[name="recipient_ids"]:checked').length;
+            return confirm('Send ' + stockCount + ' recommendation(s) to ' + recipientCount + ' selected recipient(s)? This sends a real email.');
+        }
+    </script>
+</body>
+</html>

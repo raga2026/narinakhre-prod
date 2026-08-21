@@ -218,6 +218,39 @@ def send_trading_alert_email(to_email, suggestion, buy_link):
     )
 
 
+def send_highly_recommended_alert_email(to_email, suggestion):
+    """Raghav-only (see utils/admin_alerts.py's
+    record_and_send_highly_recommended_alerts, always called with
+    to_email=STOP_LOSS_ALERT_EMAIL): one email per golden/silver-tier
+    candidate from that day's analysis, uncapped -- unlike
+    send_trading_alert_email above (tied to the single customer-facing Pick
+    of the Day, with a Buy Now button linking to the super_admin buy-
+    confirmation page for THAT stock_suggestions row), these candidates
+    were never inserted as a stock_suggestions row at all (see
+    utils/admin_alerts.py for why), so there's no suggestion_id to link a
+    buy-confirmation page to. Reuses the same stock-card rendering
+    (_render_stock_card_html/_render_stock_card_text) minus the Buy Now
+    button -- the card's own built-in "View full analysis" link (via
+    universe_id) is enough to let Raghav look the stock up."""
+    subject = f'StoqBell -- Highly Recommended: {_company_display_name(suggestion)}'
+    text_body = (
+        f"{_company_display_name(suggestion)} is Highly Recommended today.\n\n"
+        f'{_render_stock_card_text(suggestion)}\n\n'
+        f'{DISCLAIMER}\n'
+    )
+    html_inner = (
+        f'{_stoqbell_logo_header_html()}'
+        '<p style="font-family:Arial,Helvetica,sans-serif;font-size:16px;color:#0f172a;">'
+        f"<strong>{_company_display_name(suggestion)}</strong> is Highly Recommended today.</p>"
+        f'{_render_stock_card_html(suggestion)}'
+        f'<p style="color:#64748b;font-size:0.85em;margin-top:16px;">{DISCLAIMER}</p>'
+    )
+    return send_zeptomail_stocks_email(
+        to_email=to_email, to_name=to_email, subject=subject,
+        textbody=text_body, htmlbody=_wrap_email_html(html_inner), sender_name='StoqBell',
+    )
+
+
 def send_target_hit_email(to_email, trade, pnl_amount, pnl_pct):
     """Sent once per target-hit close -- app.py's
     /stocks/auto-trader/reconcile job, for each entry in
@@ -367,6 +400,82 @@ def send_target_achieved_email(to_email, to_name, achievements):
     return send_zeptomail_stocks_email(
         to_email=to_email, to_name=greeting, subject=subject,
         textbody=text_body, htmlbody=_wrap_email_html(html_inner), sender_name='StoqBell',
+    )
+
+
+def send_intraday_target_hit_alert_email(to_email, hits):
+    """Raghav-only (see utils/admin_alerts.py's
+    find_and_notify_intraday_target_hits -- always called with
+    to_email=STOP_LOSS_ALERT_EMAIL, raga2020@gmail.com): sent by the
+    every-5-minutes, market-hours-only intraday check whenever a live Kite
+    quote shows one or more pending stocks (customer suggestions and/or
+    Raghav's own uncapped Highly Recommended alerts) have reached their
+    target price. One email per check that finds anything, bundling every
+    hit found in that run rather than one email per stock -- see the
+    caller's own docstring for why this doesn't repeat for the same stock
+    on a later check.
+
+    hits: list of dicts with source ('suggestion' or 'admin_alert'),
+    symbol, exchange, company_name, buy_price, target_sell_price,
+    live_price."""
+    count = len(hits)
+    if count == 1:
+        name = hits[0].get('company_name') or hits[0]['symbol']
+        subject = f'StoqBell -- {name} hit its target (intraday)'
+    else:
+        subject = f'StoqBell -- {count} stocks hit target (intraday)'
+
+    _SOURCE_LABELS = {'suggestion': 'Customer recommendation', 'admin_alert': 'Highly Recommended alert'}
+
+    lines_text = []
+    lines_html = []
+    for h in hits:
+        name = h.get('company_name') or h['symbol']
+        profit_pct = None
+        if h.get('buy_price'):
+            profit_pct = round((h['live_price'] - h['buy_price']) / h['buy_price'] * 100, 2)
+        profit_str = f"{'+' if profit_pct is not None and profit_pct >= 0 else ''}{profit_pct}%" if profit_pct is not None else 'n/a'
+        source_label = _SOURCE_LABELS.get(h.get('source'), h.get('source') or '')
+
+        lines_text.append(
+            f"{name} ({h['symbol']} · {h['exchange']}) -- {source_label}\n"
+            f"  Buy: Rs {h['buy_price']}   Target: Rs {h['target_sell_price']}   Live: Rs {h['live_price']} ({profit_str})"
+        )
+        lines_html.append(
+            '<tr>'
+            f'<td style="padding:8px 10px;border-bottom:1px solid #e2e8f0;">'
+            f'<div style="font-weight:bold;color:#0f172a;">{name}</div>'
+            f'<div style="color:#64748b;font-size:12px;">{h["symbol"]} · {h["exchange"]} -- {source_label}</div>'
+            '</td>'
+            f'<td style="padding:8px 10px;border-bottom:1px solid #e2e8f0;text-align:right;color:#0f172a;">Rs {h["buy_price"]}</td>'
+            f'<td style="padding:8px 10px;border-bottom:1px solid #e2e8f0;text-align:right;color:#0f172a;">Rs {h["target_sell_price"]}</td>'
+            f'<td style="padding:8px 10px;border-bottom:1px solid #e2e8f0;text-align:right;color:#15803d;font-weight:bold;">Rs {h["live_price"]} ({profit_str})</td>'
+            '</tr>'
+        )
+
+    intro_line = (
+        'One stock just hit its target (live price, intraday):' if count == 1
+        else f'{count} stocks just hit target (live price, intraday):'
+    )
+    text_body = f'{intro_line}\n\n' + '\n\n'.join(lines_text) + '\n'
+    html_inner = (
+        f'{_stoqbell_logo_header_html()}'
+        f'<p style="font-family:Arial,Helvetica,sans-serif;font-size:16px;color:#0f172a;">{intro_line}</p>'
+        '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" '
+        'style="font-family:Arial,Helvetica,sans-serif;font-size:13px;border:1px solid #e2e8f0;border-radius:8px;overflow:hidden;">'
+        '<tr style="background:#f8fafc;">'
+        '<td style="padding:8px 10px;color:#64748b;font-size:11px;text-transform:uppercase;">Stock</td>'
+        '<td style="padding:8px 10px;color:#64748b;font-size:11px;text-transform:uppercase;text-align:right;">Buy</td>'
+        '<td style="padding:8px 10px;color:#64748b;font-size:11px;text-transform:uppercase;text-align:right;">Target</td>'
+        '<td style="padding:8px 10px;color:#64748b;font-size:11px;text-transform:uppercase;text-align:right;">Live</td>'
+        '</tr>'
+        + ''.join(lines_html) +
+        '</table>'
+    )
+
+    return send_zeptomail_stocks_email(
+        to_email=to_email, to_name=to_email, subject=subject,
+        textbody=text_body, htmlbody=html_inner, sender_name='StoqBell',
     )
 
 

@@ -1,0 +1,39 @@
+name: Stocks intraday target-hit check
+
+on:
+  schedule:
+    # Every 5 minutes, Mon-Fri, 03:40-10:05 UTC -- comfortably brackets
+    # NSE/BSE's 09:15-15:30 IST regular session (03:45-10:00 UTC). Two
+    # cron lines since GitHub Actions cron ranges can't cleanly express
+    # "03:40-10:05" in one expression. The route itself
+    # (POST /stocks/notifications/check-intraday-hits) does the precise
+    # is_trading_day()/is_within_trading_hours() gate and no-ops outside
+    # it, same as every other stocks-*.yml workflow here relies on its own
+    # route for the exact gate rather than the cron schedule alone.
+    #
+    # Unlike every other price/target check in this codebase (all
+    # explicitly once-a-day against yesterday's synced close), this one
+    # fetches a live Kite quote and checks it against both pending
+    # customer recommendations and Raghav's own uncapped Highly
+    # Recommended alerts (see utils/admin_alerts.py) -- emailing
+    # raga2020@gmail.com the moment either actually reaches its target,
+    # not the next morning.
+    - cron: '*/5 3-9 * * 1-5'
+    - cron: '0,5 10 * * 1-5'
+  workflow_dispatch: {}  # lets you trigger it manually from the Actions tab
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: POST to /stocks/notifications/check-intraday-hits
+        run: |
+          status=$(curl -s -o /tmp/response.txt -w "%{http_code}" --max-time 60 -X POST \
+            -H "X-Cron-Secret: ${{ secrets.STOCKS_FUNDAMENTALS_CRON_SECRET }}" \
+            https://narinakhre.com/stocks/notifications/check-intraday-hits)
+          echo "HTTP status: $status"
+          cat /tmp/response.txt
+          if [ "$status" != "200" ]; then
+            echo "Request failed"
+            exit 1
+          fi

@@ -102,6 +102,9 @@
                     Generate and send Pick of the Day
                 </button>
             </form>
+            <p class="mt-3">
+                <a href="{{ url_for('stocks.stocks_notifications') }}" class="text-sky-400 hover:text-sky-300 underline text-sm">or send a custom pick &rarr;</a>
+            </p>
         </section>
 
         <section class="bg-slate-800 rounded-2xl p-6 border border-amber-500/40 mb-6" aria-labelledby="announcements-heading">
@@ -187,6 +190,9 @@
                 <a href="{{ url_for('stocks.stocks_recommendations_tracker') }}" class="text-sky-400 hover:text-sky-300 underline">Recommendation tracker</a>
             </p>
             {% if role == 'super_admin' %}
+            <p class="mt-2">
+                <a href="{{ url_for('stocks.stocks_notifications') }}" class="text-sky-400 hover:text-sky-300 underline">Send a custom recommendation</a>
+            </p>
             <p class="mt-2">
                 <a href="{{ url_for('stocks.stocks_suggestions_resend') }}" class="text-sky-400 hover:text-sky-300 underline">Resend a past day's recommendations</a>
             </p>

@@ -1,6 +1,7 @@
-from datetime import date
+from datetime import date, datetime
 
-from stoqbell.utils.trading_calendar import is_trading_day
+from stoqbell.utils.kite_session import IST
+from stoqbell.utils.trading_calendar import is_trading_day, is_within_trading_hours
 
 
 def test_ordinary_weekday_is_a_trading_day():
@@ -38,3 +39,33 @@ def test_defaults_to_today_when_no_date_given():
     # Just needs to not raise and return a bool -- today's actual
     # weekday/holiday status will vary by when the suite runs.
     assert isinstance(is_trading_day(), bool)
+
+
+def _ist(hour, minute):
+    return datetime(2026, 8, 18, hour, minute, tzinfo=IST)
+
+
+def test_mid_session_is_within_trading_hours():
+    assert is_within_trading_hours(_ist(11, 0)) is True
+
+
+def test_before_market_open_is_not_within_trading_hours():
+    assert is_within_trading_hours(_ist(9, 0)) is False
+
+
+def test_after_market_close_is_not_within_trading_hours():
+    assert is_within_trading_hours(_ist(16, 0)) is False
+
+
+def test_exact_open_and_close_boundaries_are_within_trading_hours():
+    assert is_within_trading_hours(_ist(9, 15)) is True
+    assert is_within_trading_hours(_ist(15, 30)) is True
+
+
+def test_one_minute_outside_each_boundary_is_not_within_trading_hours():
+    assert is_within_trading_hours(_ist(9, 14)) is False
+    assert is_within_trading_hours(_ist(15, 31)) is False
+
+
+def test_defaults_to_now_when_no_datetime_given():
+    assert isinstance(is_within_trading_hours(), bool)

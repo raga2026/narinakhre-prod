@@ -11,7 +11,16 @@ following year's holiday list a few months ahead each year -- add each new
 year's dates here when they're published; a year missing from this dict
 just falls back to weekend-only checking (see is_trading_day) rather than
 silently refusing to ever send a Pick of the Day again."""
-from datetime import date
+from datetime import date, datetime, time
+
+from stoqbell.utils.kite_session import IST
+
+# NSE/BSE's regular equity session -- used by is_within_trading_hours below
+# to gate the intraday (every-5-minutes) target-hit check (see
+# utils/admin_alerts.py) so it only ever does real work while the market is
+# actually open, not just on a trading day in general.
+MARKET_OPEN_IST = time(9, 15)
+MARKET_CLOSE_IST = time(15, 30)
 
 NSE_HOLIDAYS = {
     2026: {
@@ -44,3 +53,16 @@ def is_trading_day(check_date=None):
     if check_date.weekday() >= 5:  # Saturday=5, Sunday=6
         return False
     return check_date not in NSE_HOLIDAYS.get(check_date.year, frozenset())
+
+
+def is_within_trading_hours(check_datetime=None):
+    """True if check_datetime (IST, defaults to now) falls inside NSE/BSE's
+    09:15-15:30 IST regular session. Doesn't check is_trading_day() itself
+    -- callers combine both (see app.py's
+    /stocks/notifications/check-intraday-hits), same as every other
+    cron-triggered stocks route already checks is_trading_day() alone for
+    its own once-a-day gate."""
+    if check_datetime is None:
+        check_datetime = datetime.now(IST)
+    current_time = check_datetime.astimezone(IST).time()
+    return MARKET_OPEN_IST <= current_time <= MARKET_CLOSE_IST
