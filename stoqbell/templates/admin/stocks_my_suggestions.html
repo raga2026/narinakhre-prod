@@ -18,6 +18,8 @@
     <title>My Suggestions - StoqBell</title>
     <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
     <style>
+        .brand-stoq { color: #f8fafc; }
+        .brand-bell { color: #39FF14; }
         /* Kite-inspired layout -- see the other viewer-facing Stocks
            templates for the same palette (stocks_my_history.html,
            stocks_universe_list.html, stocks_universe_detail.html).
@@ -144,7 +146,7 @@
             <div class="topbar-row1">
                 <a href="{{ url_for('stocks.stocks_home') }}" class="brand">
                     <img src="{{ url_for('stocks.static', filename='assets/stoqbell-icon-dark.svg') }}" alt="" class="brand-mark">
-                    <span class="brand-text">StoqBell</span>
+                    <span class="brand-text"><span class="brand-stoq">Stoq</span><span class="brand-bell">Bell</span></span>
                 </a>
                 <a href="{{ url_for('stocks.stocks_admin_logout') }}" class="logout-link">Log out</a>
             </div>

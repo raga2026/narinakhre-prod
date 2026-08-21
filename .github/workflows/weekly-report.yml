@@ -1,0 +1,29 @@
+name: Weekly report
+
+on:
+  schedule:
+    # 09:00 UTC every Monday -- same schedule the Render Cron Job
+    # (narinakhre-weekly-report) used before this replaced it. Triggers
+    # POST /cron/weekly-report (app.py), which does all the actual report
+    # logic (DB queries, email rendering/sending) -- this workflow is only
+    # the trigger, same pattern as every stocks-*.yml workflow here, moved
+    # off a paid Render Cron Job onto GitHub Actions' free scheduled runs
+    # since all it ever did was one HTTP POST.
+    - cron: '0 9 * * 1'
+  workflow_dispatch: {}  # lets you trigger it manually from the Actions tab
+
+jobs:
+  send-report:
+    runs-on: ubuntu-latest
+    steps:
+      - name: POST to /cron/weekly-report
+        run: |
+          status=$(curl -s -o /tmp/response.txt -w "%{http_code}" --max-time 60 -X POST \
+            -H "X-Cron-Secret: ${{ secrets.WEEKLY_REPORT_CRON_SECRET }}" \
+            https://narinakhre.com/cron/weekly-report)
+          echo "HTTP status: $status"
+          cat /tmp/response.txt
+          if [ "$status" != "200" ]; then
+            echo "Request failed"
+            exit 1
+          fi

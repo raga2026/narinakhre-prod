@@ -18,6 +18,8 @@
     <title>{{ company.name or company.symbol }} - StoqBell</title>
     <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
     <style>
+        .brand-stoq { color: #f8fafc; }
+        .brand-bell { color: #39FF14; }
         :root {
             --bg: #0f172a; --fg: #e2e8f0;
             --muted-900: #f1f5f9; --muted-700: #cbd5e1; --muted-600: #94a3b8;
@@ -104,7 +106,7 @@
             <div class="topbar-row1">
                 <a href="{{ url_for('stocks.stocks_home') }}" class="brand">
                     <img src="{{ url_for('stocks.static', filename='assets/stoqbell-icon-dark.svg') }}" alt="" class="brand-mark">
-                    <span class="brand-text">StoqBell</span>
+                    <span class="brand-text"><span class="brand-stoq">Stoq</span><span class="brand-bell">Bell</span></span>
                 </a>
                 <a href="{{ url_for('stocks.stocks_admin_logout') }}" class="logout-link">Log out</a>
             </div>

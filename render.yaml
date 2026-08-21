@@ -24,9 +24,13 @@ services:
       - www.stoqbell.com
       - stoqbell.com
     envVars:
-      # Shared secret for POST /cron/weekly-report -- must be set to the
-      # same value on narinakhre-weekly-report below. Set via the Render
-      # dashboard (sync: false means Render won't overwrite it on deploy).
+      # Shared secret for POST /cron/weekly-report -- the caller is a
+      # GitHub Actions workflow (.github/workflows/weekly-report.yml), not
+      # a Render Cron Job (that cost a second paid Starter-plan service for
+      # what was ever only one HTTP POST a week -- moved off Render
+      # 2026-08-21). Set via the Render dashboard (sync: false means Render
+      # won't overwrite it on deploy) to the same value as the
+      # WEEKLY_REPORT_CRON_SECRET repo secret on GitHub.
       - key: WEEKLY_REPORT_CRON_SECRET
         sync: false
       # Shared secret for every Stocks cron-triggered route (price sync,
@@ -36,23 +40,4 @@ services:
       # var anywhere in this file. Set the same value as the
       # STOCKS_FUNDAMENTALS_CRON_SECRET repo secret on GitHub.
       - key: STOCKS_FUNDAMENTALS_CRON_SECRET
-        sync: false
-
-  # Fires send_weekly_report_email() (in app.py) once a week by POSTing to
-  # the production web service's protected /cron/weekly-report endpoint --
-  # see weekly_report_cron.py. Points at narinakhre-production specifically
-  # (not the test service) since both share the same Supabase database, so
-  # only one of them should ever actually send the report.
-  - type: cron
-    name: narinakhre-weekly-report
-    plan: Starter
-    runtime: python
-    region: singapore
-    schedule: "0 9 * * 1"
-    buildCommand: "pip install requests"
-    startCommand: "python weekly_report_cron.py"
-    envVars:
-      - key: WEEKLY_REPORT_URL
-        value: https://narinakhre.com/cron/weekly-report
-      - key: WEEKLY_REPORT_CRON_SECRET
         sync: false

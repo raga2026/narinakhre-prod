@@ -22,7 +22,7 @@ from flask import Blueprint, current_app, g, jsonify, redirect, render_template,
 import auth_providers
 from db import get_db, get_supabase, SupabaseDB
 from razorpay_shared import get_razorpay_client
-from recaptcha_shared import verify_recaptcha, RECAPTCHA_SITE_KEY
+from recaptcha_shared import verify_recaptcha, STOCKS_RECAPTCHA_SITE_KEY, STOCKS_RECAPTCHA_SECRET_KEY
 
 from stoqbell.utils.stock_ingestion import initialize_stock_tables_if_needed, sync_daily_data, sync_daily_data_universe
 from stoqbell.utils.stock_auth import (
@@ -2533,7 +2533,7 @@ def stocks_signup():
     /stocks/users -- see set_viewer_plan)."""
     if request.method == 'GET':
         return render_template(
-            'admin/stocks_signup.html', recaptcha_site_key=RECAPTCHA_SITE_KEY, form_rendered_at=time.time(),
+            'admin/stocks_signup.html', recaptcha_site_key=STOCKS_RECAPTCHA_SITE_KEY, form_rendered_at=time.time(),
             referral_code_prefill=(request.args.get('ref') or '').strip(),
             plan_prefill='starters' if request.args.get('plan') == 'starters' else 'standard',
         )
@@ -2555,11 +2555,11 @@ def stocks_signup():
     client_ip = request.remote_addr or 'unknown'
     if contact_ip_is_rate_limited(client_ip):
         flash('Please wait a moment before trying again.', 'error')
-        return render_template('admin/stocks_signup.html', recaptcha_site_key=RECAPTCHA_SITE_KEY, form_rendered_at=time.time(), referral_code_prefill=referral_code_prefill, plan_prefill=plan), 429
-    if not verify_recaptcha(request.form.get('recaptcha_token'), remote_ip=client_ip, expected_action='stocks_signup'):
+        return render_template('admin/stocks_signup.html', recaptcha_site_key=STOCKS_RECAPTCHA_SITE_KEY, form_rendered_at=time.time(), referral_code_prefill=referral_code_prefill, plan_prefill=plan), 429
+    if not verify_recaptcha(request.form.get('recaptcha_token'), remote_ip=client_ip, expected_action='stocks_signup', secret_key=STOCKS_RECAPTCHA_SECRET_KEY):
         current_app.logger.warning(f'Bot caught on stocks signup (recaptcha): {request.form.get("email")}')
         flash('Please try again.', 'error')
-        return render_template('admin/stocks_signup.html', recaptcha_site_key=RECAPTCHA_SITE_KEY, form_rendered_at=time.time(), referral_code_prefill=referral_code_prefill, plan_prefill=plan), 401
+        return render_template('admin/stocks_signup.html', recaptcha_site_key=STOCKS_RECAPTCHA_SITE_KEY, form_rendered_at=time.time(), referral_code_prefill=referral_code_prefill, plan_prefill=plan), 401
 
     name = (request.form.get('name') or '').strip()
     email = (request.form.get('email') or '').strip().lower()
@@ -2568,10 +2568,10 @@ def stocks_signup():
 
     if not EMAIL_RE.match(email):
         flash('Please enter a valid email address.', 'error')
-        return render_template('admin/stocks_signup.html', recaptcha_site_key=RECAPTCHA_SITE_KEY, form_rendered_at=time.time(), referral_code_prefill=referral_code_prefill, plan_prefill=plan), 400
+        return render_template('admin/stocks_signup.html', recaptcha_site_key=STOCKS_RECAPTCHA_SITE_KEY, form_rendered_at=time.time(), referral_code_prefill=referral_code_prefill, plan_prefill=plan), 400
     if password != confirm_password:
         flash('Passwords do not match.', 'error')
-        return render_template('admin/stocks_signup.html', recaptcha_site_key=RECAPTCHA_SITE_KEY, form_rendered_at=time.time(), referral_code_prefill=referral_code_prefill, plan_prefill=plan), 400
+        return render_template('admin/stocks_signup.html', recaptcha_site_key=STOCKS_RECAPTCHA_SITE_KEY, form_rendered_at=time.time(), referral_code_prefill=referral_code_prefill, plan_prefill=plan), 400
 
     db = get_db()
     referrer = find_referrer_by_code(db, referral_code_prefill)
@@ -2583,7 +2583,7 @@ def stocks_signup():
     )
     if error and error != 'existing':
         flash(error, 'error')
-        return render_template('admin/stocks_signup.html', recaptcha_site_key=RECAPTCHA_SITE_KEY, form_rendered_at=time.time(), referral_code_prefill=referral_code_prefill, plan_prefill=plan), 400
+        return render_template('admin/stocks_signup.html', recaptcha_site_key=STOCKS_RECAPTCHA_SITE_KEY, form_rendered_at=time.time(), referral_code_prefill=referral_code_prefill, plan_prefill=plan), 400
 
     if error == 'existing':
         if has_stocks_access(row.get('is_pro'), row.get('subscription_status'), row.get('subscription_current_period_end')):
@@ -2964,12 +2964,12 @@ def stocks_admin_login():
     paths only) to rule out an open-redirect via a crafted next= value."""
     next_url = safe_stocks_next_url(request.values.get('next', ''))
     if request.method == 'GET':
-        return render_template('admin/stocks_login.html', recaptcha_site_key=RECAPTCHA_SITE_KEY, next_url=next_url or '')
+        return render_template('admin/stocks_login.html', recaptcha_site_key=STOCKS_RECAPTCHA_SITE_KEY, next_url=next_url or '')
 
-    if not verify_recaptcha(request.form.get('recaptcha_token'), remote_ip=request.remote_addr, expected_action='stocks_admin_login'):
+    if not verify_recaptcha(request.form.get('recaptcha_token'), remote_ip=request.remote_addr, expected_action='stocks_admin_login', secret_key=STOCKS_RECAPTCHA_SECRET_KEY):
         current_app.logger.warning('Bot caught on stocks admin login (recaptcha)')
         flash('Please try again.', 'error')
-        return render_template('admin/stocks_login.html', recaptcha_site_key=RECAPTCHA_SITE_KEY, next_url=next_url or ''), 401
+        return render_template('admin/stocks_login.html', recaptcha_site_key=STOCKS_RECAPTCHA_SITE_KEY, next_url=next_url or ''), 401
 
     username = (request.form.get('username') or '').strip()
     password = request.form.get('password') or ''
@@ -2978,7 +2978,7 @@ def stocks_admin_login():
     admin_row = authenticate_stocks_admin(db, username, password)
     if not admin_row:
         flash('Invalid username or password.', 'error')
-        return render_template('admin/stocks_login.html', recaptcha_site_key=RECAPTCHA_SITE_KEY, next_url=next_url or ''), 401
+        return render_template('admin/stocks_login.html', recaptcha_site_key=STOCKS_RECAPTCHA_SITE_KEY, next_url=next_url or ''), 401
 
     session['stocks_admin_id'] = admin_row['id']
     session['stocks_admin_username'] = admin_row['username']

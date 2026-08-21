@@ -7,6 +7,8 @@
     <title>Stocks Dashboard - StoqBell</title>
     <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
     <style>
+        .brand-stoq { color: #f8fafc; }
+        .brand-bell { color: #39FF14; }
         body { background: #0f172a; color: #f8fafc; }
         .stocks-accent { color: #0ea5e9; }
         .stocks-btn { background: linear-gradient(90deg, #0891b2 0%, #0ea5e9 100%); color: white; }
@@ -16,9 +18,9 @@
     <div class="max-w-3xl mx-auto">
         <div class="flex items-center justify-between mb-8">
             <div>
-                <h1 class="text-2xl font-extrabold stocks-accent font-serif flex items-center gap-2">
+                <h1 class="text-2xl font-extrabold font-serif flex items-center gap-2">
                     <img src="{{ url_for('stocks.static', filename='assets/stoqbell-icon-dark.svg') }}" alt="" width="26" height="26">
-                    StoqBell
+                    <span class="brand-stoq">Stoq</span><span class="brand-bell">Bell</span>
                 </h1>
                 <p class="text-slate-400 text-sm mt-1">Signed in as {{ username }} ({{ role }})</p>
             </div>

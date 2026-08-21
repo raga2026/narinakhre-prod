@@ -5,20 +5,22 @@
     <link rel="icon" type="image/png" href="{{ url_for('stocks.static', filename='assets/stoqbell-icon.png') }}">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>StoqBell - One Sharp Stock Pick, Every Day</title>
-    <meta name="description" content="StoqBell screens the entire market every day and sends you one high-conviction Pick of the Day, with the full reasoning behind it -- for Rs 299/month.">
-    <!-- Open Graph / Twitter Card -- so a link to this page shows the logo
-    and a proper title/description when shared (WhatsApp, iMessage,
-    Twitter/X, Slack, etc.), instead of no preview image at all. Uses the
-    Supabase-hosted logo (see upload_stoqbell_assets.py) since that's a
-    stable public URL independent of this app's own domain/static-serving,
-    and social-media crawlers need an absolute image URL. The light
-    (navy-on-white) logo is used here specifically, not the dark variant --
-    preview cards render on a white/light card background on every
-    platform regardless of the site's own dark theme. -->
+    <meta name="description" content="Trade the swings, own the future. One Sharp Stock Pick, Every Day -- StoqBell screens the entire market every day and sends you one high-conviction pick, with the full reasoning behind it, for Rs 299/month.">
+    <!-- Open Graph / Twitter Card -- so a link to this page shows the logo,
+    tagline, and "One Sharp Stock Pick, Every Day" line when shared
+    (WhatsApp in particular reads only og:title/og:description/og:image for
+    its preview card, not <meta name="description">, which is why that tag
+    above repeats the same copy rather than something SEO-only and
+    different). Uses the Supabase-hosted logo (see upload_stoqbell_assets.py)
+    since that's a stable public URL independent of this app's own
+    domain/static-serving, and social-media crawlers need an absolute image
+    URL. The light (navy-on-white) logo is used here specifically, not the
+    dark variant -- preview cards render on a white/light card background
+    on every platform regardless of the site's own dark theme. -->
     <meta property="og:type" content="website">
     <meta property="og:site_name" content="StoqBell">
     <meta property="og:title" content="StoqBell - One Sharp Stock Pick, Every Day">
-    <meta property="og:description" content="Trade the swings, own the future. StoqBell screens the entire market every day and sends you one high-conviction Pick of the Day -- for Rs 299/month.">
+    <meta property="og:description" content="Trade the swings, own the future. StoqBell screens the entire market every day and sends you one high-conviction Pick of the Day, with the full reasoning behind it -- for Rs 299/month.">
     <meta property="og:url" content="https://www.stoqbell.com/stocks">
     <meta property="og:image" content="https://eopqwvssznmxfxrfzqbx.supabase.co/storage/v1/object/public/products/stoqbell/stoqbell-logo.png">
     <meta property="og:image:width" content="1800">
@@ -29,6 +31,8 @@
     <meta name="twitter:image" content="https://eopqwvssznmxfxrfzqbx.supabase.co/storage/v1/object/public/products/stoqbell/stoqbell-logo.png">
     <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
     <style>
+        .brand-stoq { color: #f8fafc; }
+        .brand-bell { color: #39FF14; }
         body { background: #0f172a; color: #f8fafc; }
         .stocks-accent { color: #0ea5e9; }
         .stocks-btn { background: linear-gradient(90deg, #0891b2 0%, #0ea5e9 100%); color: white; }
@@ -48,7 +52,7 @@
         <div class="max-w-6xl mx-auto px-6 py-5 flex items-center justify-between">
             <a href="{{ url_for('stocks.stocks_landing') }}" class="no-underline flex items-center gap-2">
                 <img src="{{ url_for('stocks.static', filename='assets/stoqbell-icon-dark.svg') }}" alt="" width="28" height="28">
-                <span class="text-xl font-extrabold stocks-accent font-serif">StoqBell</span>
+                <span class="text-xl font-extrabold font-serif"><span class="brand-stoq">Stoq</span><span class="brand-bell">Bell</span></span>
                 <span class="hidden sm:inline text-xs text-slate-400 ml-2 align-middle">Trade the swings, own the future.</span>
             </a>
             <a href="{{ url_for('stocks.stocks_admin_login') }}" class="text-sm font-semibold text-slate-300 hover:text-sky-400 border border-sky-500/30 rounded-full px-4 py-2 transition">Login</a>

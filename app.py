@@ -4709,12 +4709,13 @@ def send_weekly_report_email():
 
 @app.route('/cron/weekly-report', methods=['POST'])
 def cron_weekly_report():
-    """Triggered by a Render Cron Job (see render.yaml + weekly_report_cron.py)
-    once a week. Not under /admin/ and not @admin_required -- a cron job has
-    no browser session to authenticate with, so this checks a shared secret
-    header instead. Returns 403 if the secret is missing/unset/wrong, so a
-    stray request (or a forgotten/unset WEEKLY_REPORT_CRON_SECRET) can never
-    trigger a send."""
+    """Triggered by a GitHub Actions workflow (.github/workflows/weekly-report.yml)
+    once a week -- moved off a paid Render Cron Job 2026-08-21, since all
+    that service ever did was this one HTTP POST. Not under /admin/ and not
+    @admin_required -- a cron job has no browser session to authenticate
+    with, so this checks a shared secret header instead. Returns 403 if the
+    secret is missing/unset/wrong, so a stray request (or a forgotten/unset
+    WEEKLY_REPORT_CRON_SECRET) can never trigger a send."""
     provided = request.headers.get('X-Cron-Secret', '')
     if not WEEKLY_REPORT_CRON_SECRET or not hmac.compare_digest(provided, WEEKLY_REPORT_CRON_SECRET):
         return jsonify({'status': 'error', 'message': 'Unauthorized'}), 403

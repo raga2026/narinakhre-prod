@@ -7,6 +7,8 @@
     <title>Checkout - StoqBell</title>
     <script src="https://checkout.razorpay.com/v1/checkout.js"></script>
     <style>
+        .brand-stoq { color: #f8fafc; }
+        .brand-bell { color: #39FF14; }
         body { background: #0f172a; color: #f8fafc; font-family: system-ui, -apple-system, sans-serif; min-height: 100vh; display: flex; align-items: center; justify-content: center; margin: 0; padding: 1rem; }
         .card { background: #1e293b; border: 1px solid rgba(14,165,233,0.2); border-radius: 1.25rem; padding: 2rem; max-width: 26rem; width: 100%; text-align: center; }
         .accent { color: #0ea5e9; }
@@ -23,7 +25,7 @@
     <div class="card">
         <h1 style="display:flex;align-items:center;justify-content:center;gap:8px;">
             <img src="{{ url_for('stocks.static', filename='assets/stoqbell-icon-dark.svg') }}" alt="" width="28" height="28">
-            <span class="accent">StoqBell</span>
+            <span class="brand-stoq">Stoq</span><span class="brand-bell">Bell</span>
         </h1>
         <p>Complete payment to activate your {{ price_display }}/month subscription. A secure Razorpay window will open automatically.</p>
         <button type="button" id="stocks-pay-btn" class="btn">Pay {{ price_display }}</button>
