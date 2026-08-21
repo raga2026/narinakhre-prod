@@ -22,6 +22,7 @@ services:
       - www.narinakhre.com
       - wholesale.narinakhre.com
       - www.stoqbell.com
+      - stoqbell.com
     envVars:
       # Shared secret for POST /cron/weekly-report -- must be set to the
       # same value on narinakhre-weekly-report below. Set via the Render

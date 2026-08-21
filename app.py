@@ -1306,6 +1306,34 @@ def redirect_stocks_to_own_domain():
     return redirect(target, code=301)
 
 
+# The other direction of the same split: stoqbell.com/www.stoqbell.com
+# should show ONLY the Stocks module -- nothing storefront-related is
+# reachable via this domain. Without this, hitting "/" here fell through
+# to the storefront's own index() view (site_type defaults to 'retail'
+# unless "wholesale" is in the hostname -- stoqbell.com matches neither),
+# which is exactly the "domain points at the narinakhre site" bug this
+# fixes. Bare stoqbell.com is included too (not just www) since Render can
+# have both attached to the same service regardless of what's in
+# render.yaml's domains list.
+STOQBELL_ONLY_HOSTS = {'stoqbell.com', 'www.stoqbell.com'}
+
+
+@app.before_request
+def redirect_stoqbell_domain_to_stocks():
+    if request.method != 'GET':
+        return None
+    host = request.host.lower().split(':')[0]
+    if host not in STOQBELL_ONLY_HOSTS or request.path.startswith('/stocks'):
+        return None
+    # '/' -> '/stocks' (not '/stocks/', which 404s -- the landing route is
+    # registered without a trailing slash).
+    suffix = '' if request.path == '/' else request.path
+    target = f'https://{STOCKS_DOMAIN}/stocks{suffix}'
+    if request.query_string:
+        target += '?' + request.query_string.decode()
+    return redirect(target, code=301)
+
+
 # --- SITE DETECTION ---
 @app.before_request
 def detect_site_type():
