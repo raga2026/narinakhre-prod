@@ -22,6 +22,7 @@
                     <img src="{{ url_for('stocks.static', filename='assets/stoqbell-icon-dark.png') }}" alt="" width="26" height="26">
                     <span class="brand-stoq">Stoq</span><span class="brand-bell">Bell</span>
                 </h1>
+                <p class="text-slate-500 text-xs mt-1">Trade the swings, own the future.</p>
                 <p class="text-slate-400 text-sm mt-1">Signed in as {{ username }} ({{ role }})</p>
             </div>
             <a href="{{ url_for('stocks.stocks_admin_logout') }}" class="text-sm text-slate-400 hover:text-sky-400 underline">Log out</a>
