@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <link rel="icon" type="image/png" href="{{ url_for('stocks.static', filename='assets/stoqbell-icon.png') }}">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Choose your plan - StoqBell</title>
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+    <style>
+        .brand-stoq { color: #f8fafc; }
+        .brand-bell { color: #39FF14; }
+        body { background: #0f172a; color: #f8fafc; }
+        .stocks-btn { background: linear-gradient(90deg, #0891b2 0%, #0ea5e9 100%); color: white; }
+        .stocks-accent { color: #0ea5e9; }
+        .card { background: #1e293b; border: 1px solid rgba(14,165,233,0.15); border-radius: 1rem; }
+    </style>
+</head>
+<body class="min-h-screen px-4 py-12">
+    <div class="max-w-3xl mx-auto text-center">
+        <h1 class="text-3xl font-extrabold font-serif"><a href="{{ url_for('stocks.stocks_landing') }}" class="stocks-accent no-underline inline-flex items-center gap-2"><img src="{{ url_for('stocks.static', filename='assets/stoqbell-icon-dark.png') }}" alt="" width="30" height="30"><span class="brand-stoq">Stoq</span><span class="brand-bell">Bell</span></a></h1>
+        <p class="text-slate-500 text-xs mt-1">Trade the swings, own the future.</p>
+        <h2 class="text-2xl font-extrabold font-serif mt-6">Choose your plan to continue</h2>
+        <p class="text-slate-400 mt-2">You're signed in with Google -- pick a plan below and we'll take you straight to payment.</p>
+
+        {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+            <div class="mt-6" role="alert" aria-live="assertive">
+            {% for category, msg in messages %}
+                <div class="bg-sky-900/40 text-sky-200 border border-sky-500/30 rounded-xl p-3 mb-2 text-sm">{{ msg }}</div>
+            {% endfor %}
+            </div>
+        {% endif %}
+        {% endwith %}
+
+        <div class="grid sm:grid-cols-2 gap-6 mt-10 text-left">
+            <div class="card p-8">
+                <p class="text-slate-400 text-sm font-semibold uppercase tracking-wide">Standard</p>
+                <p class="mt-2"><span class="text-4xl font-extrabold">Rs 299</span><span class="text-slate-400">/month</span></p>
+                <ul class="mt-6 space-y-3 text-sm text-slate-300">
+                    <li class="flex gap-2"><span class="stocks-accent">✓</span> Pick of the Day, with full reasoning</li>
+                    <li class="flex gap-2"><span class="stocks-accent">✓</span> Buy price and target on every pick</li>
+                    <li class="flex gap-2"><span class="stocks-accent">✓</span> StoqBell Score breakdown for every pick</li>
+                    <li class="flex gap-2"><span class="stocks-accent">✓</span> Alert email the moment a pick hits its target</li>
+                    <li class="flex gap-2"><span class="stocks-accent">✓</span> Bonus large-cap pick, twice a week</li>
+                    <li class="flex gap-2"><span class="stocks-accent">✓</span> Browse and search our full research universe</li>
+                    <li class="flex gap-2"><span class="stocks-accent">✓</span> Delivered straight to your inbox, only on trading days</li>
+                </ul>
+                <a href="{{ url_for('stocks.stocks_plans_continue', plan='standard') }}" class="stocks-btn block text-center w-full py-3.5 rounded-2xl font-bold text-lg shadow-lg mt-8 transition hover:opacity-90">
+                    Choose Standard
+                </a>
+            </div>
+            <div class="card p-8">
+                <p class="text-slate-400 text-sm font-semibold uppercase tracking-wide">Starters</p>
+                <p class="mt-2"><span class="text-4xl font-extrabold">Rs 99</span><span class="text-slate-400">/month</span></p>
+                <ul class="mt-6 space-y-3 text-sm text-slate-300">
+                    <li class="flex gap-2"><span class="stocks-accent">✓</span> Up to two separately-curated picks a week, every Monday</li>
+                    <li class="flex gap-2"><span class="stocks-accent">✓</span> Only our strictest, top-quality (golden-tier) picks</li>
+                    <li class="flex gap-2"><span class="stocks-accent">✓</span> Buy price and target included</li>
+                    <li class="flex gap-2"><span class="stocks-accent">✓</span> Browse and search our full research universe</li>
+                    <li class="flex gap-2"><span class="stocks-accent">✓</span> A handful of high-conviction ideas a month, not a daily stream</li>
+                </ul>
+                <a href="{{ url_for('stocks.stocks_plans_continue', plan='starters') }}" class="stocks-btn block text-center w-full py-3.5 rounded-2xl font-bold text-lg shadow-lg mt-8 transition hover:opacity-90">
+                    Choose Starters
+                </a>
+            </div>
+        </div>
+
+        <p class="text-center text-slate-600 text-xs mt-10">StoqBell &copy; 2026.</p>
+    </div>
+</body>
+</html>

@@ -2752,8 +2752,9 @@ def stocks_google_login():
     next_url = safe_stocks_next_url(request.args.get('next', ''))
     if next_url:
         session['stocks_pending_next_url'] = next_url
-    if request.args.get('plan') == 'starters':
-        session['stocks_pending_plan'] = 'starters'
+    plan_param = request.args.get('plan')
+    if plan_param in ('standard', 'starters'):
+        session['stocks_pending_plan'] = plan_param
     session.modified = True
     provider = auth_providers.get_auth_provider('google')
     redirect_uri = url_for('stocks.stocks_google_callback', _external=True)
@@ -2788,7 +2789,7 @@ def stocks_google_callback():
 
     referral_code = session.pop('stocks_pending_referral_code', None)
     next_url = session.pop('stocks_pending_next_url', None)
-    pending_plan = session.pop('stocks_pending_plan', 'standard')
+    pending_plan = session.pop('stocks_pending_plan', None)
     session.modified = True
 
     db = get_db()
@@ -2798,6 +2799,20 @@ def stocks_google_callback():
         if existing:
             link_google_sub(db, existing['id'], google_sub)
             row = existing
+        elif pending_plan is None:
+            # Reached here without ever going through /stocks/signup's plan
+            # radio buttons or a landing-page pricing card's explicit
+            # ?plan= link -- most commonly, hitting "Sign in with Google" on
+            # the LOGIN page directly. Rather than silently defaulting to
+            # Standard, stash what Google gave us and send them to a plan
+            # picker first; stocks_plans_continue re-enters this same
+            # create-account-then-checkout path once they've chosen.
+            session['stocks_pending_google'] = {
+                'google_sub': google_sub, 'email': email, 'name': name,
+                'referral_code': referral_code,
+            }
+            session.modified = True
+            return redirect(url_for('stocks.stocks_plans'))
         else:
             referrer = find_referrer_by_code(db, referral_code)
             if referrer and referrer['username'] == email:
@@ -2827,6 +2842,50 @@ def stocks_google_callback():
     return _render_stocks_checkout(
         row['id'], email, name, plan=row.get('stocks_plan', 'standard'),
         referral_plan=bool(row.get('referred_by_id')) and row.get('stocks_plan', 'standard') == 'standard',
+    )
+
+
+@stocks_bp.route('/stocks/plans', methods=['GET'])
+def stocks_plans():
+    """Pricing-card interstitial for a Google sign-in that arrived with no
+    plan chosen yet (see stocks_google_callback). Reads nothing itself --
+    stocks_plans_continue does the actual account creation -- this just
+    renders the two plan cards; if the pending-Google session state is
+    gone (direct hit, expired session, back-button after finishing), there
+    is nothing to continue, so send them to the normal signup page instead."""
+    if not session.get('stocks_pending_google'):
+        return redirect(url_for('stocks.stocks_signup'))
+    return render_template('admin/stocks_plans.html')
+
+
+@stocks_bp.route('/stocks/plans/continue', methods=['GET'])
+def stocks_plans_continue():
+    """Finishes the Google sign-up once a plan card on /stocks/plans has
+    been picked -- mirrors the create_pending_google_subscriber + referral
+    + checkout sequence in stocks_google_callback's own new-subscriber
+    branch, just resumed from the stashed session state instead of a fresh
+    OAuth round-trip."""
+    plan = request.args.get('plan')
+    if plan not in ('standard', 'starters'):
+        flash('Please choose a plan to continue.', 'error')
+        return redirect(url_for('stocks.stocks_plans'))
+
+    pending = session.pop('stocks_pending_google', None)
+    session.modified = True
+    if not pending:
+        return redirect(url_for('stocks.stocks_signup'))
+
+    db = get_db()
+    referrer = find_referrer_by_code(db, pending.get('referral_code'))
+    if referrer and referrer['username'] == pending['email']:
+        referrer = None  # self-referral -- silently ignored
+    row = create_pending_google_subscriber(
+        db, pending['email'], pending['name'], pending['google_sub'],
+        referred_by_id=referrer['id'] if referrer else None, stocks_plan=plan,
+    )
+    return _render_stocks_checkout(
+        row['id'], pending['email'], pending['name'], plan=plan,
+        referral_plan=bool(row.get('referred_by_id')) and plan == 'standard',
     )
 
 
