@@ -1,6 +1,6 @@
 import math
 
-from utils.price_pattern import (
+from stoqbell.utils.price_pattern import (
     PATTERN_RESEARCH_CONTEXT,
     backtest_rsi_zone_outcomes,
     build_price_sparkline_svg,
@@ -532,7 +532,7 @@ def test_empty_when_inputs_are_missing_or_invalid():
 
 
 def test_humanized_labels_cover_days_months_and_years():
-    from utils.price_pattern import _humanize_days
+    from stoqbell.utils.price_pattern import _humanize_days
     assert _humanize_days(10) == '~10 days'
     assert _humanize_days(30) == '~30 days'
     assert _humanize_days(75) == '~2.5 months'

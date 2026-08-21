@@ -1,4 +1,4 @@
-from utils.suggestion_engine import compute_watchlist_nns_scores
+from stoqbell.utils.suggestion_engine import compute_watchlist_nns_scores
 
 GOOD_ROW = {
     'id': 1, 'watchlist_id': 1, 'universe_id': 101, 'industry': 'Chemicals',

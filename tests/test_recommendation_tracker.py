@@ -1,6 +1,6 @@
 from datetime import date
 
-from utils.suggestion_engine import compute_tracker_row_stats
+from stoqbell.utils.suggestion_engine import compute_tracker_row_stats
 
 
 def test_open_position_with_price_between_stop_and_target():

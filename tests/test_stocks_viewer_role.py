@@ -1,6 +1,6 @@
 from flask import Flask, session
 
-from utils.stock_auth import stocks_login_required, stocks_role_required, stocks_watchlist_access_required
+from stoqbell.utils.stock_auth import stocks_login_required, stocks_role_required, stocks_watchlist_access_required
 
 
 def _build_test_app():
@@ -19,7 +19,9 @@ def _build_test_app():
     app = Flask(__name__)
     app.secret_key = 'test-secret-key'
 
-    @app.route('/stocks/login')
+    # endpoint= matches stoqbell/routes.py's real 'stocks' Blueprint
+    # namespace, since the decorators under test call url_for() against it.
+    @app.route('/stocks/login', endpoint='stocks.stocks_admin_login')
     def stocks_admin_login():
         return 'stocks login page', 200
 

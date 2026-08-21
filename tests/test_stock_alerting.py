@@ -3,7 +3,7 @@ from datetime import datetime as RealDatetime
 from datetime import timezone
 from unittest.mock import Mock, patch
 
-from utils.stock_alerting import (
+from stoqbell.utils.stock_alerting import (
     IST,
     JOB_EXPECTATIONS,
     alert_job_error,
@@ -84,7 +84,7 @@ def test_get_last_success_at_returns_parsed_datetime():
 def test_alert_job_error_sends_email_on_first_failure():
     db = FakeAlertingDB()
 
-    with patch('utils.stock_alerting.send_alert_email') as mock_send:
+    with patch('stoqbell.utils.stock_alerting.send_alert_email') as mock_send:
         alert_job_error(db, 'price_sync', 'Kite API timeout')
 
     mock_send.assert_called_once()
@@ -97,7 +97,7 @@ def test_alert_job_error_sends_email_on_first_failure():
 def test_alert_job_error_does_not_resend_within_6_hours_for_same_source():
     db = FakeAlertingDB()
 
-    with patch('utils.stock_alerting.send_alert_email') as mock_send:
+    with patch('stoqbell.utils.stock_alerting.send_alert_email') as mock_send:
         alert_job_error(db, 'price_sync', 'first failure')
         alert_job_error(db, 'price_sync', 'second failure, same source, soon after')
 
@@ -108,7 +108,7 @@ def test_alert_job_error_does_not_resend_within_6_hours_for_same_source():
 def test_alert_job_error_still_sends_for_a_different_source():
     db = FakeAlertingDB()
 
-    with patch('utils.stock_alerting.send_alert_email') as mock_send:
+    with patch('stoqbell.utils.stock_alerting.send_alert_email') as mock_send:
         alert_job_error(db, 'price_sync', 'failure A')
         alert_job_error(db, 'indicator_calc', 'failure B')
 
@@ -121,7 +121,7 @@ def test_check_missed_jobs_flags_a_job_with_no_success_record_today():
     fixed_now = RealDatetime(2026, 8, 16, 16, 0, tzinfo=timezone.utc)  # 21:30 IST
     db = FakeAlertingDB(job_runs={})
 
-    with patch('utils.stock_alerting.send_alert_email') as mock_send:
+    with patch('stoqbell.utils.stock_alerting.send_alert_email') as mock_send:
         summary = check_missed_jobs(db, now=fixed_now)
 
     all_sources = set(JOB_EXPECTATIONS.keys())
@@ -139,7 +139,7 @@ def test_check_missed_jobs_does_not_flag_a_job_that_ran_today():
         'price_sync': '2026-08-16T02:00:00+00:00',
     })
 
-    with patch('utils.stock_alerting.send_alert_email') as mock_send:
+    with patch('stoqbell.utils.stock_alerting.send_alert_email') as mock_send:
         summary = check_missed_jobs(db, now=fixed_now)
 
     assert 'price_sync' not in summary['missed']
@@ -155,7 +155,7 @@ def test_check_missed_jobs_ignores_a_success_from_a_previous_day():
         'price_sync': '2026-08-15T02:00:00+00:00',
     })
 
-    with patch('utils.stock_alerting.send_alert_email'):
+    with patch('stoqbell.utils.stock_alerting.send_alert_email'):
         summary = check_missed_jobs(db, now=fixed_now)
 
     assert 'price_sync' in summary['missed']
@@ -167,7 +167,7 @@ def test_check_missed_jobs_skips_jobs_not_due_yet():
     fixed_now = RealDatetime(2026, 8, 16, 5, 0, tzinfo=timezone.utc)
     db = FakeAlertingDB(job_runs={})
 
-    with patch('utils.stock_alerting.send_alert_email'):
+    with patch('stoqbell.utils.stock_alerting.send_alert_email'):
         summary = check_missed_jobs(db, now=fixed_now)
 
     assert 'fundamentals_rotation' not in summary['checked']
@@ -179,21 +179,21 @@ def test_send_zeptomail_stocks_email_missing_config_reports_which_var():
     # This is the exact scenario behind the old "check the Zeptomail
     # config" flash message -- the caller must now get told WHICH var is
     # missing, not just that something failed. Uses the storefront's own
-    # SMTP_SUPPORT_EMAIL_PASSWORD/SMTP_support_EMAIL_FROM vars, not a
-    # separate Stocks-only credential -- see the module comment in
+    # SMTP_SUPPORT_EMAIL_PASSWORD (same Mail Agent token) but its own
+    # STOCKS_SMTP_FROM_EMAIL -- see the module comment in
     # utils/stock_alerting.py for why.
-    with patch.dict(os.environ, {'SMTP_SUPPORT_EMAIL_PASSWORD': '', 'SMTP_support_EMAIL_FROM': ''}, clear=False):
+    with patch.dict(os.environ, {'SMTP_SUPPORT_EMAIL_PASSWORD': '', 'STOCKS_SMTP_FROM_EMAIL': ''}, clear=False):
         ok, detail = send_zeptomail_stocks_email('to@example.com', 'To', 'Subject', 'Body')
 
     assert ok is False
     assert 'SMTP_SUPPORT_EMAIL_PASSWORD' in detail
-    assert 'SMTP_support_EMAIL_FROM' in detail
+    assert 'STOCKS_SMTP_FROM_EMAIL' in detail
 
 
 def test_send_zeptomail_stocks_email_success_returns_ok():
-    env = {'SMTP_SUPPORT_EMAIL_PASSWORD': 'test-key', 'SMTP_support_EMAIL_FROM': 'support-noreply@narinakhre.com'}
+    env = {'SMTP_SUPPORT_EMAIL_PASSWORD': 'test-key', 'STOCKS_SMTP_FROM_EMAIL': 'support-noreply@stoqbell.com'}
     with patch.dict(os.environ, env, clear=False), \
-         patch('utils.stock_alerting.requests.post', return_value=Mock(status_code=201)):
+         patch('stoqbell.utils.stock_alerting.requests.post', return_value=Mock(status_code=201)):
         ok, detail = send_zeptomail_stocks_email('to@example.com', 'To', 'Subject', 'Body')
 
     assert ok is True
@@ -201,10 +201,10 @@ def test_send_zeptomail_stocks_email_success_returns_ok():
 
 
 def test_send_zeptomail_stocks_email_http_error_reports_status_and_body():
-    env = {'SMTP_SUPPORT_EMAIL_PASSWORD': 'test-key', 'SMTP_support_EMAIL_FROM': 'support-noreply@narinakhre.com'}
+    env = {'SMTP_SUPPORT_EMAIL_PASSWORD': 'test-key', 'STOCKS_SMTP_FROM_EMAIL': 'support-noreply@stoqbell.com'}
     mock_resp = Mock(status_code=401, text='Invalid API key')
     with patch.dict(os.environ, env, clear=False), \
-         patch('utils.stock_alerting.requests.post', return_value=mock_resp):
+         patch('stoqbell.utils.stock_alerting.requests.post', return_value=mock_resp):
         ok, detail = send_zeptomail_stocks_email('to@example.com', 'To', 'Subject', 'Body')
 
     assert ok is False
@@ -213,9 +213,9 @@ def test_send_zeptomail_stocks_email_http_error_reports_status_and_body():
 
 
 def test_send_zeptomail_stocks_email_network_error_reports_exception():
-    env = {'SMTP_SUPPORT_EMAIL_PASSWORD': 'test-key', 'SMTP_support_EMAIL_FROM': 'support-noreply@narinakhre.com'}
+    env = {'SMTP_SUPPORT_EMAIL_PASSWORD': 'test-key', 'STOCKS_SMTP_FROM_EMAIL': 'support-noreply@stoqbell.com'}
     with patch.dict(os.environ, env, clear=False), \
-         patch('utils.stock_alerting.requests.post', side_effect=ConnectionError('DNS lookup failed')):
+         patch('stoqbell.utils.stock_alerting.requests.post', side_effect=ConnectionError('DNS lookup failed')):
         ok, detail = send_zeptomail_stocks_email('to@example.com', 'To', 'Subject', 'Body')
 
     assert ok is False
@@ -223,14 +223,14 @@ def test_send_zeptomail_stocks_email_network_error_reports_exception():
     assert 'DNS lookup failed' in detail
 
 
-def test_send_zeptomail_stocks_email_defaults_to_support_noreply_sender(monkeypatch):
-    # No SMTP_support_EMAIL_FROM set at all -- must still work, using the
-    # same default app.py's own SUPPORT_FROM_EMAIL falls back to.
+def test_send_zeptomail_stocks_email_defaults_to_stoqbell_sender(monkeypatch):
+    # No STOCKS_SMTP_FROM_EMAIL set at all -- must still work, using the
+    # stoqbell.com sender now verified under the same Mail Agent token.
     monkeypatch.setenv('SMTP_SUPPORT_EMAIL_PASSWORD', 'test-key')
-    monkeypatch.delenv('SMTP_support_EMAIL_FROM', raising=False)
-    with patch('utils.stock_alerting.requests.post', return_value=Mock(status_code=201)) as mock_post:
+    monkeypatch.delenv('STOCKS_SMTP_FROM_EMAIL', raising=False)
+    with patch('stoqbell.utils.stock_alerting.requests.post', return_value=Mock(status_code=201)) as mock_post:
         ok, _ = send_zeptomail_stocks_email('to@example.com', 'To', 'Subject', 'Body')
 
     assert ok is True
     payload = mock_post.call_args.kwargs['json']
-    assert payload['from']['address'] == 'support-noreply@narinakhre.com'
+    assert payload['from']['address'] == 'support-noreply@stoqbell.com'

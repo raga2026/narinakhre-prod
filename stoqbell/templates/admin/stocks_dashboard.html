@@ -1,0 +1,377 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Stocks Dashboard - StoqBell</title>
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+    <style>
+        body { background: #0f172a; color: #f8fafc; }
+        .stocks-accent { color: #0ea5e9; }
+        .stocks-btn { background: linear-gradient(90deg, #0891b2 0%, #0ea5e9 100%); color: white; }
+    </style>
+</head>
+<body class="min-h-screen p-8">
+    <div class="max-w-3xl mx-auto">
+        <div class="flex items-center justify-between mb-8">
+            <div>
+                <h1 class="text-2xl font-extrabold stocks-accent font-serif flex items-center gap-2">
+                    <img src="{{ url_for('stocks.static', filename='assets/stoqbell-icon.png') }}" alt="" width="26" height="26">
+                    StoqBell
+                </h1>
+                <p class="text-slate-400 text-sm mt-1">Signed in as {{ username }} ({{ role }})</p>
+            </div>
+            <a href="{{ url_for('stocks.stocks_admin_logout') }}" class="text-sm text-slate-400 hover:text-sky-400 underline">Log out</a>
+        </div>
+
+        {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+            <div class="mb-6" role="alert" aria-live="assertive">
+            {% for category, msg in messages %}
+                <div class="bg-sky-900/40 text-sky-200 border border-sky-500/30 rounded-xl p-3 mb-2 text-sm">{{ msg }}</div>
+            {% endfor %}
+            </div>
+        {% endif %}
+        {% endwith %}
+
+        <div id="job-status-region" role="status" aria-live="polite" class="mb-6"></div>
+
+        {% if role == 'super_admin' %}
+        <section class="bg-slate-800 rounded-2xl p-6 border-2 border-sky-500/50 mb-6" aria-labelledby="super-sync-heading">
+            <h2 id="super-sync-heading" class="text-lg font-bold text-slate-200 mb-2">Super Sync</h2>
+            <p class="text-slate-400 text-sm mb-3">
+                Runs every fast sync and calculation step in the right order, in one click -- Kite instrument map,
+                market cap filter, shortlist refresh, price sync, indicators, and the universe-wide versions of both.
+                Usually done within a couple of minutes. Doesn't include Screener.in fundamentals -- that refreshes on
+                its own automatic schedule, see "Fundamentals data" below.
+            </p>
+            <form method="POST" action="{{ url_for('stocks.stocks_super_sync') }}"
+                  data-job-form data-job-name="super_sync" data-job-label="Super Sync">
+                <button type="submit" class="stocks-btn py-3 px-8 rounded-2xl font-bold text-lg transition hover:opacity-90">
+                    Super Sync -- update everything (fast)
+                </button>
+            </form>
+        </section>
+        {% endif %}
+
+        <section class="bg-slate-800 rounded-2xl p-6 border border-sky-500/20 mb-6" aria-labelledby="fundamentals-heading">
+            <h2 id="fundamentals-heading" class="text-lg font-bold text-slate-200 mb-2">Fundamentals data</h2>
+            <p class="text-slate-400 text-sm">
+                Last synced: {{ fundamentals_last_synced_ist or 'not yet run' }}
+            </p>
+            <details class="mt-3">
+                <summary class="text-sky-400 hover:text-sky-300 cursor-pointer text-sm">Why is there no button here?</summary>
+                <p class="text-slate-400 text-sm mt-2">
+                    PE, EPS, ROCE, and every other fundamental come from scraping Screener.in one company at a time --
+                    a slow, rate-sensitive process. It refreshes automatically in the background, a small batch each day,
+                    cycling through every eligible company roughly once every 15 days. This is deliberately not something
+                    you can click to run on demand: running it more often than that risks getting throttled or blocked by
+                    Screener.in for everyone. If you need to check when a specific company's fundamentals were last
+                    refreshed, see its company detail page.
+                </p>
+            </details>
+        </section>
+
+        {% if role == 'super_admin' %}
+        <section class="bg-slate-800 rounded-2xl p-6 border border-sky-500/20 mb-6" aria-labelledby="kite-heading">
+            <h2 id="kite-heading" class="text-lg font-bold text-slate-200 mb-2">Kite connection</h2>
+            <p role="status" aria-live="polite"
+               class="{{ 'text-emerald-400' if kite_status and kite_status.access_token_encrypted else 'text-amber-400' }}">
+                {% if kite_status and kite_status.access_token_encrypted %}
+                    Connected — expires {{ kite_status.expires_at }}.
+                {% else %}
+                    Not connected — click reconnect below.
+                {% endif %}
+            </p>
+            <p class="text-slate-400 text-sm mt-1">Kite access tokens expire daily -- reconnect each trading day before syncing.</p>
+            <p class="mt-3">
+                <a href="{{ url_for('stocks.stocks_kite_login') }}" class="text-sky-400 hover:text-sky-300 underline">
+                    {{ 'Reconnect Kite' if kite_status and kite_status.access_token_encrypted else 'Connect Kite' }}
+                </a>
+            </p>
+        </section>
+        {% endif %}
+
+        <section class="bg-slate-800 rounded-2xl p-6 border border-sky-500/20 mb-6" aria-labelledby="suggestions-heading">
+            <h2 id="suggestions-heading" class="text-lg font-bold text-slate-200 mb-2">Pick of the Day</h2>
+            <p class="text-slate-400 text-sm mb-3">Picks a single top-ranked golden-cross stock from the current watchlist/indicators/fundamentals that clears at least the bronze StoqBell Score bar, then emails everyone on the recipient list -- a stock already sent within the last 30 days is skipped in favor of the next-best one unless its pick has genuinely changed, so this rotates through the qualifying list instead of repeating the same stock every day. Can send nothing on a day when everything that qualifies is on cooldown or nothing clears the bar at all.</p>
+            <form method="POST" action="{{ url_for('stocks.stocks_suggestions_send_daily_email') }}"
+                  data-job-form data-job-name="suggestion_email" data-job-label="Generate and send Pick of the Day">
+                <button type="submit" class="stocks-btn py-3 px-6 rounded-2xl font-bold transition hover:opacity-90">
+                    Generate and send Pick of the Day
+                </button>
+            </form>
+        </section>
+
+        <details class="bg-slate-800 rounded-2xl p-6 border border-sky-500/20 mb-6">
+            <summary class="text-lg font-bold text-slate-200 cursor-pointer">Advanced: run individual sync steps</summary>
+            <p class="text-slate-400 text-sm mt-3 mb-4">
+                Super Sync above already runs all of these together, in order. Use these only if you need to re-run just
+                one step on its own -- for example after fixing a Kite session, or to isolate which step is failing.
+            </p>
+
+            <h3 class="text-slate-200 font-semibold mb-2">Data sync</h3>
+            <p class="text-slate-400 text-sm mb-3">Pulls the latest daily candle for every active watchlist symbol.</p>
+            <form method="POST" action="{{ url_for('stocks.admin_stocks_sync') }}" class="inline-block mr-3"
+                  data-job-form data-job-name="price_sync" data-job-label="Sync now">
+                <button type="submit" class="stocks-btn py-3 px-6 rounded-2xl font-bold transition hover:opacity-90">
+                    Sync now
+                </button>
+            </form>
+            <p class="text-slate-400 text-sm mt-4 mb-3">Matches Kite's own instrument list against our companies by name, so price sync can use Kite's real ID instead of guessing -- run this if "Sync now" reports symbols Kite has no quote for. Not a daily task.</p>
+            <form method="POST" action="{{ url_for('stocks.stocks_kite_sync_instrument_map') }}" class="inline-block"
+                  data-job-form data-job-name="kite_instrument_map_sync" data-job-label="Sync Kite instrument map">
+                <button type="submit" class="stocks-btn py-3 px-6 rounded-2xl font-bold transition hover:opacity-90">
+                    Sync Kite instrument map
+                </button>
+            </form>
+
+            <h3 class="text-slate-200 font-semibold mt-6 mb-2">Universe-wide scan</h3>
+            <p class="text-slate-400 text-sm mb-3">
+                Pulls daily prices for all ~1,067 scrape-eligible companies (not just the watchlist) -- takes several minutes.
+                Run this before "Calculate indicators (universe)" below.
+            </p>
+            <form method="POST" action="{{ url_for('stocks.stocks_sync_universe') }}" class="inline-block mr-3"
+                  data-job-form data-job-name="price_sync_universe" data-job-label="Sync prices (universe)">
+                <button type="submit" class="stocks-btn py-3 px-6 rounded-2xl font-bold transition hover:opacity-90">
+                    Sync prices (universe)
+                </button>
+            </form>
+            <p class="text-slate-400 text-sm mt-4 mb-3">
+                Computes moving averages (5/21/50/200-day), RSI, and cross-over status for every company with universe-wide
+                price data -- this is what powers "Golden cross, not yet qualified" on the watchlist page.
+            </p>
+            <form method="POST" action="{{ url_for('stocks.stocks_indicators_calculate_universe') }}" class="inline-block"
+                  data-job-form data-job-name="indicator_calc_universe" data-job-label="Calculate indicators (universe)">
+                <button type="submit" class="stocks-btn py-3 px-6 rounded-2xl font-bold transition hover:opacity-90">
+                    Calculate indicators (universe)
+                </button>
+            </form>
+
+            <h3 class="text-slate-200 font-semibold mt-6 mb-2">Watchlist shortlist</h3>
+            <p class="text-slate-400 text-sm mb-3">Re-evaluates every scrape-eligible company's latest fundamentals against the screening criteria and updates the watchlist accordingly. Also runs automatically each morning before market open.</p>
+            <form method="POST" action="{{ url_for('stocks.stocks_watchlist_refresh_shortlist') }}"
+                  data-job-form data-job-name="shortlist_refresh" data-job-label="Refresh shortlist">
+                <button type="submit" class="stocks-btn py-3 px-6 rounded-2xl font-bold transition hover:opacity-90">
+                    Refresh shortlist
+                </button>
+            </form>
+        </details>
+
+        <div class="bg-slate-800 rounded-2xl p-6 border border-sky-500/20">
+            <p class="mt-4">
+                <a href="{{ url_for('stocks.stocks_watchlist') }}" class="text-sky-400 hover:text-sky-300 underline">View watchlist</a>
+            </p>
+            <p class="mt-2">
+                <a href="{{ url_for('stocks.stocks_universe_list') }}" class="text-sky-400 hover:text-sky-300 underline">Browse all companies</a>
+            </p>
+            <p class="mt-2">
+                <a href="{{ url_for('stocks.stocks_recommendations_tracker') }}" class="text-sky-400 hover:text-sky-300 underline">Recommendation tracker</a>
+            </p>
+            {% if role == 'super_admin' %}
+            <p class="mt-2">
+                <a href="{{ url_for('stocks.stocks_suggestions_resend') }}" class="text-sky-400 hover:text-sky-300 underline">Resend a past day's recommendations</a>
+            </p>
+            <p class="mt-2">
+                <a href="{{ url_for('stocks.stocks_admin_manage') }}" class="text-sky-400 hover:text-sky-300 underline">Manage admins</a>
+            </p>
+            <p class="mt-2">
+                <a href="{{ url_for('stocks.stocks_users_manage') }}" class="text-sky-400 hover:text-sky-300 underline">Viewer users</a>
+            </p>
+            <p class="mt-2">
+                <a href="{{ url_for('stocks.stocks_auto_trader') }}" class="text-sky-400 hover:text-sky-300 underline">Auto-Trader (dry run)</a>
+            </p>
+            {% endif %}
+        </div>
+    </div>
+
+    <script>
+    (function () {
+        var POLL_INTERVAL_MS = 3000;
+        var statusRegion = document.getElementById('job-status-region');
+        var activePolls = {};  // jobName -> intervalId, so a job is only polled once
+
+        function announce(text) {
+            statusRegion.textContent = text;
+        }
+
+        function setButtonRunning(form, running) {
+            var button = form.querySelector('button[type="submit"]');
+            if (running) {
+                if (!button.dataset.originalText) {
+                    button.dataset.originalText = button.textContent.trim();
+                }
+                button.disabled = true;
+                button.textContent = 'Running…';
+            } else {
+                button.disabled = false;
+                if (button.dataset.originalText) {
+                    button.textContent = button.dataset.originalText;
+                }
+            }
+        }
+
+        function summarizeResult(result) {
+            if (!result) { return ''; }
+            var keys = ['inserted', 'passed', 'golden', 'silver', 'bronze', 'failed', 'matched', 'sent'];
+            var parts = [];
+            keys.forEach(function (key) {
+                if (typeof result[key] === 'number') {
+                    parts.push(key + ': ' + result[key]);
+                }
+            });
+            return parts.length ? ' (' + parts.join(', ') + ')' : '';
+        }
+
+        function formatDateTime(value) {
+            if (!value) { return null; }
+            var d = new Date(value);
+            if (isNaN(d.getTime())) { return value; }
+            return d.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
+        }
+
+        function formatProgress(progress) {
+            if (!progress || !progress.total) { return ''; }
+            var pct = Math.round((progress.current / progress.total) * 100);
+            var base = pct + '% (' + progress.current + ' of ' + progress.total + ')';
+            return progress.label ? (progress.label + ' -- ' + base) : base;
+        }
+
+        function updateProgress(progressEl, progress, running) {
+            progressEl.textContent = running ? formatProgress(progress) : '';
+        }
+
+        function updateLastSync(lastSyncEl, lastSuccessAt) {
+            var formatted = formatDateTime(lastSuccessAt);
+            lastSyncEl.textContent = 'Last synced: ' + (formatted || 'never yet');
+        }
+
+        function pollStatus(jobName, label, form, progressEl, lastSyncEl, cancelEl) {
+            if (activePolls[jobName]) { return; }
+            activePolls[jobName] = setInterval(function () {
+                fetch('/stocks/jobs/' + jobName + '/status', { headers: { 'Accept': 'application/json' } })
+                    .then(function (resp) { return resp.json(); })
+                    .then(function (data) {
+                        if (data.status === 'running') {
+                            updateProgress(progressEl, data.progress, true);
+                            if (cancelEl) { setCancelVisible(cancelEl, true); }
+                            return;
+                        }
+                        clearInterval(activePolls[jobName]);
+                        delete activePolls[jobName];
+                        setButtonRunning(form, false);
+                        updateProgress(progressEl, null, false);
+                        if (cancelEl) { setCancelVisible(cancelEl, false); }
+                        updateLastSync(lastSyncEl, data.last_success_at);
+                        if (data.status === 'done') {
+                            announce(label + ': done' + summarizeResult(data.result) + '.');
+                        } else if (data.status === 'error') {
+                            announce(label + ': failed -- ' + (data.error || 'unknown error') + '.');
+                        } else {
+                            announce(label + ': finished.');
+                        }
+                    })
+                    .catch(function () {
+                        // A transient network hiccup shouldn't stop polling --
+                        // just try again on the next interval.
+                    });
+            }, POLL_INTERVAL_MS);
+        }
+
+        function checkStatusOnLoad(jobName, label, form, progressEl, lastSyncEl, cancelEl) {
+            // Always runs on page load, whether or not a job happens to be
+            // running right now -- this is what populates "Last synced"
+            // from a previous run, and (if a job was already running before
+            // this page was opened or reloaded) picks polling back up so
+            // the button correctly shows as busy instead of inviting a
+            // second click on top of it.
+            fetch('/stocks/jobs/' + jobName + '/status', { headers: { 'Accept': 'application/json' } })
+                .then(function (resp) { return resp.json(); })
+                .then(function (data) {
+                    updateLastSync(lastSyncEl, data.last_success_at);
+                    if (data.status === 'running') {
+                        setButtonRunning(form, true);
+                        updateProgress(progressEl, data.progress, true);
+                        if (cancelEl) { setCancelVisible(cancelEl, true); }
+                        announce(label + ': already running from an earlier click -- watching for it to finish.');
+                        pollStatus(jobName, label, form, progressEl, lastSyncEl, cancelEl);
+                    }
+                })
+                .catch(function () {});
+        }
+
+        function setCancelVisible(cancelEl, visible) {
+            cancelEl.style.display = visible ? 'inline' : 'none';
+        }
+
+        document.querySelectorAll('form[data-job-form]').forEach(function (form) {
+            var jobName = form.dataset.jobName;
+            var label = form.dataset.jobLabel;
+
+            var progressEl = document.createElement('span');
+            progressEl.className = 'text-slate-400 text-sm ml-3';
+            var button = form.querySelector('button[type="submit"]');
+            button.insertAdjacentElement('afterend', progressEl);
+
+            {% if role == 'super_admin' %}
+            var cancelEl = document.createElement('button');
+            cancelEl.type = 'button';
+            cancelEl.textContent = 'Stuck? Cancel it';
+            cancelEl.className = 'text-sm underline text-rose-400 hover:text-rose-300 ml-3';
+            cancelEl.style.display = 'none';
+            cancelEl.addEventListener('click', function () {
+                if (!confirm('Cancel "' + label + '"? Only do this if it looks stuck (e.g. running far longer than usual).')) { return; }
+                fetch('/stocks/jobs/' + jobName + '/cancel', { method: 'POST', headers: { 'Accept': 'application/json' } })
+                    .then(function () { window.location.reload(); });
+            });
+            progressEl.insertAdjacentElement('afterend', cancelEl);
+            {% endif %}
+
+            var lastSyncEl = document.createElement('p');
+            lastSyncEl.className = 'text-slate-500 text-xs mt-2';
+            lastSyncEl.textContent = 'Last synced: checking…';
+            form.insertAdjacentElement('afterend', lastSyncEl);
+
+            checkStatusOnLoad(jobName, label, form, progressEl, lastSyncEl, {% if role == 'super_admin' %}cancelEl{% else %}null{% endif %});
+
+            form.addEventListener('submit', function (event) {
+                event.preventDefault();
+                setButtonRunning(form, true);
+                updateProgress(progressEl, null, true);
+                announce(label + ': starting…');
+
+                fetch(form.action, { method: 'POST', headers: { 'Accept': 'application/json' } })
+                    .then(function (resp) { return resp.json(); })
+                    .then(function (data) {
+                        if (data.status === 'error') {
+                            setButtonRunning(form, false);
+                            updateProgress(progressEl, null, false);
+                            announce(label + ': ' + (data.message || 'failed to start') + '.');
+                            return;
+                        }
+                        if (data.status === 'started') {
+                            announce(data.already_running
+                                ? label + ': already running -- watching for it to finish.'
+                                : label + ': running in the background -- you can keep using the dashboard.');
+                            {% if role == 'super_admin' %}setCancelVisible(cancelEl, true);{% endif %}
+                            pollStatus(jobName, label, form, progressEl, lastSyncEl, {% if role == 'super_admin' %}cancelEl{% else %}null{% endif %});
+                            return;
+                        }
+                        // Defensive fallback -- a session-triggered click always
+                        // gets 'started' from the server, never 'ok' directly.
+                        setButtonRunning(form, false);
+                        updateProgress(progressEl, null, false);
+                        updateLastSync(lastSyncEl, data.last_success_at);
+                        announce(label + ': done' + summarizeResult(data) + '.');
+                    })
+                    .catch(function () {
+                        setButtonRunning(form, false);
+                        updateProgress(progressEl, null, false);
+                        announce(label + ': request failed -- check your connection and try again.');
+                    });
+            });
+        });
+    })();
+    </script>
+</body>
+</html>

@@ -1,4 +1,4 @@
-from utils.indicator_engine import (
+from stoqbell.utils.indicator_engine import (
     CONSOLIDATION_BREAKOUT_DAYS,
     CONSOLIDATION_RANGE_MAX_PCT,
     calculate_moving_averages,

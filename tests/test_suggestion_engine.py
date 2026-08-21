@@ -1,6 +1,6 @@
 from datetime import date, timedelta
 
-from utils.suggestion_engine import (
+from stoqbell.utils.suggestion_engine import (
     HOLDING_PERIOD_DAYS,
     NNS_SCORE_CHANGE_THRESHOLD,
     SUGGESTION_REPEAT_WINDOW_DAYS,
@@ -143,7 +143,7 @@ def test_silver_candidate_preferred_over_a_bronze_one_when_both_available():
 
     assert len(top) == 1
     assert top[0][0]['symbol'] == 'SILVERCO'
-    from utils.nns_score import nns_tier
+    from stoqbell.utils.nns_score import nns_tier
     assert nns_tier(top[0][1]) == 'silver'
 
 
@@ -154,7 +154,7 @@ def test_bronze_candidate_used_when_no_silver_or_better_is_available():
 
     assert len(top) == 1
     assert top[0][0]['symbol'] == 'BRONZECO'
-    from utils.nns_score import nns_tier
+    from stoqbell.utils.nns_score import nns_tier
     assert nns_tier(top[0][1]) == 'bronze'
 
 

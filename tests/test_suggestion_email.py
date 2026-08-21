@@ -1,6 +1,7 @@
+import pytest
 from unittest.mock import patch
 
-from utils.suggestion_email import (
+from stoqbell.utils.suggestion_email import (
     DISCLAIMER,
     send_admin_new_subscriber_email,
     send_admin_subscription_cancelled_email,
@@ -13,7 +14,20 @@ from utils.suggestion_email import (
     send_weekly_starters_email,
     send_large_cap_bonus_email,
 )
-from utils.price_pattern import compute_projection_targets
+from stoqbell.utils.price_pattern import compute_projection_targets
+
+
+@pytest.fixture(autouse=True)
+def _no_real_supabase_uploads():
+    """Every stock card in this suite calls build_prediction_chart_image_url,
+    which now uploads to Supabase Storage (see suggestion_chart.py) instead
+    of returning a base64 data: URI -- autouse so no test in this file ever
+    makes a real network call by accident. Individual tests that care about
+    the resulting URL can still patch this themselves with a specific
+    return_value; this fixture just sets a safe default."""
+    with patch('stoqbell.utils.suggestion_chart.upload_bytes_to_supabase',
+               return_value='https://example.supabase.co/storage/v1/object/public/products/stoqbell/charts/test.png'):
+        yield
 
 
 class FakeCursor:
@@ -80,7 +94,7 @@ def test_no_suggestions_today_still_sends_an_email_not_nothing():
         recipient_rows=[{'email': 'friend@example.com', 'name': 'A Friend'}],
     )
 
-    with patch('utils.suggestion_email.send_zeptomail_stocks_email', return_value=(True, 'ok')) as mock_send:
+    with patch('stoqbell.utils.suggestion_email.send_zeptomail_stocks_email', return_value=(True, 'ok')) as mock_send:
         summary = send_daily_suggestions_email(db)
 
     mock_send.assert_called_once()
@@ -108,7 +122,7 @@ def test_email_sent_to_every_active_recipient_and_includes_disclaimer():
         ],
     )
 
-    with patch('utils.suggestion_email.send_zeptomail_stocks_email', return_value=(True, 'ok')) as mock_send:
+    with patch('stoqbell.utils.suggestion_email.send_zeptomail_stocks_email', return_value=(True, 'ok')) as mock_send:
         summary = send_daily_suggestions_email(db)
 
     assert mock_send.call_count == 2
@@ -134,7 +148,7 @@ def test_golden_nns_suggestion_shows_highly_recommended_without_pe_or_opm():
         recipient_rows=[{'email': 'a@example.com', 'name': 'A'}],
     )
 
-    with patch('utils.suggestion_email.send_zeptomail_stocks_email', return_value=(True, 'ok')) as mock_send:
+    with patch('stoqbell.utils.suggestion_email.send_zeptomail_stocks_email', return_value=(True, 'ok')) as mock_send:
         send_daily_suggestions_email(db)
 
     textbody = mock_send.call_args.kwargs['textbody']
@@ -162,7 +176,7 @@ def test_company_name_is_shown_when_known_falls_back_to_symbol_when_not():
         recipient_rows=[{'email': 'a@example.com', 'name': 'A'}],
     )
 
-    with patch('utils.suggestion_email.send_zeptomail_stocks_email', return_value=(True, 'ok')) as mock_send:
+    with patch('stoqbell.utils.suggestion_email.send_zeptomail_stocks_email', return_value=(True, 'ok')) as mock_send:
         send_daily_suggestions_email(db)
 
     textbody = mock_send.call_args.kwargs['textbody']
@@ -186,7 +200,7 @@ def test_silver_nns_suggestion_shows_fundamentals_note_with_pe_and_opm_values_an
         recipient_rows=[{'email': 'a@example.com', 'name': 'A'}],
     )
 
-    with patch('utils.suggestion_email.send_zeptomail_stocks_email', return_value=(True, 'ok')) as mock_send:
+    with patch('stoqbell.utils.suggestion_email.send_zeptomail_stocks_email', return_value=(True, 'ok')) as mock_send:
         send_daily_suggestions_email(db)
 
     textbody = mock_send.call_args.kwargs['textbody']
@@ -210,7 +224,7 @@ def test_suggestion_predating_nns_score_falls_back_to_plain_recommended_not_a_cr
         recipient_rows=[{'email': 'a@example.com', 'name': 'A'}],
     )
 
-    with patch('utils.suggestion_email.send_zeptomail_stocks_email', return_value=(True, 'ok')) as mock_send:
+    with patch('stoqbell.utils.suggestion_email.send_zeptomail_stocks_email', return_value=(True, 'ok')) as mock_send:
         send_daily_suggestions_email(db)
 
     textbody = mock_send.call_args.kwargs['textbody']
@@ -226,7 +240,9 @@ def test_suggestion_with_no_pattern_shows_generic_extrapolated_projection_and_a_
         recipient_rows=[{'email': 'a@example.com', 'name': 'A'}],
     )
 
-    with patch('utils.suggestion_email.send_zeptomail_stocks_email', return_value=(True, 'ok')) as mock_send:
+    fake_chart_url = 'https://example.supabase.co/storage/v1/object/public/products/stoqbell/charts/abc123.png'
+    with patch('stoqbell.utils.suggestion_email.send_zeptomail_stocks_email', return_value=(True, 'ok')) as mock_send, \
+         patch('stoqbell.utils.suggestion_chart.upload_bytes_to_supabase', return_value=fake_chart_url):
         send_daily_suggestions_email(db)
 
     textbody = mock_send.call_args.kwargs['textbody']
@@ -235,8 +251,10 @@ def test_suggestion_with_no_pattern_shows_generic_extrapolated_projection_and_a_
     assert '~6 months' in textbody and '~6 months' in htmlbody
     assert '~1 year' in textbody and '~1 year' in htmlbody
     assert 'extrapolated -- no confirmed chart pattern' in textbody
-    # A chart image is embedded inline as a data URI.
-    assert 'data:image/png;base64,' in htmlbody
+    # A chart image is embedded via its Supabase-hosted public URL, not a
+    # base64 data: URI (many mail clients, Outlook desktop included, strip
+    # data: URIs -- see suggestion_chart.py).
+    assert f'<img src="{fake_chart_url}"' in htmlbody
     # The disclaimer explaining the two methods appears once, not per-stock.
     assert 'not a fixed calendar point' in textbody
     assert textbody.count('not a fixed calendar point') == 1
@@ -256,7 +274,7 @@ def test_suggestion_with_confirmed_pattern_shows_its_own_pattern_specific_projec
         recipient_rows=[{'email': 'a@example.com', 'name': 'A'}],
     )
 
-    with patch('utils.suggestion_email.send_zeptomail_stocks_email', return_value=(True, 'ok')) as mock_send:
+    with patch('stoqbell.utils.suggestion_email.send_zeptomail_stocks_email', return_value=(True, 'ok')) as mock_send:
         send_daily_suggestions_email(db)
 
     textbody = mock_send.call_args.kwargs['textbody']
@@ -280,7 +298,7 @@ def test_rounding_bottom_suggestion_gets_a_different_period_than_head_and_should
         recipient_rows=[{'email': 'a@example.com', 'name': 'A'}],
     )
 
-    with patch('utils.suggestion_email.send_zeptomail_stocks_email', return_value=(True, 'ok')) as mock_send:
+    with patch('stoqbell.utils.suggestion_email.send_zeptomail_stocks_email', return_value=(True, 'ok')) as mock_send:
         send_daily_suggestions_email(db)
 
     textbody = mock_send.call_args.kwargs['textbody']
@@ -301,11 +319,16 @@ def test_suggestion_missing_prices_gets_no_projection_or_chart():
         recipient_rows=[{'email': 'a@example.com', 'name': 'A'}],
     )
 
-    with patch('utils.suggestion_email.send_zeptomail_stocks_email', return_value=(True, 'ok')) as mock_send:
+    with patch('stoqbell.utils.suggestion_email.send_zeptomail_stocks_email', return_value=(True, 'ok')) as mock_send, \
+         patch('stoqbell.utils.suggestion_chart.upload_bytes_to_supabase') as mock_upload:
         send_daily_suggestions_email(db)
 
     htmlbody = mock_send.call_args.kwargs['htmlbody']
-    assert 'data:image/png;base64,' not in htmlbody
+    # No target_sell_price -- no projection to draw, so the chart builder
+    # never even gets called (nothing to upload), and no chart block
+    # renders in the email.
+    mock_upload.assert_not_called()
+    assert 'Price Projection' not in htmlbody
 
 
 def test_short_term_target_price_is_shown_alongside_buy_and_stop_loss():
@@ -321,7 +344,7 @@ def test_short_term_target_price_is_shown_alongside_buy_and_stop_loss():
         recipient_rows=[{'email': 'a@example.com', 'name': 'A'}],
     )
 
-    with patch('utils.suggestion_email.send_zeptomail_stocks_email', return_value=(True, 'ok')) as mock_send:
+    with patch('stoqbell.utils.suggestion_email.send_zeptomail_stocks_email', return_value=(True, 'ok')) as mock_send:
         send_daily_suggestions_email(db)
 
     textbody = mock_send.call_args.kwargs['textbody']
@@ -349,7 +372,7 @@ def test_projection_prices_show_pct_increase_from_buy_price():
     mid_pct = round((projection['mid_period']['price'] - buy_price) / buy_price * 100, 1)
     long_pct = round((projection['long_term']['price'] - buy_price) / buy_price * 100, 1)
 
-    with patch('utils.suggestion_email.send_zeptomail_stocks_email', return_value=(True, 'ok')) as mock_send:
+    with patch('stoqbell.utils.suggestion_email.send_zeptomail_stocks_email', return_value=(True, 'ok')) as mock_send:
         send_daily_suggestions_email(db)
 
     textbody = mock_send.call_args.kwargs['textbody']
@@ -371,7 +394,7 @@ def test_pattern_based_suggestion_target_label_has_no_day_count_claim():
         recipient_rows=[{'email': 'a@example.com', 'name': 'A'}],
     )
 
-    with patch('utils.suggestion_email.send_zeptomail_stocks_email', return_value=(True, 'ok')) as mock_send:
+    with patch('stoqbell.utils.suggestion_email.send_zeptomail_stocks_email', return_value=(True, 'ok')) as mock_send:
         send_daily_suggestions_email(db)
 
     textbody = mock_send.call_args.kwargs['textbody']
@@ -391,7 +414,7 @@ def test_html_is_a_real_responsive_document_not_a_bare_fragment():
         recipient_rows=[{'email': 'a@example.com', 'name': 'A'}],
     )
 
-    with patch('utils.suggestion_email.send_zeptomail_stocks_email', return_value=(True, 'ok')) as mock_send:
+    with patch('stoqbell.utils.suggestion_email.send_zeptomail_stocks_email', return_value=(True, 'ok')) as mock_send:
         send_daily_suggestions_email(db)
 
     htmlbody = mock_send.call_args.kwargs['htmlbody']
@@ -400,7 +423,7 @@ def test_html_is_a_real_responsive_document_not_a_bare_fragment():
     assert '@media only screen and (max-width' in htmlbody
     # No-suggestions path must be wrapped the same way, not just the main one.
     empty_db = FakeEmailDB(suggestion_rows=[], recipient_rows=[{'email': 'a@example.com', 'name': 'A'}])
-    with patch('utils.suggestion_email.send_zeptomail_stocks_email', return_value=(True, 'ok')) as mock_send2:
+    with patch('stoqbell.utils.suggestion_email.send_zeptomail_stocks_email', return_value=(True, 'ok')) as mock_send2:
         send_daily_suggestions_email(empty_db)
     empty_htmlbody = mock_send2.call_args.kwargs['htmlbody']
     assert empty_htmlbody.strip().startswith('<!doctype html>')
@@ -416,7 +439,7 @@ def test_chart_image_is_fluid_width_not_a_fixed_pixel_size():
         recipient_rows=[{'email': 'a@example.com', 'name': 'A'}],
     )
 
-    with patch('utils.suggestion_email.send_zeptomail_stocks_email', return_value=(True, 'ok')) as mock_send:
+    with patch('stoqbell.utils.suggestion_email.send_zeptomail_stocks_email', return_value=(True, 'ok')) as mock_send:
         send_daily_suggestions_email(db)
 
     htmlbody = mock_send.call_args.kwargs['htmlbody']
@@ -440,7 +463,7 @@ def test_highlights_show_available_technical_and_fundamental_figures():
         recipient_rows=[{'email': 'a@example.com', 'name': 'A'}],
     )
 
-    with patch('utils.suggestion_email.send_zeptomail_stocks_email', return_value=(True, 'ok')) as mock_send:
+    with patch('stoqbell.utils.suggestion_email.send_zeptomail_stocks_email', return_value=(True, 'ok')) as mock_send:
         send_daily_suggestions_email(db)
 
     textbody = mock_send.call_args.kwargs['textbody']
@@ -461,7 +484,7 @@ def test_highlights_omit_missing_fields_without_crashing():
         recipient_rows=[{'email': 'a@example.com', 'name': 'A'}],
     )
 
-    with patch('utils.suggestion_email.send_zeptomail_stocks_email', return_value=(True, 'ok')) as mock_send:
+    with patch('stoqbell.utils.suggestion_email.send_zeptomail_stocks_email', return_value=(True, 'ok')) as mock_send:
         send_daily_suggestions_email(db)
 
     textbody = mock_send.call_args.kwargs['textbody']
@@ -483,13 +506,13 @@ def test_stock_link_points_to_the_any_viewer_accessible_universe_page():
         recipient_rows=[{'email': 'a@example.com', 'name': 'A'}],
     )
 
-    with patch('utils.suggestion_email.send_zeptomail_stocks_email', return_value=(True, 'ok')) as mock_send:
+    with patch('stoqbell.utils.suggestion_email.send_zeptomail_stocks_email', return_value=(True, 'ok')) as mock_send:
         send_daily_suggestions_email(db)
 
     textbody = mock_send.call_args.kwargs['textbody']
     htmlbody = mock_send.call_args.kwargs['htmlbody']
-    assert 'https://narinakhre.com/stocks/universe/77' in textbody
-    assert 'https://narinakhre.com/stocks/universe/77' in htmlbody
+    assert 'https://www.stoqbell.com/stocks/universe/77' in textbody
+    assert 'https://www.stoqbell.com/stocks/universe/77' in htmlbody
     assert '/stocks/company/' not in htmlbody
 
 
@@ -504,7 +527,7 @@ def test_no_stock_link_when_universe_id_unresolved():
         recipient_rows=[{'email': 'a@example.com', 'name': 'A'}],
     )
 
-    with patch('utils.suggestion_email.send_zeptomail_stocks_email', return_value=(True, 'ok')) as mock_send:
+    with patch('stoqbell.utils.suggestion_email.send_zeptomail_stocks_email', return_value=(True, 'ok')) as mock_send:
         send_daily_suggestions_email(db)
 
     htmlbody = mock_send.call_args.kwargs['htmlbody']
@@ -520,7 +543,7 @@ def test_resend_uses_the_given_date_instead_of_today():
         recipient_rows=[{'email': 'a@example.com', 'name': 'A'}],
     )
 
-    with patch('utils.suggestion_email.send_zeptomail_stocks_email', return_value=(True, 'ok')) as mock_send:
+    with patch('stoqbell.utils.suggestion_email.send_zeptomail_stocks_email', return_value=(True, 'ok')) as mock_send:
         summary = send_daily_suggestions_email(db, target_date='2026-07-01')
 
     assert summary['suggestion_count'] == 1
@@ -542,7 +565,7 @@ def test_recipient_ids_restricts_the_send_to_just_those_accounts():
         ],
     )
 
-    with patch('utils.suggestion_email.send_zeptomail_stocks_email', return_value=(True, 'ok')) as mock_send:
+    with patch('stoqbell.utils.suggestion_email.send_zeptomail_stocks_email', return_value=(True, 'ok')) as mock_send:
         summary = send_daily_suggestions_email(db, recipient_ids=[1, 3])
 
     assert summary['recipient_count'] == 2
@@ -559,7 +582,7 @@ def test_recipient_ids_none_still_means_every_active_viewer():
         ],
     )
 
-    with patch('utils.suggestion_email.send_zeptomail_stocks_email', return_value=(True, 'ok')) as mock_send:
+    with patch('stoqbell.utils.suggestion_email.send_zeptomail_stocks_email', return_value=(True, 'ok')) as mock_send:
         summary = send_daily_suggestions_email(db, recipient_ids=None)
 
     assert summary['recipient_count'] == 2
@@ -574,7 +597,7 @@ def test_recipient_ids_empty_list_sends_to_nobody():
         recipient_rows=[{'id': 1, 'email': 'a@example.com', 'name': 'A'}],
     )
 
-    with patch('utils.suggestion_email.send_zeptomail_stocks_email', return_value=(True, 'ok')) as mock_send:
+    with patch('stoqbell.utils.suggestion_email.send_zeptomail_stocks_email', return_value=(True, 'ok')) as mock_send:
         summary = send_daily_suggestions_email(db, recipient_ids=[])
 
     assert summary['recipient_count'] == 0
@@ -594,7 +617,7 @@ def test_pattern_based_suggestion_shows_pattern_note_instead_of_hold_days():
         recipient_rows=[{'email': 'a@example.com', 'name': 'A'}],
     )
 
-    with patch('utils.suggestion_email.send_zeptomail_stocks_email', return_value=(True, 'ok')) as mock_send:
+    with patch('stoqbell.utils.suggestion_email.send_zeptomail_stocks_email', return_value=(True, 'ok')) as mock_send:
         send_daily_suggestions_email(db)
 
     textbody = mock_send.call_args.kwargs['textbody']
@@ -613,7 +636,7 @@ def test_a_failed_send_is_counted_without_stopping_the_rest():
         ],
     )
 
-    with patch('utils.suggestion_email.send_zeptomail_stocks_email',
+    with patch('stoqbell.utils.suggestion_email.send_zeptomail_stocks_email',
                side_effect=[(False, 'Zeptomail HTTP 500: server error'), (True, 'ok')]):
         summary = send_daily_suggestions_email(db)
 
@@ -623,7 +646,7 @@ def test_a_failed_send_is_counted_without_stopping_the_rest():
 
 
 def test_viewer_welcome_email_includes_login_link_username_and_password():
-    with patch('utils.suggestion_email.send_zeptomail_stocks_email', return_value=(True, 'ok')) as mock_send:
+    with patch('stoqbell.utils.suggestion_email.send_zeptomail_stocks_email', return_value=(True, 'ok')) as mock_send:
         sent, detail = send_viewer_welcome_email('new@example.com', 'New Viewer', 'r4nd0mPass123')
 
     assert sent is True
@@ -643,7 +666,7 @@ def test_viewer_welcome_email_propagates_the_real_failure_reason():
     # This is the exact bug the "check the Zeptomail config" flash message
     # used to hide -- send_viewer_welcome_email must hand back the actual
     # reason (missing config, Zeptomail's own error, etc.), not just a bool.
-    with patch('utils.suggestion_email.send_zeptomail_stocks_email',
+    with patch('stoqbell.utils.suggestion_email.send_zeptomail_stocks_email',
                return_value=(False, 'Missing: STOCKS_ZEPTOMAIL_API_KEY.')):
         sent, detail = send_viewer_welcome_email('new@example.com', 'New Viewer', 'pass123')
 
@@ -652,7 +675,7 @@ def test_viewer_welcome_email_propagates_the_real_failure_reason():
 
 
 def test_viewer_welcome_email_falls_back_to_email_as_greeting_when_no_name():
-    with patch('utils.suggestion_email.send_zeptomail_stocks_email', return_value=(True, 'ok')) as mock_send:
+    with patch('stoqbell.utils.suggestion_email.send_zeptomail_stocks_email', return_value=(True, 'ok')) as mock_send:
         send_viewer_welcome_email('noname@example.com', '', 'somepass')
 
     kwargs = mock_send.call_args.kwargs
@@ -660,7 +683,7 @@ def test_viewer_welcome_email_falls_back_to_email_as_greeting_when_no_name():
 
 
 def test_subscription_welcome_email_without_suggestions_is_the_plain_welcome():
-    with patch('utils.suggestion_email.send_zeptomail_stocks_email', return_value=(True, 'ok')) as mock_send:
+    with patch('stoqbell.utils.suggestion_email.send_zeptomail_stocks_email', return_value=(True, 'ok')) as mock_send:
         send_subscription_welcome_email('new@example.com', 'New Sub', '17 Sep 2026')
 
     kwargs = mock_send.call_args.kwargs
@@ -676,7 +699,7 @@ def test_subscription_welcome_email_with_suggestions_includes_todays_pick():
          'target_sell_price': 105.0, 'stop_loss_price': 97.0, 'holding_period_days': 10,
          'rationale': 'Golden cross with confirming volume'},
     ]
-    with patch('utils.suggestion_email.send_zeptomail_stocks_email', return_value=(True, 'ok')) as mock_send:
+    with patch('stoqbell.utils.suggestion_email.send_zeptomail_stocks_email', return_value=(True, 'ok')) as mock_send:
         send_subscription_welcome_email('new@example.com', 'New Sub', '17 Sep 2026', suggestions=suggestions)
 
     kwargs = mock_send.call_args.kwargs
@@ -690,7 +713,7 @@ def test_subscription_welcome_email_with_suggestions_includes_todays_pick():
 
 
 def test_subscription_welcome_email_defaults_to_standard_plan_pricing():
-    with patch('utils.suggestion_email.send_zeptomail_stocks_email', return_value=(True, 'ok')) as mock_send:
+    with patch('stoqbell.utils.suggestion_email.send_zeptomail_stocks_email', return_value=(True, 'ok')) as mock_send:
         send_subscription_welcome_email('new@example.com', 'New Sub', '17 Sep 2026')
 
     kwargs = mock_send.call_args.kwargs
@@ -699,7 +722,7 @@ def test_subscription_welcome_email_defaults_to_standard_plan_pricing():
 
 
 def test_subscription_welcome_email_starters_plan_shows_the_correct_price_and_cadence():
-    with patch('utils.suggestion_email.send_zeptomail_stocks_email', return_value=(True, 'ok')) as mock_send:
+    with patch('stoqbell.utils.suggestion_email.send_zeptomail_stocks_email', return_value=(True, 'ok')) as mock_send:
         send_subscription_welcome_email('new@example.com', 'New Sub', '17 Sep 2026', plan='starters')
 
     kwargs = mock_send.call_args.kwargs
@@ -715,7 +738,7 @@ def test_subscription_welcome_email_starters_plan_with_suggestions_uses_weekly_h
          'target_sell_price': 105.0, 'stop_loss_price': 97.0, 'holding_period_days': 10,
          'rationale': 'Golden cross with confirming volume'},
     ]
-    with patch('utils.suggestion_email.send_zeptomail_stocks_email', return_value=(True, 'ok')) as mock_send:
+    with patch('stoqbell.utils.suggestion_email.send_zeptomail_stocks_email', return_value=(True, 'ok')) as mock_send:
         send_subscription_welcome_email(
             'new@example.com', 'New Sub', '17 Sep 2026', suggestions=suggestions, plan='starters',
         )
@@ -728,7 +751,7 @@ def test_subscription_welcome_email_starters_plan_with_suggestions_uses_weekly_h
 
 
 def test_admin_new_subscriber_email_goes_to_the_fixed_admin_address():
-    with patch('utils.suggestion_email.send_zeptomail_stocks_email', return_value=(True, 'ok')) as mock_send:
+    with patch('stoqbell.utils.suggestion_email.send_zeptomail_stocks_email', return_value=(True, 'ok')) as mock_send:
         send_admin_new_subscriber_email('newsub@example.com', 'New Sub')
 
     kwargs = mock_send.call_args.kwargs
@@ -739,7 +762,7 @@ def test_admin_new_subscriber_email_goes_to_the_fixed_admin_address():
 
 
 def test_admin_cancellation_email_goes_to_the_fixed_admin_address():
-    with patch('utils.suggestion_email.send_zeptomail_stocks_email', return_value=(True, 'ok')) as mock_send:
+    with patch('stoqbell.utils.suggestion_email.send_zeptomail_stocks_email', return_value=(True, 'ok')) as mock_send:
         send_admin_subscription_cancelled_email('leaving@example.com', 'Leaving User')
 
     kwargs = mock_send.call_args.kwargs
@@ -755,7 +778,7 @@ def test_trading_alert_email_includes_the_stock_card_and_buy_link():
         'nns_tier': 'golden', 'rationale': 'Golden cross with confirming volume',
     }
     buy_link = 'https://narinakhre.com/stocks/suggestions/42/buy'
-    with patch('utils.suggestion_email.send_zeptomail_stocks_email', return_value=(True, 'ok')) as mock_send:
+    with patch('stoqbell.utils.suggestion_email.send_zeptomail_stocks_email', return_value=(True, 'ok')) as mock_send:
         send_trading_alert_email('raga2020@gmail.com', suggestion, buy_link)
 
     kwargs = mock_send.call_args.kwargs
@@ -770,7 +793,7 @@ def test_trading_alert_email_includes_the_stock_card_and_buy_link():
 
 def test_target_hit_email_reports_the_pnl_and_links_to_the_dashboard():
     trade = {'symbol': 'GLD', 'exchange': 'NSE', 'buy_price': 100.0, 'quantity': 60, 'exit_price': 105.0}
-    with patch('utils.suggestion_email.send_zeptomail_stocks_email', return_value=(True, 'ok')) as mock_send:
+    with patch('stoqbell.utils.suggestion_email.send_zeptomail_stocks_email', return_value=(True, 'ok')) as mock_send:
         send_target_hit_email('raga2020@gmail.com', trade, pnl_amount=300.0, pnl_pct=5.0)
 
     kwargs = mock_send.call_args.kwargs
@@ -788,7 +811,7 @@ def test_target_achieved_email_single_achievement():
         'suggestion_date': '2026-08-01', 'buy_price': 100.0, 'target_sell_price': 110.0,
         'latest_price': 112.0, 'latest_price_date': '2026-08-11',
     }
-    with patch('utils.suggestion_email.send_zeptomail_stocks_email', return_value=(True, 'ok')) as mock_send:
+    with patch('stoqbell.utils.suggestion_email.send_zeptomail_stocks_email', return_value=(True, 'ok')) as mock_send:
         send_target_achieved_email('sub@example.com', 'A Subscriber', [achievement])
 
     kwargs = mock_send.call_args.kwargs
@@ -816,7 +839,7 @@ def test_target_achieved_email_bundles_multiple_achievements_in_one_email():
          'suggestion_date': '2026-07-20', 'buy_price': 50.0, 'target_sell_price': 55.0,
          'latest_price': 56.0, 'latest_price_date': '2026-08-08'},
     ]
-    with patch('utils.suggestion_email.send_zeptomail_stocks_email', return_value=(True, 'ok')) as mock_send:
+    with patch('stoqbell.utils.suggestion_email.send_zeptomail_stocks_email', return_value=(True, 'ok')) as mock_send:
         send_target_achieved_email('sub@example.com', 'A Subscriber', achievements)
 
     kwargs = mock_send.call_args.kwargs
@@ -833,7 +856,7 @@ def test_target_achieved_email_falls_back_to_symbol_when_no_company_name():
         'suggestion_date': '2026-08-01', 'buy_price': 100.0, 'target_sell_price': 110.0,
         'latest_price': 112.0, 'latest_price_date': '2026-08-11',
     }
-    with patch('utils.suggestion_email.send_zeptomail_stocks_email', return_value=(True, 'ok')) as mock_send:
+    with patch('stoqbell.utils.suggestion_email.send_zeptomail_stocks_email', return_value=(True, 'ok')) as mock_send:
         send_target_achieved_email('sub@example.com', None, [achievement])
 
     kwargs = mock_send.call_args.kwargs
@@ -853,7 +876,7 @@ def test_daily_email_includes_each_recipients_own_referral_footer():
         ],
     )
 
-    with patch('utils.suggestion_email.send_zeptomail_stocks_email', return_value=(True, 'ok')) as mock_send:
+    with patch('stoqbell.utils.suggestion_email.send_zeptomail_stocks_email', return_value=(True, 'ok')) as mock_send:
         send_daily_suggestions_email(db)
 
     calls_by_email = {c.kwargs['to_email']: c.kwargs for c in mock_send.call_args_list}
@@ -875,7 +898,7 @@ def test_daily_email_generates_a_referral_code_for_a_recipient_who_has_none_yet(
         recipient_rows=[{'id': 1, 'email': 'a@example.com', 'name': 'A'}],  # no referral_code yet
     )
 
-    with patch('utils.suggestion_email.send_zeptomail_stocks_email', return_value=(True, 'ok')) as mock_send:
+    with patch('stoqbell.utils.suggestion_email.send_zeptomail_stocks_email', return_value=(True, 'ok')) as mock_send:
         send_daily_suggestions_email(db)
 
     assert db.recipient_rows[0]['referral_code']  # lazily generated and persisted
@@ -931,7 +954,7 @@ class FakeStartersEmailDB:
 def test_weekly_starters_email_sends_nothing_when_no_pick_cleared_the_bar():
     db = FakeStartersEmailDB(suggestion_rows=[], recipient_rows=[{'id': 1, 'email': 'a@example.com', 'name': 'A'}])
 
-    with patch('utils.suggestion_email.send_zeptomail_stocks_email', return_value=(True, 'ok')) as mock_send:
+    with patch('stoqbell.utils.suggestion_email.send_zeptomail_stocks_email', return_value=(True, 'ok')) as mock_send:
         summary = send_weekly_starters_email(db)
 
     mock_send.assert_not_called()
@@ -948,7 +971,7 @@ def test_weekly_starters_email_sends_only_to_starters_recipients_with_the_weekly
         recipient_rows=[{'id': 1, 'email': 'starter@example.com', 'name': 'Starter'}],
     )
 
-    with patch('utils.suggestion_email.send_zeptomail_stocks_email', return_value=(True, 'ok')) as mock_send:
+    with patch('stoqbell.utils.suggestion_email.send_zeptomail_stocks_email', return_value=(True, 'ok')) as mock_send:
         summary = send_weekly_starters_email(db)
 
     assert summary['sent'] == 1
@@ -974,7 +997,7 @@ def test_weekly_starters_email_includes_both_picks_when_two_cleared_the_bar():
         recipient_rows=[{'id': 1, 'email': 'starter@example.com', 'name': 'Starter'}],
     )
 
-    with patch('utils.suggestion_email.send_zeptomail_stocks_email', return_value=(True, 'ok')) as mock_send:
+    with patch('stoqbell.utils.suggestion_email.send_zeptomail_stocks_email', return_value=(True, 'ok')) as mock_send:
         summary = send_weekly_starters_email(db)
 
     assert summary['suggestion_count'] == 2
@@ -1034,7 +1057,7 @@ class FakeLargeCapBonusEmailDB:
 def test_large_cap_bonus_email_sends_nothing_when_no_pick_cleared_the_bar():
     db = FakeLargeCapBonusEmailDB(suggestion_rows=[], recipient_rows=[{'id': 1, 'email': 'a@example.com', 'name': 'A'}])
 
-    with patch('utils.suggestion_email.send_zeptomail_stocks_email', return_value=(True, 'ok')) as mock_send:
+    with patch('stoqbell.utils.suggestion_email.send_zeptomail_stocks_email', return_value=(True, 'ok')) as mock_send:
         summary = send_large_cap_bonus_email(db)
 
     mock_send.assert_not_called()
@@ -1051,7 +1074,7 @@ def test_large_cap_bonus_email_sends_only_to_standard_recipients():
         recipient_rows=[{'id': 1, 'email': 'standard@example.com', 'name': 'Standard Sub'}],
     )
 
-    with patch('utils.suggestion_email.send_zeptomail_stocks_email', return_value=(True, 'ok')) as mock_send:
+    with patch('stoqbell.utils.suggestion_email.send_zeptomail_stocks_email', return_value=(True, 'ok')) as mock_send:
         summary = send_large_cap_bonus_email(db)
 
     assert summary['sent'] == 1

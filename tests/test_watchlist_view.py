@@ -1,4 +1,4 @@
-from utils.watchlist_view import enrich_and_sort_watchlist_rows, redact_recommendation_signals
+from stoqbell.utils.watchlist_view import enrich_and_sort_watchlist_rows, redact_recommendation_signals
 
 GOOD_INDICATORS = {'cross_status': 'golden_cross', 'volume_trend': 'confirming', 'rsi_14': 50}
 

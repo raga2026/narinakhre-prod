@@ -1,6 +1,6 @@
 """Tests for utils/industry_growth.py -- same FakeCursor/matching-by-SQL-
 prefix pattern as the other Stocks engine tests (no real database)."""
-from utils.industry_growth import INDUSTRY_GROWTH_MIN_SAMPLE_SIZE, compute_industry_growth
+from stoqbell.utils.industry_growth import INDUSTRY_GROWTH_MIN_SAMPLE_SIZE, compute_industry_growth
 
 
 class FakeCursor:

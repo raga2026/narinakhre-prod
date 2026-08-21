@@ -1,7 +1,7 @@
 from unittest.mock import MagicMock, patch
 
-from utils.super_sync import STEP_LABELS, SUPER_SYNC_STEPS, run_super_sync
-from utils import job_progress
+from stoqbell.utils.super_sync import STEP_LABELS, SUPER_SYNC_STEPS, run_super_sync
+from stoqbell.utils import job_progress
 
 
 def test_all_steps_run_in_the_documented_order():
@@ -14,14 +14,14 @@ def test_all_steps_run_in_the_documented_order():
             return return_value
         return _fn
 
-    with patch('utils.super_sync.KiteClient', return_value=MagicMock()), \
-         patch('utils.super_sync.sync_kite_instrument_map', side_effect=_tracked('kite_instrument_map_sync', {})), \
-         patch('utils.super_sync.refresh_market_cap_filter', side_effect=_tracked('market_cap_filter', {})), \
-         patch('utils.super_sync.run_fundamental_shortlist', side_effect=_tracked('shortlist_refresh', {})), \
-         patch('utils.super_sync.sync_daily_data', side_effect=_tracked('price_sync', {})), \
-         patch('utils.super_sync.run_indicator_calculation', side_effect=_tracked('indicator_calc', {})), \
-         patch('utils.super_sync.sync_daily_data_universe', side_effect=_tracked('price_sync_universe', {})), \
-         patch('utils.super_sync.run_indicator_calculation_universe', side_effect=_tracked('indicator_calc_universe', {})):
+    with patch('stoqbell.utils.super_sync.KiteClient', return_value=MagicMock()), \
+         patch('stoqbell.utils.super_sync.sync_kite_instrument_map', side_effect=_tracked('kite_instrument_map_sync', {})), \
+         patch('stoqbell.utils.super_sync.refresh_market_cap_filter', side_effect=_tracked('market_cap_filter', {})), \
+         patch('stoqbell.utils.super_sync.run_fundamental_shortlist', side_effect=_tracked('shortlist_refresh', {})), \
+         patch('stoqbell.utils.super_sync.sync_daily_data', side_effect=_tracked('price_sync', {})), \
+         patch('stoqbell.utils.super_sync.run_indicator_calculation', side_effect=_tracked('indicator_calc', {})), \
+         patch('stoqbell.utils.super_sync.sync_daily_data_universe', side_effect=_tracked('price_sync_universe', {})), \
+         patch('stoqbell.utils.super_sync.run_indicator_calculation_universe', side_effect=_tracked('indicator_calc_universe', {})):
         result = run_super_sync(db, access_token='fake-token')
 
     assert call_order == SUPER_SYNC_STEPS
@@ -34,14 +34,14 @@ def test_all_steps_run_in_the_documented_order():
 def test_a_failing_step_does_not_stop_the_rest():
     db = MagicMock()
 
-    with patch('utils.super_sync.KiteClient', return_value=MagicMock()), \
-         patch('utils.super_sync.sync_kite_instrument_map', side_effect=RuntimeError('Kite session expired')), \
-         patch('utils.super_sync.refresh_market_cap_filter', return_value={}), \
-         patch('utils.super_sync.run_fundamental_shortlist', return_value={'passed': 2}), \
-         patch('utils.super_sync.sync_daily_data', side_effect=RuntimeError('No Kite session')), \
-         patch('utils.super_sync.run_indicator_calculation', return_value={}), \
-         patch('utils.super_sync.sync_daily_data_universe', return_value={}), \
-         patch('utils.super_sync.run_indicator_calculation_universe', return_value={}):
+    with patch('stoqbell.utils.super_sync.KiteClient', return_value=MagicMock()), \
+         patch('stoqbell.utils.super_sync.sync_kite_instrument_map', side_effect=RuntimeError('Kite session expired')), \
+         patch('stoqbell.utils.super_sync.refresh_market_cap_filter', return_value={}), \
+         patch('stoqbell.utils.super_sync.run_fundamental_shortlist', return_value={'passed': 2}), \
+         patch('stoqbell.utils.super_sync.sync_daily_data', side_effect=RuntimeError('No Kite session')), \
+         patch('stoqbell.utils.super_sync.run_indicator_calculation', return_value={}), \
+         patch('stoqbell.utils.super_sync.sync_daily_data_universe', return_value={}), \
+         patch('stoqbell.utils.super_sync.run_indicator_calculation_universe', return_value={}):
         result = run_super_sync(db, access_token='fake-token')
 
     assert result['ok_count'] == len(SUPER_SYNC_STEPS) - 2
@@ -80,14 +80,14 @@ def test_progress_reports_a_step_label_before_each_step_runs():
     job_progress.bind(lambda current, total, label: reports.append((current, total, label)))
 
     try:
-        with patch('utils.super_sync.KiteClient', return_value=MagicMock()), \
-             patch('utils.super_sync.sync_kite_instrument_map', return_value={}), \
-             patch('utils.super_sync.refresh_market_cap_filter', return_value={}), \
-             patch('utils.super_sync.run_fundamental_shortlist', return_value={}), \
-             patch('utils.super_sync.sync_daily_data', return_value={}), \
-             patch('utils.super_sync.run_indicator_calculation', return_value={}), \
-             patch('utils.super_sync.sync_daily_data_universe', return_value={}), \
-             patch('utils.super_sync.run_indicator_calculation_universe', return_value={}):
+        with patch('stoqbell.utils.super_sync.KiteClient', return_value=MagicMock()), \
+             patch('stoqbell.utils.super_sync.sync_kite_instrument_map', return_value={}), \
+             patch('stoqbell.utils.super_sync.refresh_market_cap_filter', return_value={}), \
+             patch('stoqbell.utils.super_sync.run_fundamental_shortlist', return_value={}), \
+             patch('stoqbell.utils.super_sync.sync_daily_data', return_value={}), \
+             patch('stoqbell.utils.super_sync.run_indicator_calculation', return_value={}), \
+             patch('stoqbell.utils.super_sync.sync_daily_data_universe', return_value={}), \
+             patch('stoqbell.utils.super_sync.run_indicator_calculation_universe', return_value={}):
             run_super_sync(db, access_token='fake-token')
     finally:
         job_progress.clear()

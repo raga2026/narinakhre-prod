@@ -1,6 +1,6 @@
 from flask import Flask, session
 
-from utils.stock_auth import stocks_login_required
+from stoqbell.utils.stock_auth import stocks_login_required
 
 
 def _mirrors_admin_required(view_func):
@@ -30,7 +30,9 @@ def _build_test_app():
     def admin_login():
         return 'storefront login page', 200
 
-    @app.route('/admin/stocks/login')
+    # endpoint= matches stoqbell/routes.py's real 'stocks' Blueprint
+    # namespace, since stocks_login_required's url_for() targets that.
+    @app.route('/admin/stocks/login', endpoint='stocks.stocks_admin_login')
     def stocks_admin_login():
         return 'stocks login page', 200
 
@@ -39,7 +41,7 @@ def _build_test_app():
     def admin_dashboard():
         return 'storefront admin content', 200
 
-    @app.route('/admin/stocks/dashboard')
+    @app.route('/admin/stocks/dashboard', endpoint='stocks.stocks_admin_dashboard')
     @stocks_login_required
     def stocks_admin_dashboard():
         return 'stocks admin content', 200

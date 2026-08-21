@@ -1,13 +1,13 @@
 from datetime import date, timedelta
 from unittest.mock import MagicMock
 
-from utils.stock_ingestion import (
+from stoqbell.utils.stock_ingestion import (
     BACKFILL_DAYS,
     MIN_HISTORY_DAYS_BEFORE_INCREMENTAL_SYNC,
     sync_daily_data,
     sync_daily_data_universe,
 )
-from utils import job_progress
+from stoqbell.utils import job_progress
 
 
 def teardown_function(_fn):
@@ -327,7 +327,7 @@ def test_sync_daily_data_universe_paces_calls_with_a_sleep(monkeypatch):
     mock_kite.fetch_daily_candles.return_value = []
 
     sleeps = []
-    monkeypatch.setattr('utils.stock_ingestion.time.sleep', lambda s: sleeps.append(s))
+    monkeypatch.setattr('stoqbell.utils.stock_ingestion.time.sleep', lambda s: sleeps.append(s))
 
     sync_daily_data_universe(db, kite_client=mock_kite, sleep_seconds=0.35)
 

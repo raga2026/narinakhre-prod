@@ -1,6 +1,6 @@
 from datetime import date
 
-from utils.trading_calendar import is_trading_day
+from stoqbell.utils.trading_calendar import is_trading_day
 
 
 def test_ordinary_weekday_is_a_trading_day():

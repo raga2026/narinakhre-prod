@@ -1,4 +1,4 @@
-from utils.kite_instrument_map import (
+from stoqbell.utils.kite_instrument_map import (
     get_cached_instrument_token,
     sync_kite_instrument_map,
     upsert_instrument_map,

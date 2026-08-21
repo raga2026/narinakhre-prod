@@ -1,6 +1,6 @@
 from datetime import date
 
-from utils.kite_client import KiteClient, KiteClientError
+from stoqbell.utils.kite_client import KiteClient, KiteClientError
 
 
 class FakeKite:

@@ -2,7 +2,7 @@ import hashlib
 import hmac
 from datetime import datetime, timedelta, timezone
 
-from utils.stocks_subscription import (
+from stoqbell.utils.stocks_subscription import (
     days_until,
     has_stocks_access,
     is_within_reminder_window,

@@ -1,4 +1,4 @@
-from utils import job_progress
+from stoqbell.utils import job_progress
 
 
 def teardown_function(_fn):

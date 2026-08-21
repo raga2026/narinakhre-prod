@@ -1,6 +1,6 @@
 from flask import Flask, session
 
-from utils.stock_auth import (
+from stoqbell.utils.stock_auth import (
     PASSWORD_LENGTH,
     _generate_simple_password,
     change_own_password,
@@ -253,30 +253,34 @@ def _build_test_app():
     app = Flask(__name__)
     app.secret_key = 'test-secret-key'
 
-    @app.route('/stocks/login')
+    # endpoint= matches the real app's Blueprint-namespaced names (Nari
+    # Nakhre Stocks moved onto a 'stocks' Blueprint -- see stoqbell/routes.py
+    # -- so stock_auth.py's url_for() calls now target 'stocks.stocks_x',
+    # not bare 'stocks_x').
+    @app.route('/stocks/login', endpoint='stocks.stocks_admin_login')
     def stocks_admin_login():
         return 'stocks login page', 200
 
-    @app.route('/stocks/change-password')
+    @app.route('/stocks/change-password', endpoint='stocks.stocks_change_password')
     def stocks_change_password():
         return 'change password page', 200
 
-    @app.route('/stocks/watchlist')
+    @app.route('/stocks/watchlist', endpoint='stocks.stocks_watchlist')
     @stocks_watchlist_access_required
     def stocks_watchlist():
         return 'watchlist content', 200
 
-    @app.route('/stocks/users')
+    @app.route('/stocks/users', endpoint='stocks.stocks_users_manage')
     @stocks_role_required('super_admin')
     def stocks_users_manage():
         return 'viewer user management', 200
 
-    @app.route('/stocks/my/suggestions')
+    @app.route('/stocks/my/suggestions', endpoint='stocks.stocks_my_suggestions')
     @stocks_login_required
     def stocks_my_suggestions():
         return 'my suggestions content', 200
 
-    @app.route('/stocks/universe/<int:universe_id>')
+    @app.route('/stocks/universe/<int:universe_id>', endpoint='stocks.stocks_universe_detail')
     @stocks_login_required
     def stocks_universe_detail(universe_id):
         return f'universe detail {universe_id}', 200

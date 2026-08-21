@@ -1,4 +1,4 @@
-from utils.auto_trader import (
+from stoqbell.utils.auto_trader import (
     cancel_stop_loss_sell,
     compute_available_funds,
     compute_pnl,

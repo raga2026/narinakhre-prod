@@ -1,6 +1,6 @@
 from flask import Flask, jsonify, request
 
-from utils.stock_auth import legacy_stocks_redirect, stocks_login_required
+from stoqbell.utils.stock_auth import legacy_stocks_redirect, stocks_login_required
 
 # A minimal standalone app, not app.py -- importing app.py in a unit test
 # requires live Supabase/env vars and runs every startup DB call, which this
@@ -16,7 +16,9 @@ def _build_test_app():
     app = Flask(__name__)
     app.secret_key = 'test-secret-key'
 
-    @app.route('/stocks/login')
+    # endpoint= matches stoqbell/routes.py's real 'stocks' Blueprint
+    # namespace, since stocks_login_required's url_for() targets that.
+    @app.route('/stocks/login', endpoint='stocks.stocks_admin_login')
     def stocks_admin_login():
         return 'stocks login page', 200
 

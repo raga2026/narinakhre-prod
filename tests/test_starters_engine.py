@@ -6,7 +6,7 @@ stock_suggestions/suggestion_date."""
 from datetime import date
 
 from tests.test_suggestion_engine import _candidate
-from utils.starters_engine import (
+from stoqbell.utils.starters_engine import (
     STARTERS_REPEAT_WINDOW_DAYS,
     TOP_N_STARTERS,
     generate_weekly_starters_pick,

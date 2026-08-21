@@ -1,0 +1,272 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <script>
+    // Dark mode is the default (see the bare :root block below) -- see
+    // stocks_home.html's copy of this same script for the full comment.
+    (function () {
+        try {
+            if (localStorage.getItem('nn_stocks_theme') === 'light') {
+                document.documentElement.setAttribute('data-theme', 'light');
+            }
+        } catch (e) {}
+    })();
+    </script>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>All Companies - StoqBell</title>
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+    <style>
+        :root {
+            --bg: #0f172a; --fg: #e2e8f0;
+            --muted-600: #94a3b8; --muted-500: #7d8aa0; --muted-400: #64748b;
+            --accent: #38bdf8; --accent-hover: #7dd3fc; --accent-shadow: rgba(56,189,248,0.35);
+            --topbar-bg: rgba(30,41,59,0.85); --topbar-border: #334155;
+            --nav-hover-bg: rgba(56,189,248,0.10);
+            --logout-bg: rgba(248,113,113,0.12); --logout-fg: #f87171; --logout-hover-bg: rgba(248,113,113,0.22);
+            --card-bg: #1e293b; --card-border: #334155; --card-shadow: 0 6px 24px rgba(0,0,0,0.35);
+            --input-bg: #16202f; --input-border: #3a4556;
+            --th-bg: #17223a; --th-fg: #7dd3fc; --row-border: #2d3a4f; --row-hover: #1a2540;
+            --flash-bg: #16233a; --flash-fg: #bfdbfe; --flash-border: #2c4570;
+            --danger: #f87171;
+        }
+        [data-theme="light"] {
+            --bg: #f5f6f8; --fg: #24262d;
+            --muted-600: #4b5563; --muted-500: #6c7080; --muted-400: #9ca3af;
+            --accent: #387ed1; --accent-hover: #2b6cb8; --accent-shadow: rgba(56,126,209,0.25);
+            --topbar-bg: rgba(255,255,255,0.85); --topbar-border: #e6e9ec;
+            --nav-hover-bg: rgba(56,126,209,0.07);
+            --logout-bg: rgba(214,69,52,0.08); --logout-fg: #d64534; --logout-hover-bg: rgba(214,69,52,0.16);
+            --card-bg: #ffffff; --card-border: #e6e9ec; --card-shadow: 0 2px 14px rgba(15,23,42,0.07);
+            --input-bg: #ffffff; --input-border: #d7dbe0;
+            --th-bg: #fafbfc; --th-fg: #6c7080; --row-border: #eef0f2; --row-hover: #f9fbfd;
+            --flash-bg: #eff6ff; --flash-fg: #1e3a8a; --flash-border: #bfdbfe;
+            --danger: #dc2626;
+        }
+        body { background: var(--bg); color: var(--fg); font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; font-size: 0.9rem; }
+        .kite-accent { color: var(--accent); }
+
+        .topbar { background: var(--topbar-bg); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); border-bottom: 1px solid var(--topbar-border); position: sticky; top: 0; z-index: 10; }
+        .topbar-inner { max-width: 62rem; margin: 0 auto; padding: 0.85rem 1.5rem; }
+        .topbar-row1 { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; margin-bottom: 0.65rem; }
+        .brand { display: flex; align-items: center; gap: 0.6rem; text-decoration: none; }
+        .brand-mark { width: 28px; height: 28px; flex-shrink: 0; }
+        .brand-text { font-size: 1.05rem; font-weight: 800; color: var(--fg); white-space: nowrap; }
+        .logout-link { display: inline-flex; align-items: center; background: var(--logout-bg); color: var(--logout-fg); text-decoration: none; font-size: 0.8rem; font-weight: 700; padding: 0.45rem 1rem; border-radius: 999px; white-space: nowrap; transition: background-color .15s ease; }
+        .logout-link:hover { background: var(--logout-hover-bg); }
+        .nav-scroll { display: flex; align-items: center; gap: 0.3rem; overflow-x: auto; -webkit-overflow-scrolling: touch; scrollbar-width: none; }
+        .nav-scroll::-webkit-scrollbar { display: none; }
+        .nav-link { color: var(--muted-600); text-decoration: none; font-size: 0.82rem; font-weight: 600; padding: 0.45rem 0.9rem; border-radius: 999px; white-space: nowrap; transition: all .15s ease; }
+        .nav-link:hover { color: var(--accent); background: var(--nav-hover-bg); }
+        .nav-link.active { color: #ffffff; background: var(--accent); box-shadow: 0 2px 10px var(--accent-shadow); }
+
+        .card { background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 1rem; box-shadow: var(--card-shadow); }
+        table { border-collapse: collapse; width: 100%; }
+        th, td { text-align: left; padding: 0.6rem 0.9rem; border-bottom: 1px solid var(--row-border); }
+        th { color: var(--th-fg); font-weight: 600; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.04em; background: var(--th-bg); }
+        td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+        tbody tr:hover { background: var(--row-hover); }
+        .badge { display:inline-flex; align-items:center; padding:2px 10px; border-radius:999px; font-size:0.7rem; font-weight:700; white-space: nowrap; }
+        .badge-golden_cross    { background:#dcfce7; color:#15803d; }
+        .badge-death_cross     { background:#fee2e2; color:#b91c1c; }
+        .badge-no_clear_trend  { background:#eceff2; color:#4a4f57; }
+        .search-input { background: var(--input-bg); border:1px solid var(--input-border); color: var(--fg); border-radius:0.375rem; padding:0.55rem 0.9rem; width:100%; max-width: 22rem; }
+        .filter-select { background: var(--input-bg); border:1px solid var(--input-border); color: var(--fg); border-radius:0.375rem; padding:0.55rem 0.9rem; }
+        .kite-btn { background: var(--accent); color: white; border-radius: 0.375rem; }
+        .kite-btn:hover { background: var(--accent-hover); }
+        a.link { color: var(--accent); text-decoration: underline; }
+        a.link:hover { color: var(--accent-hover); }
+        .page-link { padding: 5px 14px; border-radius: 999px; font-size: 0.82rem; font-weight: 600; border: 1px solid var(--input-border); color: var(--accent); }
+        .page-link[aria-disabled="true"] { opacity: 0.4; pointer-events: none; }
+        .text-gray-600 { color: var(--muted-600); }
+        .text-gray-500 { color: var(--muted-500); }
+        .text-gray-400 { color: var(--muted-400); }
+        .bg-blue-50 { background-color: var(--flash-bg); }
+        .text-blue-900 { color: var(--flash-fg); }
+        .border-blue-200 { border-color: var(--flash-border); }
+        .text-red-600 { color: var(--danger); }
+    </style>
+</head>
+<body class="min-h-screen">
+    {% if session.stocks_admin_role == 'viewer' %}
+    <div class="topbar">
+        <div class="topbar-inner">
+            <div class="topbar-row1">
+                <a href="{{ url_for('stocks.stocks_home') }}" class="brand">
+                    <img src="{{ url_for('stocks.static', filename='assets/stoqbell-icon.png') }}" alt="" class="brand-mark">
+                    <span class="brand-text">StoqBell</span>
+                </a>
+                <a href="{{ url_for('stocks.stocks_admin_logout') }}" class="logout-link">Log out</a>
+            </div>
+            <nav class="nav-scroll" aria-label="Main">
+                <a href="{{ url_for('stocks.stocks_my_suggestions') }}" class="nav-link">Recommendations</a>
+                <a href="{{ url_for('stocks.stocks_universe_list') }}" class="nav-link active" aria-current="page">Browse All Companies</a>
+                <a href="{{ url_for('stocks.stocks_profile') }}" class="nav-link">Profile</a>
+            </nav>
+        </div>
+    </div>
+    {% endif %}
+
+    <div class="max-w-5xl mx-auto p-6">
+        <div class="flex items-center justify-between mb-6">
+            <div>
+                <h1 class="text-xl font-bold kite-accent">All Companies</h1>
+                <p class="text-gray-500 text-sm mt-1">
+                    {{ total }} scrape-eligible compan{{ 'y' if total == 1 else 'ies' }}, A-Z
+                    {% if not can_view_signals %}&middot; golden-cross status and recommendations aren't shown on this view{% endif %}
+                </p>
+            </div>
+            {% if session.stocks_admin_role != 'viewer' %}
+            <a href="{{ url_for('stocks.stocks_admin_dashboard') }}" class="text-sm text-gray-500 hover:underline">Back to dashboard</a>
+            {% endif %}
+        </div>
+
+        {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+            <div class="mb-4" role="alert" aria-live="assertive">
+            {% for category, msg in messages %}
+                <div class="bg-blue-50 text-blue-900 border border-blue-200 rounded-md p-3 mb-2 text-sm">{{ msg }}</div>
+            {% endfor %}
+            </div>
+        {% endif %}
+        {% endwith %}
+
+        {% if saved_filters %}
+        <div class="flex flex-wrap items-center gap-2 mb-4">
+            <span class="text-gray-500 text-xs uppercase tracking-wide">Saved filters:</span>
+            {% for f in saved_filters %}
+            <span class="filter-select" style="display:inline-flex; align-items:center; gap:8px; padding:4px 6px 4px 12px;">
+                <a href="{{ url_for('stocks.stocks_universe_list') }}?{{ f.query_string }}" class="link" style="text-decoration:none;">{{ f.name }}</a>
+                <form method="POST" action="{{ url_for('stocks.stocks_universe_filters_delete', filter_id=f.id) }}" style="display:inline;"
+                      onsubmit="return confirm('Delete saved filter \'{{ f.name }}\'?');">
+                    <button type="submit" aria-label="Delete saved filter {{ f.name }}" class="text-gray-400 hover:text-red-600" style="font-weight:700;">&times;</button>
+                </form>
+            </span>
+            {% endfor %}
+        </div>
+        {% endif %}
+
+        <form method="GET" action="{{ url_for('stocks.stocks_universe_list') }}" class="mb-4" role="search">
+            <label for="universe-search" class="text-gray-600 text-sm mb-2 block">Search and filter</label>
+            <div class="flex gap-2 flex-wrap items-center">
+                <input type="search" id="universe-search" name="q" value="{{ query }}" class="search-input"
+                       placeholder="e.g. Reliance, TCS, INFY">
+
+                <label for="universe-industry" class="sr-only">Filter by industry</label>
+                <select id="universe-industry" name="industry" class="filter-select">
+                    <option value="">All industries</option>
+                    {% for ind in industries %}
+                    <option value="{{ ind }}" {% if ind == industry_filter %}selected{% endif %}>{{ ind }}</option>
+                    {% endfor %}
+                </select>
+
+                {% if can_view_signals %}
+                <label for="universe-cross" class="sr-only">Filter by crossover status</label>
+                <select id="universe-cross" name="cross" class="filter-select">
+                    <option value="">Any crossover status</option>
+                    <option value="golden_cross" {% if cross_filter == 'golden_cross' %}selected{% endif %}>Golden cross</option>
+                    <option value="death_cross" {% if cross_filter == 'death_cross' %}selected{% endif %}>Death cross</option>
+                    <option value="no_clear_trend" {% if cross_filter == 'no_clear_trend' %}selected{% endif %}>No clear trend</option>
+                </select>
+                {% endif %}
+            </div>
+
+            <div class="flex gap-2 flex-wrap items-center mt-2">
+                {% for field, label, ph in [
+                    ('pe_min', 'PE ≥', 'PE min'), ('pe_max', 'PE ≤', 'PE max'),
+                    ('peg_max', 'PEG ≤', 'PEG max'),
+                    ('opm_min', 'OPM% ≥', 'OPM min'),
+                    ('roce_min', 'ROCE% ≥', 'ROCE min'),
+                    ('roa_min', 'ROA% ≥', 'ROA min'),
+                    ('rsi_min', 'RSI ≥', 'RSI min'), ('rsi_max', 'RSI ≤', 'RSI max'),
+                ] %}
+                <label for="universe-{{ field }}" class="sr-only">{{ label }}</label>
+                <input type="number" step="0.01" id="universe-{{ field }}" name="{{ field }}"
+                       value="{{ numeric_values.get(field, '') }}" placeholder="{{ ph }}" class="search-input" style="width:6.5rem; max-width:none;">
+                {% endfor %}
+            </div>
+
+            <div class="flex gap-2 flex-wrap items-center mt-3">
+                <button type="submit" class="kite-btn py-2 px-6 font-semibold text-sm">
+                    Apply filters
+                </button>
+                {% if query or industry_filter or cross_filter or numeric_values %}
+                <a href="{{ url_for('stocks.stocks_universe_list') }}" class="text-sm text-gray-500 hover:underline">Clear all</a>
+                {% endif %}
+            </div>
+        </form>
+
+        {% if query or industry_filter or cross_filter or numeric_values %}
+        <form method="POST" action="{{ url_for('stocks.stocks_universe_filters_save') }}" class="mb-6 flex gap-2 flex-wrap items-center">
+            <input type="hidden" name="query_string" value="{{ filters_query_string }}">
+            <label for="save-filter-name" class="text-gray-500 text-sm">Save this combination as:</label>
+            <input type="text" id="save-filter-name" name="name" class="search-input" style="max-width:14rem;" placeholder="e.g. Cheap quality growth" required>
+            <button type="submit" class="text-sm link" style="background:none; border:none; cursor:pointer;">Save filter</button>
+        </form>
+        {% endif %}
+
+        <div class="card p-5 overflow-x-auto">
+            <table>
+                <caption class="sr-only">All scrape-eligible companies</caption>
+                <thead>
+                    <tr>
+                        <th scope="col">Name</th>
+                        <th scope="col">Symbol</th>
+                        <th scope="col">Exchange</th>
+                        <th scope="col" class="num">Price</th>
+                        <th scope="col" class="num">P/E</th>
+                        <th scope="col" class="num">PEG</th>
+                        <th scope="col" class="num">OPM</th>
+                        <th scope="col" class="num">ROCE</th>
+                        <th scope="col" class="num">ROA</th>
+                        <th scope="col" class="num">RSI (14)</th>
+                        {% if can_view_signals %}
+                        <th scope="col">Cross</th>
+                        {% endif %}
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for row in rows %}
+                    <tr>
+                        <th scope="row">
+                            <a class="link" href="{{ url_for('stocks.stocks_universe_detail', universe_id=row.universe_id) }}">{{ row.company_name or row.symbol }}</a>
+                        </th>
+                        <td>{{ row.symbol }}</td>
+                        <td>{{ row.exchange }}</td>
+                        <td class="num">{{ '₹%.2f'|format(row.latest_price) if row.latest_price is not none else '—' }}</td>
+                        <td class="num">{{ '%.2fx'|format(row.pe_ratio) if row.pe_ratio is not none else '—' }}</td>
+                        <td class="num">{{ '%.2fx'|format(row.peg_ratio) if row.peg_ratio is not none else '—' }}</td>
+                        <td class="num">{{ '%.0f%%'|format(row.opm_pct) if row.opm_pct is not none else '—' }}</td>
+                        <td class="num">{{ '%.0f%%'|format(row.roce_pct) if row.roce_pct is not none else '—' }}</td>
+                        <td class="num">{{ '%.0f%%'|format(row.roa_pct) if row.roa_pct is not none else '—' }}</td>
+                        <td class="num">{{ row.rsi_14 if row.rsi_14 is not none else '—' }}</td>
+                        {% if can_view_signals %}
+                        <td>
+                            {% if row.cross_status %}
+                                <span class="badge badge-{{ row.cross_status }}">{{ row.cross_status.replace('_', ' ') | title }}</span>
+                            {% else %}—
+                            {% endif %}
+                        </td>
+                        {% endif %}
+                    </tr>
+                    {% else %}
+                    <tr>
+                        <td colspan="11" class="text-gray-400">No companies match the current search/filters.</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+
+        {% if total_pages > 1 %}
+        <nav aria-label="Pagination" class="flex gap-2 mt-6 items-center flex-wrap">
+            <a class="page-link" {% if page <= 1 %}aria-disabled="true"{% endif %}
+               href="{{ url_for('stocks.stocks_universe_list', q=query, industry=industry_filter, cross=cross_filter, page=page-1, **numeric_values) }}">&larr; Previous</a>
+            <span class="text-gray-500 text-sm">Page {{ page }} of {{ total_pages }}</span>
+            <a class="page-link" {% if page >= total_pages %}aria-disabled="true"{% endif %}
+               href="{{ url_for('stocks.stocks_universe_list', q=query, industry=industry_filter, cross=cross_filter, page=page+1, **numeric_values) }}">Next &rarr;</a>
+        </nav>
+        {% endif %}
+    </div>
+</body>
+</html>

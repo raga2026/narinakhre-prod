@@ -3,7 +3,7 @@ FakeCursor/FakeDB pattern as tests/test_stock_auth_viewers.py, matching
 normalized SQL text prefixes rather than hitting a real database."""
 from datetime import datetime, timezone
 
-from utils.stocks_subscription import (
+from stoqbell.utils.stocks_subscription import (
     activate_subscription,
     attach_razorpay_subscription,
     create_pending_subscriber,

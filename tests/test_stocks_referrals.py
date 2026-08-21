@@ -3,7 +3,7 @@ tests/test_stocks_subscription_db.py, matching normalized SQL text prefixes
 rather than hitting a real database."""
 from datetime import datetime, timedelta, timezone
 
-from utils.stocks_referrals import (
+from stoqbell.utils.stocks_referrals import (
     FREE_MONTH_DAYS,
     REFERRAL_CODE_LENGTH,
     REFERRALS_PER_FREE_MONTH,

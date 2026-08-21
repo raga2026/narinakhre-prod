@@ -1,4 +1,4 @@
-from utils.saved_filters import (
+from stoqbell.utils.saved_filters import (
     MAX_SAVED_FILTERS_PER_USER,
     delete_saved_stock_filter,
     list_saved_stock_filters,

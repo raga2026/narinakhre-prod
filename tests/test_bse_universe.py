@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from utils.stock_universe import parse_bse_equity_json
+from stoqbell.utils.stock_universe import parse_bse_equity_json
 
 # A real snapshot of BSE's scrip-master API response, fetched while building
 # this -- not synthetic -- so the "thousands of rows" sanity check reflects

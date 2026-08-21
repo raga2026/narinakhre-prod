@@ -1,4 +1,4 @@
-from utils.fundamental_screen import (
+from stoqbell.utils.fundamental_screen import (
     MINIMUM_GROWTH_PCT_LARGE_CAP,
     PROMOTER_PLEDGE_MAX_PCT,
     QUARTERLY_GROWTH_MIN,

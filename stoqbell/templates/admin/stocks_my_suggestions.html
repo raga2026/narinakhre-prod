@@ -1,0 +1,356 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <script>
+    // Dark mode is the default (see the bare :root block below) -- see
+    // stocks_home.html's copy of this same script for the full comment.
+    (function () {
+        try {
+            if (localStorage.getItem('nn_stocks_theme') === 'light') {
+                document.documentElement.setAttribute('data-theme', 'light');
+            }
+        } catch (e) {}
+    })();
+    </script>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>My Suggestions - StoqBell</title>
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+    <style>
+        /* Kite-inspired layout -- see the other viewer-facing Stocks
+           templates for the same palette (stocks_my_history.html,
+           stocks_universe_list.html, stocks_universe_detail.html).
+           Staff/admin pages intentionally keep the original dark theme --
+           this only applies to the pages an actual paying viewer spends
+           time in.
+
+           Card rows (not a wide table) for the recommendation list below
+           -- the old 9-column table (Company/Date/Recommendation/Buy/
+           Target/Projected/Timing/Rationale/Status) was dense and hard to
+           scan; the full explanation for any one pick now lives on its
+           own Analysis page (see stocks_suggestion_analysis.html) instead
+           of being crammed into a table cell here.
+
+           Dark is the default theme (bare :root) -- see this same
+           variable/override approach explained fully in stocks_home.html. */
+        :root {
+            --bg: #0f172a; --fg: #e2e8f0;
+            --muted-900: #f1f5f9; --muted-700: #cbd5e1;
+            --muted-600: #94a3b8; --muted-500: #7d8aa0; --muted-400: #64748b;
+            --accent: #38bdf8; --accent-hover: #7dd3fc; --accent-shadow: rgba(56,189,248,0.35);
+            --topbar-bg: rgba(30,41,59,0.85); --topbar-border: #334155;
+            --nav-hover-bg: rgba(56,189,248,0.10);
+            --logout-bg: rgba(248,113,113,0.12); --logout-fg: #f87171; --logout-hover-bg: rgba(248,113,113,0.22);
+            --card-bg: #1e293b; --card-border: #2d3a4f; --card-shadow: 0 6px 24px rgba(0,0,0,0.35);
+            --row-bg: #16202f; --row-border: #2d3a4f;
+            --input-bg: #16202f; --input-border: #3a4556;
+            --hero-grad-1: #1e293b; --hero-grad-2: #0f172a; --hero-border: #334155;
+            --flash-bg: #16233a; --flash-fg: #bfdbfe; --flash-border: #2c4570;
+            --up: #4ade80; --down: #f87171;
+            --badge-golden-bg: #78350f; --badge-golden-fg: #fef3c7;
+            --badge-silver-bg: #334155; --badge-silver-fg: #e2e8f0;
+            --badge-bronze-bg: #7c2d12; --badge-bronze-fg: #fed7aa;
+        }
+        [data-theme="light"] {
+            --bg: #f5f6f8; --fg: #24262d;
+            --muted-900: #111827; --muted-700: #374151;
+            --muted-600: #4b5563; --muted-500: #6c7080; --muted-400: #9ca3af;
+            --accent: #387ed1; --accent-hover: #2b6cb8; --accent-shadow: rgba(56,126,209,0.25);
+            --topbar-bg: rgba(255,255,255,0.85); --topbar-border: #e6e9ec;
+            --nav-hover-bg: rgba(56,126,209,0.07);
+            --logout-bg: rgba(214,69,52,0.08); --logout-fg: #d64534; --logout-hover-bg: rgba(214,69,52,0.16);
+            --card-bg: #ffffff; --card-border: #e6e9ec; --card-shadow: 0 2px 14px rgba(15,23,42,0.07);
+            --row-bg: #f9fafb; --row-border: #eef0f2;
+            --input-bg: #ffffff; --input-border: #d7dbe0;
+            --hero-grad-1: #eaf2fc; --hero-grad-2: #f5f6f8; --hero-border: #dbe7f7;
+            --flash-bg: #eff6ff; --flash-fg: #1e3a8a; --flash-border: #bfdbfe;
+            --up: #00875a; --down: #d64534;
+            --badge-golden-bg: #fff3cd; --badge-golden-fg: #8a6706;
+            --badge-silver-bg: #eceff2; --badge-silver-fg: #4a4f57;
+            --badge-bronze-bg: #fde3d2; --badge-bronze-fg: #9a4a12;
+        }
+        body { background: var(--bg); color: var(--fg); font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; font-size: 0.9rem; }
+        .kite-btn { background: var(--accent); color: white; }
+        .kite-btn:hover { background: var(--accent-hover); }
+
+        .topbar { background: var(--topbar-bg); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); border-bottom: 1px solid var(--topbar-border); position: sticky; top: 0; z-index: 10; }
+        .topbar-inner { max-width: 56rem; margin: 0 auto; padding: 0.85rem 1.5rem; }
+        .topbar-row1 { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; margin-bottom: 0.65rem; }
+        .brand { display: flex; align-items: center; gap: 0.6rem; text-decoration: none; }
+        .brand-mark { width: 28px; height: 28px; flex-shrink: 0; }
+        .brand-text { font-size: 1.05rem; font-weight: 800; color: var(--fg); white-space: nowrap; }
+        .logout-link { display: inline-flex; align-items: center; background: var(--logout-bg); color: var(--logout-fg); text-decoration: none; font-size: 0.8rem; font-weight: 700; padding: 0.45rem 1rem; border-radius: 999px; white-space: nowrap; transition: background-color .15s ease; }
+        .logout-link:hover { background: var(--logout-hover-bg); }
+        .nav-scroll { display: flex; align-items: center; gap: 0.3rem; overflow-x: auto; -webkit-overflow-scrolling: touch; scrollbar-width: none; }
+        .nav-scroll::-webkit-scrollbar { display: none; }
+        .nav-link { color: var(--muted-600); text-decoration: none; font-size: 0.82rem; font-weight: 600; padding: 0.45rem 0.9rem; border-radius: 999px; white-space: nowrap; transition: all .15s ease; }
+        .nav-link:hover { color: var(--accent); background: var(--nav-hover-bg); }
+        .nav-link.active { color: #ffffff; background: var(--accent); box-shadow: 0 2px 10px var(--accent-shadow); }
+
+        .card { background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 1rem; box-shadow: var(--card-shadow); }
+        .hero { background: linear-gradient(135deg, var(--hero-grad-1) 0%, var(--hero-grad-2) 100%); border: 1px solid var(--hero-border); border-radius: 1rem; padding: 1.5rem; }
+
+        .suggestion-card { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 0.6rem 0.9rem; padding: 0.9rem 1.05rem; border-radius: 0.75rem; background: var(--row-bg); border: 1px solid var(--row-border); margin-bottom: 0.55rem; transition: border-color .15s ease; }
+        .suggestion-card:last-child { margin-bottom: 0; }
+        .suggestion-card:hover { border-color: var(--accent); }
+        .suggestion-main { min-width: 0; }
+        .suggestion-name { font-weight: 700; color: var(--muted-900); font-size: 0.92rem; }
+        .suggestion-meta { font-size: 0.76rem; color: var(--muted-500); margin-top: 3px; }
+        .suggestion-prices { font-size: 0.82rem; color: var(--muted-600); white-space: nowrap; }
+        .suggestion-prices .up { font-weight: 700; }
+        .suggestion-analysis-btn { display: inline-flex; align-items: center; background: var(--accent); color: #fff; text-decoration: none; font-size: 0.76rem; font-weight: 700; padding: 0.42rem 0.95rem; border-radius: 999px; white-space: nowrap; transition: background-color .15s ease; }
+        .suggestion-analysis-btn:hover { background: var(--accent-hover); }
+
+        .badge { display:inline-flex; align-items:center; padding:2px 10px; border-radius:999px; font-size:0.68rem; font-weight:700; white-space: nowrap; }
+        .badge-golden { background: var(--badge-golden-bg); color: var(--badge-golden-fg); }
+        .badge-silver { background: var(--badge-silver-bg); color: var(--badge-silver-fg); }
+        .badge-bronze { background: var(--badge-bronze-bg); color: var(--badge-bronze-fg); }
+        .up { color: var(--up); font-weight: 600; }
+        .down { color: var(--down); font-weight: 600; }
+
+        a.link { color: var(--accent); text-decoration: none; font-weight: 600; }
+        a.link:hover { color: var(--accent-hover); text-decoration: underline; }
+
+        .text-gray-900 { color: var(--muted-900); }
+        .text-gray-700 { color: var(--muted-700); }
+        .text-gray-600 { color: var(--muted-600); }
+        .text-gray-500 { color: var(--muted-500); }
+        .text-gray-400 { color: var(--muted-400); }
+        .bg-gray-50 { background-color: var(--input-bg); }
+        .border-gray-300 { border-color: var(--input-border); }
+        .bg-blue-50 { background-color: var(--flash-bg); }
+        .text-blue-900 { color: var(--flash-fg); }
+        .border-blue-200 { border-color: var(--flash-border); }
+
+        /* Popup used by "View Timing"/"View Rationale" above -- see
+           openInfoModal/closeInfoModal near the bottom of the page. */
+        .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.55); display: flex; align-items: center; justify-content: center; z-index: 50; padding: 1.25rem; }
+        .modal-overlay[hidden] { display: none; }
+        .modal-box { background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 1rem; box-shadow: var(--card-shadow); max-width: 26rem; width: 100%; padding: 1.25rem; }
+        .modal-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 0.75rem; margin-bottom: 0.75rem; }
+        .modal-title { font-size: 1rem; font-weight: 700; color: var(--muted-900); margin: 0; }
+        .modal-close { background: none; border: none; color: var(--muted-500); font-size: 1.35rem; line-height: 1; cursor: pointer; padding: 0.15rem 0.45rem; border-radius: 0.4rem; }
+        .modal-close:hover { color: var(--fg); background: var(--nav-hover-bg); }
+        .modal-body { color: var(--muted-700); font-size: 0.88rem; line-height: 1.55; white-space: pre-line; margin: 0; }
+        .modal-footer { display: flex; justify-content: flex-end; margin-top: 1.15rem; }
+        .modal-ok-btn { background: var(--accent); color: #fff; border: none; font-size: 0.82rem; font-weight: 700; padding: 0.5rem 1.3rem; border-radius: 999px; cursor: pointer; }
+        .modal-ok-btn:hover { background: var(--accent-hover); }
+    </style>
+</head>
+<body class="min-h-screen">
+    <div class="topbar">
+        <div class="topbar-inner">
+            <div class="topbar-row1">
+                <a href="{{ url_for('stocks.stocks_home') }}" class="brand">
+                    <img src="{{ url_for('stocks.static', filename='assets/stoqbell-icon.png') }}" alt="" class="brand-mark">
+                    <span class="brand-text">StoqBell</span>
+                </a>
+                <a href="{{ url_for('stocks.stocks_admin_logout') }}" class="logout-link">Log out</a>
+            </div>
+            <nav class="nav-scroll" aria-label="Main">
+                <a href="{{ url_for('stocks.stocks_home') }}" class="nav-link">Home</a>
+                <a href="{{ url_for('stocks.stocks_universe_list') }}" class="nav-link">Browse All Companies</a>
+                <a href="{{ url_for('stocks.stocks_profile') }}" class="nav-link">Profile</a>
+            </nav>
+        </div>
+    </div>
+
+    <div class="max-w-4xl mx-auto p-6">
+        {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+            <div class="mb-6" role="alert" aria-live="assertive">
+            {% for category, msg in messages %}
+                <div class="bg-blue-50 text-blue-900 border border-blue-200 rounded-md p-3 mb-2 text-sm">{{ msg }}</div>
+            {% endfor %}
+            </div>
+        {% endif %}
+        {% endwith %}
+
+        <div class="hero mb-6">
+            <h2 class="text-lg font-bold text-gray-900">Welcome back{{ ', ' ~ session.stocks_admin_username if session.stocks_admin_username }}</h2>
+            <p class="text-gray-600 text-sm mt-2">
+                {% if is_starters %}
+                    {% if suggestions %}
+                        {{ suggestions | length }} weekly pick{{ 's' if suggestions | length != 1 }} from the last ~9 weeks, below --
+                        Starters only ever gets picks that clear our strictest, golden-tier quality bar, up to two a
+                        week on Mondays, so some weeks have fewer (or none at all) if not enough clears that bar.
+                    {% else %}
+                        No pick clearing our golden-tier bar in the last ~9 weeks -- check back after the next Monday
+                        screening run.
+                    {% endif %}
+                {% else %}
+                    {% if suggestions %}
+                        {{ suggestions | length }} recommendation{{ 's' if suggestions | length != 1 }} from the last 10 days, below --
+                        at most one Pick of the Day, and a stock already picked recently is skipped in favor of the
+                        next-best one until its own pick genuinely changes, so this rotates through the qualifying
+                        list rather than repeating the same stock.
+                    {% else %}
+                        No recommendations in the last 10 days -- check back after the next screening run.
+                    {% endif %}
+                {% endif %}
+            </p>
+            {% if subscription_period_end_label %}
+            <p class="text-gray-600 text-sm mt-3">
+                {% if subscription_status == 'active' %}
+                    Your subscription renews on <strong class="text-gray-900">{{ subscription_period_end_label }}</strong>.
+                {% elif subscription_status == 'cancelled' %}
+                    Your subscription is cancelled -- access ends <strong class="text-gray-900">{{ subscription_period_end_label }}</strong>.
+                {% elif subscription_status == 'halted' %}
+                    Your last renewal payment failed -- access ended <strong class="text-gray-900">{{ subscription_period_end_label }}</strong>.
+                    <a href="{{ url_for('stocks.stocks_signup') }}" class="link">Renew now</a>.
+                {% endif %}
+            </p>
+            {% endif %}
+            {% if session.stocks_can_view_watchlist %}
+            <p class="text-gray-600 text-sm mt-3">
+                <a href="{{ url_for('stocks.stocks_watchlist') }}" class="link">View watchlist</a>
+            </p>
+            {% endif %}
+        </div>
+
+        <div class="card p-5 mb-6">
+            <h2 class="text-lg font-bold text-gray-900 mb-2">Refer people, earn a free month</h2>
+            <p class="text-gray-600 text-sm mb-3">
+                Refer {{ referrals_per_free_month }} people who subscribe and get 1 month free -- they get their
+                first month for Rs 199 instead of Rs 299 when they sign up with your link or code.
+            </p>
+            <div class="flex flex-wrap items-center gap-2 mb-3">
+                <input id="referral-link" type="text" readonly value="{{ referral_link }}"
+                       class="flex-1 min-w-0 border border-gray-300 rounded-md px-3 py-2 text-sm bg-gray-50 text-gray-700"
+                       onclick="this.select();" aria-label="Your referral link">
+                <button type="button" onclick="stocksCopyReferralLink()" class="kite-btn rounded-md px-4 py-2 text-sm font-semibold">
+                    Copy link
+                </button>
+            </div>
+            <p class="text-gray-600 text-sm mb-3">
+                Or share the code directly: <strong class="text-gray-900">{{ referral_code }}</strong>
+            </p>
+            <p class="text-gray-600 text-sm">
+                Qualified referrals (people who've paid at least once): <strong class="text-gray-900">{{ qualified_referrals }}</strong>
+                &nbsp;·&nbsp;
+                Free months available: <strong class="text-gray-900">{{ available_referral_credits }}</strong>
+                {% if available_referral_credits %}
+                    <span class="text-gray-500">(applied automatically to extend your access when you cancel)</span>
+                {% endif %}
+            </p>
+        </div>
+
+        <div class="card p-5">
+            <h2 class="text-base font-bold text-gray-900 mb-1">
+                {{ 'Weekly Picks' if is_starters else 'Recent Recommendations' }}
+            </h2>
+            <p class="text-gray-500 text-xs mb-4">
+                {% if is_starters %}Every pick from the last ~9 weeks -- the same one emailed to you.
+                {% else %}Recommendations from the last 10 days -- the same picks emailed to you.{% endif %}
+                Read-only -- there's nothing to execute or edit here. Tap Analysis on any pick for the full
+                explanation and its own mid-period/long-term price projection.
+            </p>
+
+            {% if suggestions %}
+            <div>
+                {% for s in suggestions %}
+                {% set timing_text = s.pattern_note if s.pattern_name else (s.holding_period_days ~ '-day typical holding period, based on the flat target used when no confirmed chart pattern applies.') %}
+                <div class="suggestion-card">
+                    <div class="suggestion-main">
+                        <div class="suggestion-name">
+                            {{ s.company_name or s.symbol }} <span class="text-gray-400 font-normal">({{ s.symbol }})</span>
+                            {% if s.nns_tier in ('golden', 'silver') %}<span class="badge badge-golden">Highly Recommended</span>
+                            {% elif s.nns_tier == 'bronze' %}<span class="badge badge-bronze">Recommended -- extra caution</span>
+                            {% else %}<span class="badge badge-silver">Recommended</span>
+                            {% endif %}
+                        </div>
+                        <div class="suggestion-meta">
+                            {{ s.suggestion_date }} &nbsp;·&nbsp;
+                            <a href="javascript:void(0)" class="link" onclick="openInfoModal('Timing', {{ timing_text|tojson }}, this)">View Timing</a> &nbsp;·&nbsp;
+                            <a href="javascript:void(0)" class="link" onclick="openInfoModal('Rationale', {{ s.rationale|tojson }}, this)">View Rationale</a>
+                        </div>
+                    </div>
+                    <div class="suggestion-prices">
+                        Buy {{ s.buy_price if s.buy_price is not none else '—' }} &rarr;
+                        <span class="up">{{ s.target_sell_price if s.target_sell_price is not none else '—' }}</span>
+                    </div>
+                    <a href="{{ url_for('stocks.stocks_suggestion_analysis', source=('starters' if is_starters else 'daily'), suggestion_id=s.suggestion_id) }}" class="suggestion-analysis-btn">Analysis</a>
+                </div>
+                {% endfor %}
+            </div>
+            {% else %}
+                <p class="text-gray-400 text-sm">
+                    {% if is_starters %}No recommendations in the last ~9 weeks.{% else %}No recommendations in the last 10 days.{% endif %}
+                </p>
+            {% endif %}
+
+            <p class="text-gray-600 text-sm mt-4">
+                <a href="{{ url_for('stocks.stocks_my_history') }}" class="link">View full history &rarr;</a>
+            </p>
+        </div>
+    </div>
+
+    <div id="info-modal-overlay" class="modal-overlay" hidden>
+        <div class="modal-box" role="dialog" aria-modal="true" aria-labelledby="info-modal-title">
+            <div class="modal-header">
+                <h3 id="info-modal-title" class="modal-title"></h3>
+                <button type="button" class="modal-close" onclick="closeInfoModal()" aria-label="Close">&times;</button>
+            </div>
+            <p id="info-modal-body" class="modal-body"></p>
+            <div class="modal-footer">
+                <button type="button" class="modal-ok-btn" onclick="closeInfoModal()">OK</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+    function stocksCopyReferralLink() {
+        var input = document.getElementById('referral-link');
+        if (!input) { return; }
+        input.select();
+        input.setSelectionRange(0, 99999);
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText(input.value).catch(function () {
+                document.execCommand('copy');
+            });
+        } else {
+            document.execCommand('copy');
+        }
+    }
+
+    var infoModalLastFocused = null;
+
+    function openInfoModal(title, text, triggerEl) {
+        infoModalLastFocused = triggerEl || document.activeElement;
+        document.getElementById('info-modal-title').textContent = title;
+        document.getElementById('info-modal-body').textContent = text;
+        document.getElementById('info-modal-overlay').hidden = false;
+        document.querySelector('.modal-close').focus();
+    }
+
+    function closeInfoModal() {
+        document.getElementById('info-modal-overlay').hidden = true;
+        if (infoModalLastFocused) { infoModalLastFocused.focus(); }
+    }
+
+    document.getElementById('info-modal-overlay').addEventListener('click', function (e) {
+        if (e.target === this) { closeInfoModal(); }
+    });
+
+    document.addEventListener('keydown', function (e) {
+        var overlay = document.getElementById('info-modal-overlay');
+        if (overlay.hidden) { return; }
+        if (e.key === 'Escape') {
+            closeInfoModal();
+            return;
+        }
+        if (e.key === 'Tab') {
+            var closeBtn = document.querySelector('.modal-close');
+            var okBtn = document.querySelector('.modal-ok-btn');
+            if (e.shiftKey && document.activeElement === closeBtn) {
+                e.preventDefault();
+                okBtn.focus();
+            } else if (!e.shiftKey && document.activeElement === okBtn) {
+                e.preventDefault();
+                closeBtn.focus();
+            }
+        }
+    });
+    </script>
+</body>
+</html>

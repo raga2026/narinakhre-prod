@@ -1,4 +1,4 @@
-from utils.stock_indicators import run_indicator_calculation, run_indicator_calculation_universe
+from stoqbell.utils.stock_indicators import run_indicator_calculation, run_indicator_calculation_universe
 
 
 class FakeCursor:

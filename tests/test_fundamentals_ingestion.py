@@ -1,8 +1,8 @@
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-from utils.fundamentals_ingestion import FUNDAMENTALS_COLUMNS, sync_fundamentals_rotation
-from utils.screener_client import ScreenerParseError, fetch_fundamentals
+from stoqbell.utils.fundamentals_ingestion import FUNDAMENTALS_COLUMNS, sync_fundamentals_rotation
+from stoqbell.utils.screener_client import ScreenerParseError, fetch_fundamentals
 
 FIXTURE_PATH = Path(__file__).resolve().parent / 'fixtures' / 'screener_sample.html'
 
@@ -62,8 +62,8 @@ def test_parser_extracts_pe_eps_roe_debt_to_equity_from_sample_page():
     html = FIXTURE_PATH.read_text(encoding='utf-8')
     fake_response = MagicMock(status_code=200, text=html)
 
-    with patch('utils.screener_client.requests.get', return_value=fake_response), \
-         patch('utils.screener_client.time.sleep'):
+    with patch('stoqbell.utils.screener_client.requests.get', return_value=fake_response), \
+         patch('stoqbell.utils.screener_client.time.sleep'):
         data = fetch_fundamentals('TESTCO')
 
     assert data['pe_ratio'] == 28.4
@@ -83,8 +83,8 @@ def test_parser_falls_back_to_broader_classification_when_industry_missing():
     trimmed = re.sub(r'<a [^>]*title="(Broad Industry|Industry)"[^>]*>[^<]*</a>', '', html)
     fake_response = MagicMock(status_code=200, text=trimmed)
 
-    with patch('utils.screener_client.requests.get', return_value=fake_response), \
-         patch('utils.screener_client.time.sleep'):
+    with patch('stoqbell.utils.screener_client.requests.get', return_value=fake_response), \
+         patch('stoqbell.utils.screener_client.time.sleep'):
         data = fetch_fundamentals('TESTCO')
 
     assert data['industry'] == 'Oil, Gas & Consumable Fuels'  # Sector, since Industry/Broad Industry are gone
@@ -94,8 +94,8 @@ def test_parser_industry_is_none_when_breadcrumb_entirely_absent():
     html = '<html><body><ul id="top-ratios"><li class="flex flex-space-between"><span class="name">Stock P/E</span><span class="nowrap value"><span class="number">10</span></span></li></ul></body></html>'
     fake_response = MagicMock(status_code=200, text=html)
 
-    with patch('utils.screener_client.requests.get', return_value=fake_response), \
-         patch('utils.screener_client.time.sleep'):
+    with patch('stoqbell.utils.screener_client.requests.get', return_value=fake_response), \
+         patch('stoqbell.utils.screener_client.time.sleep'):
         data = fetch_fundamentals('TESTCO')
 
     assert data['industry'] is None
@@ -104,8 +104,8 @@ def test_parser_industry_is_none_when_breadcrumb_entirely_absent():
 def test_fetch_fundamentals_raises_on_404_instead_of_returning_garbage():
     fake_response = MagicMock(status_code=404, text='Not Found')
 
-    with patch('utils.screener_client.requests.get', return_value=fake_response), \
-         patch('utils.screener_client.time.sleep'):
+    with patch('stoqbell.utils.screener_client.requests.get', return_value=fake_response), \
+         patch('stoqbell.utils.screener_client.time.sleep'):
         try:
             fetch_fundamentals('NOSUCHSYMBOL')
             assert False, 'expected ScreenerParseError'

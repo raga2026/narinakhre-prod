@@ -8,7 +8,7 @@ from datetime import date, timedelta
 
 from tests.test_suggestion_engine import _candidate
 from tests.test_starters_engine import _golden_candidate
-from utils.large_cap_engine import (
+from stoqbell.utils.large_cap_engine import (
     LARGE_CAP_BONUS_REPEAT_WINDOW_DAYS,
     TOP_N_LARGE_CAP_BONUS,
     generate_large_cap_bonus_pick,

@@ -1,4 +1,4 @@
-from utils.kite_instrument_matching import match_instruments_to_universe, normalize_company_name
+from stoqbell.utils.kite_instrument_matching import match_instruments_to_universe, normalize_company_name
 
 
 def test_normalize_strips_suffixes_punctuation_and_case():

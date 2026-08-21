@@ -1,4 +1,4 @@
-from utils.stock_universe import rebucket_large_cap_eligibility, refresh_market_cap_filter
+from stoqbell.utils.stock_universe import rebucket_large_cap_eligibility, refresh_market_cap_filter
 
 
 class FakeCursor:

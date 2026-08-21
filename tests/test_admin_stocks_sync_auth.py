@@ -1,6 +1,6 @@
 from flask import Flask, jsonify, redirect, request, session, url_for
 
-from utils.stock_auth import has_valid_cron_secret
+from stoqbell.utils.stock_auth import has_valid_cron_secret
 
 TEST_SECRET = 'test-cron-secret-value'
 

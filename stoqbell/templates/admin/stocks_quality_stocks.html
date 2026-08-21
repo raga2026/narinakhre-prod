@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <script>
+    // Dark mode is the default (see the bare :root block below) -- see
+    // stocks_home.html's copy of this same script for the full comment.
+    (function () {
+        try {
+            if (localStorage.getItem('nn_stocks_theme') === 'light') {
+                document.documentElement.setAttribute('data-theme', 'light');
+            }
+        } catch (e) {}
+    })();
+    </script>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Quality Stocks - StoqBell</title>
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+    <style>
+        :root {
+            --bg: #0f172a; --fg: #e2e8f0;
+            --muted-900: #f1f5f9; --muted-600: #94a3b8; --muted-500: #7d8aa0; --muted-400: #64748b;
+            --accent: #38bdf8; --accent-hover: #7dd3fc; --accent-shadow: rgba(56,189,248,0.35);
+            --topbar-bg: rgba(30,41,59,0.85); --topbar-border: #334155;
+            --nav-hover-bg: rgba(56,189,248,0.10);
+            --logout-bg: rgba(248,113,113,0.12); --logout-fg: #f87171; --logout-hover-bg: rgba(248,113,113,0.22);
+            --card-bg: #1e293b; --card-border: #2d3a4f; --card-shadow: 0 6px 24px rgba(0,0,0,0.35);
+            --row-bg: #16202f; --row-border: #2d3a4f;
+            --badge-golden-bg: #78350f; --badge-golden-fg: #fef3c7;
+            --badge-silver-bg: #334155; --badge-silver-fg: #e2e8f0;
+        }
+        [data-theme="light"] {
+            --bg: #f5f6f8; --fg: #24262d;
+            --muted-900: #111827; --muted-600: #4b5563; --muted-500: #6c7080; --muted-400: #9ca3af;
+            --accent: #387ed1; --accent-hover: #2b6cb8; --accent-shadow: rgba(56,126,209,0.25);
+            --topbar-bg: rgba(255,255,255,0.85); --topbar-border: #e6e9ec;
+            --nav-hover-bg: rgba(56,126,209,0.07);
+            --logout-bg: rgba(214,69,52,0.08); --logout-fg: #d64534; --logout-hover-bg: rgba(214,69,52,0.16);
+            --card-bg: #ffffff; --card-border: #e6e9ec; --card-shadow: 0 2px 14px rgba(15,23,42,0.07);
+            --row-bg: #f9fafb; --row-border: #eef0f2;
+            --badge-golden-bg: #fff3cd; --badge-golden-fg: #8a6706;
+            --badge-silver-bg: #eceff2; --badge-silver-fg: #4a4f57;
+        }
+        body { background: var(--bg); color: var(--fg); font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; font-size: 0.9rem; }
+        .kite-accent { color: var(--accent); }
+
+        .topbar { background: var(--topbar-bg); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); border-bottom: 1px solid var(--topbar-border); position: sticky; top: 0; z-index: 10; }
+        .topbar-inner { max-width: 42rem; margin: 0 auto; padding: 0.85rem 1.5rem; }
+        .topbar-row1 { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; margin-bottom: 0.65rem; }
+        .brand { display: flex; align-items: center; gap: 0.6rem; text-decoration: none; }
+        .brand-mark { width: 28px; height: 28px; flex-shrink: 0; }
+        .brand-text { font-size: 1.05rem; font-weight: 800; color: var(--fg); white-space: nowrap; }
+        .logout-link { display: inline-flex; align-items: center; background: var(--logout-bg); color: var(--logout-fg); text-decoration: none; font-size: 0.8rem; font-weight: 700; padding: 0.45rem 1rem; border-radius: 999px; white-space: nowrap; transition: background-color .15s ease; }
+        .logout-link:hover { background: var(--logout-hover-bg); }
+        .nav-scroll { display: flex; align-items: center; gap: 0.3rem; overflow-x: auto; -webkit-overflow-scrolling: touch; scrollbar-width: none; }
+        .nav-scroll::-webkit-scrollbar { display: none; }
+        .nav-link { color: var(--muted-600); text-decoration: none; font-size: 0.82rem; font-weight: 600; padding: 0.45rem 0.9rem; border-radius: 999px; white-space: nowrap; transition: all .15s ease; }
+        .nav-link:hover { color: var(--accent); background: var(--nav-hover-bg); }
+        .nav-link.active { color: #ffffff; background: var(--accent); box-shadow: 0 2px 10px var(--accent-shadow); }
+
+        .card { background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 1rem; box-shadow: var(--card-shadow); }
+        .badge { display:inline-flex; align-items:center; padding:2px 10px; border-radius:999px; font-size:0.68rem; font-weight:700; white-space: nowrap; }
+        .badge-golden { background: var(--badge-golden-bg); color: var(--badge-golden-fg); }
+        .badge-silver { background: var(--badge-silver-bg); color: var(--badge-silver-fg); }
+        a.link { color: var(--accent); text-decoration: none; font-weight: 600; }
+        a.link:hover { color: var(--accent-hover); text-decoration: underline; }
+
+        .stock-card { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 0.5rem 0.9rem; padding: 0.85rem 1.05rem; border-radius: 0.75rem; background: var(--row-bg); border: 1px solid var(--row-border); margin-bottom: 0.55rem; transition: border-color .15s ease; }
+        .stock-card:last-child { margin-bottom: 0; }
+        .stock-card:hover { border-color: var(--accent); }
+
+        .text-gray-900 { color: var(--muted-900); }
+        .text-gray-600 { color: var(--muted-600); }
+        .text-gray-500 { color: var(--muted-500); }
+        .text-gray-400 { color: var(--muted-400); }
+    </style>
+</head>
+<body class="min-h-screen">
+    <div class="topbar">
+        <div class="topbar-inner">
+            <div class="topbar-row1">
+                <a href="{{ url_for('stocks.stocks_home') }}" class="brand">
+                    <img src="{{ url_for('stocks.static', filename='assets/stoqbell-icon.png') }}" alt="" class="brand-mark">
+                    <span class="brand-text">StoqBell</span>
+                </a>
+                <a href="{{ url_for('stocks.stocks_admin_logout') }}" class="logout-link">Log out</a>
+            </div>
+            <nav class="nav-scroll" aria-label="Main">
+                <a href="{{ url_for('stocks.stocks_my_suggestions') }}" class="nav-link">Recommendations</a>
+                <a href="{{ url_for('stocks.stocks_universe_list') }}" class="nav-link">Browse All Companies</a>
+                <a href="{{ url_for('stocks.stocks_profile') }}" class="nav-link">Profile</a>
+            </nav>
+        </div>
+    </div>
+
+    <div class="max-w-2xl mx-auto p-6">
+        <p class="text-gray-500 text-sm mb-4">
+            <a href="{{ url_for('stocks.stocks_home') }}" class="link">&larr; Back to home</a>
+        </p>
+
+        <div class="card p-5">
+            <h1 class="text-base font-bold text-gray-900 mb-1">Quality Stocks</h1>
+            <p class="text-gray-600 text-sm mb-4">Every company currently clearing our golden/silver quality bar, from our full research universe.</p>
+
+            {% if quality_stocks %}
+                {% for t in quality_stocks %}
+                <div class="stock-card">
+                    <div>
+                        <span class="text-gray-900 font-semibold">{{ t.symbol }}</span>
+                        <span class="text-gray-400">({{ t.exchange }})</span>
+                        <span class="text-gray-600">{{ t.company_name }}</span>
+                    </div>
+                    <div class="text-right">
+                        {% if t.nns_tier == 'golden' %}<span class="badge badge-golden">Highly Recommended</span>
+                        {% else %}<span class="badge badge-silver">Recommended</span>{% endif %}
+                        {% if t.latest_close is not none %}<div class="text-gray-500 text-xs mt-1">{{ t.latest_close }}</div>{% endif %}
+                    </div>
+                </div>
+                {% endfor %}
+            {% else %}
+                <p class="text-gray-500 text-sm">No stocks are clearing our quality bar right now -- check back soon.</p>
+            {% endif %}
+
+            <p class="text-gray-600 text-sm mt-4">
+                <a href="{{ url_for('stocks.stocks_universe_list') }}" class="link">Browse all companies &rarr;</a>
+            </p>
+        </div>
+    </div>
+</body>
+</html>

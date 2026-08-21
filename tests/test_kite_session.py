@@ -9,8 +9,8 @@ os.environ.setdefault('CREDENTIAL_ENCRYPTION_KEY', Fernet.generate_key().decode(
 os.environ.setdefault('STOCKS_KITE_API_KEY', 'test-api-key')
 os.environ.setdefault('STOCKS_KITE_API_SECRET', 'test-api-secret')
 
-from utils.kite_client import KiteClient
-from utils.kite_session import exchange_request_token, get_kite_access_token, save_kite_access_token
+from stoqbell.utils.kite_client import KiteClient
+from stoqbell.utils.kite_session import exchange_request_token, get_kite_access_token, save_kite_access_token
 
 
 class FakeCursor:
@@ -71,7 +71,7 @@ class FakeKiteSessionDB:
 def test_callback_flow_stores_encrypted_token_and_kite_client_can_use_it():
     db = FakeKiteSessionDB()
 
-    with patch('utils.kite_session.KiteConnect') as MockKiteConnect:
+    with patch('stoqbell.utils.kite_session.KiteConnect') as MockKiteConnect:
         MockKiteConnect.return_value.generate_session.return_value = {
             'access_token': 'real-secret-token-123',
         }
@@ -90,7 +90,7 @@ def test_callback_flow_stores_encrypted_token_and_kite_client_can_use_it():
     # KiteClient builds a working client from the decrypted token without
     # needing an access_token passed in directly, and without hitting the
     # real Kite API.
-    with patch('utils.kite_client.KiteConnect') as MockKiteConnectForClient:
+    with patch('stoqbell.utils.kite_client.KiteConnect') as MockKiteConnectForClient:
         mock_instance = MockKiteConnectForClient.return_value
         KiteClient(db=db)
         mock_instance.set_access_token.assert_called_once_with('real-secret-token-123')

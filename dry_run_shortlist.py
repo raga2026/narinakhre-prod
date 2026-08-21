@@ -17,8 +17,8 @@ from datetime import date, timedelta
 from dotenv import load_dotenv
 from supabase import create_client
 
-from utils.fundamental_screen import classify_fundamental_tier
-from utils.stock_shortlist import MAX_SNAPSHOT_AGE_DAYS
+from stoqbell.utils.fundamental_screen import classify_fundamental_tier
+from stoqbell.utils.stock_shortlist import MAX_SNAPSHOT_AGE_DAYS
 
 
 def run(client):

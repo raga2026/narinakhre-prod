@@ -1,8 +1,8 @@
 import threading
 from datetime import datetime, timedelta, timezone
 
-from utils.background_jobs import cancel_job, get_job_status, start_background_job
-from utils.job_progress import report as report_progress
+from stoqbell.utils.background_jobs import cancel_job, get_job_status, start_background_job
+from stoqbell.utils.job_progress import report as report_progress
 
 
 class FakeCursor:

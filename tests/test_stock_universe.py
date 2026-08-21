@@ -1,7 +1,7 @@
 from pathlib import Path
 
-from utils.fundamentals_ingestion import STOCK_FUNDAMENTALS_ALTER_SQL
-from utils.stock_universe import parse_nse_equity_csv
+from stoqbell.utils.fundamentals_ingestion import STOCK_FUNDAMENTALS_ALTER_SQL
+from stoqbell.utils.stock_universe import parse_nse_equity_csv
 
 # A real snapshot of NSE's official EQUITY_L.csv, fetched while building
 # this -- not a synthetic fixture -- so the "thousands of rows" sanity

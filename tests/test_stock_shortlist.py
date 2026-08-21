@@ -1,6 +1,6 @@
 import re
 
-from utils.stock_shortlist import (
+from stoqbell.utils.stock_shortlist import (
     LARGE_CAP_SHORTLIST_SOURCE,
     SHORTLIST_SOURCE,
     _compute_industry_benchmarks,

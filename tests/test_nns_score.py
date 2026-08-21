@@ -1,4 +1,4 @@
-from utils.nns_score import NNS_BRONZE_MIN, NNS_GOLDEN_MIN, NNS_SILVER_MIN, compute_nns_score, nns_tier
+from stoqbell.utils.nns_score import NNS_BRONZE_MIN, NNS_GOLDEN_MIN, NNS_SILVER_MIN, compute_nns_score, nns_tier
 
 # Every sub-score at its ceiling/ideal -- should score a perfect (or
 # near-perfect) 10.0.

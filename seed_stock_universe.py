@@ -33,7 +33,7 @@ import requests
 from dotenv import load_dotenv
 from supabase import create_client
 
-from utils.stock_universe import (
+from stoqbell.utils.stock_universe import (
     initialize_stock_universe_table_if_needed,
     parse_nse_equity_csv,
     parse_bse_equity_json,
