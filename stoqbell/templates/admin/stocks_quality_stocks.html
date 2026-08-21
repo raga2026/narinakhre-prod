@@ -51,7 +51,7 @@
         .topbar-inner { max-width: 42rem; margin: 0 auto; padding: 0.85rem 1.5rem; }
         .topbar-row1 { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; margin-bottom: 0.65rem; }
         .brand { display: flex; align-items: center; gap: 0.6rem; text-decoration: none; }
-        .brand-mark { width: 28px; height: 28px; flex-shrink: 0; }
+        .brand-mark { width: 28px; height: 28px; flex-shrink: 0; background: var(--accent); border-radius: 8px; padding: 3px; box-sizing: border-box; }
         .brand-text { font-size: 1.05rem; font-weight: 800; color: var(--fg); white-space: nowrap; }
         .logout-link { display: inline-flex; align-items: center; background: var(--logout-bg); color: var(--logout-fg); text-decoration: none; font-size: 0.8rem; font-weight: 700; padding: 0.45rem 1rem; border-radius: 999px; white-space: nowrap; transition: background-color .15s ease; }
         .logout-link:hover { background: var(--logout-hover-bg); }
@@ -83,7 +83,7 @@
         <div class="topbar-inner">
             <div class="topbar-row1">
                 <a href="{{ url_for('stocks.stocks_home') }}" class="brand">
-                    <img src="{{ url_for('stocks.static', filename='assets/stoqbell-icon-dark.svg') }}" alt="" class="brand-mark">
+                    <img src="{{ url_for('stocks.static', filename='assets/stoqbell-icon-dark.png') }}" alt="" class="brand-mark">
                     <span class="brand-text"><span class="brand-stoq">Stoq</span><span class="brand-bell">Bell</span></span>
                 </a>
                 <a href="{{ url_for('stocks.stocks_admin_logout') }}" class="logout-link">Log out</a>

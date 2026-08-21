@@ -37,7 +37,7 @@ STORAGE_PREFIX = 'stoqbell'
 _CONTENT_TYPES = {'.png': 'image/png', '.svg': 'image/svg+xml'}
 # Must match the paths suggestion_email.py's _stoqbell_logo_header_html()
 # and the templates' hardcoded Supabase URLs construct from.
-FILENAMES = ('stoqbell-logo.png', 'stoqbell-icon.png', 'stoqbell-icon-dark.svg')
+FILENAMES = ('stoqbell-logo.png', 'stoqbell-icon.png', 'stoqbell-icon-dark.png')
 
 
 def run():
