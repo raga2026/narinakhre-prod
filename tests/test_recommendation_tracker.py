@@ -8,7 +8,10 @@ def test_open_position_with_price_between_stop_and_target():
         buy_price=100, target_sell_price=110, stop_loss_price=95, latest_price=104,
         suggestion_date=date(2026, 8, 1), today=date(2026, 8, 6),
     )
-    assert stats == {'days_elapsed': 5, 'pct_change': 4.0, 'outcome': 'open'}
+    assert stats == {
+        'days_elapsed': 5, 'pct_change': 4.0, 'outcome': 'open',
+        'target_hit_date': None, 'days_to_target_hit': None,
+    }
 
 
 def test_target_hit_when_latest_price_at_or_above_target():
@@ -81,3 +84,23 @@ def test_defaults_today_to_the_real_current_date():
         suggestion_date=date.today(),
     )
     assert stats['days_elapsed'] == 0
+
+
+def test_days_to_target_hit_computed_from_target_hit_date():
+    stats = compute_tracker_row_stats(
+        buy_price=100, target_sell_price=110, stop_loss_price=95, latest_price=110,
+        suggestion_date=date(2026, 8, 1), today=date(2026, 8, 20),
+        target_hit_date=date(2026, 8, 9),
+    )
+    assert stats['target_hit_date'] == date(2026, 8, 9)
+    assert stats['days_to_target_hit'] == 8
+
+
+def test_target_hit_date_accepts_iso_string():
+    stats = compute_tracker_row_stats(
+        buy_price=100, target_sell_price=110, stop_loss_price=95, latest_price=110,
+        suggestion_date=date(2026, 8, 1), today=date(2026, 8, 20),
+        target_hit_date='2026-08-09',
+    )
+    assert stats['target_hit_date'] == date(2026, 8, 9)
+    assert stats['days_to_target_hit'] == 8

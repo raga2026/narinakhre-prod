@@ -5,14 +5,17 @@ from datetime import datetime, timezone
 
 from stoqbell.utils.stocks_subscription import (
     activate_subscription,
+    activate_trial,
     attach_razorpay_subscription,
     create_pending_subscriber,
     find_account_by_razorpay_subscription_id,
+    find_expired_trials,
     find_expiring_subscribers,
     has_stocks_access,
     mark_reminder_sent,
     mark_subscription_cancelled,
     mark_subscription_halted,
+    mark_trial_ended_email_sent,
     record_recurring_charge,
 )
 
@@ -39,11 +42,26 @@ class FakeSubscriberDB:
 
         if normalized.startswith(
             'SELECT id, username, name, is_active, is_pro, subscription_status, subscription_current_period_end, '
-            'referred_by_id, stocks_plan FROM stocks_admin_users WHERE username=?'
+            'trial_ends_at, referred_by_id, stocks_plan FROM stocks_admin_users WHERE username=?'
         ):
             username, = params
             matches = [r for r in self.rows if r['username'] == username]
             return FakeCursor(matches[:1])
+
+        if normalized.startswith(
+            "INSERT INTO stocks_admin_users (username, password_hash, role, name, is_active, must_change_password, "
+            "subscription_status, trial_ends_at, referred_by_id, stocks_plan)"
+        ):
+            email, password_hash, name, referred_by_id, stocks_plan = params
+            self.rows.append({
+                'id': self._next_id, 'username': email, 'password_hash': password_hash, 'name': name,
+                'role': 'viewer', 'is_active': 1, 'must_change_password': 0, 'is_pro': 0,
+                'subscription_status': 'trialing', 'subscription_current_period_end': None,
+                'trial_ends_at': 'fake-trial-end', 'trial_ended_email_sent_at': None,
+                'razorpay_subscription_id': None, 'referred_by_id': referred_by_id, 'stocks_plan': stocks_plan,
+            })
+            self._next_id += 1
+            return FakeCursor([])
 
         if normalized.startswith('INSERT INTO stocks_admin_users'):
             email, password_hash, name, referred_by_id, stocks_plan = params
@@ -51,13 +69,15 @@ class FakeSubscriberDB:
                 'id': self._next_id, 'username': email, 'password_hash': password_hash, 'name': name,
                 'role': 'viewer', 'is_active': 0, 'must_change_password': 0, 'is_pro': 0,
                 'subscription_status': 'pending', 'subscription_current_period_end': None,
+                'trial_ends_at': None, 'trial_ended_email_sent_at': None,
                 'razorpay_subscription_id': None, 'referred_by_id': referred_by_id, 'stocks_plan': stocks_plan,
             })
             self._next_id += 1
             return FakeCursor([])
 
         if normalized.startswith(
-            'SELECT id, username, name, subscription_status, razorpay_subscription_id, referred_by_id, stocks_plan '
+            'SELECT id, username, name, can_view_watchlist, must_change_password, subscription_status, '
+            'trial_ends_at, razorpay_subscription_id, referred_by_id, stocks_plan '
             'FROM stocks_admin_users WHERE username=?'
         ):
             username, = params
@@ -118,6 +138,34 @@ class FakeSubscriberDB:
                     r['subscription_reminder_sent_for'] = period_end
             return FakeCursor([])
 
+        if normalized.startswith("UPDATE stocks_admin_users SET is_active=1, subscription_status='trialing', "
+                                  "trial_ends_at=NOW() + INTERVAL '7 days', updated_at=NOW() WHERE id=?"):
+            admin_id, = params
+            for r in self.rows:
+                if r['id'] == admin_id:
+                    r['is_active'] = 1
+                    r['subscription_status'] = 'trialing'
+                    r['trial_ends_at'] = 'fake-trial-end'
+            return FakeCursor([])
+
+        if normalized.startswith(
+            "SELECT id, username, name FROM stocks_admin_users WHERE subscription_status='trialing' "
+            "AND trial_ends_at <= NOW() AND trial_ended_email_sent_at IS NULL"
+        ):
+            matches = [
+                r for r in self.rows
+                if r.get('subscription_status') == 'trialing' and r.get('trial_ends_at') is not None
+                and r.get('trial_ended_email_sent_at') is None
+            ]
+            return FakeCursor(matches)
+
+        if normalized.startswith('UPDATE stocks_admin_users SET trial_ended_email_sent_at=NOW()'):
+            admin_id, = params
+            for r in self.rows:
+                if r['id'] == admin_id:
+                    r['trial_ended_email_sent_at'] = 'sent'
+            return FakeCursor([])
+
         if normalized.startswith("SELECT id, username, name, subscription_status, subscription_current_period_end "
                                   "FROM stocks_admin_users WHERE subscription_status IN"):
             window_str, = params
@@ -144,14 +192,28 @@ class FakeSubscriberDB:
         pass
 
 
-def test_create_pending_subscriber_creates_a_pending_inactive_row():
+def test_create_pending_subscriber_grants_an_immediate_trial_for_standard():
+    # Standard is the default plan, and now grants a 7-day trial straight
+    # away -- no more pending/inactive row waiting on Razorpay checkout.
     db = FakeSubscriberDB()
     row, error = create_pending_subscriber(db, 'a@example.com', 'A', 'password123')
 
     assert error is None
+    assert db.rows[0]['subscription_status'] == 'trialing'
+    assert db.rows[0]['is_active'] == 1
+    assert db.rows[0]['trial_ends_at'] is not None
+    assert db.rows[0]['is_pro'] == 0
+
+
+def test_create_pending_subscriber_keeps_starters_pending_until_checkout():
+    # Starters never gets a trial -- unchanged pending/inactive shape.
+    db = FakeSubscriberDB()
+    row, error = create_pending_subscriber(db, 'a@example.com', 'A', 'password123', stocks_plan='starters')
+
+    assert error is None
     assert db.rows[0]['subscription_status'] == 'pending'
     assert db.rows[0]['is_active'] == 0
-    assert db.rows[0]['is_pro'] == 0
+    assert db.rows[0]['trial_ends_at'] is None
 
 
 def test_create_pending_subscriber_rejects_short_password():
@@ -243,6 +305,40 @@ def test_find_account_by_razorpay_subscription_id():
     assert found['username'] == 'b@example.com'
 
     assert find_account_by_razorpay_subscription_id(db, 'sub_unknown') is None
+
+
+def test_activate_trial_sets_active_trialing_and_trial_ends_at():
+    db = FakeSubscriberDB(rows=[{
+        'id': 1, 'username': 'a@example.com', 'is_active': 0, 'subscription_status': 'pending',
+        'trial_ends_at': None,
+    }])
+
+    activate_trial(db, 1)
+
+    assert db.rows[0]['is_active'] == 1
+    assert db.rows[0]['subscription_status'] == 'trialing'
+    assert db.rows[0]['trial_ends_at'] is not None
+
+
+def test_find_expired_trials_and_email_dedup():
+    db = FakeSubscriberDB(rows=[
+        {'id': 1, 'username': 'expired@example.com', 'name': 'Expired', 'subscription_status': 'trialing',
+         'trial_ends_at': 'past', 'trial_ended_email_sent_at': None},
+        {'id': 2, 'username': 'stillgoing@example.com', 'name': 'Going', 'subscription_status': 'trialing',
+         'trial_ends_at': None, 'trial_ended_email_sent_at': None},
+        {'id': 3, 'username': 'alreadysent@example.com', 'name': 'Sent', 'subscription_status': 'trialing',
+         'trial_ends_at': 'past', 'trial_ended_email_sent_at': 'already'},
+        {'id': 4, 'username': 'paid@example.com', 'name': 'Paid', 'subscription_status': 'active',
+         'trial_ends_at': None, 'trial_ended_email_sent_at': None},
+    ])
+
+    expired = find_expired_trials(db)
+    assert {r['id'] for r in expired} == {1}
+
+    mark_trial_ended_email_sent(db, 1)
+    assert db.rows[0]['trial_ended_email_sent_at'] is not None
+
+    assert find_expired_trials(db) == []
 
 
 def test_find_expiring_subscribers_and_reminder_dedup():

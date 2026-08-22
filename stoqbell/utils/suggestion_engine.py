@@ -546,13 +546,14 @@ def get_suggestion_by_id(db, suggestion_id):
     ).fetchone()
 
 
-def compute_tracker_row_stats(buy_price, target_sell_price, stop_loss_price, latest_price, suggestion_date, today=None):
+def compute_tracker_row_stats(buy_price, target_sell_price, stop_loss_price, latest_price, suggestion_date, today=None, target_hit_date=None):
     """Pure per-row math for the recommendation tracker (see
     get_recommendation_tracker and app.py's /stocks/recommendations/tracker)
     -- kept separate from the DB query so the profit/loss and outcome
-    arithmetic is unit-testable without a database. suggestion_date/today
-    are date objects (or ISO strings, which get parsed) -- today defaults to
-    date.today(). Returns {'days_elapsed', 'pct_change', 'outcome'}:
+    arithmetic is unit-testable without a database. suggestion_date/today/
+    target_hit_date are date objects (or ISO strings, which get parsed) --
+    today defaults to date.today(). Returns {'days_elapsed', 'pct_change',
+    'outcome', 'target_hit_date', 'days_to_target_hit'}:
       - days_elapsed: whole days since the suggestion, >= 0 (never negative
         -- a suggestion is never "in the future" relative to today).
       - pct_change: (latest - buy) / buy * 100, rounded to 1 decimal, or
@@ -562,7 +563,14 @@ def compute_tracker_row_stats(buy_price, target_sell_price, stop_loss_price, lat
         AFTER target, so a pattern-based suggestion with an unusually tight
         stop that also happens to sit at/above target reads as the good
         outcome, not the bad one), else 'open'. 'unknown' if latest_price
-        is missing entirely (nothing synced yet)."""
+        is missing entirely (nothing synced yet).
+      - target_hit_date/days_to_target_hit: target_hit_date is the first
+        trade date (from get_recommendation_tracker's own correlated
+        subquery, not this function) on/after suggestion_date whose close
+        reached target_sell_price -- passed straight through as a date
+        object (parsed if given as a string). days_to_target_hit is the
+        whole-day gap from suggestion_date to it, or None if no hit date
+        was given (never hit, or outcome isn't currently 'target_hit')."""
     if isinstance(suggestion_date, str):
         suggestion_date = date.fromisoformat(suggestion_date[:10])
     today = today or date.today()
@@ -581,7 +589,16 @@ def compute_tracker_row_stats(buy_price, target_sell_price, stop_loss_price, lat
     else:
         outcome = 'open'
 
-    return {'days_elapsed': days_elapsed, 'pct_change': pct_change, 'outcome': outcome}
+    days_to_target_hit = None
+    if isinstance(target_hit_date, str):
+        target_hit_date = date.fromisoformat(target_hit_date[:10])
+    if target_hit_date is not None:
+        days_to_target_hit = max(0, (target_hit_date - suggestion_date).days)
+
+    return {
+        'days_elapsed': days_elapsed, 'pct_change': pct_change, 'outcome': outcome,
+        'target_hit_date': target_hit_date, 'days_to_target_hit': days_to_target_hit,
+    }
 
 
 def get_recommendation_tracker(db):
@@ -603,13 +620,26 @@ def get_recommendation_tracker(db):
     "timing" pair _timing_text in utils/suggestion_email.py already reads
     off a stock_suggestions row) are what let a caller show how long a
     pick is expected to take, e.g. the auto-trader dashboard's own
-    buy-list of recent recommendations."""
+    buy-list of recent recommendations.
+
+    target_hit_date is the first trade_date on/after suggestion_date whose
+    close reached target_sell_price -- computed fresh from stock_daily_data's
+    full history every time (like latest_price above), not from
+    stock_suggestions.status/find_pending_target_hit_suggestions' once-daily
+    'target_hit' marking, so it stays in sync with this same query's own
+    live-recomputed 'outcome' (see compute_tracker_row_stats) instead of
+    disagreeing with it if a price later drops back below target after a
+    transient hit."""
     return db.execute(
         '''SELECT s.id, w.id AS watchlist_id, w.symbol, w.exchange, s.suggestion_date,
                   s.buy_price, s.target_sell_price, s.stop_loss_price, s.status,
                   s.nns_tier, s.score AS nns_score, s.pattern_name, s.pattern_note,
                   s.holding_period_days, s.rationale,
-                  d.close AS latest_price, d.trade_date AS price_date
+                  d.close AS latest_price, d.trade_date AS price_date,
+                  (SELECT MIN(d3.trade_date) FROM stock_daily_data d3
+                    WHERE d3.watchlist_id = w.id AND d3.trade_date >= s.suggestion_date
+                      AND s.target_sell_price IS NOT NULL AND d3.close >= s.target_sell_price
+                  ) AS target_hit_date
            FROM stock_suggestions s
            JOIN stock_watchlist w ON w.id = s.watchlist_id
            LEFT JOIN stock_daily_data d ON d.watchlist_id = w.id

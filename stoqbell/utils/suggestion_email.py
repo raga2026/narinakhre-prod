@@ -176,6 +176,7 @@ def send_stop_loss_review_email(to_email, trade, pnl_amount, pnl_pct):
     return send_zeptomail_stocks_email(
         to_email=to_email, to_name=to_email, subject=subject,
         textbody=body_text, htmlbody=body_html, sender_name='StoqBell Auto-Trader',
+        include_unsubscribe=False,  # Raghav's own auto-trader alert, not a customer send
     )
 
 
@@ -215,6 +216,7 @@ def send_trading_alert_email(to_email, suggestion, buy_link):
     return send_zeptomail_stocks_email(
         to_email=to_email, to_name=to_email, subject=subject,
         textbody=text_body, htmlbody=_wrap_email_html(html_inner), sender_name='StoqBell',
+        include_unsubscribe=False,  # Raghav's own trading alert, not a customer send
     )
 
 
@@ -248,6 +250,7 @@ def send_highly_recommended_alert_email(to_email, suggestion):
     return send_zeptomail_stocks_email(
         to_email=to_email, to_name=to_email, subject=subject,
         textbody=text_body, htmlbody=_wrap_email_html(html_inner), sender_name='StoqBell',
+        include_unsubscribe=False,  # Raghav-only, not a customer send
     )
 
 
@@ -282,20 +285,24 @@ def send_target_hit_email(to_email, trade, pnl_amount, pnl_pct):
     return send_zeptomail_stocks_email(
         to_email=to_email, to_name=to_email, subject=subject,
         textbody=text_body, htmlbody=body_html, sender_name='StoqBell Auto-Trader',
+        include_unsubscribe=False,  # Raghav's own auto-trader alert, not a customer send
     )
 
 
-def send_target_achieved_email(to_email, to_name, achievements):
-    """Sent to every CURRENT Standard-plan (Rs 299/month) subscriber when
-    one or more daily recommendations reaches its target price -- app.py's
-    /stocks/suggestions/notify-target-hits job, one email per recipient
-    per day, bundling every entry from
+def send_target_achieved_email(to_email, to_name, achievements, currently_subscribed=True):
+    """Sent to every Standard-plan (Rs 299/month) viewer who ever had
+    access -- app.py's /stocks/suggestions/notify-target-hits job, one
+    email per recipient per day, bundling every entry from
     suggestion_engine.find_pending_target_hit_suggestions that landed that
     day (in the rare case more than one hits the same day) rather than
-    sending a separate email per stock. Deliberately goes to every current
-    Standard subscriber, not just whoever happened to receive the original
-    pick's email -- broadcasting a win to the whole current plan
-    population, per instruction.
+    sending a separate email per stock. Deliberately reaches a lapsed
+    subscriber too (free trial expired without subscribing, or a
+    subscription that lapsed) -- currently_subscribed=False switches in a
+    resubscribe nudge at the end, since a pick they saw while they still
+    had access hitting target is exactly the moment they're most likely to
+    come back; currently_subscribed=True (default) omits it entirely for
+    someone who doesn't need to be sold on the product they're already
+    paying for.
 
     Unlike send_target_hit_email above (the auto-trader's OWN position,
     sold automatically the moment target is reached), this is purely
@@ -316,9 +323,9 @@ def send_target_achieved_email(to_email, to_name, achievements):
     count = len(achievements)
     if count == 1:
         name = achievements[0].get('company_name') or achievements[0]['symbol']
-        subject = f'StoqBell -- {name} hit its target'
+        subject = f'Called it: {name} just hit its target'
     else:
-        subject = f'StoqBell -- {count} of your recommendations hit target'
+        subject = f'Called it: {count} of our picks just hit target'
 
     cards_text = []
     cards_html = []
@@ -369,13 +376,13 @@ def send_target_achieved_email(to_email, to_name, achievements):
         )
 
     intro_line = (
-        'Your recommendation has reached its target:' if count == 1
-        else f'{count} of your recommendations have reached target:'
+        'Good news -- one of our picks just delivered:' if count == 1
+        else f'Good news -- {count} of our picks just delivered:'
     )
     intro_text = f'Hi {greeting},\n\n{intro_line}\n\n'
     intro_html = (
         f'<p style="font-family:Arial,Helvetica,sans-serif;font-size:16px;color:#0f172a;">Hi {greeting},</p>'
-        f'<p style="font-family:Arial,Helvetica,sans-serif;font-size:16px;color:#0f172a;">{intro_line}</p>'
+        f'<p style="font-family:Arial,Helvetica,sans-serif;font-size:17px;font-weight:bold;color:#0f172a;">{intro_line}</p>'
     )
 
     cta_line = (
@@ -389,11 +396,27 @@ def send_target_achieved_email(to_email, to_name, achievements):
         f'{cta_line}</p>'
     )
 
-    text_body = intro_text + '\n\n'.join(cards_text) + f'\n\n{cta_line}\n\n{DISCLAIMER}\n'
+    resubscribe_line = ''
+    resubscribe_html = ''
+    if not currently_subscribed:
+        resubscribe_line = (
+            "This is exactly the kind of call StoqBell sends out -- but you're not currently subscribed, "
+            f"so you won't get the next one. Log in and pick a plan to jump back in: {STOCKS_LOGIN_URL}"
+        )
+        resubscribe_html = (
+            f'<p style="font-family:Arial,Helvetica,sans-serif;color:#0f172a;font-size:14px;line-height:1.5;'
+            f'background:#eff6ff;border-left:3px solid #0ea5e9;border-radius:4px;padding:12px 14px;margin-top:12px;">'
+            f"This is exactly the kind of call StoqBell sends out -- but you're not currently subscribed, "
+            f"so you won't get the next one. "
+            f'<a href="{STOCKS_LOGIN_URL}" style="color:#0ea5e9;font-weight:bold;">Log in and pick a plan to jump back in &rarr;</a></p>'
+        )
+
+    text_body = intro_text + '\n\n'.join(cards_text) + f'\n\n{cta_line}\n\n{resubscribe_line}\n\n{DISCLAIMER}\n'
     html_inner = (
         intro_html
         + ''.join(cards_html)
         + cta_html
+        + resubscribe_html
         + f'<p style="color:#64748b;font-size:0.85em;margin-top:16px;font-family:Arial,Helvetica,sans-serif;">{DISCLAIMER}</p>'
     )
 
@@ -476,6 +499,7 @@ def send_intraday_target_hit_alert_email(to_email, hits):
     return send_zeptomail_stocks_email(
         to_email=to_email, to_name=to_email, subject=subject,
         textbody=text_body, htmlbody=html_inner, sender_name='StoqBell',
+        include_unsubscribe=False,  # Raghav-only, not a customer send
     )
 
 
@@ -639,6 +663,85 @@ def send_subscription_expiry_reminder_email(email, name, current_period_end_labe
     )
 
 
+def send_trial_ended_email(email, name):
+    """Sent once, the first time app.py's /stocks/subscription/notify-trial-ended
+    finds a Standard-plan free trial past its trial_ends_at (see
+    utils/stocks_subscription.find_expired_trials/activate_trial). Links to
+    STOCKS_LOGIN_URL rather than straight to /stocks/plans -- a bare
+    emailed link can't carry the session state /stocks/plans needs, but
+    logging in with their already-known credentials naturally lands them
+    there via stocks_admin_login's own trial-expired redirect. Lists both
+    plans (not just the Standard one they trialed) since resubscribing is a
+    fresh choice, not a lock-in to what they started with."""
+    greeting = name or email
+    subject = 'Your StoqBell free trial has ended'
+    headline = (
+        "Your 7-day free trial of StoqBell's Standard plan has ended, and your "
+        "access has been paused. Log in and pick a plan below to keep it going -- "
+        "no trial reset, this is a real subscription from here."
+    )
+    plans_text = (
+        'Standard -- Rs 299/month: Pick of the Day with full reasoning, buy/target '
+        'prices, StoqBell Score breakdown, target-hit alerts, bonus large-cap pick '
+        'twice a week.\n'
+        'Starters -- Rs 99/month: up to two golden-tier picks a week, every Monday, '
+        'with buy/target prices.'
+    )
+    text_body = f'Hi {greeting},\n\n{headline}\n\n{plans_text}\n\nLog in to subscribe: {STOCKS_LOGIN_URL}\n\n{DISCLAIMER}\n'
+    html_inner = (
+        f'{_stoqbell_logo_header_html()}'
+        f'<p>Hi {greeting},</p><p>{headline}</p>'
+        '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" '
+        'style="max-width:600px;width:100%;margin:12px 0;border-collapse:collapse;">'
+        '<tr>'
+        '<td style="width:50%;vertical-align:top;padding:12px;border:1px solid #e2e8f0;border-radius:8px;">'
+        '<div style="font-weight:bold;color:#0f172a;">Standard -- Rs 299/month</div>'
+        '<div style="color:#475569;font-size:13px;margin-top:6px;">Pick of the Day with full reasoning, '
+        'buy/target prices, StoqBell Score breakdown, target-hit alerts, bonus large-cap pick twice a week.</div>'
+        '</td>'
+        '<td style="width:50%;vertical-align:top;padding:12px;border:1px solid #e2e8f0;border-radius:8px;">'
+        '<div style="font-weight:bold;color:#0f172a;">Starters -- Rs 99/month</div>'
+        '<div style="color:#475569;font-size:13px;margin-top:6px;">Up to two golden-tier picks a week, '
+        'every Monday, with buy/target prices.</div>'
+        '</td>'
+        '</tr></table>'
+        f'<p><a href="{STOCKS_LOGIN_URL}" style="color:#0ea5e9;font-weight:bold;">Log in to subscribe &rarr;</a></p>'
+        f'<p style="color:#64748b;font-size:0.85em;margin-top:16px;">{DISCLAIMER}</p>'
+    )
+    return send_zeptomail_stocks_email(
+        to_email=email, to_name=greeting, subject=subject,
+        textbody=text_body, htmlbody=_wrap_email_html(html_inner), sender_name='StoqBell',
+    )
+
+
+def send_trial_started_email(email, name, trial_end_label):
+    """Sent once a super_admin-added viewer (see create_viewer_account's
+    start_trial=True and utils/stock_auth.change_own_password) actually
+    sets their own password -- that's the one moment their 7-day free
+    trial genuinely starts (not account-creation time, which could sit
+    unopened for days), so this is the first the viewer hears "your clock
+    is running", right when it's true. trial_end_label is a pre-formatted
+    date string (e.g. '29 Aug 2026')."""
+    greeting = name or email
+    subject = 'Your StoqBell 7-day free trial has started'
+    headline = (
+        f"Your password is set and your 7-day free trial is now active -- full Standard-plan access "
+        f"through {trial_end_label}, no card required. You'll get a Pick of the Day each trading day, "
+        f"plus a bonus large-cap pick twice a week."
+    )
+    text_body = f'Hi {greeting},\n\n{headline}\n\nLog in: {STOCKS_LOGIN_URL}\n\n{DISCLAIMER}\n'
+    html_inner = (
+        f'{_stoqbell_logo_header_html()}'
+        f'<p>Hi {greeting},</p><p>{headline}</p>'
+        f'<p><a href="{STOCKS_LOGIN_URL}" style="color:#0ea5e9;font-weight:bold;">Log in &rarr;</a></p>'
+        f'<p style="color:#64748b;font-size:0.85em;margin-top:16px;">{DISCLAIMER}</p>'
+    )
+    return send_zeptomail_stocks_email(
+        to_email=email, to_name=greeting, subject=subject,
+        textbody=text_body, htmlbody=_wrap_email_html(html_inner), sender_name='StoqBell',
+    )
+
+
 def send_admin_new_subscriber_email(email, name):
     """Notifies the site owner (STOCKS_ADMIN_NOTIFY_EMAIL) every time a
     self-serve signup completes its FIRST payment -- see app.py's
@@ -663,6 +766,7 @@ def send_admin_new_subscriber_email(email, name):
     return send_zeptomail_stocks_email(
         to_email=STOCKS_ADMIN_NOTIFY_EMAIL, to_name='Nari Nakhre', subject=subject,
         textbody=text_body, htmlbody=html_body, sender_name='StoqBell',
+        include_unsubscribe=False,  # site-owner notification, not a customer send
     )
 
 
@@ -688,6 +792,7 @@ def send_admin_subscription_cancelled_email(email, name):
     return send_zeptomail_stocks_email(
         to_email=STOCKS_ADMIN_NOTIFY_EMAIL, to_name='Nari Nakhre', subject=subject,
         textbody=text_body, htmlbody=html_body, sender_name='StoqBell',
+        include_unsubscribe=False,  # site-owner notification, not a customer send
     )
 
 
@@ -749,14 +854,15 @@ def send_rebrand_announcement_to_all_viewers(db, recipient_ids=None):
             placeholders = ','.join('?' * len(recipient_ids))
             recipients = db.execute(
                 f"SELECT id, username AS email, name FROM stocks_admin_users "
-                f"WHERE role='viewer' AND is_active=1 AND id IN ({placeholders})",
+                f"WHERE role='viewer' AND is_active=1 AND email_unsubscribed_at IS NULL AND id IN ({placeholders})",
                 tuple(recipient_ids)
             ).fetchall()
         else:
             recipients = []
     else:
         recipients = db.execute(
-            "SELECT id, username AS email, name FROM stocks_admin_users WHERE role='viewer' AND is_active=1"
+            "SELECT id, username AS email, name FROM stocks_admin_users "
+            "WHERE role='viewer' AND is_active=1 AND email_unsubscribed_at IS NULL"
         ).fetchall()
 
     sent = 0
@@ -1273,14 +1379,15 @@ def send_daily_suggestions_email(db, target_date=None, recipient_ids=None):
             placeholders = ','.join('?' * len(recipient_ids))
             recipients = db.execute(
                 f"SELECT id, username AS email, name FROM stocks_admin_users "
-                f"WHERE role='viewer' AND is_active=1 AND id IN ({placeholders})",
+                f"WHERE role='viewer' AND is_active=1 AND email_unsubscribed_at IS NULL AND id IN ({placeholders})",
                 tuple(recipient_ids)
             ).fetchall()
         else:
             recipients = []
     else:
         recipients = db.execute(
-            "SELECT id, username AS email, name FROM stocks_admin_users WHERE role='viewer' AND is_active=1"
+            "SELECT id, username AS email, name FROM stocks_admin_users "
+            "WHERE role='viewer' AND is_active=1 AND email_unsubscribed_at IS NULL"
         ).fetchall()
 
     sent = 0
@@ -1407,7 +1514,8 @@ def send_weekly_starters_email(db, target_date=None, recipient_ids=None):
             placeholders = ','.join('?' * len(recipient_ids))
             recipients = db.execute(
                 f"SELECT id, username AS email, name FROM stocks_admin_users "
-                f"WHERE role='viewer' AND is_active=1 AND stocks_plan='starters' AND id IN ({placeholders})",
+                f"WHERE role='viewer' AND is_active=1 AND stocks_plan='starters' "
+                f"AND email_unsubscribed_at IS NULL AND id IN ({placeholders})",
                 tuple(recipient_ids)
             ).fetchall()
         else:
@@ -1415,7 +1523,7 @@ def send_weekly_starters_email(db, target_date=None, recipient_ids=None):
     else:
         recipients = db.execute(
             "SELECT id, username AS email, name FROM stocks_admin_users "
-            "WHERE role='viewer' AND is_active=1 AND stocks_plan='starters'"
+            "WHERE role='viewer' AND is_active=1 AND stocks_plan='starters' AND email_unsubscribed_at IS NULL"
         ).fetchall()
 
     sent = 0
@@ -1535,7 +1643,8 @@ def send_large_cap_bonus_email(db, target_date=None, recipient_ids=None):
             placeholders = ','.join('?' * len(recipient_ids))
             recipients = db.execute(
                 f"SELECT id, username AS email, name FROM stocks_admin_users "
-                f"WHERE role='viewer' AND is_active=1 AND stocks_plan='standard' AND id IN ({placeholders})",
+                f"WHERE role='viewer' AND is_active=1 AND stocks_plan='standard' "
+                f"AND email_unsubscribed_at IS NULL AND id IN ({placeholders})",
                 tuple(recipient_ids)
             ).fetchall()
         else:
@@ -1543,7 +1652,7 @@ def send_large_cap_bonus_email(db, target_date=None, recipient_ids=None):
     else:
         recipients = db.execute(
             "SELECT id, username AS email, name FROM stocks_admin_users "
-            "WHERE role='viewer' AND is_active=1 AND stocks_plan='standard'"
+            "WHERE role='viewer' AND is_active=1 AND stocks_plan='standard' AND email_unsubscribed_at IS NULL"
         ).fetchall()
 
     sent = 0

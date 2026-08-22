@@ -74,6 +74,7 @@
         <div class="max-w-6xl mx-auto px-6 pt-16 pb-14 grid md:grid-cols-2 gap-12 items-center">
             <div>
                 <span class="badge badge-golden mb-5">Pick of the Day</span>
+                <span class="badge mb-5" style="background:#14532d;color:#bbf7d0;">7-Day Free Trial -- No Card Required</span>
                 <h1 class="text-4xl md:text-5xl font-extrabold leading-tight font-serif">
                     One stock a day.<br>
                     <span class="stocks-accent">Actually worth your time.</span>
@@ -86,11 +87,11 @@
                 </p>
                 <div class="flex flex-wrap items-center gap-4 mt-8">
                     <a href="{{ url_for('stocks.stocks_signup') }}" class="stocks-btn px-7 py-3.5 rounded-2xl font-bold text-lg shadow-lg transition hover:opacity-90">
-                        Get Started -- Rs 299/month
+                        Start your free 7-day trial
                     </a>
                     <a href="#how-it-works" class="text-slate-300 hover:text-sky-400 font-semibold underline underline-offset-4">See how it works</a>
                 </div>
-                <p class="text-slate-500 text-sm mt-4">Less than the cost of a pizza. Cancel anytime.</p>
+                <p class="text-slate-500 text-sm mt-4">Then Rs 299/month for Standard, no card needed to start. Cancel anytime.</p>
             </div>
 
             <!-- Illustrative "pick" card with an inline sparkline -->
@@ -280,8 +281,9 @@
                         <li class="flex gap-2"><span class="stocks-accent">✓</span> Browse and search our full research universe</li>
                         <li class="flex gap-2"><span class="stocks-accent">✓</span> Delivered straight to your inbox, only on trading days</li>
                     </ul>
-                    <a href="{{ url_for('stocks.stocks_signup') }}" class="stocks-btn block text-center w-full py-3.5 rounded-2xl font-bold text-lg shadow-lg mt-8 transition hover:opacity-90">
-                        Get Started
+                    <p class="text-sm mt-4" style="color:#4ade80;font-weight:600;">Free for your first 7 days -- no card required.</p>
+                    <a href="{{ url_for('stocks.stocks_signup') }}" class="stocks-btn block text-center w-full py-3.5 rounded-2xl font-bold text-lg shadow-lg mt-4 transition hover:opacity-90">
+                        Start free trial
                     </a>
                 </div>
                 <div class="card p-8">

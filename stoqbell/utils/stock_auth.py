@@ -1,13 +1,15 @@
+import hashlib
 import hmac
 import os
 import secrets
 import string
 from functools import wraps
+from urllib.parse import quote
 
 from flask import flash, redirect, request, session, url_for
 from werkzeug.security import check_password_hash, generate_password_hash
 
-from stoqbell.utils.stocks_subscription import has_stocks_access
+from stoqbell.utils.stocks_subscription import activate_trial, has_stocks_access
 
 # Letters/digits only, and the commonly-confused ones (0/O, 1/l/I) dropped --
 # these are emailed in plaintext to a small trusted circle (see
@@ -32,6 +34,53 @@ def has_valid_cron_secret(request_headers, secret):
         return False
     provided = request_headers.get('X-Cron-Secret', '')
     return hmac.compare_digest(provided, secret)
+
+
+def _unsubscribe_signature(email):
+    """HMAC-SHA256(email, FLASK_SECRET_KEY) -- the one-click-unsubscribe
+    link's signature (see build_unsubscribe_url/verify_and_apply_unsubscribe
+    below). Reads the env var directly rather than importing app.py's own
+    `app.secret_key` (same lazy-env-var-read pattern as db.py/razorpay_shared.py
+    elsewhere in this codebase, so import order relative to app.py's own
+    .env loader doesn't matter) -- must be the exact same value app.py
+    itself sets app.secret_key to, or every link ever generated breaks."""
+    secret = os.environ.get('FLASK_SECRET_KEY', 'nari-nakhre-dev-secret')
+    return hmac.new(secret.encode('utf-8'), email.encode('utf-8'), hashlib.sha256).hexdigest()
+
+
+def build_unsubscribe_url(email):
+    """Signed one-click-unsubscribe link appended to every CUSTOMER-facing
+    Stocks email by default (see utils/stock_alerting.send_zeptomail_stocks_email's
+    include_unsubscribe param) -- HMAC-signed so a guessed/tampered email
+    address alone can't unsubscribe someone else. No login required to use
+    it (app.py's /stocks/unsubscribe) -- a recipient clicking this from
+    their inbox shouldn't need to remember Stocks credentials just to stop
+    receiving mail."""
+    email = (email or '').strip().lower()
+    return f'https://www.stoqbell.com/stocks/unsubscribe?email={quote(email)}&token={_unsubscribe_signature(email)}'
+
+
+def verify_and_apply_unsubscribe(db, email, token):
+    """Verifies a build_unsubscribe_url token (constant-time, same pattern
+    as has_valid_cron_secret above) and, if valid, stamps
+    email_unsubscribed_at on that account -- see STOCKS_AUTH_ALTER_SQL for
+    what this suppresses (every recurring marketing/campaign send) and
+    what it deliberately doesn't touch (website login/access, which stays
+    governed entirely by has_stocks_access/subscription_is_current,
+    completely independent of this flag). Returns True if applied, False
+    if the token didn't verify (tampered or malformed link) -- a
+    non-existent email still needs a correctly-signed token for that exact
+    email to reach the UPDATE at all, so there's nothing further to check
+    to tell 'bad token' apart from 'no such account'."""
+    email = (email or '').strip().lower()
+    if not email or not token or not hmac.compare_digest(_unsubscribe_signature(email), token):
+        return False
+    db.execute(
+        'UPDATE stocks_admin_users SET email_unsubscribed_at=NOW(), updated_at=NOW() WHERE username=?',
+        (email,)
+    )
+    db.commit()
+    return True
 
 
 def legacy_stocks_redirect(new_endpoint, code=301):
@@ -111,6 +160,44 @@ STOCKS_AUTH_ALTER_SQL = [
     # rows that actually went through Razorpay.
     "ALTER TABLE stocks_admin_users ADD COLUMN IF NOT EXISTS subscription_status TEXT "
     "DEFAULT 'none' CHECK (subscription_status IN ('none', 'pending', 'active', 'cancelled', 'halted'))",
+    # Widens the CHECK above to also allow 'trialing' (see utils/stocks_subscription.py's
+    # activate_trial) -- ADD COLUMN IF NOT EXISTS above is a no-op on an
+    # already-existing column, so the only way to add a value to its CHECK
+    # is to drop and re-add the constraint under its default auto-generated
+    # name, same pattern already used for the role check above.
+    'ALTER TABLE stocks_admin_users DROP CONSTRAINT IF EXISTS stocks_admin_users_subscription_status_check',
+    "ALTER TABLE stocks_admin_users ADD CONSTRAINT stocks_admin_users_subscription_status_check "
+    "CHECK (subscription_status IN ('none', 'pending', 'active', 'cancelled', 'halted', 'trialing'))",
+    # 7-day free trial for a brand-new Standard-plan signup (Starters never
+    # gets one) -- see create_pending_subscriber/create_pending_google_subscriber
+    # below and utils/stocks_subscription.py's activate_trial/subscription_is_current.
+    # NULL forever for every row that never had a trial (every row that
+    # predates this column, every Starters signup, every admin-created
+    # viewer).
+    'ALTER TABLE stocks_admin_users ADD COLUMN IF NOT EXISTS trial_ends_at TIMESTAMPTZ',
+    # Dedups the trial-ended notification cron the same way
+    # subscription_reminder_sent_for dedups find_expiring_subscribers below.
+    'ALTER TABLE stocks_admin_users ADD COLUMN IF NOT EXISTS trial_ended_email_sent_at TIMESTAMPTZ',
+    # Admin-created viewer (see create_viewer_account's start_trial param)
+    # who should get a 7-day free trial (same shape as a self-serve
+    # Standard signup, see activate_trial in utils/stocks_subscription.py)
+    # instead of permanent Pro access -- but only starting once THEY set
+    # their own password, not at creation time (an invite can sit unopened
+    # for days, and the whole point of a trial is a clock that starts when
+    # someone actually begins using the product). Consumed (set back to 0)
+    # by change_own_password the moment that first password change
+    # actually happens; see app.py's /stocks/change-password.
+    'ALTER TABLE stocks_admin_users ADD COLUMN IF NOT EXISTS trial_pending_password_change INTEGER DEFAULT 0',
+    # One-click unsubscribe (see app.py's /stocks/unsubscribe and
+    # utils/stock_alerting.py's send_zeptomail_stocks_email, which appends
+    # a per-recipient signed unsubscribe link to every CUSTOMER-facing
+    # email by default). NULL means still subscribed -- every recurring
+    # marketing/campaign send (daily picks, weekly Starters, large-cap
+    # bonus, target-hit/trial-ended/expiry-reminder notices, rebrand
+    # announcements) excludes a row once this is set. Does NOT affect
+    # website login/access at all -- purely an email-delivery opt-out,
+    # completely independent of subscription_status/trial_ends_at.
+    'ALTER TABLE stocks_admin_users ADD COLUMN IF NOT EXISTS email_unsubscribed_at TIMESTAMPTZ',
     'ALTER TABLE stocks_admin_users ADD COLUMN IF NOT EXISTS razorpay_customer_id TEXT',
     'ALTER TABLE stocks_admin_users ADD COLUMN IF NOT EXISTS razorpay_subscription_id TEXT',
     # When the current paid period ends -- for 'active' this is the next
@@ -227,7 +314,7 @@ def _seed_super_admin(client):
 
 
 def authenticate_stocks_admin(db, username, password):
-    """Returns the stocks_admin_users row on success, else None. db is
+    """Returns (row, None) on success, or (None, reason) on failure. db is
     app.py's get_db() -- unlike the startup-time init above, this always
     runs inside a request.
 
@@ -236,22 +323,36 @@ def authenticate_stocks_admin(db, username, password):
     a 'pending' row (signed up, checkout never completed) or 'halted' row
     (Razorpay gave up retrying a failed renewal) is refused login even with
     the right password. Every other role/account is untouched by this
-    check (subscription_status defaults to 'none', which always passes)."""
+    check (subscription_status defaults to 'none', which always passes).
+
+    reason is 'invalid' for every failure except one: 'trial_expired' when
+    the credentials are otherwise correct but a Standard-plan free trial
+    (see activate_trial) has run out -- app.py's stocks_admin_login uses
+    that one specific reason to send the visitor to /stocks/plans to
+    actually subscribe, instead of a generic invalid-credentials message.
+    A lapsed/cancelled/halted PAID subscription still reads as plain
+    'invalid', unchanged from before this distinction existed -- out of
+    scope for what introduced the trial."""
     row = db.execute(
-        'SELECT id, username, password_hash, role, is_active, can_view_watchlist, must_change_password, '
-        'is_pro, subscription_status, subscription_current_period_end, stocks_plan '
+        'SELECT id, username, password_hash, role, name, is_active, can_view_watchlist, must_change_password, '
+        'is_pro, subscription_status, subscription_current_period_end, trial_ends_at, stocks_plan '
         'FROM stocks_admin_users WHERE username=?',
         (username,)
     ).fetchone()
     if not row or not row['is_active']:
-        return None
+        return None, 'invalid'
     if not row.get('password_hash'):
-        return None  # Google-only account -- has no password to check against at all
+        return None, 'invalid'  # Google-only account -- has no password to check against at all
     if not check_password_hash(row['password_hash'], password):
-        return None
-    if not has_stocks_access(row.get('is_pro'), row.get('subscription_status'), row.get('subscription_current_period_end')):
-        return None
-    return row
+        return None, 'invalid'
+    if not has_stocks_access(
+        row.get('is_pro'), row.get('subscription_status'), row.get('subscription_current_period_end'),
+        trial_ends_at=row.get('trial_ends_at'),
+    ):
+        if row.get('subscription_status') == 'trialing':
+            return None, 'trial_expired'
+        return None, 'invalid'
+    return row, None
 
 
 def _must_change_password_redirect():
@@ -409,12 +510,13 @@ def toggle_child_admin_active(db, admin_id):
 def list_viewers(db):
     return db.execute(
         "SELECT id, username, name, is_active, can_view_watchlist, must_change_password, is_pro, "
-        "subscription_status, subscription_current_period_end, stocks_plan, created_at "
+        "subscription_status, subscription_current_period_end, trial_ends_at, trial_pending_password_change, "
+        "stocks_plan, created_at "
         "FROM stocks_admin_users WHERE role='viewer' ORDER BY created_at DESC"
     ).fetchall()
 
 
-def create_viewer_account(db, email, name, created_by_id, can_view_watchlist=False):
+def create_viewer_account(db, email, name, created_by_id, can_view_watchlist=False, start_trial=False):
     """Creates a new role='viewer' account -- email stored in the username
     column (stocks_admin_users has no separate email field, and username is
     already the login field for every role). Generates a real, random
@@ -432,6 +534,17 @@ def create_viewer_account(db, email, name, created_by_id, can_view_watchlist=Fal
     /stocks/watchlist page -- off by default; see
     stocks_watchlist_access_required. Most viewers should stay read-only
     to their own suggestions, so this is opt-in per account, not global.
+
+    start_trial=True creates this viewer WITHOUT permanent Pro access
+    (is_pro=0, unlike the normal admin-created-viewer default) and flags
+    trial_pending_password_change=1 -- their 7-day free trial (same
+    activate_trial/subscription_is_current mechanics a self-serve Standard
+    signup gets) only actually starts once THEY set their own password
+    (see change_own_password), not at this creation moment. Until then,
+    subscription_status stays 'none' (which already always passes
+    has_stocks_access -- see subscription_is_current), so login works fine
+    for the forced first password change; it's what happens right after
+    that changes.
 
     Always created with must_change_password=1 -- a freshly-generated
     password went out over email in plaintext, so the account must be
@@ -454,9 +567,11 @@ def create_viewer_account(db, email, name, created_by_id, can_view_watchlist=Fal
     password_hash = generate_password_hash(password)
     db.execute(
         '''INSERT INTO stocks_admin_users
-               (username, password_hash, role, name, created_by, can_view_watchlist, must_change_password, is_pro)
-           VALUES (?, ?, 'viewer', ?, ?, ?, 1, 1)''',
-        (email, password_hash, (name or '').strip() or None, created_by_id, 1 if can_view_watchlist else 0)
+               (username, password_hash, role, name, created_by, can_view_watchlist, must_change_password,
+                is_pro, trial_pending_password_change)
+           VALUES (?, ?, 'viewer', ?, ?, ?, 1, ?, ?)''',
+        (email, password_hash, (name or '').strip() or None, created_by_id, 1 if can_view_watchlist else 0,
+         0 if start_trial else 1, 1 if start_trial else 0)
     )
     db.commit()
 
@@ -478,16 +593,39 @@ def change_own_password(db, admin_id, new_password):
     so there's no separate 'current password' re-entry here; any logged-in
     account can reach this to change their own password, not just a
     viewer working through a forced first-login change. Returns
-    (ok, error_message)."""
+    (ok, error_message, trial_started).
+
+    trial_started is True only when this account was created via
+    create_viewer_account's start_trial=True (see
+    trial_pending_password_change) and this call just consumed that
+    one-shot flag by actually activating the trial -- the caller (app.py's
+    /stocks/change-password) uses it to tell the viewer their 7-day clock
+    just started, right at the one moment that's actually true (account
+    creation time would be misleading -- an invite can sit unopened for
+    days). False for every other account, and for this same account on any
+    later password change (the flag is cleared after firing once)."""
     if not new_password or len(new_password) < MIN_PASSWORD_LENGTH:
-        return False, f'Password must be at least {MIN_PASSWORD_LENGTH} characters.'
+        return False, f'Password must be at least {MIN_PASSWORD_LENGTH} characters.', False
     password_hash = generate_password_hash(new_password)
     db.execute(
         'UPDATE stocks_admin_users SET password_hash=?, must_change_password=0, updated_at=NOW() WHERE id=?',
         (password_hash, admin_id)
     )
     db.commit()
-    return True, None
+
+    trial_started = False
+    row = db.execute(
+        'SELECT trial_pending_password_change FROM stocks_admin_users WHERE id=?', (admin_id,)
+    ).fetchone()
+    if row and row.get('trial_pending_password_change'):
+        activate_trial(db, admin_id)
+        db.execute(
+            'UPDATE stocks_admin_users SET trial_pending_password_change=0, updated_at=NOW() WHERE id=?',
+            (admin_id,)
+        )
+        db.commit()
+        trial_started = True
+    return True, None, trial_started
 
 
 def toggle_viewer_active(db, admin_id):
@@ -530,9 +668,13 @@ def toggle_viewer_pro(db, admin_id):
 
 def set_viewer_plan(db, admin_id, plan):
     """Admin-only plan switch (Standard <-> Starters, see STOCKS_AUTH_ALTER_SQL's
-    stocks_plan column) -- there's no self-serve upgrade/downgrade flow, so
-    this is the only way an existing subscriber's plan ever changes after
-    signup. Same role-safety pattern as toggle_viewer_active/toggle_viewer_pro:
+    stocks_plan column) -- there's still no self-serve upgrade/downgrade
+    flow once paying, so this is the only way a PAYING subscriber's plan
+    ever changes. (The one other caller, app.py's stocks_plans_continue in
+    'resubscribe' mode, is a different case entirely -- an account whose
+    free trial already expired choosing which plan to actually pay for,
+    with nothing paid yet, not an upgrade/downgrade of an active
+    subscription.) Same role-safety pattern as toggle_viewer_active/toggle_viewer_pro:
     only ever touches a row that's actually role='viewer'. Does NOT touch
     Razorpay at all -- switching here only changes which weekly/daily send
     a viewer is included in going forward; their existing subscription
@@ -555,7 +697,7 @@ def set_viewer_plan(db, admin_id, plan):
 def find_stocks_account_by_google_sub(db, google_sub):
     return db.execute(
         'SELECT id, username, name, role, is_active, can_view_watchlist, must_change_password, '
-        'is_pro, subscription_status, subscription_current_period_end, razorpay_subscription_id, '
+        'is_pro, subscription_status, subscription_current_period_end, trial_ends_at, razorpay_subscription_id, '
         'referred_by_id, stocks_plan '
         'FROM stocks_admin_users WHERE google_sub=?',
         (google_sub,)
@@ -565,7 +707,7 @@ def find_stocks_account_by_google_sub(db, google_sub):
 def find_stocks_account_by_username(db, username):
     return db.execute(
         'SELECT id, username, name, role, is_active, can_view_watchlist, must_change_password, '
-        'is_pro, subscription_status, subscription_current_period_end, razorpay_subscription_id, google_sub, '
+        'is_pro, subscription_status, subscription_current_period_end, trial_ends_at, razorpay_subscription_id, google_sub, '
         'referred_by_id, stocks_plan '
         'FROM stocks_admin_users WHERE username=?',
         (username,)
@@ -588,26 +730,39 @@ def create_pending_google_subscriber(db, email, name, google_sub, referred_by_id
     """Brand-new self-serve signup via 'Sign up with Google' -- no password
     at all (password_hash stays NULL; see the relaxed NOT NULL constraint
     in STOCKS_AUTH_ALTER_SQL and authenticate_stocks_admin's check for a
-    missing password_hash). Same pending/unpaid shape as
-    utils.stocks_subscription.create_pending_subscriber's email/password
-    version: is_active=0, subscription_status='pending', is_pro=0 -- the
-    caller (app.py's Google callback) still has to send this account
-    through Razorpay checkout before it can log in. referred_by_id (see
-    utils/stocks_referrals.py), when given, is stamped once here and never
-    changes after -- app.py's Google callback resolves the code (carried
-    across the OAuth round-trip via session, since form fields don't
-    survive it) into this id before calling in. stocks_plan ('standard' or
-    'starters', see STOCKS_AUTH_ALTER_SQL) is likewise resolved from the
-    OAuth round-trip's stashed session value and stamped once here. Returns
-    the new row."""
+    missing password_hash). referred_by_id (see utils/stocks_referrals.py),
+    when given, is stamped once here and never changes after -- app.py's
+    Google callback resolves the code (carried across the OAuth round-trip
+    via session, since form fields don't survive it) into this id before
+    calling in. stocks_plan ('standard' or 'starters', see
+    STOCKS_AUTH_ALTER_SQL) is likewise resolved from the OAuth round-trip's
+    stashed session value and stamped once here. Returns the new row.
+
+    stocks_plan == 'standard' grants an immediate 7-day free trial
+    (is_active=1, subscription_status='trialing', trial_ends_at=NOW()+7d --
+    see utils/stocks_subscription.py's subscription_is_current) so the
+    caller can log this account straight in with no Razorpay step at all.
+    'starters' keeps the original pending/unpaid shape (is_active=0,
+    subscription_status='pending') -- the caller still has to send it
+    through Razorpay checkout before it can log in, exactly as before the
+    trial existed."""
     email = (email or '').strip().lower()
-    db.execute(
-        '''INSERT INTO stocks_admin_users
-               (username, password_hash, role, name, is_active, must_change_password,
-                subscription_status, is_pro, google_sub, referred_by_id, stocks_plan)
-           VALUES (?, NULL, 'viewer', ?, 0, 0, 'pending', 0, ?, ?, ?)''',
-        (email, (name or '').strip() or None, google_sub, referred_by_id, stocks_plan)
-    )
+    if stocks_plan == 'standard':
+        db.execute(
+            '''INSERT INTO stocks_admin_users
+                   (username, password_hash, role, name, is_active, must_change_password,
+                    subscription_status, trial_ends_at, is_pro, google_sub, referred_by_id, stocks_plan)
+               VALUES (?, NULL, 'viewer', ?, 1, 0, 'trialing', NOW() + INTERVAL '7 days', 0, ?, ?, ?)''',
+            (email, (name or '').strip() or None, google_sub, referred_by_id, stocks_plan)
+        )
+    else:
+        db.execute(
+            '''INSERT INTO stocks_admin_users
+                   (username, password_hash, role, name, is_active, must_change_password,
+                    subscription_status, is_pro, google_sub, referred_by_id, stocks_plan)
+               VALUES (?, NULL, 'viewer', ?, 0, 0, 'pending', 0, ?, ?, ?)''',
+            (email, (name or '').strip() or None, google_sub, referred_by_id, stocks_plan)
+        )
     db.commit()
     return find_stocks_account_by_google_sub(db, google_sub)
 

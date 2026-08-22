@@ -19,8 +19,13 @@
     <div class="max-w-3xl mx-auto text-center">
         <h1 class="text-3xl font-extrabold font-serif"><a href="{{ url_for('stocks.stocks_landing') }}" class="stocks-accent no-underline inline-flex items-center gap-2"><img src="{{ url_for('stocks.static', filename='assets/stoqbell-icon-dark.png') }}" alt="" width="30" height="30"><span class="brand-stoq">Stoq</span><span class="brand-bell">Bell</span></a></h1>
         <p class="text-slate-500 text-xs mt-1">Trade the swings, own the future.</p>
+        {% if plans_mode == 'resubscribe' %}
+        <h2 class="text-2xl font-extrabold font-serif mt-6">Choose a plan to keep your access</h2>
+        <p class="text-slate-400 mt-2">Your 7-day free trial has ended -- pick a plan below and we'll take you straight to payment.</p>
+        {% else %}
         <h2 class="text-2xl font-extrabold font-serif mt-6">Choose your plan to continue</h2>
-        <p class="text-slate-400 mt-2">You're signed in with Google -- pick a plan below and we'll take you straight to payment.</p>
+        <p class="text-slate-400 mt-2">You're signed in with Google -- pick Standard for a free 7-day trial, or Starters to go straight to payment.</p>
+        {% endif %}
 
         {% with messages = get_flashed_messages(with_categories=true) %}
         {% if messages %}
@@ -45,8 +50,11 @@
                     <li class="flex gap-2"><span class="stocks-accent">✓</span> Browse and search our full research universe</li>
                     <li class="flex gap-2"><span class="stocks-accent">✓</span> Delivered straight to your inbox, only on trading days</li>
                 </ul>
+                {% if plans_mode != 'resubscribe' %}
+                <p class="text-sm mt-4" style="color:#4ade80;font-weight:600;">Free for your first 7 days -- no card required.</p>
+                {% endif %}
                 <a href="{{ url_for('stocks.stocks_plans_continue', plan='standard') }}" class="stocks-btn block text-center w-full py-3.5 rounded-2xl font-bold text-lg shadow-lg mt-8 transition hover:opacity-90">
-                    Choose Standard
+                    {{ 'Subscribe' if plans_mode == 'resubscribe' else 'Start free trial' }}
                 </a>
             </div>
             <div class="card p-8">
@@ -60,7 +68,7 @@
                     <li class="flex gap-2"><span class="stocks-accent">✓</span> A handful of high-conviction ideas a month, not a daily stream</li>
                 </ul>
                 <a href="{{ url_for('stocks.stocks_plans_continue', plan='starters') }}" class="stocks-btn block text-center w-full py-3.5 rounded-2xl font-bold text-lg shadow-lg mt-8 transition hover:opacity-90">
-                    Choose Starters
+                    Subscribe
                 </a>
             </div>
         </div>

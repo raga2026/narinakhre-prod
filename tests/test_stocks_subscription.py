@@ -121,6 +121,28 @@ def test_subscription_is_current_parses_iso_string_timestamps():
     assert subscription_is_current('cancelled', future_str) is True
 
 
+def test_trialing_status_passes_until_trial_ends_at():
+    future = datetime.now(timezone.utc) + timedelta(days=3)
+    assert subscription_is_current('trialing', None, trial_ends_at=future) is True
+
+
+def test_trialing_status_fails_after_trial_ends_at():
+    past = datetime.now(timezone.utc) - timedelta(seconds=1)
+    assert subscription_is_current('trialing', None, trial_ends_at=past) is False
+
+
+def test_trialing_status_with_no_trial_ends_at_fails():
+    # Defensive -- should never happen in practice (activate_trial always
+    # stamps trial_ends_at in the same statement that sets 'trialing'), but
+    # a trial with no recorded end must not silently grant access forever.
+    assert subscription_is_current('trialing', None, trial_ends_at=None) is False
+
+
+def test_trialing_status_parses_iso_string_trial_ends_at():
+    future_str = (datetime.now(timezone.utc) + timedelta(days=1)).isoformat().replace('+00:00', 'Z')
+    assert subscription_is_current('trialing', None, trial_ends_at=future_str) is True
+
+
 # --- has_stocks_access -------------------------------------------------------
 
 def test_is_pro_grants_access_regardless_of_subscription_status():
@@ -134,6 +156,13 @@ def test_not_pro_falls_through_to_subscription_check():
     assert has_stocks_access(False, 'active', None) is True
     assert has_stocks_access(False, 'pending', future) is False
     assert has_stocks_access(0, 'none', None) is True  # is_pro=0 but never a paid account either
+
+
+def test_has_stocks_access_threads_trial_ends_at_through():
+    future = datetime.now(timezone.utc) + timedelta(days=3)
+    past = datetime.now(timezone.utc) - timedelta(seconds=1)
+    assert has_stocks_access(False, 'trialing', None, trial_ends_at=future) is True
+    assert has_stocks_access(False, 'trialing', None, trial_ends_at=past) is False
 
 
 # --- days_until / is_within_reminder_window ---------------------------------

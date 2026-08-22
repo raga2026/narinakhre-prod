@@ -50,16 +50,20 @@ from stoqbell.utils.stock_auth import (
     link_google_sub,
     create_pending_google_subscriber,
     safe_stocks_next_url,
+    verify_and_apply_unsubscribe,
 )
 from stoqbell.utils.stocks_subscription import (
     SUBSCRIPTION_TOTAL_COUNT_MONTHS,
     create_pending_subscriber,
     attach_razorpay_subscription,
     activate_subscription,
+    activate_trial,
     record_recurring_charge,
     mark_subscription_cancelled,
     mark_subscription_halted,
     find_expiring_subscribers,
+    find_expired_trials,
+    mark_trial_ended_email_sent,
     find_account_by_razorpay_subscription_id,
     mark_reminder_sent,
     has_stocks_access,
@@ -204,6 +208,8 @@ from stoqbell.utils.suggestion_email import (
     send_admin_subscription_cancelled_email,
     send_target_hit_email,
     send_target_achieved_email,
+    send_trial_ended_email,
+    send_trial_started_email,
     send_weekly_starters_email,
     send_large_cap_bonus_email,
     send_rebrand_announcement_to_all_viewers,
@@ -760,12 +766,19 @@ def stocks_large_cap_bonus_send_email():
 def stocks_suggestions_notify_target_hits():
     """Checks every still-'pending' stock_suggestions row against the
     latest synced close (see suggestion_engine.find_pending_target_hit_suggestions)
-    and, for any that have reached target, emails every CURRENT
-    stocks_plan='standard' (Rs 299/mo) subscriber -- one email per
+    and, for any that have reached target, emails every stocks_plan='standard'
+    (Rs 299/mo) viewer who ever had access -- is_active never gets reset
+    back to 0 once a trial or subscription starts (only an admin manually
+    suspending an account does that, see toggle_viewer_active), so this
+    deliberately still reaches someone whose free trial expired without
+    subscribing, or whose paid subscription lapsed -- the pick they saw
+    while they had access hit target regardless, and it's exactly the
+    moment they're most likely to come back and subscribe. One email per
     recipient bundling every hit found this run, not one email per stock
     -- with the recommended day/price, target price, achieved day, time
     taken, and profit at today's close, prompting them to consider
-    booking profit themselves (see send_target_achieved_email). Every
+    booking profit themselves, plus a resubscribe nudge for anyone who
+    doesn't currently have access (see send_target_achieved_email). Every
     notified suggestion is then marked status='target_hit'
     (mark_suggestions_target_hit) so it's never re-notified about.
 
@@ -785,17 +798,41 @@ def stocks_suggestions_notify_target_hits():
             failed = 0
             if hits:
                 recipients = job_db.execute(
-                    "SELECT id, username AS email, name FROM stocks_admin_users "
-                    "WHERE role='viewer' AND is_active=1 AND stocks_plan='standard'"
+                    "SELECT id, username AS email, name, is_pro, subscription_status, "
+                    "subscription_current_period_end, trial_ends_at FROM stocks_admin_users "
+                    "WHERE role='viewer' AND is_active=1 AND stocks_plan='standard' AND email_unsubscribed_at IS NULL"
                 ).fetchall()
+                if not recipients:
+                    current_app.logger.warning(
+                        f'{len(hits)} target hit(s) found but there are no Standard-plan '
+                        f'subscribers to notify -- marking as notified anyway since there is no one to retry for.'
+                    )
                 for r in recipients:
-                    ok, detail = send_target_achieved_email(r['email'], r.get('name'), hits)
+                    currently_subscribed = has_stocks_access(
+                        r.get('is_pro'), r.get('subscription_status'), r.get('subscription_current_period_end'),
+                        trial_ends_at=r.get('trial_ends_at'),
+                    )
+                    ok, detail = send_target_achieved_email(r['email'], r.get('name'), hits, currently_subscribed=currently_subscribed)
                     if ok:
                         sent += 1
                     else:
                         failed += 1
                         current_app.logger.warning(f'Target-achieved email failed for {r["email"]}: {detail}')
-                mark_suggestions_target_hit(job_db, [h['id'] for h in hits])
+                # Only consume the 'pending' status (permanently excluding
+                # these hits from tomorrow's re-check, see
+                # find_pending_target_hit_suggestions) once we know someone
+                # actually got told, or there was truly no one to tell --
+                # if recipients existed but every single send failed (e.g. a
+                # transient ZeptoMail outage), leave them pending so
+                # tomorrow's run retries instead of silently losing the
+                # notification forever.
+                if sent > 0 or not recipients:
+                    mark_suggestions_target_hit(job_db, [h['id'] for h in hits])
+                else:
+                    current_app.logger.error(
+                        f'All {len(recipients)} target-achieved emails failed to send; '
+                        f'leaving {len(hits)} suggestion(s) pending for retry tomorrow.'
+                    )
             summary = {'target_hits': len(hits), 'recipients_sent': sent, 'recipients_failed': failed}
         except Exception as e:
             current_app.logger.error(f'Target-hit notification job failed: {e}')
@@ -1033,8 +1070,10 @@ def stocks_users_manage():
         email = request.form.get('email')
         name = request.form.get('name')
         can_view_watchlist = request.form.get('can_view_watchlist') == 'on'
+        start_trial = request.form.get('start_trial') == 'on'
         row, password, error = create_viewer_account(
-            db, email, name, session.get('stocks_admin_id'), can_view_watchlist=can_view_watchlist
+            db, email, name, session.get('stocks_admin_id'),
+            can_view_watchlist=can_view_watchlist, start_trial=start_trial,
         )
         if error:
             flash(error, 'error')
@@ -1048,7 +1087,14 @@ def stocks_users_manage():
                       f'{detail} -- share their login manually for now.', 'error')
         return redirect(url_for('stocks.stocks_users_manage'))
 
-    viewers = list_viewers(db)
+    viewers = []
+    for v in list_viewers(db):
+        v = dict(v)
+        trial_ends_at = v.get('trial_ends_at')
+        if isinstance(trial_ends_at, str):
+            trial_ends_at = datetime.fromisoformat(trial_ends_at.replace('Z', '+00:00'))
+        v['trial_ends_at_label'] = trial_ends_at.strftime('%d %b %Y') if trial_ends_at else None
+        viewers.append(v)
     return render_template('admin/stocks_users.html', viewers=viewers)
 
 
@@ -2052,11 +2098,12 @@ def _stocks_viewer_account_summary(db, admin_id):
     stocks_profile so this lookup isn't duplicated across both. Returns a
     flat dict whose keys match the template variable names both pages
     already use (subscription_status, subscription_period_end_label,
-    referral_code, referral_link, qualified_referrals,
-    available_referral_credits, referrals_per_free_month) -- callers pass
-    it straight through to render_template via **."""
+    trial_ends_at_label, can_cancel_subscription, referral_code,
+    referral_link, qualified_referrals, available_referral_credits,
+    referrals_per_free_month) -- callers pass it straight through to
+    render_template via **."""
     subscription_row = db.execute(
-        'SELECT subscription_status, subscription_current_period_end FROM stocks_admin_users WHERE id=?',
+        'SELECT subscription_status, subscription_current_period_end, trial_ends_at FROM stocks_admin_users WHERE id=?',
         (admin_id,)
     ).fetchone()
     subscription_period_end_label = None
@@ -2065,6 +2112,20 @@ def _stocks_viewer_account_summary(db, admin_id):
         end_value = subscription_row['subscription_current_period_end']
         end_dt = datetime.fromisoformat(str(end_value).replace('Z', '+00:00')) if isinstance(end_value, str) else end_value
         subscription_period_end_label = end_dt.strftime('%d %b %Y')
+
+    trial_ends_at_label = None
+    if subscription_row and subscription_row.get('subscription_status') == 'trialing' \
+            and subscription_row.get('trial_ends_at'):
+        trial_value = subscription_row['trial_ends_at']
+        trial_dt = datetime.fromisoformat(str(trial_value).replace('Z', '+00:00')) if isinstance(trial_value, str) else trial_value
+        trial_ends_at_label = trial_dt.strftime('%d %b %Y')
+
+    # Cancel button only for a real, currently-active PAID subscription --
+    # a free trial has no Razorpay mandate at all to cancel (see
+    # stocks_subscription_cancel's own docstring for the matching
+    # server-side check, this is just what decides whether to show the
+    # button in the first place).
+    can_cancel_subscription = bool(subscription_row and subscription_row.get('subscription_status') == 'active')
 
     # Referral status (see utils/stocks_referrals.py) -- lazily generates a
     # code on first view for an account that's never had one (existing
@@ -2077,6 +2138,8 @@ def _stocks_viewer_account_summary(db, admin_id):
     return {
         'subscription_status': subscription_row.get('subscription_status') if subscription_row else None,
         'subscription_period_end_label': subscription_period_end_label,
+        'trial_ends_at_label': trial_ends_at_label,
+        'can_cancel_subscription': can_cancel_subscription,
         'referral_code': referral_code, 'referral_link': referral_link,
         'qualified_referrals': qualified_referrals, 'available_referral_credits': available_credits,
         'referrals_per_free_month': REFERRALS_PER_FREE_MONTH,
@@ -2101,6 +2164,71 @@ def stocks_profile():
         plan=session.get('stocks_plan'),
         **account_summary,
     )
+
+
+@stocks_bp.route('/stocks/subscription/upgrade-now', methods=['GET'])
+@stocks_login_required
+def stocks_subscription_upgrade_now():
+    """'Subscribe now' from /stocks/profile during an active trial --
+    lets someone pay early instead of waiting for their trial to run out.
+    Can't just point this at /stocks/signup: that account already has
+    working trial access, so create_pending_subscriber's 'existing' branch
+    would see has_stocks_access already True and bounce them to "please
+    log in" instead of checkout. Reuses /stocks/plans' 'resubscribe' mode
+    instead (see stocks_plans_continue) -- same "choose a plan, go straight
+    to real Razorpay checkout, no second trial" path an expired trial uses,
+    just reached voluntarily instead of via a lapsed-access redirect."""
+    db = get_db()
+    row = db.execute('SELECT name FROM stocks_admin_users WHERE id=?', (session['stocks_admin_id'],)).fetchone()
+    session['stocks_plans_context'] = {
+        'mode': 'resubscribe', 'admin_id': session['stocks_admin_id'],
+        'email': session.get('stocks_admin_username'), 'name': row.get('name') if row else None,
+    }
+    session.modified = True
+    return redirect(url_for('stocks.stocks_plans'))
+
+
+@stocks_bp.route('/stocks/subscription/cancel', methods=['POST'])
+@stocks_login_required
+def stocks_subscription_cancel():
+    """Self-serve cancellation from /stocks/profile's 'Cancel subscription'
+    button. Cancels at the end of the current billing cycle
+    (cancel_at_cycle_end=1) rather than immediately -- access keeps
+    working through whatever period was already paid for, exactly what
+    subscription_is_current already assumes for a 'cancelled' row (see its
+    own docstring) and exactly what the profile page displays
+    ("Cancelled -- access ends <date>"). Updates the local row immediately
+    via mark_subscription_cancelled rather than waiting on Razorpay's own
+    'subscription.cancelled' webhook (which only fires once the cycle
+    actually ends for a cycle-end cancellation) -- the visitor who just
+    clicked Cancel should see it reflected on the very next page load, not
+    days later.
+
+    Only ever acts on a real, currently 'active' PAID subscription -- a
+    free trial has no Razorpay mandate to cancel at all (see
+    _stocks_viewer_account_summary's can_cancel_subscription, which is
+    what decides whether the button even shows), and a row that's already
+    cancelled/halted/pending has nothing further to cancel."""
+    admin_id = session.get('stocks_admin_id')
+    db = get_db()
+    row = db.execute(
+        'SELECT subscription_status, razorpay_subscription_id FROM stocks_admin_users WHERE id=?',
+        (admin_id,)
+    ).fetchone()
+    if not row or row.get('subscription_status') != 'active' or not row.get('razorpay_subscription_id'):
+        flash('No active subscription to cancel.', 'error')
+        return redirect(url_for('stocks.stocks_profile'))
+
+    try:
+        razorpay_client.subscription.cancel(row['razorpay_subscription_id'], data={'cancel_at_cycle_end': 1})
+    except Exception as e:
+        current_app.logger.error(f'Razorpay subscription cancel failed for admin_id={admin_id}: {e}')
+        flash('Could not cancel right now -- please try again shortly.', 'error')
+        return redirect(url_for('stocks.stocks_profile'))
+
+    mark_subscription_cancelled(db, row['razorpay_subscription_id'])
+    flash('Your subscription has been cancelled -- access continues until your current billing period ends.', 'info')
+    return redirect(url_for('stocks.stocks_profile'))
 
 
 @stocks_bp.route('/stocks/my/suggestions', methods=['GET'])
@@ -2179,7 +2307,7 @@ def stocks_recommendations_tracker():
         row = dict(row)
         row.update(compute_tracker_row_stats(
             row.get('buy_price'), row.get('target_sell_price'), row.get('stop_loss_price'),
-            row.get('latest_price'), row['suggestion_date'],
+            row.get('latest_price'), row['suggestion_date'], target_hit_date=row.get('target_hit_date'),
         ))
         row['projection'] = compute_projection_targets(
             row.get('buy_price'), row.get('target_sell_price'), row.get('pattern_name')
@@ -2509,6 +2637,35 @@ def _render_stocks_checkout(admin_id, email, name, plan='standard', referral_pla
     )
 
 
+def _finish_stocks_signup(row, email, name, plan):
+    """Routes a brand-new signup to either an immediate trial login
+    (Standard, trial just granted by create_pending_subscriber/
+    create_pending_google_subscriber) or Razorpay checkout (Starters, or
+    any row that wasn't freshly created as 'trialing' -- e.g. a resubmitted
+    signup for an account that already used its trial) -- shared by
+    /stocks/signup, the Google callback's new-subscriber branch, and
+    /stocks/plans/continue's 'new_google' mode, all three of which need
+    this exact same fork."""
+    if row.get('subscription_status') == 'trialing':
+        session['stocks_admin_id'] = row['id']
+        session['stocks_admin_username'] = row['username']
+        session['stocks_admin_role'] = 'viewer'
+        session['stocks_can_view_watchlist'] = bool(row.get('can_view_watchlist'))
+        session['stocks_must_change_password'] = bool(row.get('must_change_password'))
+        session['stocks_plan'] = plan
+        session.modified = True
+        trial_ends_at = row.get('trial_ends_at')
+        if isinstance(trial_ends_at, str):
+            trial_ends_at = datetime.fromisoformat(trial_ends_at.replace('Z', '+00:00'))
+        trial_end_display = trial_ends_at.strftime('%d %b %Y') if trial_ends_at else 'in 7 days'
+        flash(f'Your 7-day free trial has started -- full access through {trial_end_display}, no card required.', 'info')
+        return redirect(url_for('stocks.stocks_my_suggestions'))
+    return _render_stocks_checkout(
+        row['id'], email, name, plan=plan,
+        referral_plan=bool(row.get('referred_by_id')) and plan == 'standard',
+    )
+
+
 @stocks_bp.route('/stocks/signup', methods=['GET', 'POST'])
 def stocks_signup():
     """Self-serve paid signup -- collects name/email/password, then hands
@@ -2593,15 +2750,21 @@ def stocks_signup():
         return render_template('admin/stocks_signup.html', recaptcha_site_key=STOCKS_RECAPTCHA_SITE_KEY, form_rendered_at=time.time(), referral_code_prefill=referral_code_prefill, plan_prefill=plan), 400
 
     if error == 'existing':
-        if has_stocks_access(row.get('is_pro'), row.get('subscription_status'), row.get('subscription_current_period_end')):
+        if has_stocks_access(
+            row.get('is_pro'), row.get('subscription_status'), row.get('subscription_current_period_end'),
+            trial_ends_at=row.get('trial_ends_at'),
+        ):
             flash('You already have an account -- please log in.', 'info')
             return redirect(url_for('stocks.stocks_admin_login'))
-        # Pending (never completed checkout) or lapsed (halted/expired
-        # cancelled) -- send them back through checkout rather than
-        # refusing the signup outright. An existing row's referred_by_id
-        # AND stocks_plan (if any) were already stamped the first time it
-        # was created -- this resubmission doesn't retroactively change
-        # either one.
+        # Pending (never completed checkout), an expired trial, or lapsed
+        # (halted/expired cancelled) -- send them back through checkout
+        # rather than refusing the signup outright. An existing row's
+        # referred_by_id AND stocks_plan (if any) were already stamped the
+        # first time it was created -- this resubmission doesn't
+        # retroactively change either one, and deliberately does NOT grant
+        # a second trial (_finish_stocks_signup only starts a trial login
+        # for a row this same call just freshly created as 'trialing' --
+        # see create_pending_subscriber's docstring).
 
     # Based on the ACCOUNT's own stored referred_by_id/stocks_plan, not
     # just whatever was resubmitted in this exact request -- covers the
@@ -2610,10 +2773,7 @@ def stocks_signup():
     # qualified for, as long as it's still on its first, never-completed
     # payment attempt).
     account_plan = row.get('stocks_plan', 'standard')
-    return _render_stocks_checkout(
-        row['id'], email, name, plan=account_plan,
-        referral_plan=bool(row.get('referred_by_id')) and account_plan == 'standard',
-    )
+    return _finish_stocks_signup(row, email, name, account_plan)
 
 
 @stocks_bp.route('/stocks/subscribe/verify', methods=['POST'])
@@ -2806,9 +2966,9 @@ def stocks_google_callback():
             # the LOGIN page directly. Rather than silently defaulting to
             # Standard, stash what Google gave us and send them to a plan
             # picker first; stocks_plans_continue re-enters this same
-            # create-account-then-checkout path once they've chosen.
-            session['stocks_pending_google'] = {
-                'google_sub': google_sub, 'email': email, 'name': name,
+            # create-account-then-trial/checkout path once they've chosen.
+            session['stocks_plans_context'] = {
+                'mode': 'new_google', 'google_sub': google_sub, 'email': email, 'name': name,
                 'referral_code': referral_code,
             }
             session.modified = True
@@ -2821,8 +2981,12 @@ def stocks_google_callback():
                 db, email, name, google_sub, referred_by_id=referrer['id'] if referrer else None,
                 stocks_plan=pending_plan,
             )
+            return _finish_stocks_signup(row, email, name, pending_plan)
 
-    if row.get('is_active') and has_stocks_access(row.get('is_pro'), row.get('subscription_status'), row.get('subscription_current_period_end')):
+    if row.get('is_active') and has_stocks_access(
+        row.get('is_pro'), row.get('subscription_status'), row.get('subscription_current_period_end'),
+        trial_ends_at=row.get('trial_ends_at'),
+    ):
         session['stocks_admin_id'] = row['id']
         session['stocks_admin_username'] = row['username']
         session['stocks_admin_role'] = 'viewer'
@@ -2836,6 +3000,18 @@ def stocks_google_callback():
             return redirect(next_url)
         return redirect(url_for('stocks.stocks_my_suggestions'))
 
+    if row.get('subscription_status') == 'trialing':
+        # An existing account whose free trial has run out, signing in via
+        # Google -- same "go choose a plan for real" treatment as a
+        # password login getting reason='trial_expired' below, not a
+        # straight-to-checkout bounce (see stocks_admin_login's docstring
+        # for why this is scoped to 'trialing' specifically and not every
+        # kind of lapsed account).
+        session['stocks_plans_context'] = {'mode': 'resubscribe', 'admin_id': row['id'], 'email': email, 'name': name}
+        session.modified = True
+        flash('Your 7-day free trial has ended -- choose a plan to keep your access.', 'info')
+        return redirect(url_for('stocks.stocks_plans'))
+
     # Based on the ACCOUNT's own stored referred_by_id/stocks_plan (see the
     # matching comment in /stocks/signup) so a retried checkout still gets
     # the same plan and discount it originally qualified for.
@@ -2847,46 +3023,58 @@ def stocks_google_callback():
 
 @stocks_bp.route('/stocks/plans', methods=['GET'])
 def stocks_plans():
-    """Pricing-card interstitial for a Google sign-in that arrived with no
-    plan chosen yet (see stocks_google_callback). Reads nothing itself --
-    stocks_plans_continue does the actual account creation -- this just
-    renders the two plan cards; if the pending-Google session state is
-    gone (direct hit, expired session, back-button after finishing), there
-    is nothing to continue, so send them to the normal signup page instead."""
-    if not session.get('stocks_pending_google'):
+    """Pricing-card page -- reached either as a brand-new Google sign-in
+    that arrived with no plan chosen yet, or as an EXISTING account whose
+    free trial just ran out needing to actually subscribe now (see
+    stocks_plans_context's 'mode' field, set by stocks_google_callback and
+    stocks_admin_login). Reads nothing itself -- stocks_plans_continue does
+    the actual account creation/checkout -- this just renders the two plan
+    cards; if the context is gone (direct hit, expired session, back-button
+    after finishing), there is nothing to continue, so send them to the
+    normal signup page instead."""
+    context = session.get('stocks_plans_context')
+    if not context:
         return redirect(url_for('stocks.stocks_signup'))
-    return render_template('admin/stocks_plans.html')
+    return render_template('admin/stocks_plans.html', plans_mode=context.get('mode', 'new_google'))
 
 
 @stocks_bp.route('/stocks/plans/continue', methods=['GET'])
 def stocks_plans_continue():
-    """Finishes the Google sign-up once a plan card on /stocks/plans has
-    been picked -- mirrors the create_pending_google_subscriber + referral
-    + checkout sequence in stocks_google_callback's own new-subscriber
-    branch, just resumed from the stashed session state instead of a fresh
-    OAuth round-trip."""
+    """Finishes whichever /stocks/plans visit this is, once a plan card has
+    been picked -- see stocks_plans_context's 'mode':
+      - 'new_google': mirrors the create_pending_google_subscriber +
+        referral + trial/checkout sequence in stocks_google_callback's own
+        new-subscriber branch (via _finish_stocks_signup), just resumed
+        from the stashed session state instead of a fresh OAuth round-trip.
+      - 'resubscribe': an EXISTING account whose free trial already ran
+        out, choosing a plan to actually pay for now -- always goes to
+        real Razorpay checkout, never grants a second trial regardless of
+        which plan is picked. Lets them switch Standard<->Starters from
+        what they originally trialed, since nothing's been paid for yet."""
     plan = request.args.get('plan')
     if plan not in ('standard', 'starters'):
         flash('Please choose a plan to continue.', 'error')
         return redirect(url_for('stocks.stocks_plans'))
 
-    pending = session.pop('stocks_pending_google', None)
+    context = session.pop('stocks_plans_context', None)
     session.modified = True
-    if not pending:
+    if not context:
         return redirect(url_for('stocks.stocks_signup'))
 
     db = get_db()
-    referrer = find_referrer_by_code(db, pending.get('referral_code'))
-    if referrer and referrer['username'] == pending['email']:
+    if context.get('mode') == 'resubscribe':
+        admin_id = context['admin_id']
+        set_viewer_plan(db, admin_id, plan)
+        return _render_stocks_checkout(admin_id, context['email'], context['name'], plan=plan, referral_plan=False)
+
+    referrer = find_referrer_by_code(db, context.get('referral_code'))
+    if referrer and referrer['username'] == context['email']:
         referrer = None  # self-referral -- silently ignored
     row = create_pending_google_subscriber(
-        db, pending['email'], pending['name'], pending['google_sub'],
+        db, context['email'], context['name'], context['google_sub'],
         referred_by_id=referrer['id'] if referrer else None, stocks_plan=plan,
     )
-    return _render_stocks_checkout(
-        row['id'], pending['email'], pending['name'], plan=plan,
-        referral_plan=bool(row.get('referred_by_id')) and plan == 'standard',
-    )
+    return _finish_stocks_signup(row, context['email'], context['name'], plan)
 
 
 @stocks_bp.route('/stocks/razorpay/webhook', methods=['POST'])
@@ -2991,6 +3179,52 @@ def stocks_subscriptions_send_expiry_reminders():
     return _dispatch_stocks_job(db, is_cron, 'subscription_reminders', _job)
 
 
+@stocks_bp.route('/stocks/subscription/notify-trial-ended', methods=['POST'])
+def stocks_subscription_notify_trial_ended():
+    """Daily cron-triggered: emails anyone whose 7-day Standard-plan free
+    trial has run out (see find_expired_trials/activate_trial), pointing
+    them at /stocks/login rather than /stocks/plans directly -- a bare
+    emailed link can't carry the stocks_plans_context session state
+    /stocks/plans needs, but logging in with their already-known
+    credentials naturally lands them there via stocks_admin_login's own
+    reason='trial_expired' redirect. Same dual auth as every other Stocks
+    cron route, and NOT gated on is_trading_day() -- trials run on calendar
+    days like billing does, not trading days.
+
+    Only marks a row's email as sent once it actually sends -- same "don't
+    silently burn the one-time notification on a failed send" rule as
+    /stocks/suggestions/notify-target-hits, so a transient failure retries
+    tomorrow instead of that subscriber never hearing their trial ended."""
+    is_cron = has_valid_cron_secret(request.headers, STOCKS_FUNDAMENTALS_CRON_SECRET)
+    if not is_cron and not session.get('stocks_admin_id'):
+        return redirect(url_for('stocks.stocks_admin_login'))
+
+    db = get_db()
+
+    def _job(job_db):
+        try:
+            rows = find_expired_trials(job_db)
+            sent = 0
+            failed = 0
+            for row in rows:
+                ok, detail = send_trial_ended_email(row['username'], row.get('name'))
+                if ok:
+                    mark_trial_ended_email_sent(job_db, row['id'])
+                    sent += 1
+                else:
+                    failed += 1
+                    current_app.logger.warning(f'Trial-ended email failed for {row["username"]}: {detail}')
+            summary = {'expired_trials': len(rows), 'sent': sent, 'failed': failed}
+        except Exception as e:
+            current_app.logger.error(f'Trial-ended notification job failed: {e}')
+            alert_job_error(job_db, 'trial_ended_notify', str(e))
+            raise
+        record_job_success(job_db, 'trial_ended_notify')
+        return summary
+
+    return _dispatch_stocks_job(db, is_cron, 'trial_ended_notify', _job)
+
+
 @stocks_bp.route('/stocks/users/<int:viewer_id>/toggle-pro', methods=['POST'])
 @stocks_role_required('super_admin', 'child_admin')
 def stocks_users_toggle_pro(viewer_id):
@@ -3041,8 +3275,23 @@ def stocks_admin_login():
     password = request.form.get('password') or ''
 
     db = get_db()
-    admin_row = authenticate_stocks_admin(db, username, password)
+    admin_row, reason = authenticate_stocks_admin(db, username, password)
     if not admin_row:
+        if reason == 'trial_expired':
+            # Credentials were correct -- this is specifically a Standard
+            # trial that's run out (see authenticate_stocks_admin's
+            # docstring for why every other lapsed-access case still falls
+            # through to the generic message below). Look the row back up
+            # for its id/name -- authenticate_stocks_admin only returns
+            # those on success.
+            expired_row = find_stocks_account_by_username(db, username)
+            session['stocks_plans_context'] = {
+                'mode': 'resubscribe', 'admin_id': expired_row['id'],
+                'email': expired_row['username'], 'name': expired_row.get('name'),
+            }
+            session.modified = True
+            flash('Your 7-day free trial has ended -- choose a plan to keep your access.', 'info')
+            return redirect(url_for('stocks.stocks_plans'))
         flash('Invalid username or password.', 'error')
         return render_template('admin/stocks_login.html', recaptcha_site_key=STOCKS_RECAPTCHA_SITE_KEY, next_url=next_url or ''), 401
 
@@ -3086,6 +3335,23 @@ def stocks_admin_logout():
     return redirect(url_for('stocks.stocks_admin_login'))
 
 
+@stocks_bp.route('/stocks/unsubscribe', methods=['GET'])
+def stocks_unsubscribe():
+    """One-click unsubscribe -- the link appended to every customer-facing
+    Stocks email by default (see utils/stock_alerting.send_zeptomail_stocks_email
+    and utils/stock_auth.build_unsubscribe_url/verify_and_apply_unsubscribe).
+    Deliberately no login required -- a recipient clicking this from their
+    inbox shouldn't need to remember Stocks credentials just to stop
+    receiving mail, and GET-not-POST matches the one-click convention every
+    major mail client's own list-unsubscribe support already assumes.
+    Purely an email-delivery opt-out -- doesn't touch is_active,
+    subscription_status, or website login/access at all."""
+    email = request.args.get('email', '')
+    token = request.args.get('token', '')
+    applied = verify_and_apply_unsubscribe(get_db(), email, token)
+    return render_template('admin/stocks_unsubscribe.html', applied=applied)
+
+
 @stocks_bp.route('/stocks/change-password', methods=['GET', 'POST'])
 @stocks_login_required
 def stocks_change_password():
@@ -3103,13 +3369,29 @@ def stocks_change_password():
         if new_password != confirm_password:
             flash('Passwords do not match.', 'error')
         else:
-            ok, error = change_own_password(get_db(), session['stocks_admin_id'], new_password)
+            db = get_db()
+            ok, error, trial_started = change_own_password(db, session['stocks_admin_id'], new_password)
             if not ok:
                 flash(error, 'error')
             else:
                 session['stocks_must_change_password'] = False
                 session.modified = True
-                flash('Password updated.')
+                if trial_started:
+                    row = db.execute(
+                        'SELECT name, trial_ends_at FROM stocks_admin_users WHERE id=?',
+                        (session['stocks_admin_id'],)
+                    ).fetchone()
+                    trial_ends_at = row.get('trial_ends_at') if row else None
+                    if isinstance(trial_ends_at, str):
+                        trial_ends_at = datetime.fromisoformat(trial_ends_at.replace('Z', '+00:00'))
+                    trial_end_label = trial_ends_at.strftime('%d %b %Y') if trial_ends_at else 'in 7 days'
+                    flash(f'Password updated -- your 7-day free trial has started! Full access through {trial_end_label}.')
+                    try:
+                        send_trial_started_email(session['stocks_admin_username'], row.get('name') if row else None, trial_end_label)
+                    except Exception as e:
+                        current_app.logger.warning(f'Trial-started email failed for {session["stocks_admin_username"]}: {e}')
+                else:
+                    flash('Password updated.')
                 if session.get('stocks_admin_role') == 'viewer':
                     return redirect(url_for('stocks.stocks_my_suggestions'))
                 return redirect(url_for('stocks.stocks_admin_dashboard'))

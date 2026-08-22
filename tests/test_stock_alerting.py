@@ -234,3 +234,30 @@ def test_send_zeptomail_stocks_email_defaults_to_stoqbell_sender(monkeypatch):
     assert ok is True
     payload = mock_post.call_args.kwargs['json']
     assert payload['from']['address'] == 'support-noreply@stoqbell.com'
+
+
+def test_customer_facing_email_gets_unsubscribe_link_by_default():
+    env = {'SMTP_SUPPORT_EMAIL_PASSWORD': 'test-key', 'STOCKS_SMTP_FROM_EMAIL': 'support-noreply@stoqbell.com'}
+    with patch.dict(os.environ, env, clear=False), \
+         patch('stoqbell.utils.stock_alerting.requests.post', return_value=Mock(status_code=201)) as mock_post:
+        ok, _ = send_zeptomail_stocks_email('to@example.com', 'To', 'Subject', 'Body text', htmlbody='<p>Body html</p>')
+
+    assert ok is True
+    payload = mock_post.call_args.kwargs['json']
+    assert '/stocks/unsubscribe?email=' in payload['textbody']
+    assert '/stocks/unsubscribe?email=' in payload['htmlbody']
+
+
+def test_internal_email_omits_unsubscribe_link_when_suppressed():
+    env = {'SMTP_SUPPORT_EMAIL_PASSWORD': 'test-key', 'STOCKS_SMTP_FROM_EMAIL': 'support-noreply@stoqbell.com'}
+    with patch.dict(os.environ, env, clear=False), \
+         patch('stoqbell.utils.stock_alerting.requests.post', return_value=Mock(status_code=201)) as mock_post:
+        ok, _ = send_zeptomail_stocks_email(
+            'raga2020@gmail.com', 'Raghav', 'Subject', 'Body text', htmlbody='<p>Body html</p>',
+            include_unsubscribe=False,
+        )
+
+    assert ok is True
+    payload = mock_post.call_args.kwargs['json']
+    assert '/stocks/unsubscribe' not in payload['textbody']
+    assert '/stocks/unsubscribe' not in payload['htmlbody']

@@ -66,7 +66,7 @@ def verify_webhook_signature(raw_body, signature, secret):
     return verify_signature(raw_body, signature, secret)
 
 
-def has_stocks_access(is_pro, subscription_status, subscription_current_period_end, now=None):
+def has_stocks_access(is_pro, subscription_status, subscription_current_period_end, now=None, trial_ends_at=None):
     """The actual login gate (see authenticate_stocks_admin in
     utils/stock_auth.py, and the Google callback in app.py) -- is_pro short-
     circuits to True before subscription_status is even looked at, since a
@@ -74,10 +74,10 @@ def has_stocks_access(is_pro, subscription_status, subscription_current_period_e
     at all. Falls through to subscription_is_current for everyone else."""
     if is_pro:
         return True
-    return subscription_is_current(subscription_status, subscription_current_period_end, now)
+    return subscription_is_current(subscription_status, subscription_current_period_end, now, trial_ends_at)
 
 
-def subscription_is_current(subscription_status, subscription_current_period_end, now=None):
+def subscription_is_current(subscription_status, subscription_current_period_end, now=None, trial_ends_at=None):
     """True if this account's paid access should currently work. 'none'
     (never a paid account -- an admin-created viewer) always passes, since
     this check only ever means anything for accounts that went through
@@ -88,6 +88,11 @@ def subscription_is_current(subscription_status, subscription_current_period_end
     -- see the module docstring on why the webhook, not this date alone, is
     the source of truth for cutting a still-'active' row off). 'cancelled'
     passes only through the end of whatever period was already paid for.
+    'trialing' (see activate_trial) passes only through trial_ends_at, the
+    exact same shape as 'cancelled' just against a different stored end
+    timestamp -- it deliberately never flips to some other status once the
+    trial runs out (no cron has to race to cut access off in time), it just
+    starts reading as expired the moment 'now' passes trial_ends_at.
     'halted' (Razorpay gave up retrying a failed renewal) never passes."""
     if subscription_status in (None, 'none'):
         return True
@@ -98,6 +103,11 @@ def subscription_is_current(subscription_status, subscription_current_period_end
             return False
         now = now or datetime.now(timezone.utc)
         return _parse_timestamp(subscription_current_period_end) >= now
+    if subscription_status == 'trialing':
+        if trial_ends_at is None:
+            return False
+        now = now or datetime.now(timezone.utc)
+        return _parse_timestamp(trial_ends_at) >= now
     return False  # 'pending', 'halted', or anything unrecognized
 
 
@@ -141,19 +151,29 @@ def hash_password(password):
 # --- DB orchestration ------------------------------------------------------
 
 def create_pending_subscriber(db, email, name, password, referred_by_id=None, stocks_plan='standard'):
-    """Creates a role='viewer' row for a self-serve signup, before payment
-    has been confirmed -- is_active=0 and subscription_status='pending', so
-    authenticate_stocks_admin already refuses login (is_active check) even
-    before subscription_is_current is consulted at all. must_change_password
+    """Creates a role='viewer' row for a self-serve signup. referred_by_id
+    (see utils/stocks_referrals.py), when given, is stamped once here and
+    never changes after -- app.py's /stocks/signup resolves a submitted
+    referral code into this id before calling in. stocks_plan ('standard'
+    or 'starters', see STOCKS_AUTH_ALTER_SQL) is likewise stamped once here
+    from the signup form's plan selector. Returns (row, error_message).
+
+    stocks_plan == 'standard' grants an immediate 7-day free trial
+    (is_active=1, subscription_status='trialing', trial_ends_at=NOW()+7d --
+    see subscription_is_current above) -- the account can log in right
+    away, no payment step at all. 'starters' keeps the original
+    pending/unpaid shape (is_active=0, subscription_status='pending'), so
+    authenticate_stocks_admin still refuses login (is_active check) until
+    checkout completes, exactly as before the trial existed. must_change_password
     is 0 (not 1, unlike create_viewer_account's admin-created viewers) since
     this password was chosen by the person themselves, not auto-generated
     and emailed in plaintext -- there's nothing to force a change away from.
-    referred_by_id (see utils/stocks_referrals.py), when given, is stamped
-    once here and never changes after -- app.py's /stocks/signup resolves
-    a submitted referral code into this id before calling in. stocks_plan
-    ('standard' or 'starters', see STOCKS_AUTH_ALTER_SQL) is likewise
-    stamped once here from the signup form's plan selector. Returns
-    (row, error_message)."""
+
+    An 'existing' row (same email already signed up before, whether still
+    mid-trial, expired, pending Starters checkout, or a lapsed paid
+    account) is returned as-is with no changes -- deliberately does NOT
+    grant a fresh trial on resubmission; see the caller (/stocks/signup)
+    for why that's already safe with no extra code."""
     email = (email or '').strip().lower()
     if not email:
         return None, 'Email is required.'
@@ -162,7 +182,7 @@ def create_pending_subscriber(db, email, name, password, referred_by_id=None, st
 
     existing = db.execute(
         'SELECT id, username, name, is_active, is_pro, subscription_status, subscription_current_period_end, '
-        'referred_by_id, stocks_plan '
+        'trial_ends_at, referred_by_id, stocks_plan '
         'FROM stocks_admin_users WHERE username=?',
         (email,)
     ).fetchone()
@@ -170,17 +190,27 @@ def create_pending_subscriber(db, email, name, password, referred_by_id=None, st
         return existing, 'existing'
 
     password_hash = hash_password(password)
-    db.execute(
-        '''INSERT INTO stocks_admin_users
-               (username, password_hash, role, name, is_active, must_change_password, subscription_status,
-                referred_by_id, stocks_plan)
-           VALUES (?, ?, 'viewer', ?, 0, 0, 'pending', ?, ?)''',
-        (email, password_hash, (name or '').strip() or None, referred_by_id, stocks_plan)
-    )
+    if stocks_plan == 'standard':
+        db.execute(
+            '''INSERT INTO stocks_admin_users
+                   (username, password_hash, role, name, is_active, must_change_password,
+                    subscription_status, trial_ends_at, referred_by_id, stocks_plan)
+               VALUES (?, ?, 'viewer', ?, 1, 0, 'trialing', NOW() + INTERVAL '7 days', ?, ?)''',
+            (email, password_hash, (name or '').strip() or None, referred_by_id, stocks_plan)
+        )
+    else:
+        db.execute(
+            '''INSERT INTO stocks_admin_users
+                   (username, password_hash, role, name, is_active, must_change_password, subscription_status,
+                    referred_by_id, stocks_plan)
+               VALUES (?, ?, 'viewer', ?, 0, 0, 'pending', ?, ?)''',
+            (email, password_hash, (name or '').strip() or None, referred_by_id, stocks_plan)
+        )
     db.commit()
 
     row = db.execute(
-        'SELECT id, username, name, subscription_status, razorpay_subscription_id, referred_by_id, stocks_plan '
+        'SELECT id, username, name, can_view_watchlist, must_change_password, subscription_status, '
+        'trial_ends_at, razorpay_subscription_id, referred_by_id, stocks_plan '
         'FROM stocks_admin_users WHERE username=?',
         (email,)
     ).fetchone()
@@ -204,6 +234,46 @@ def activate_subscription(db, admin_id, current_period_end):
            SET is_active=1, subscription_status='active', subscription_current_period_end=?, updated_at=NOW()
            WHERE id=?''',
         (current_period_end, admin_id)
+    )
+    db.commit()
+
+
+def activate_trial(db, admin_id):
+    """Grants a brand-new Standard-plan signup its 7-day free trial --
+    see create_pending_subscriber/create_pending_google_subscriber, which
+    call this (or inline the same fields directly at INSERT time) rather
+    than the old is_active=0/subscription_status='pending' shape. Same
+    UPDATE shape as activate_subscription above, just against trial_ends_at
+    instead of subscription_current_period_end."""
+    db.execute(
+        '''UPDATE stocks_admin_users
+           SET is_active=1, subscription_status='trialing', trial_ends_at=NOW() + INTERVAL '7 days', updated_at=NOW()
+           WHERE id=?''',
+        (admin_id,)
+    )
+    db.commit()
+
+
+def find_expired_trials(db):
+    """Standard-plan trials whose trial_ends_at has passed and that haven't
+    been emailed about it yet (see mark_trial_ended_email_sent) -- the
+    once-daily 'your trial has ended' cron's source list. Deliberately
+    doesn't touch subscription_status/is_active itself: access is already
+    gated purely by comparing trial_ends_at against now (see
+    subscription_is_current), so this job's only job is the one-time
+    email, not cutting access off. Excludes anyone who's unsubscribed (see
+    STOCKS_AUTH_ALTER_SQL's email_unsubscribed_at)."""
+    return db.execute(
+        '''SELECT id, username, name FROM stocks_admin_users
+           WHERE subscription_status='trialing' AND trial_ends_at <= NOW()
+             AND trial_ended_email_sent_at IS NULL AND email_unsubscribed_at IS NULL'''
+    ).fetchall()
+
+
+def mark_trial_ended_email_sent(db, admin_id):
+    db.execute(
+        'UPDATE stocks_admin_users SET trial_ended_email_sent_at=NOW(), updated_at=NOW() WHERE id=?',
+        (admin_id,)
     )
     db.commit()
 
@@ -268,7 +338,10 @@ def find_expiring_subscribers(db, window_days=REMINDER_WINDOW_DAYS):
     renewal coming) with subscription_current_period_end within the next
     window_days, that haven't already been reminded for this same period
     end (subscription_reminder_sent_for IS DISTINCT FROM the period end --
-    so a renewed subscription's later expiry still gets its own reminder)."""
+    so a renewed subscription's later expiry still gets its own reminder).
+    Excludes anyone who's unsubscribed (see STOCKS_AUTH_ALTER_SQL's
+    email_unsubscribed_at) -- same as every other recurring send, opting
+    out means no more mail at all, not just the marketing ones."""
     return db.execute(
         '''SELECT id, username, name, subscription_status, subscription_current_period_end
            FROM stocks_admin_users
@@ -276,7 +349,8 @@ def find_expiring_subscribers(db, window_days=REMINDER_WINDOW_DAYS):
              AND subscription_current_period_end IS NOT NULL
              AND subscription_current_period_end >= NOW()
              AND subscription_current_period_end <= NOW() + (?)::interval
-             AND subscription_reminder_sent_for IS DISTINCT FROM subscription_current_period_end''',
+             AND subscription_reminder_sent_for IS DISTINCT FROM subscription_current_period_end
+             AND email_unsubscribed_at IS NULL''',
         (f'{window_days} days',)
     ).fetchall()
 

@@ -3,6 +3,8 @@ from datetime import datetime, timedelta, timezone
 
 import requests
 
+from stoqbell.utils.stock_auth import build_unsubscribe_url
+
 # Deliberately reuses the storefront's own "support" Zeptomail Mail Agent's
 # TOKEN (SMTP_SUPPORT_EMAIL_PASSWORD, see app.py's send_contact_email)
 # rather than a separate Mail Agent/API key -- an earlier version of this
@@ -61,6 +63,11 @@ IST = timezone(timedelta(hours=5, minutes=30))
 #                          suggestion_email above which skips non-trading days;
 #                          see utils/trading_calendar.py and
 #                          stocks-subscription-reminders.yml)
+#   trial_ended_notify     02:10 UTC = 07:40 IST -> expect done by 09:00 IST
+#                          (free-trial-related, same "every calendar day"
+#                          reasoning as subscription_reminders above; see
+#                          utils/stocks_subscription.find_expired_trials and
+#                          stocks-trial-ended-notify.yml)
 #   auto_trade_reconcile   01:30 UTC = 07:00 IST -> expect done by 08:00 IST
 #                          (dry-run only, see utils/auto_trader.py -- runs
 #                          every day regardless of whether the simulation
@@ -96,6 +103,7 @@ JOB_EXPECTATIONS = {
     # completes normally with target_hits=0, which is a genuine success,
     # not a skip).
     'suggestion_target_hit_notify': {'expected_by_ist_hour': 9, 'label': '9 AM IST'},
+    'trial_ended_notify': {'expected_by_ist_hour': 9, 'label': '9 AM IST'},
     'subscription_reminders': {'expected_by_ist_hour': 11, 'label': '11 AM IST'},
     'fundamentals_rotation': {'expected_by_ist_hour': 12, 'label': '12 PM IST'},
     'market_cap_filter': {'expected_by_ist_hour': 13, 'label': '1 PM IST'},
@@ -126,7 +134,7 @@ def initialize_stock_alerting_tables_if_needed(client):
 
 
 def send_zeptomail_stocks_email(to_email, to_name, subject, textbody, htmlbody=None,
-                                 sender_name='StoqBell Alerts'):
+                                 sender_name='StoqBell Alerts', include_unsubscribe=True):
     """Low-level Zeptomail HTTP API sender shared by every Stocks-module
     email -- job-failure alerts (send_alert_email below) and the daily
     suggestions email (utils/suggestion_email.py) both go through this, so
@@ -134,6 +142,16 @@ def send_zeptomail_stocks_email(to_email, to_name, subject, textbody, htmlbody=N
     same credentials, and same verified sender identity as the storefront's
     own send_contact_email() in app.py -- see the module comment above for
     why this reuses that context instead of a separate one.
+
+    include_unsubscribe=True (the default) appends a signed one-click-
+    unsubscribe link (see utils/stock_auth.build_unsubscribe_url) to the
+    bottom of every CUSTOMER-facing send -- deliberately opt-OUT rather
+    than opt-in, so nobody has to remember to add it to any new
+    subscriber-facing email function later. The handful of INTERNAL sends
+    (job-failure alerts, Raghav's own auto-trader/admin-notification
+    emails -- see each of those callers in utils/suggestion_email.py)
+    explicitly pass include_unsubscribe=False, since "unsubscribe" makes
+    no sense on an email to the site owner about their own business.
 
     Returns (success: bool, detail: str) -- never raises, since a failed
     email shouldn't itself crash whatever else was happening (a failing
@@ -163,6 +181,16 @@ def send_zeptomail_stocks_email(to_email, to_name, subject, textbody, htmlbody=N
         detail = f"Missing: {', '.join(missing)}."
         print(f'Stock email skipped: {detail}')
         return False, detail
+
+    if include_unsubscribe:
+        unsubscribe_url = build_unsubscribe_url(to_email)
+        textbody = f'{textbody}\n\n--\nUnsubscribe from these emails: {unsubscribe_url}\n'
+        if htmlbody:
+            htmlbody = (
+                f'{htmlbody}<p style="color:#94a3b8;font-size:11px;margin-top:20px;'
+                f'font-family:Arial,Helvetica,sans-serif;text-align:center;">'
+                f'<a href="{unsubscribe_url}" style="color:#94a3b8;">Unsubscribe</a> from these emails</p>'
+            )
 
     payload = {
         'from': {'address': from_email, 'name': sender_name},
@@ -203,7 +231,7 @@ def send_alert_email(subject, body):
     if not to_email:
         print('Stock alert email skipped: STOCKS_ALERT_TO_EMAIL must be set.')
         return False
-    ok, detail = send_zeptomail_stocks_email(to_email, to_email, subject, body)
+    ok, detail = send_zeptomail_stocks_email(to_email, to_email, subject, body, include_unsubscribe=False)
     if not ok:
         print(f'Stock alert email failed: {detail}')
     return ok

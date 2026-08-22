@@ -3,6 +3,7 @@ from unittest.mock import patch
 
 from stoqbell.utils.suggestion_email import (
     DISCLAIMER,
+    STOCKS_LOGIN_URL,
     send_admin_new_subscriber_email,
     send_admin_subscription_cancelled_email,
     send_daily_suggestions_email,
@@ -911,7 +912,7 @@ def test_target_achieved_email_bundles_multiple_achievements_in_one_email():
         send_target_achieved_email('sub@example.com', 'A Subscriber', achievements)
 
     kwargs = mock_send.call_args.kwargs
-    assert '2 of your recommendations' in kwargs['subject']
+    assert '2 of our picks' in kwargs['subject']
     assert 'Golden Co Ltd' in kwargs['textbody']
     assert 'Silver Star Ltd' in kwargs['textbody']
     assert 'Golden Co Ltd' in kwargs['htmlbody']
@@ -930,6 +931,38 @@ def test_target_achieved_email_falls_back_to_symbol_when_no_company_name():
     kwargs = mock_send.call_args.kwargs
     assert 'GLD' in kwargs['subject']
     assert kwargs['to_name'] == 'sub@example.com'  # falls back to email when no name given
+
+
+def test_target_achieved_email_omits_resubscribe_nudge_for_current_subscriber():
+    achievement = {
+        'symbol': 'GLD', 'exchange': 'NSE', 'company_name': 'Golden Co Ltd',
+        'suggestion_date': '2026-08-01', 'buy_price': 100.0, 'target_sell_price': 110.0,
+        'latest_price': 112.0, 'latest_price_date': '2026-08-11',
+    }
+    with patch('stoqbell.utils.suggestion_email.send_zeptomail_stocks_email', return_value=(True, 'ok')) as mock_send:
+        send_target_achieved_email('sub@example.com', 'A Subscriber', [achievement], currently_subscribed=True)
+
+    kwargs = mock_send.call_args.kwargs
+    assert 'jump back in' not in kwargs['textbody'].lower()
+    assert 'jump back in' not in kwargs['htmlbody'].lower()
+
+
+def test_target_achieved_email_adds_resubscribe_nudge_for_lapsed_recipient():
+    # A trial that expired without subscribing (or a lapsed paid account)
+    # still gets this email -- see app.py's stocks_suggestions_notify_target_hits,
+    # which threads has_stocks_access through as currently_subscribed.
+    achievement = {
+        'symbol': 'GLD', 'exchange': 'NSE', 'company_name': 'Golden Co Ltd',
+        'suggestion_date': '2026-08-01', 'buy_price': 100.0, 'target_sell_price': 110.0,
+        'latest_price': 112.0, 'latest_price_date': '2026-08-11',
+    }
+    with patch('stoqbell.utils.suggestion_email.send_zeptomail_stocks_email', return_value=(True, 'ok')) as mock_send:
+        send_target_achieved_email('lapsed@example.com', 'A Lapsed User', [achievement], currently_subscribed=False)
+
+    kwargs = mock_send.call_args.kwargs
+    assert 'jump back in' in kwargs['textbody'].lower()
+    assert 'jump back in' in kwargs['htmlbody'].lower()
+    assert STOCKS_LOGIN_URL in kwargs['textbody']
 
 
 def test_daily_email_includes_each_recipients_own_referral_footer():

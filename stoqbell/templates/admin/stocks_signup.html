@@ -63,6 +63,7 @@
                 <div class="plan-option-card">
                     <p class="text-slate-100 font-semibold">Standard -- Rs 299/month</p>
                     <p class="text-slate-400 text-sm mt-1">One Pick of the Day, every trading day.</p>
+                    <p class="text-sm mt-1" style="color:#4ade80;font-weight:600;">Free for your first 7 days -- no card required.</p>
                 </div>
             </label>
             <label class="plan-option">
@@ -124,8 +125,8 @@
                        class="w-full bg-slate-900 border border-sky-500/30 rounded-xl p-3 placeholder-slate-500 focus:outline-none focus:border-sky-500 transition">
             </div>
 
-            <button type="submit" class="stocks-btn w-full py-3 rounded-2xl font-bold text-lg shadow-lg mt-2 transition hover:opacity-90">
-                Continue to payment
+            <button type="submit" id="stocks-signup-submit" class="stocks-btn w-full py-3 rounded-2xl font-bold text-lg shadow-lg mt-2 transition hover:opacity-90">
+                {{ 'Continue to payment' if plan_prefill == 'starters' else 'Start my free trial' }}
             </button>
         </form>
 
@@ -141,11 +142,13 @@
         var hiddenField = document.getElementById('stocks-plan-hidden');
         var googleLink = document.getElementById('stocks-google-signup-link');
         var googleBaseHref = googleLink.href.split('?')[0];
+        var submitBtn = document.getElementById('stocks-signup-submit');
         radios.forEach(function(radio) {
             radio.addEventListener('change', function() {
                 if (!radio.checked) return;
                 hiddenField.value = radio.value;
                 googleLink.href = googleBaseHref + '?plan=' + radio.value;
+                submitBtn.textContent = radio.value === 'starters' ? 'Continue to payment' : 'Start my free trial';
             });
         });
     })();

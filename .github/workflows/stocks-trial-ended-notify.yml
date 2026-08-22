@@ -1,0 +1,28 @@
+name: Stocks trial-ended notify
+
+on:
+  schedule:
+    # 02:10 UTC daily = 07:40 IST, alongside the other morning jobs. Runs
+    # every day including weekends/holidays -- the 7-day trial runs on
+    # calendar days, not trading days. Triggers POST
+    # /stocks/subscription/notify-trial-ended, which emails anyone whose
+    # Standard-plan free trial has just run out (see
+    # utils/stocks_subscription.find_expired_trials/activate_trial).
+    - cron: '10 2 * * *'
+  workflow_dispatch: {}  # lets you trigger it manually from the Actions tab
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: POST to /stocks/subscription/notify-trial-ended
+        run: |
+          status=$(curl -s -o /tmp/response.txt -w "%{http_code}" --max-time 120 -X POST \
+            -H "X-Cron-Secret: ${{ secrets.STOCKS_FUNDAMENTALS_CRON_SECRET }}" \
+            https://narinakhre.com/stocks/subscription/notify-trial-ended)
+          echo "HTTP status: $status"
+          cat /tmp/response.txt
+          if [ "$status" != "200" ]; then
+            echo "Request failed"
+            exit 1
+          fi

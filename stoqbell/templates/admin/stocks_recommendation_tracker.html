@@ -97,7 +97,14 @@
                             {% else %}—{% endif %}
                         </td>
                         <td>
-                            {% if r.outcome == 'target_hit' %}<span class="badge badge-target">Target hit</span>
+                            {% if r.outcome == 'target_hit' %}
+                                <span class="badge badge-target">Target hit</span>
+                                {% if r.target_hit_date %}
+                                <div class="text-xs text-slate-400 mt-1">
+                                    {{ r.target_hit_date.strftime('%d %b %Y') }} &middot;
+                                    {{ r.days_to_target_hit }} day{{ 's' if r.days_to_target_hit != 1 }} after recommendation
+                                </div>
+                                {% endif %}
                             {% elif r.outcome == 'stop_loss_hit' %}<span class="badge badge-stop">Stop-loss hit</span>
                             {% elif r.outcome == 'open' %}<span class="badge badge-open">Open</span>
                             {% else %}<span class="badge badge-unknown">No price yet</span>

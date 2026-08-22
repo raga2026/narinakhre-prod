@@ -59,6 +59,13 @@
                         Also let this viewer see the watchlist (symbols, fundamentals, golden/death cross status)
                     </label>
                 </div>
+                <div class="flex items-center gap-2">
+                    <input id="new-start-trial" type="checkbox" name="start_trial"
+                           class="h-4 w-4">
+                    <label for="new-start-trial" class="text-sm text-slate-300">
+                        Give a 7-day free trial instead of permanent Pro access -- starts the moment they set their own password, not now
+                    </label>
+                </div>
                 <button type="submit" class="stocks-btn py-3 px-6 rounded-2xl font-bold transition hover:opacity-90">
                     Add viewer
                 </button>
@@ -95,6 +102,8 @@
                     </p>
                     <p class="text-slate-400 text-sm">
                         Access: {% if viewer.is_pro %}<span class="text-amber-400 font-semibold">Pro (free access)</span>
+                        {% elif viewer.trial_pending_password_change %}<span class="text-sky-400 font-semibold">7-day trial pending -- starts once they set their password</span>
+                        {% elif viewer.subscription_status == 'trialing' %}<span class="text-sky-400 font-semibold">Free trial{% if viewer.trial_ends_at_label %} -- ends {{ viewer.trial_ends_at_label }}{% endif %}</span>
                         {% elif viewer.subscription_status and viewer.subscription_status != 'none' %}Paid subscriber -- {{ viewer.subscription_status | title }}
                         {% else %}--{% endif %}
                     </p>

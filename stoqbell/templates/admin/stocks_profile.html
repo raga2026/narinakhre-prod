@@ -154,6 +154,23 @@
                 <a href="{{ url_for('stocks.stocks_signup') }}" class="link">Renew now</a>
             </div>
             {% endif %}
+            {% if can_cancel_subscription %}
+            <div class="row">
+                <button type="button" id="stocks-cancel-subscription-btn" class="link" style="color:#dc2626;background:none;border:none;padding:0;cursor:pointer;font:inherit;">
+                    Cancel subscription
+                </button>
+                <form id="stocks-cancel-subscription-form" method="POST" action="{{ url_for('stocks.stocks_subscription_cancel') }}" style="display:none;"></form>
+            </div>
+            {% endif %}
+            {% endif %}
+            {% if trial_ends_at_label %}
+            <div class="row flex items-center justify-between">
+                <span class="text-gray-500">Free trial</span>
+                <span class="text-gray-900 font-semibold text-right">Ends {{ trial_ends_at_label }}</span>
+            </div>
+            <div class="row">
+                <a href="{{ url_for('stocks.stocks_subscription_upgrade_now') }}" class="link">Subscribe now</a>
+            </div>
             {% endif %}
             <div class="row">
                 <a href="{{ url_for('stocks.stocks_change_password') }}" class="link">Change password</a>
@@ -195,6 +212,17 @@
     </div>
 
     <script>
+    (function () {
+        var btn = document.getElementById('stocks-cancel-subscription-btn');
+        var form = document.getElementById('stocks-cancel-subscription-form');
+        if (!btn || !form) { return; }
+        btn.addEventListener('click', function () {
+            if (confirm('Cancel your subscription? You\'ll keep access until your current billing period ends, then it won\'t renew.')) {
+                form.submit();
+            }
+        });
+    })();
+
     function stocksCopyReferralLink() {
         var input = document.getElementById('referral-link');
         if (!input) { return; }

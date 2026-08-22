@@ -44,13 +44,17 @@ class FakeViewerDB:
             matches = [r for r in self.rows if r['username'] == username]
             return FakeCursor(matches[:1])
 
-        if normalized.startswith('INSERT INTO stocks_admin_users (username, password_hash, role, name, created_by, can_view_watchlist, must_change_password, is_pro)'):
-            username, password_hash, name, created_by, can_view_watchlist = params
+        if normalized.startswith(
+            'INSERT INTO stocks_admin_users (username, password_hash, role, name, created_by, can_view_watchlist, '
+            'must_change_password, is_pro, trial_pending_password_change)'
+        ):
+            username, password_hash, name, created_by, can_view_watchlist, is_pro, trial_pending = params
             self.rows.append({
                 'id': self._next_id, 'username': username, 'password_hash': password_hash,
                 'role': 'viewer', 'name': name, 'created_by': created_by,
                 'is_active': 1, 'can_view_watchlist': can_view_watchlist, 'must_change_password': 1,
-                'is_pro': 1, 'subscription_status': 'none', 'subscription_current_period_end': None,
+                'is_pro': is_pro, 'subscription_status': 'none', 'subscription_current_period_end': None,
+                'trial_ends_at': None, 'trial_pending_password_change': trial_pending,
                 'created_at': '2026-08-17',
             })
             self._next_id += 1
@@ -62,10 +66,35 @@ class FakeViewerDB:
             return FakeCursor(matches[:1])
 
         if normalized.startswith("SELECT id, username, name, is_active, can_view_watchlist, must_change_password, is_pro, "
-                                  "subscription_status, subscription_current_period_end, stocks_plan, created_at FROM stocks_admin_users WHERE role='viewer'"):
+                                  "subscription_status, subscription_current_period_end, trial_ends_at, "
+                                  "trial_pending_password_change, stocks_plan, created_at FROM stocks_admin_users WHERE role='viewer'"):
             matches = [r for r in self.rows if r['role'] == 'viewer']
             matches.sort(key=lambda r: r['created_at'], reverse=True)
             return FakeCursor(matches)
+
+        if normalized.startswith('SELECT trial_pending_password_change FROM stocks_admin_users WHERE id=?'):
+            admin_id, = params
+            matches = [r for r in self.rows if r['id'] == admin_id]
+            return FakeCursor(matches[:1])
+
+        if normalized.startswith("UPDATE stocks_admin_users SET trial_pending_password_change=0"):
+            admin_id, = params
+            for r in self.rows:
+                if r['id'] == admin_id:
+                    r['trial_pending_password_change'] = 0
+            return FakeCursor([])
+
+        if normalized.startswith(
+            "UPDATE stocks_admin_users SET is_active=1, subscription_status='trialing', "
+            "trial_ends_at=NOW() + INTERVAL '7 days'"
+        ):
+            admin_id, = params
+            for r in self.rows:
+                if r['id'] == admin_id:
+                    r['is_active'] = 1
+                    r['subscription_status'] = 'trialing'
+                    r['trial_ends_at'] = 'fake-trial-end'
+            return FakeCursor([])
 
         if normalized.startswith('SELECT id, role, is_pro FROM stocks_admin_users WHERE id=?'):
             admin_id, = params
@@ -155,6 +184,42 @@ def test_create_viewer_account_is_pro_by_default():
     db = FakeViewerDB()
     row, _, _ = create_viewer_account(db, 'a@example.com', 'A', created_by_id=1)
     assert db.rows[0]['is_pro'] == 1
+
+
+def test_create_viewer_account_with_start_trial_is_not_pro_and_flags_pending_trial():
+    db = FakeViewerDB()
+    row, _, error = create_viewer_account(db, 'a@example.com', 'A', created_by_id=1, start_trial=True)
+
+    assert error is None
+    assert db.rows[0]['is_pro'] == 0
+    assert db.rows[0]['trial_pending_password_change'] == 1
+    assert db.rows[0]['subscription_status'] == 'none'  # not trialing yet -- only on password change
+
+
+def test_password_change_activates_the_pending_trial():
+    db = FakeViewerDB()
+    create_viewer_account(db, 'a@example.com', 'A', created_by_id=1, start_trial=True)
+    admin_id = db.rows[0]['id']
+
+    ok, error, trial_started = change_own_password(db, admin_id, 'newpassword123')
+
+    assert ok is True
+    assert trial_started is True
+    assert db.rows[0]['subscription_status'] == 'trialing'
+    assert db.rows[0]['trial_ends_at'] is not None
+    assert db.rows[0]['trial_pending_password_change'] == 0
+
+
+def test_password_change_without_pending_trial_does_not_start_one():
+    db = FakeViewerDB()
+    create_viewer_account(db, 'a@example.com', 'A', created_by_id=1)  # no start_trial -- normal Pro viewer
+    admin_id = db.rows[0]['id']
+
+    ok, error, trial_started = change_own_password(db, admin_id, 'newpassword123')
+
+    assert ok is True
+    assert trial_started is False
+    assert db.rows[0]['subscription_status'] == 'none'
 
 
 def test_toggle_viewer_pro_flips_the_flag():
@@ -339,10 +404,11 @@ def test_change_own_password_success_clears_the_flag():
         'must_change_password': 1, 'created_at': '2026-01-01',
     }])
 
-    ok, error = change_own_password(db, 1, 'newpassword123')
+    ok, error, trial_started = change_own_password(db, 1, 'newpassword123')
 
     assert ok is True
     assert error is None
+    assert trial_started is False
     assert db.rows[0]['must_change_password'] == 0
     assert db.rows[0]['password_hash'] != 'old-hash'
 
@@ -354,10 +420,11 @@ def test_change_own_password_rejects_too_short_password():
         'must_change_password': 1, 'created_at': '2026-01-01',
     }])
 
-    ok, error = change_own_password(db, 1, 'short')
+    ok, error, trial_started = change_own_password(db, 1, 'short')
 
     assert ok is False
     assert '8 characters' in error
+    assert trial_started is False
     # Row must be untouched -- the DB call is never even made.
     assert db.rows[0]['password_hash'] == 'old-hash'
     assert db.rows[0]['must_change_password'] == 1
