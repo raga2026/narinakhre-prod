@@ -167,6 +167,7 @@ from stoqbell.utils.price_pattern import (
     detect_rounding_pattern,
     compute_projection_targets,
 )
+from stoqbell.utils.suggestion_chart import build_prediction_chart_image_url
 from stoqbell.utils.super_sync import run_super_sync
 from stoqbell.utils.stock_indicators import (
     initialize_stock_indicators_table_if_needed,
@@ -2074,11 +2075,18 @@ _ANALYSIS_SOURCE_LABELS = {
 @stocks_login_required
 def stocks_suggestion_analysis(source, suggestion_id):
     """Full explanation for one specific recommendation -- company, date,
-    buy/target price, tier, rationale, chart-pattern note (or plain
-    holding-period timing), and mid/long-term projection with % increase
-    from the buy price, the same figures the emails already show (see
-    utils.suggestion_email._render_stock_card_html). Linked from the
-    Stocks home page's Your Suggestions table ("Analysis") and from the
+    buy/target price, tier, rationale, chart-pattern name/note (or plain
+    holding-period timing), fundamentals snapshot (RSI/PE/PEG/OPM at
+    suggestion time, whichever are on record, any tier -- not just
+    silver), the projection chart image, and mid/long-term projection with
+    % increase from the buy price -- the same figures and the same chart
+    image the emails already show (see
+    utils.suggestion_email._render_stock_card_html/build_prediction_chart_image_url).
+    Every suggestion from any of the three engines requires golden-cross
+    at generation time (see suggestion_engine.is_suggestion_eligible) --
+    this page states that directly rather than leaving it implicit, since
+    the email itself never spells it out either. Linked from the Stocks
+    home page's Your Suggestions table ("Analysis") and from the
     company/universe detail page's own suggestion-history table ("View
     analysis for this pick").
 
@@ -2111,11 +2119,20 @@ def stocks_suggestion_analysis(source, suggestion_id):
     target_pct = _pct_increase(suggestion.get('buy_price'), suggestion.get('target_sell_price'))
     mid_pct = _pct_increase(suggestion.get('buy_price'), projection.get('mid_period', {}).get('price')) if projection else None
     long_pct = _pct_increase(suggestion.get('buy_price'), projection.get('long_term', {}).get('price')) if projection else None
+    # Same chart the daily/weekly/bonus email itself embedded (see
+    # utils/suggestion_email.py's _render_stock_card_html) -- content-
+    # addressed by pixel content (see build_prediction_chart_image_url's
+    # own docstring), so this reuses the exact file already uploaded for
+    # this suggestion's numbers rather than uploading a fresh copy.
+    chart_url = build_prediction_chart_image_url(
+        suggestion.get('buy_price'), projection, suggestion.get('stop_loss_price')
+    )
 
     return render_template(
         'admin/stocks_suggestion_analysis.html',
         s=suggestion, source=source, source_label=_ANALYSIS_SOURCE_LABELS[source],
         projection=projection, target_pct=target_pct, mid_pct=mid_pct, long_pct=long_pct,
+        chart_url=chart_url,
     )
 
 

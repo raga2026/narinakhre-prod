@@ -33,6 +33,8 @@
             --badge-golden-bg: #78350f; --badge-golden-fg: #fef3c7;
             --badge-silver-bg: #334155; --badge-silver-fg: #e2e8f0;
             --badge-bronze-bg: #7c2d12; --badge-bronze-fg: #fed7aa;
+            --badge-cross-bg: #14532d; --badge-cross-fg: #bbf7d0;
+            --chip-bg: #16202f; --chip-fg: #cbd5e1; --chip-label: #7d8aa0;
         }
         [data-theme="light"] {
             --bg: #f5f6f8; --fg: #24262d;
@@ -47,6 +49,8 @@
             --badge-golden-bg: #fff3cd; --badge-golden-fg: #8a6706;
             --badge-silver-bg: #eceff2; --badge-silver-fg: #4a4f57;
             --badge-bronze-bg: #fde3d2; --badge-bronze-fg: #9a4a12;
+            --badge-cross-bg: #dcfce7; --badge-cross-fg: #15803d;
+            --chip-bg: #f1f5f9; --chip-fg: #334155; --chip-label: #64748b;
         }
         body { background: var(--bg); color: var(--fg); font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; font-size: 0.9rem; }
         .kite-accent { color: var(--accent); }
@@ -84,6 +88,10 @@
         .badge-golden { background: var(--badge-golden-bg); color: var(--badge-golden-fg); }
         .badge-silver { background: var(--badge-silver-bg); color: var(--badge-silver-fg); }
         .badge-bronze { background: var(--badge-bronze-bg); color: var(--badge-bronze-fg); }
+        .badge-cross { background: var(--badge-cross-bg); color: var(--badge-cross-fg); }
+        .chip { display: inline-block; background: var(--chip-bg); color: var(--chip-fg); border-radius: 6px; padding: 4px 10px; margin: 0 6px 6px 0; font-size: 0.76rem; white-space: nowrap; }
+        .chip-label { color: var(--chip-label); }
+        .chart-img { width: 100%; max-width: 496px; height: auto; display: block; border-radius: 6px; margin-top: 0.5rem; }
         .up { color: var(--up); font-weight: 600; }
         .down { color: var(--down); font-weight: 600; }
         .text-gray-900 { color: var(--muted-900); }
@@ -135,6 +143,16 @@
                 </span>
             </div>
             <div class="row flex items-center justify-between">
+                <span class="text-gray-500">Chart signal</span>
+                <span class="badge badge-cross">Golden Cross confirmed</span>
+            </div>
+            {% if s.pattern_name %}
+            <div class="row flex items-center justify-between">
+                <span class="text-gray-500">Pattern</span>
+                <span class="text-gray-900 font-semibold">{{ s.pattern_name | replace('_', ' ') | title }}</span>
+            </div>
+            {% endif %}
+            <div class="row flex items-center justify-between">
                 <span class="text-gray-500">Buy price</span>
                 <span class="text-gray-900 font-semibold">{{ s.buy_price if s.buy_price is not none else '—' }}</span>
             </div>
@@ -167,6 +185,13 @@
                 {% endif %}
             </p>
             {% endif %}
+
+            {% if chart_url %}
+            <div class="mt-4">
+                <p class="text-gray-500 text-xs uppercase tracking-wide font-semibold mb-1">Price Projection</p>
+                <img src="{{ chart_url }}" alt="Projected price chart for {{ s.company_name or s.symbol }}: buy {{ s.buy_price }} through its mid-period and long-term projected price" class="chart-img">
+            </div>
+            {% endif %}
         </div>
 
         <div class="card p-5 mb-6">
@@ -175,11 +200,17 @@
             {% if s.pattern_note %}
             <p class="text-gray-600 text-sm mt-3">{{ s.pattern_note }}</p>
             {% endif %}
+
+            {% if s.rsi_at_suggestion is not none or s.pe_at_suggestion is not none or s.peg_at_suggestion is not none or s.opm_at_suggestion is not none %}
+            <div class="mt-3">
+                {% if s.rsi_at_suggestion is not none %}<span class="chip"><span class="chip-label">RSI</span> {{ '%.1f'|format(s.rsi_at_suggestion) }}</span>{% endif %}
+                {% if s.pe_at_suggestion is not none %}<span class="chip"><span class="chip-label">PE</span> {{ '%.2f'|format(s.pe_at_suggestion) }}</span>{% endif %}
+                {% if s.peg_at_suggestion is not none %}<span class="chip"><span class="chip-label">PEG</span> {{ '%.2f'|format(s.peg_at_suggestion) }}</span>{% endif %}
+                {% if s.opm_at_suggestion is not none %}<span class="chip"><span class="chip-label">OPM</span> {{ '%.0f'|format(s.opm_at_suggestion) }}%</span>{% endif %}
+            </div>
+            {% endif %}
             {% if s.fundamental_tier == 'silver' %}
-            <p class="text-gray-500 text-xs mt-3">
-                PE {{ '%.2f'|format(s.pe_at_suggestion) if s.pe_at_suggestion is not none else '—' }},
-                OPM {{ '%.0f'|format(s.opm_at_suggestion) if s.opm_at_suggestion is not none else '—' }}%
-            </p>
+            <p class="text-gray-500 text-xs mt-3">Watchlisted on the silver criteria (fundamentals meet the softer second-tier bar, not the strictest one).</p>
             {% endif %}
         </div>
 
