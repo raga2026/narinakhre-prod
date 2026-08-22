@@ -31,8 +31,19 @@ def enrich_and_sort_watchlist_rows(rows, cross_filter=None):
     is_recommended (see suggestion_engine.passes_hard_filters -- the exact
     same hard filters the suggestion engine itself uses, so "recommended
     to buy" here never drifts from what actually gets suggested) to each
-    row, then sorts recommended-first, golden-cross-first, alphabetically
-    by name within each tier ("list it as per the recommendation").
+    row, then sorts it.
+
+    Staff rows (see app.py's stocks_watchlist route, which only computes
+    nns_score for super_admin/child_admin via compute_watchlist_nns_scores
+    before calling this) sort by nns_score descending first -- most
+    favourable company to least favourable, admin-panel-only, per
+    instruction -- falling through to is_recommended/cross_status/name for
+    any tie. Viewer rows never carry nns_score at all (see
+    compute_watchlist_nns_scores' own "viewers see is_recommended/tier,
+    not the score itself" policy), so every row's primary key collapses to
+    the same constant and this sorts exactly as before for them:
+    recommended-first, golden-cross-first, alphabetically by name within
+    each tier.
 
     Returns a new list -- never mutates the input rows."""
     if cross_filter == 'golden':
@@ -46,6 +57,7 @@ def enrich_and_sort_watchlist_rows(rows, cross_filter=None):
     ]
 
     enriched.sort(key=lambda r: (
+        -r['nns_score'] if r.get('nns_score') is not None else 0,
         not r['is_recommended'],
         r.get('cross_status') != 'golden_cross',
         (r.get('name') or r['symbol']).lower(),

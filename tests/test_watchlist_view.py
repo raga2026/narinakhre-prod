@@ -61,6 +61,27 @@ def test_sort_puts_golden_cross_ahead_of_others_when_neither_is_recommended():
     assert all(not r['is_recommended'] for r in result)
 
 
+def test_sort_ranks_by_nns_score_descending_for_staff_rows():
+    # Admin-panel-only: staff rows carry nns_score (see app.py's
+    # stocks_watchlist route, which computes it via
+    # compute_watchlist_nns_scores only for super_admin/child_admin) --
+    # most favourable company first, overriding the plain
+    # recommended/golden-cross/alphabetical tie-breakers below it.
+    high = _row('HI', name='Zebra Corp', cross_status='death_cross', nns_score=8.5)
+    low = _row('LO', name='Alpha Corp', nns_score=2.0)  # golden_cross + recommended, but low score
+    result = enrich_and_sort_watchlist_rows([low, high])
+    assert [r['symbol'] for r in result] == ['HI', 'LO']
+
+
+def test_sort_without_nns_score_is_unaffected_viewer_rows():
+    # No row carries nns_score (the viewer case) -- falls straight through
+    # to the pre-existing recommended/golden-cross/alphabetical order.
+    recommended = _row('AAA', name='Zebra Corp')
+    not_recommended = _row('BBB', name='Alpha Corp', cross_status='death_cross')
+    result = enrich_and_sort_watchlist_rows([not_recommended, recommended])
+    assert [r['symbol'] for r in result] == ['AAA', 'BBB']
+
+
 def test_sort_falls_back_to_symbol_when_name_missing():
     a = _row('AAA', name=None)
     b = _row('BBB', name=None)
