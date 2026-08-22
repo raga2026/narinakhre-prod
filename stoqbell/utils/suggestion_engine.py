@@ -300,15 +300,30 @@ def _build_pattern_note(pattern_name, pattern_research):
     )
 
 
-def _fetch_price_history(db, watchlist_id, lookback_days=PATTERN_LOOKBACK_DAYS):
+def _fetch_price_history(db, watchlist_id=None, lookback_days=PATTERN_LOOKBACK_DAYS, universe_id=None):
     """Closing prices, oldest first, for pattern detection (see
     utils.price_pattern.compute_suggestion_pricing) -- capped at
-    lookback_days most recent rows regardless of how much history exists."""
-    rows = db.execute(
-        '''SELECT close FROM stock_daily_data WHERE watchlist_id=?
-           ORDER BY trade_date DESC LIMIT ?''',
-        (watchlist_id, lookback_days)
-    ).fetchall()
+    lookback_days most recent rows regardless of how much history exists.
+
+    watchlist_id is how every existing caller (a watchlisted candidate)
+    already used this. universe_id is the fallback for a universe-only
+    candidate that was never watchlisted at all (see
+    _fetch_universe_candidates/get_special_recommendations_today) --
+    stock_daily_data for those rows is only ever keyed by universe_id, not
+    watchlist_id. Pass exactly one of the two; watchlist_id wins if both
+    are somehow given."""
+    if watchlist_id is not None:
+        rows = db.execute(
+            '''SELECT close FROM stock_daily_data WHERE watchlist_id=?
+               ORDER BY trade_date DESC LIMIT ?''',
+            (watchlist_id, lookback_days)
+        ).fetchall()
+    else:
+        rows = db.execute(
+            '''SELECT close FROM stock_daily_data WHERE universe_id=?
+               ORDER BY trade_date DESC LIMIT ?''',
+            (universe_id, lookback_days)
+        ).fetchall()
     closes_desc = [r['close'] for r in rows if r['close'] is not None]
     return list(reversed(closes_desc))
 
@@ -349,6 +364,60 @@ def _fetch_candidates(db, market_cap_tier=None):
                )
            WHERE w.is_active = 1{tier_clause}''',
         params
+    ).fetchall()
+
+
+def _fetch_universe_candidates(db):
+    """Same shape/columns as _fetch_candidates, but sourced from the full
+    scrape-eligible stock_universe (~1,067 companies) instead of just the
+    ~80-company watchlist -- for the super_admin-only Special
+    Recommendations page (see get_special_recommendations_today), which
+    ranks the entire universe, not only the pre-shortlisted watchlist
+    subset. Indicators/fundamentals/price are joined by universe_id (see
+    run_indicator_calculation_universe, sync_daily_data_universe, and
+    stock_fundamentals' own universe_id column) rather than watchlist_id
+    -- a universe-only company was never watchlisted, so it has no
+    watchlist_id row to join against at all. watchlist_id is still LEFT
+    JOINed in and returned when a company happens to also be watchlisted,
+    purely so callers can still link to /stocks/company/<id> for it --
+    scoring/pricing never depend on it being present (see
+    _fetch_price_history's universe_id fallback).
+
+    Same NSE/BSE ISIN dedup as /stocks/universe's own list query (see
+    app.py's stocks_universe_list) -- our NSE and BSE source lists don't
+    agree on 'Ltd' vs 'Limited' for the same company, so without this the
+    same company could be ranked (and shown) twice."""
+    today = date.today().isoformat()
+    fundamentals_cutoff = (date.today() - timedelta(days=20)).isoformat()
+    return db.execute(
+        '''SELECT u.id AS universe_id, u.symbol, u.exchange, u.company_name,
+                  w.id AS watchlist_id, w.fundamental_tier, w.market_cap_tier,
+                  u.industry,
+                  i.rsi_14, i.cross_status, i.volume_trend,
+                  f.pe_ratio, f.peg_ratio, f.opm_pct, f.roce_pct, f.roa_pct,
+                  f.quarterly_profit_growth_pct, f.quarterly_revenue_growth_pct,
+                  f.price_to_book, f.promoter_holding_pct, f.fii_holding_pct, f.snapshot_date,
+                  d.close AS latest_close
+           FROM stock_universe u
+           LEFT JOIN stock_watchlist w ON w.symbol = u.symbol AND w.exchange = u.exchange AND w.is_active = 1
+           JOIN stock_indicators i ON i.universe_id = u.id AND i.calc_date = ?
+           JOIN stock_fundamentals f ON f.universe_id = u.id
+               AND f.snapshot_date = (
+                   SELECT MAX(f2.snapshot_date) FROM stock_fundamentals f2
+                   WHERE f2.universe_id = u.id AND f2.snapshot_date >= ?
+               )
+           JOIN stock_daily_data d ON d.universe_id = u.id
+               AND d.trade_date = (
+                   SELECT MAX(d2.trade_date) FROM stock_daily_data d2 WHERE d2.universe_id = u.id
+               )
+           WHERE u.is_scrape_eligible = true
+             AND NOT EXISTS (
+                 SELECT 1 FROM stock_universe u2
+                 WHERE u2.isin = u.isin AND u2.isin IS NOT NULL AND u2.isin != ''
+                   AND u2.id != u.id
+                   AND ((u2.exchange = 'NSE' AND u.exchange != 'NSE') OR (u2.exchange = u.exchange AND u2.id < u.id))
+             )''',
+        (today, fundamentals_cutoff)
     ).fetchall()
 
 
@@ -1043,6 +1112,61 @@ def get_all_highly_recommended_today(db):
         results.append({
             'watchlist_id': watchlist_id, 'symbol': candidate['symbol'], 'exchange': candidate['exchange'],
             'company_name': candidate.get('company_name'), 'universe_id': candidate.get('universe_id'),
+            'buy_price': pricing['buy_price'], 'target_sell_price': pricing['target_sell_price'],
+            'stop_loss_price': pricing['stop_loss_price'], 'holding_period_days': HOLDING_PERIOD_DAYS,
+            'rsi_at_suggestion': candidate['rsi_14'], 'pe_at_suggestion': candidate['pe_ratio'],
+            'peg_at_suggestion': candidate['peg_ratio'], 'opm_at_suggestion': candidate['opm_pct'],
+            'fundamental_tier': candidate.get('fundamental_tier'),
+            'pattern_name': pricing['pattern_name'], 'pattern_note': pattern_note,
+            'score': nns_score, 'nns_tier': tier, 'rationale': rationale,
+        })
+    return results
+
+
+def get_special_recommendations_today(db):
+    """Every currently golden-cross-eligible, quality-floor-clearing
+    candidate from the FULL scrape-eligible stock_universe (~1,067
+    companies), not just the ~80-company watchlist -- powers the
+    super_admin-only Special Recommendations page (app.py's
+    /stocks/special-recommendations). Same golden/silver-only ('Highly
+    Recommended') bucket, uncapped, score-descending shape as
+    get_all_highly_recommended_today, just over the wider pool via
+    _fetch_universe_candidates instead of _fetch_candidates -- deliberately
+    a separate function rather than a parameter on that one, since that
+    one is Raghav's own daily alert-email source (watchlist-scoped, on
+    purpose) and must not silently change scope underneath it.
+
+    Purely a live, read-only snapshot -- never inserts a stock_suggestions
+    row, never touches any cooldown/rotation, and is never emailed to
+    anyone; it exists only to answer "what would qualify right now across
+    the entire universe", for a super_admin to browse.
+
+    Returns the same dict shape as get_all_highly_recommended_today, plus
+    universe_id always populated (every row's own origin) even when
+    watchlist_id is None (a candidate that was never watchlisted)."""
+    candidates = _fetch_universe_candidates(db)
+    eligible = [c for c in candidates if is_suggestion_eligible(c)]
+    previous_snapshots_by_universe = _fetch_previous_snapshots(db, eligible)
+    industry_benchmarks_by_industry = _compute_industry_benchmarks(eligible)
+    ranked = score_candidates(eligible, previous_snapshots_by_universe, industry_benchmarks_by_industry)
+
+    results = []
+    for candidate, nns_score in ranked:
+        tier = nns_tier(nns_score)
+        if tier not in ('golden', 'silver'):
+            continue
+        watchlist_id = candidate.get('watchlist_id')
+        universe_id = candidate['universe_id']
+        price_history = _fetch_price_history(db, watchlist_id=watchlist_id, universe_id=universe_id)
+        pricing = compute_suggestion_pricing(
+            price_history, candidate['latest_close'], TARGET_MULTIPLIER, STOP_LOSS_MULTIPLIER
+        )
+        pattern_note = _build_pattern_note(pricing['pattern_name'], pricing['pattern_research'])
+        rationale = _build_rationale(candidate, tier)
+        results.append({
+            'watchlist_id': watchlist_id, 'universe_id': universe_id,
+            'symbol': candidate['symbol'], 'exchange': candidate['exchange'],
+            'company_name': candidate.get('company_name'),
             'buy_price': pricing['buy_price'], 'target_sell_price': pricing['target_sell_price'],
             'stop_loss_price': pricing['stop_loss_price'], 'holding_period_days': HOLDING_PERIOD_DAYS,
             'rsi_at_suggestion': candidate['rsi_14'], 'pe_at_suggestion': candidate['pe_ratio'],

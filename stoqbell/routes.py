@@ -196,6 +196,7 @@ from stoqbell.utils.suggestion_engine import (
     get_top_stocks,
     get_candidates_for_manual_pick,
     create_manual_suggestions,
+    get_special_recommendations_today,
 )
 from stoqbell.utils.industry_growth import compute_industry_growth
 from stoqbell.utils.suggestion_email import (
@@ -2358,6 +2359,24 @@ def stocks_recommendations_tracker():
         )
         tracker_rows.append(row)
     return render_template('admin/stocks_recommendation_tracker.html', tracker_rows=tracker_rows)
+
+
+@stocks_bp.route('/stocks/special-recommendations', methods=['GET'])
+@stocks_role_required('super_admin')
+def stocks_special_recommendations():
+    """super_admin-only (narrower than every other staff-facing Stocks
+    page in this codebase, which all also admit child_admin, per
+    instruction) -- every currently golden-cross-eligible,
+    quality-clearing candidate ranked score-descending, live, from the
+    FULL scrape-eligible stock_universe (~1,067 companies), not just the
+    ~80-company watchlist stocks_watchlist covers. Same buy/target/tier/
+    score/pattern detail a real suggestion would show, computed on the
+    fly -- read-only, never inserts a stock_suggestions row, never
+    affects any cooldown, never emailed to anyone. See
+    utils.suggestion_engine.get_special_recommendations_today."""
+    db = get_db()
+    picks = get_special_recommendations_today(db)
+    return render_template('admin/stocks_special_recommendations.html', picks=picks)
 
 
 def _kite_client_for_auto_trade(db, settings):

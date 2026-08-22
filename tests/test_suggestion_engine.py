@@ -14,6 +14,7 @@ from stoqbell.utils.suggestion_engine import (
     generate_daily_suggestions,
     get_all_highly_recommended_today,
     get_candidates_for_manual_pick,
+    get_special_recommendations_today,
     get_suggestion_by_id,
     get_top_stocks,
     is_suggestion_eligible,
@@ -236,10 +237,16 @@ class FakeSuggestionDB:
     (see compute_suggestion_pricing's fallback), so existing tests that
     don't care about pattern pricing keep working unchanged."""
 
-    def __init__(self, candidate_rows, existing_suggestions=None, price_history=None):
+    def __init__(self, candidate_rows, existing_suggestions=None, price_history=None,
+                 universe_candidate_rows=None, universe_price_history=None):
         self.candidate_rows = candidate_rows
         self.suggestions = existing_suggestions or []  # list of dicts: watchlist_id, status, suggestion_date
         self.price_history = price_history or {}
+        # get_special_recommendations_today's own candidate pool (see
+        # _fetch_universe_candidates) -- separate from candidate_rows since
+        # that one's SQL is watchlist-scoped, this one is universe-wide.
+        self.universe_candidate_rows = universe_candidate_rows or []
+        self.universe_price_history = universe_price_history or {}
         self._next_id = 1
 
     def execute(self, sql, params=None):
@@ -249,9 +256,17 @@ class FakeSuggestionDB:
         if normalized.startswith('SELECT w.id AS watchlist_id, w.symbol, w.exchange'):
             return FakeCursor(self.candidate_rows)
 
+        if normalized.startswith('SELECT u.id AS universe_id, u.symbol, u.exchange, u.company_name'):
+            return FakeCursor(self.universe_candidate_rows)
+
         if normalized.startswith('SELECT close FROM stock_daily_data WHERE watchlist_id=?'):
             watchlist_id, _lookback_days = params
             closes = self.price_history.get(watchlist_id, [])
+            return FakeCursor([{'close': c} for c in reversed(closes)])  # DESC, like the real query
+
+        if normalized.startswith('SELECT close FROM stock_daily_data WHERE universe_id=?'):
+            universe_id, _lookback_days = params
+            closes = self.universe_price_history.get(universe_id, [])
             return FakeCursor([{'close': c} for c in reversed(closes)])  # DESC, like the real query
 
         if normalized.startswith('SELECT universe_id, promoter_holding_pct, fii_holding_pct, snapshot_date'):
@@ -653,6 +668,20 @@ def test_mark_suggestions_target_hit_is_a_no_op_on_empty_list():
     assert db.rows[0]['status'] == 'pending'
 
 
+def _universe_candidate(universe_id, symbol, watchlist_id=None, **overrides):
+    """Same shape _fetch_universe_candidates returns -- watchlist_id is
+    None by default (a company that was never watchlisted at all), unlike
+    _candidate's watchlist-scoped fixture above."""
+    row = {
+        'universe_id': universe_id, 'watchlist_id': watchlist_id, 'symbol': symbol, 'exchange': 'NSE',
+        'latest_close': 100.0, 'fundamental_tier': 'golden',
+        **GOOD_FUNDAMENTALS,
+        **GOOD_INDICATORS,
+    }
+    row.update(overrides)
+    return row
+
+
 def _golden_scoring_candidate(watchlist_id, symbol, **overrides):
     # Same fixture shape test_starters_engine.py's _golden_candidate uses
     # (clears NNS_GOLDEN_MIN, 8.0+) -- duplicated here rather than imported
@@ -899,3 +928,81 @@ def test_get_all_highly_recommended_today_empty_when_nothing_clears_silver():
     db = FakeSuggestionDB([bronze_only])
 
     assert get_all_highly_recommended_today(db) == []
+
+
+# --- get_special_recommendations_today (super_admin-only, full-universe scan) ---
+
+def test_special_recommendations_ranks_the_full_universe_not_just_the_watchlist():
+    # A candidate with NO watchlist_id at all (never watchlisted) still
+    # shows up -- unlike get_all_highly_recommended_today, which only ever
+    # sees the ~80-company watchlist via _fetch_candidates.
+    never_watchlisted = _universe_candidate(101, 'UNIVONLY', watchlist_id=None)
+    db = FakeSuggestionDB([], universe_candidate_rows=[never_watchlisted])
+
+    results = get_special_recommendations_today(db)
+
+    assert [r['symbol'] for r in results] == ['UNIVONLY']
+    assert results[0]['watchlist_id'] is None
+    assert results[0]['universe_id'] == 101
+
+
+def test_special_recommendations_still_includes_watchlisted_companies_too():
+    also_watchlisted = _universe_candidate(202, 'BOTHCO', watchlist_id=7)
+    db = FakeSuggestionDB([], universe_candidate_rows=[also_watchlisted])
+
+    result = get_special_recommendations_today(db)[0]
+
+    assert result['watchlist_id'] == 7
+    assert result['universe_id'] == 202
+
+
+def test_special_recommendations_ranked_highest_score_first():
+    weaker = _universe_candidate(1, 'WEAKER', watchlist_id=1)  # plain fixture, scores silver
+    stronger = _universe_candidate(
+        2, 'STRONGER', watchlist_id=None,
+        peg_ratio=0.1, quarterly_profit_growth_pct=35, quarterly_revenue_growth_pct=30,
+        opm_pct=45, roce_pct=30, roa_pct=20, rsi_14=52.5, pe_ratio=12, price_to_book=2,
+    )  # golden-scoring fixture shape, see _golden_scoring_candidate
+    db = FakeSuggestionDB([], universe_candidate_rows=[weaker, stronger])
+
+    results = get_special_recommendations_today(db)
+
+    assert [r['symbol'] for r in results] == ['STRONGER', 'WEAKER']
+    assert results[0]['nns_tier'] == 'golden'
+    assert results[1]['nns_tier'] == 'silver'
+
+
+def test_special_recommendations_excludes_bronze_and_non_golden_cross():
+    bronze = _universe_candidate(1, 'WEAKCO', peg_ratio=1.5, quarterly_profit_growth_pct=1,
+                                  quarterly_revenue_growth_pct=1, opm_pct=5, roce_pct=2, roa_pct=1)
+    not_golden_cross = _universe_candidate(2, 'DEATHCO', cross_status='death_cross')
+    db = FakeSuggestionDB([], universe_candidate_rows=[bronze, not_golden_cross])
+
+    assert get_special_recommendations_today(db) == []
+
+
+def test_special_recommendations_includes_fields_the_page_template_needs():
+    candidate = _universe_candidate(1, 'GOLDCO', watchlist_id=None, company_name='Gold Company Ltd')
+    db = FakeSuggestionDB([], universe_candidate_rows=[candidate])
+
+    result = get_special_recommendations_today(db)[0]
+
+    for field in ('watchlist_id', 'universe_id', 'symbol', 'exchange', 'company_name',
+                  'buy_price', 'target_sell_price', 'stop_loss_price', 'pattern_name',
+                  'score', 'nns_tier', 'rationale'):
+        assert field in result, f'missing {field}'
+
+
+def test_special_recommendations_uses_universe_price_history_when_never_watchlisted():
+    # Confirms _fetch_price_history's universe_id fallback is actually
+    # wired up here -- a distinctive price history (clean uptrend) should
+    # feed into compute_suggestion_pricing's pattern detection the same
+    # way it would for a watchlisted candidate.
+    candidate = _universe_candidate(55, 'UNIVPRICE', watchlist_id=None, latest_close=120.0)
+    closes = [100.0 + i for i in range(30)]  # steady uptrend, oldest first
+    db = FakeSuggestionDB([], universe_candidate_rows=[candidate], universe_price_history={55: closes})
+
+    result = get_special_recommendations_today(db)[0]
+
+    assert result['buy_price'] == 120.0
+    assert result['target_sell_price'] is not None

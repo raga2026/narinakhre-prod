@@ -194,6 +194,9 @@
             </p>
             {% if role == 'super_admin' %}
             <p class="mt-2">
+                <a href="{{ url_for('stocks.stocks_special_recommendations') }}" class="text-sky-400 hover:text-sky-300 underline">Special Recommendations</a>
+            </p>
+            <p class="mt-2">
                 <a href="{{ url_for('stocks.stocks_notifications') }}" class="text-sky-400 hover:text-sky-300 underline">Send a custom recommendation</a>
             </p>
             <p class="mt-2">

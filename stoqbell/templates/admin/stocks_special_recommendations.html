@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <link rel="icon" type="image/png" href="{{ url_for('stocks.static', filename='assets/stoqbell-icon.png') }}">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Special Recommendations - StoqBell</title>
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+    <style>
+        body { background: #0f172a; color: #f8fafc; }
+        .stocks-accent { color: #0ea5e9; }
+        table { border-collapse: collapse; width: 100%; }
+        th, td { text-align: left; padding: 0.6rem 0.9rem; border-bottom: 1px solid rgba(14, 165, 233, 0.15); white-space: nowrap; }
+        th { color: #7dd3fc; font-weight: 600; position: sticky; top: 0; background: #1e293b; }
+        tbody tr:hover { background: rgba(14, 165, 233, 0.06); }
+        td.wrap { white-space: normal; max-width: 22rem; }
+        .badge { display:inline-flex; align-items:center; padding:3px 11px; border-radius:999px; font-size:0.72rem; font-weight:700; white-space:nowrap; }
+        .badge-golden { background:#78350f; color:#fef3c7; }
+        .badge-silver { background:#334155; color:#e2e8f0; }
+        .badge-cross { background:#14532d; color:#bbf7d0; }
+        .pct-up { color:#4ade80; font-weight:600; }
+        .rationale { color: #94a3b8; font-size: 0.8rem; }
+    </style>
+</head>
+<body class="min-h-screen p-8">
+    <div class="max-w-7xl mx-auto">
+        <div class="flex items-center justify-between mb-6">
+            <div>
+                <h1 class="text-2xl font-extrabold stocks-accent font-serif">Special Recommendations</h1>
+                <p class="text-slate-400 text-sm mt-1">
+                    Every golden-cross, quality-clearing stock across the entire scrape-eligible universe -- not just the watchlist --
+                    ranked by StoqBell Score, best first. {{ picks|length }} result{{ 's' if picks|length != 1 }} right now.
+                    Computed live; nothing here is sent to anyone or saved as a suggestion.
+                </p>
+            </div>
+            <a href="{{ url_for('stocks.stocks_admin_dashboard') }}" class="text-sm text-slate-400 hover:text-sky-400 underline">Back to dashboard</a>
+        </div>
+
+        <div class="bg-slate-800 rounded-2xl p-6 border border-sky-500/20 overflow-x-auto">
+            <table>
+                <caption class="text-left text-slate-400 text-sm mb-3">
+                    Every row here is currently golden-cross, by definition -- see the Signal column. Buy/target/stop-loss are computed the same
+                    way a real Pick of the Day would be, from this stock's own detected chart pattern when one exists, else a flat percentage.
+                </caption>
+                <thead>
+                    <tr>
+                        <th scope="col">Company</th>
+                        <th scope="col">Signal</th>
+                        <th scope="col">Buy</th>
+                        <th scope="col">Target</th>
+                        <th scope="col">Stop-loss</th>
+                        <th scope="col">Pattern</th>
+                        <th scope="col">StoqBell Score</th>
+                        <th scope="col">Why</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for p in picks %}
+                    <tr>
+                        <th scope="row">
+                            {% if p.watchlist_id %}
+                            <a href="{{ url_for('stocks.stocks_company_detail', watchlist_id=p.watchlist_id) }}" class="text-sky-400 hover:text-sky-300 underline">
+                                {{ p.company_name or p.symbol }} ({{ p.exchange }})
+                            </a>
+                            {% elif p.universe_id %}
+                            <a href="{{ url_for('stocks.stocks_universe_detail', universe_id=p.universe_id) }}" class="text-sky-400 hover:text-sky-300 underline">
+                                {{ p.company_name or p.symbol }} ({{ p.exchange }})
+                            </a>
+                            {% else %}
+                            {{ p.company_name or p.symbol }} ({{ p.exchange }})
+                            {% endif %}
+                            {% if not p.watchlist_id %}<div class="text-xs text-slate-500">Not on the watchlist</div>{% endif %}
+                        </th>
+                        <td><span class="badge badge-cross">Golden Cross</span></td>
+                        <td>{{ p.buy_price if p.buy_price is not none else '—' }}</td>
+                        <td class="pct-up">{{ p.target_sell_price if p.target_sell_price is not none else '—' }}</td>
+                        <td>{{ p.stop_loss_price if p.stop_loss_price is not none else '—' }}</td>
+                        <td>{{ p.pattern_name | replace('_', ' ') | title if p.pattern_name else '—' }}</td>
+                        <td>
+                            <span class="badge {{ 'badge-golden' if p.nns_tier == 'golden' else 'badge-silver' }}">{{ p.nns_tier | title }}</span>
+                            {{ p.score }}
+                        </td>
+                        <td class="wrap rationale">{{ p.rationale }}</td>
+                    </tr>
+                    {% else %}
+                    <tr>
+                        <td colspan="8" class="text-slate-400">Nothing clears the bar across the whole universe right now.</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</body>
+</html>
