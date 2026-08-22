@@ -53,10 +53,12 @@
                 {% if company.cross_status %}
                     <span class="badge badge-{{ company.cross_status }}">{{ company.cross_status.replace('_', ' ') | title }}</span>
                 {% endif %}
+                {% if session.stocks_admin_role in ('super_admin', 'child_admin') %}
                 {% if company.is_recommended %}
                     <span class="badge badge-recommended">Highly recommended to buy</span>
                 {% else %}
                     <span class="badge badge-not-recommended">Not currently recommended</span>
+                {% endif %}
                 {% endif %}
             </div>
         </div>
@@ -295,6 +297,7 @@
             </div>
         </div>
 
+        {% if session.stocks_admin_role in ('super_admin', 'child_admin') %}
         <div class="section-card">
             <h2 class="text-lg font-bold text-slate-200 mb-4">Suggestion history</h2>
             <div class="overflow-x-auto">
@@ -342,6 +345,7 @@
                 </table>
             </div>
         </div>
+        {% endif %}
     </div>
 </body>
 </html>

@@ -10,12 +10,13 @@ def _build_test_app():
 
     Note: /stocks/settings/trading-mode and any execute-suggestion route
     don't exist anywhere in this codebase (grepped app.py to confirm), so
-    they can't be tested here -- /stocks/users and /stocks/watchlist are
-    the real staff-only routes this phase gates against viewer.
+    they can't be tested here -- /stocks/users is staff-only;
     /stocks/watchlist uses stocks_watchlist_access_required (not a plain
-    stocks_role_required), matching the real route in app.py -- a viewer
-    with can_view_watchlist granted is a deliberate exception, tested
-    below."""
+    stocks_role_required), matching the real route in app.py, but that
+    decorator now admits any logged-in viewer regardless of
+    can_view_watchlist (that flag no longer gates anything -- see
+    stocks_watchlist_access_required's own docstring; the staff-vs-viewer
+    difference lives entirely in the template now)."""
     app = Flask(__name__)
     app.secret_key = 'test-secret-key'
 
@@ -55,7 +56,9 @@ def test_viewer_cannot_access_stocks_users():
     assert response.status_code == 403
 
 
-def test_viewer_without_watchlist_flag_cannot_access_stocks_watchlist():
+def test_viewer_without_watchlist_flag_can_still_access_stocks_watchlist():
+    # can_view_watchlist no longer gates anything -- every viewer can reach
+    # the watchlist now, regardless of this flag.
     app = _build_test_app()
     client = app.test_client()
 
@@ -65,13 +68,10 @@ def test_viewer_without_watchlist_flag_cannot_access_stocks_watchlist():
         sess['stocks_can_view_watchlist'] = False
 
     response = client.get('/stocks/watchlist')
-    assert response.status_code == 403
+    assert response.status_code == 200
 
 
 def test_viewer_with_watchlist_flag_granted_can_access_stocks_watchlist():
-    # The one deliberate exception: a viewer created with can_view_watchlist
-    # granted (see create_viewer_account) can reach the watchlist page,
-    # unlike a default viewer.
     app = _build_test_app()
     client = app.test_client()
 

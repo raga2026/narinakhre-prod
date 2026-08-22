@@ -484,12 +484,16 @@ def get_suggestions(db, start_date=None, end_date=None):
     universe_id (LEFT JOINed by symbol/exchange, same match as
     _fetch_candidates -- may be None if the company was ever removed from
     stock_universe) is what suggestion_email.py links out to
-    /stocks/universe/<universe_id> with -- the ANY-logged-in-role company
-    detail page, unlike /stocks/company/<watchlist_id> which is staff/
-    can_view_watchlist-only and would 403 for a plain viewer. Shared
-    by the daily email (utils/suggestion_email.py) and the read-only viewer
-    pages (/stocks/my/suggestions, /stocks/my/history) so there's exactly
-    one place building this join, not three."""
+    /stocks/universe/<universe_id> with -- the general-audience company
+    detail page (fundamentals/technicals, no Recommended flag), distinct
+    from /stocks/company/<watchlist_id> (linked from /stocks/watchlist),
+    which shows staff the Recommended column too. Both are open to any
+    logged-in Stocks account now (see stocks_watchlist_access_required) --
+    the difference between them is what each page's template shows, not
+    who can reach it. Shared by the daily email (utils/suggestion_email.py)
+    and the read-only viewer pages (/stocks/my/suggestions,
+    /stocks/my/history) so there's exactly one place building this join,
+    not three."""
     conditions = []
     params = []
     if start_date:

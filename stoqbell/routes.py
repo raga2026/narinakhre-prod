@@ -1069,11 +1069,9 @@ def stocks_users_manage():
     if request.method == 'POST':
         email = request.form.get('email')
         name = request.form.get('name')
-        can_view_watchlist = request.form.get('can_view_watchlist') == 'on'
         start_trial = request.form.get('start_trial') == 'on'
         row, password, error = create_viewer_account(
-            db, email, name, session.get('stocks_admin_id'),
-            can_view_watchlist=can_view_watchlist, start_trial=start_trial,
+            db, email, name, session.get('stocks_admin_id'), start_trial=start_trial,
         )
         if error:
             flash(error, 'error')
@@ -1351,17 +1349,18 @@ def stocks_watchlist():
     and whether it currently passes the same hard filters the suggestion
     engine uses to decide what to recommend (see
     suggestion_engine.passes_hard_filters) -- shown as "Recommended to buy".
-    Doesn't touch any of those tables -- read-only here. super_admin/
-    child_admin always have access; a viewer only gets in if their account
-    was created with can_view_watchlist granted (see
-    stocks_watchlist_access_required) -- everyone else gets their own
-    read-only page at /stocks/my/suggestions instead.
+    Doesn't touch any of those tables -- read-only here. Any logged-in
+    Stocks account -- super_admin, child_admin, or a plain viewer of
+    either plan -- has access (see stocks_watchlist_access_required).
 
     Staff (super_admin/child_admin) get the full operational table incl.
-    PE/PEG/OPM/RSI. A viewer gets a simplified table instead (see the
-    template): name, price, cross-over status, and the recommended flag
-    only, sorted recommended-first -- they don't need the underlying
-    fundamentals numbers to decide whether to act on it.
+    PE/PEG/OPM/RSI/StoqBell Score AND the Recommended column. A viewer
+    gets a simplified table instead (see the template): name, price, and
+    cross-over status only -- the Recommended column (and its row
+    highlight) is deliberately left out for a viewer, so browsing the
+    watchlist doesn't leak which companies StoqBell is currently
+    recommending; that stays behind the daily Pick of the Day a paying
+    plan actually delivers.
 
     ?filter=golden narrows the list to golden_cross rows only, for either
     audience -- the "view only golden cross companies" option.
@@ -1369,9 +1368,9 @@ def stocks_watchlist():
     get_golden_cross_not_qualified()'s list instead -- golden-cross
     companies from the full scrape-eligible universe (not just the
     watchlist) that are excluded fundamentally, with the specific reasons
-    why. Staff only (super_admin/child_admin); a viewer with
-    can_view_watchlist granted only sees the watchlist itself, not this
-    universe-wide diagnostic view.
+    why. Staff only (super_admin/child_admin) -- gated by its own inline
+    role check below, not stocks_watchlist_access_required, since a viewer
+    should never see this diagnostic view regardless of watchlist access.
 
     Only is_active=1 rows are shown -- stock_watchlist never deletes a row,
     only deactivates it (see run_fundamental_shortlist), so without this

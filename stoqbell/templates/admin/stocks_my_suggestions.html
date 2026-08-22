@@ -205,11 +205,9 @@
                 {% endif %}
             </p>
             {% endif %}
-            {% if session.stocks_can_view_watchlist %}
             <p class="text-gray-600 text-sm mt-3">
                 <a href="{{ url_for('stocks.stocks_watchlist') }}" class="link">View watchlist</a>
             </p>
-            {% endif %}
         </div>
 
         <div class="card p-5 mb-6">

@@ -147,22 +147,26 @@
         {% else %}
         <div class="bg-slate-800 rounded-2xl p-6 border border-sky-500/20 overflow-x-auto">
             {% if session.stocks_admin_role == 'viewer' %}
-            {# Simplified table: name, price, cross-over, recommended -- sorted recommended-first (see the route). #}
+            {# Simplified table: name, price, cross-over only -- the Recommended
+               column (and its is-recommended row highlight) is deliberately left
+               out here, so browsing the watchlist doesn't leak which companies
+               are currently recommended; that stays behind the daily Pick of
+               the Day a paying plan actually delivers (see the staff table
+               below, which does show it). #}
             <table>
                 <caption class="text-left text-slate-400 text-sm mb-3">
-                    Sorted with the most promising companies first. Click a name for the full analysis.
+                    Click a name for the full fundamentals and technicals.
                 </caption>
                 <thead>
                     <tr>
                         <th scope="col">Company</th>
                         <th scope="col">Price</th>
                         <th scope="col">Cross-over</th>
-                        <th scope="col">Recommended</th>
                     </tr>
                 </thead>
                 <tbody>
                     {% for row in rows %}
-                    <tr class="{{ 'is-recommended' if row.is_recommended }}">
+                    <tr>
                         <th scope="row">
                             <a class="company-link" href="{{ url_for('stocks.stocks_company_detail', watchlist_id=row.id) }}">{{ row.name or row.symbol }}</a>
                         </th>
@@ -174,17 +178,10 @@
                                 —
                             {% endif %}
                         </td>
-                        <td>
-                            {% if row.is_recommended %}
-                                <span class="badge badge-recommended">Highly recommended to buy</span>
-                            {% else %}
-                                <span class="badge badge-not-recommended">Not yet</span>
-                            {% endif %}
-                        </td>
                     </tr>
                     {% else %}
                     <tr>
-                        <td colspan="4" class="text-slate-400">No symbols in the watchlist yet.</td>
+                        <td colspan="3" class="text-slate-400">No symbols in the watchlist yet.</td>
                     </tr>
                     {% endfor %}
                 </tbody>

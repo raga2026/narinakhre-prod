@@ -364,7 +364,10 @@ def test_watchlist_access_staff_always_allowed():
     assert response.status_code == 200
 
 
-def test_watchlist_access_viewer_with_flag_allowed():
+def test_watchlist_access_any_viewer_allowed_regardless_of_flag():
+    # can_view_watchlist no longer gates anything -- every viewer can reach
+    # the watchlist now (the template, not this decorator, is what hides
+    # the Recommended column from them).
     app = _build_test_app()
     client = app.test_client()
     with client.session_transaction() as sess:
@@ -376,7 +379,7 @@ def test_watchlist_access_viewer_with_flag_allowed():
     assert response.status_code == 200
 
 
-def test_watchlist_access_viewer_without_flag_blocked():
+def test_watchlist_access_viewer_without_flag_also_allowed():
     app = _build_test_app()
     client = app.test_client()
     with client.session_transaction() as sess:
@@ -385,7 +388,7 @@ def test_watchlist_access_viewer_without_flag_blocked():
         sess['stocks_can_view_watchlist'] = False
 
     response = client.get('/stocks/watchlist')
-    assert response.status_code == 403
+    assert response.status_code == 200
 
 
 def test_watchlist_access_logged_out_redirects_to_login():

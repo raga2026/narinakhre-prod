@@ -38,8 +38,9 @@
         <section class="bg-slate-800 rounded-2xl p-6 border border-sky-500/20 mb-6" aria-labelledby="add-viewer-heading">
             <h2 id="add-viewer-heading" class="text-lg font-bold text-slate-200 mb-4">Add a viewer</h2>
             <p class="text-slate-400 text-sm mb-4">
-                Viewers can log in and see their own suggestions, nothing else. A welcome email with
-                their login and password is sent immediately when you add them.
+                Viewers can log in and see their own suggestions plus the full watchlist (without the
+                Recommended column staff see). A welcome email with their login and password is sent
+                immediately when you add them.
             </p>
             <form method="POST" action="{{ url_for('stocks.stocks_users_manage') }}" class="space-y-4">
                 <div>
@@ -51,13 +52,6 @@
                     <label for="new-name" class="block text-sm font-semibold text-slate-300 mb-1">Name (optional)</label>
                     <input id="new-name" type="text" name="name" autocomplete="off"
                            class="w-full border border-sky-500/30 rounded-xl p-3 focus:outline-none focus:border-sky-500 transition">
-                </div>
-                <div class="flex items-center gap-2">
-                    <input id="new-can-view-watchlist" type="checkbox" name="can_view_watchlist"
-                           class="h-4 w-4">
-                    <label for="new-can-view-watchlist" class="text-sm text-slate-300">
-                        Also let this viewer see the watchlist (symbols, fundamentals, golden/death cross status)
-                    </label>
                 </div>
                 <div class="flex items-center gap-2">
                     <input id="new-start-trial" type="checkbox" name="start_trial"
@@ -93,9 +87,6 @@
                     {% if viewer.name %}<p class="text-slate-400 text-sm">{{ viewer.username }}</p>{% endif %}
                     <p class="text-slate-400 text-sm">
                         Status: {{ 'Active' if viewer.is_active else 'Disabled' }}
-                    </p>
-                    <p class="text-slate-400 text-sm">
-                        Watchlist access: {{ 'Yes' if viewer.can_view_watchlist else 'No' }}
                     </p>
                     <p class="text-slate-400 text-sm">
                         Password: {{ 'Still using the temporary one -- must change on next login' if viewer.must_change_password else 'Changed' }}

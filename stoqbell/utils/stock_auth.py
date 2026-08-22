@@ -425,14 +425,18 @@ def stocks_role_required(*roles):
 
 
 def stocks_watchlist_access_required(view_func):
-    """Same access as stocks_role_required('super_admin', 'child_admin'),
-    plus any viewer whose can_view_watchlist flag was granted when their
-    account was created (see create_viewer_account) -- the flag is cached
-    into session['stocks_can_view_watchlist'] at login time
-    (stocks_admin_login in app.py), same staleness tradeoff
-    session['stocks_admin_role'] already accepts everywhere else in this
-    module: toggling the flag after a viewer's already logged in takes
-    effect on their next login, not immediately."""
+    """Any logged-in Stocks account -- super_admin, child_admin, or a
+    plain viewer, regardless of plan (Standard or Starters) -- can reach
+    /stocks/watchlist and /stocks/company/<id>. Previously gated a viewer
+    behind a per-account can_view_watchlist flag (see create_viewer_account);
+    that flag no longer gates anything here (per instruction: the
+    watchlist should be visible to everyone) -- the actual staff/viewer
+    difference now lives entirely in the template (stocks_watchlist.html),
+    which shows staff the full fundamentals/technicals table including the
+    Recommended column, and a viewer a simplified table with that column
+    (and its is-recommended row highlight) removed, so a viewer can browse
+    the same companies without seeing which ones StoqBell is currently
+    recommending -- that stays behind the daily Pick of the Day."""
     @wraps(view_func)
     def wrapped(*args, **kwargs):
         if not session.get('stocks_admin_id'):
@@ -440,10 +444,7 @@ def stocks_watchlist_access_required(view_func):
         forced = _must_change_password_redirect()
         if forced:
             return forced
-        role = session.get('stocks_admin_role')
-        if role in ('super_admin', 'child_admin'):
-            return view_func(*args, **kwargs)
-        if role == 'viewer' and session.get('stocks_can_view_watchlist'):
+        if session.get('stocks_admin_role') in ('super_admin', 'child_admin', 'viewer'):
             return view_func(*args, **kwargs)
         flash('You do not have access to that page.', 'error')
         return ('Forbidden', 403)
@@ -530,10 +531,12 @@ def create_viewer_account(db, email, name, created_by_id, can_view_watchlist=Fal
     in plaintext, only so that send can happen -- nothing else stores or
     logs the plaintext, only its hash persists in the database.
 
-    can_view_watchlist grants this specific viewer access to the (staff)
-    /stocks/watchlist page -- off by default; see
-    stocks_watchlist_access_required. Most viewers should stay read-only
-    to their own suggestions, so this is opt-in per account, not global.
+    can_view_watchlist no longer gates anything (every viewer can reach
+    /stocks/watchlist now, see stocks_watchlist_access_required) -- kept
+    as a param/column only so this function's signature and existing rows
+    don't need a migration; app.py's /stocks/users no longer has a
+    checkbox for it, so every new viewer is created with it left at its
+    default (False).
 
     start_trial=True creates this viewer WITHOUT permanent Pro access
     (is_pro=0, unlike the normal admin-created-viewer default) and flags
