@@ -32,6 +32,9 @@
             --th-bg: #17223a; --th-fg: #7dd3fc; --row-border: #2d3a4f; --row-hover: #1a2540;
             --flash-bg: #16233a; --flash-fg: #bfdbfe; --flash-border: #2c4570;
             --danger: #f87171;
+            --badge-golden_cross-bg: #14532d; --badge-golden_cross-fg: #bbf7d0;
+            --badge-death_cross-bg: #7f1d1d; --badge-death_cross-fg: #fecaca;
+            --badge-no_clear_trend-bg: #334155; --badge-no_clear_trend-fg: #e2e8f0;
         }
         [data-theme="light"] {
             --bg: #f5f6f8; --fg: #24262d;
@@ -45,6 +48,9 @@
             --th-bg: #fafbfc; --th-fg: #6c7080; --row-border: #eef0f2; --row-hover: #f9fbfd;
             --flash-bg: #eff6ff; --flash-fg: #1e3a8a; --flash-border: #bfdbfe;
             --danger: #dc2626;
+            --badge-golden_cross-bg: #dcfce7; --badge-golden_cross-fg: #15803d;
+            --badge-death_cross-bg: #fee2e2; --badge-death_cross-fg: #b91c1c;
+            --badge-no_clear_trend-bg: #eceff2; --badge-no_clear_trend-fg: #4a4f57;
         }
         body { background: var(--bg); color: var(--fg); font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; font-size: 0.9rem; }
         .kite-accent { color: var(--accent); }
@@ -70,9 +76,9 @@
         td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
         tbody tr:hover { background: var(--row-hover); }
         .badge { display:inline-flex; align-items:center; padding:2px 10px; border-radius:999px; font-size:0.7rem; font-weight:700; white-space: nowrap; }
-        .badge-golden_cross    { background:#dcfce7; color:#15803d; }
-        .badge-death_cross     { background:#fee2e2; color:#b91c1c; }
-        .badge-no_clear_trend  { background:#eceff2; color:#4a4f57; }
+        .badge-golden_cross    { background: var(--badge-golden_cross-bg); color: var(--badge-golden_cross-fg); }
+        .badge-death_cross     { background: var(--badge-death_cross-bg); color: var(--badge-death_cross-fg); }
+        .badge-no_clear_trend  { background: var(--badge-no_clear_trend-bg); color: var(--badge-no_clear_trend-fg); }
         .search-input { background: var(--input-bg); border:1px solid var(--input-border); color: var(--fg); border-radius:0.375rem; padding:0.55rem 0.9rem; width:100%; max-width: 22rem; }
         .filter-select { background: var(--input-bg); border:1px solid var(--input-border); color: var(--fg); border-radius:0.375rem; padding:0.55rem 0.9rem; }
         .kite-btn { background: var(--accent); color: white; border-radius: 0.375rem; }
