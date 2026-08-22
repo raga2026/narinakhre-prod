@@ -363,8 +363,14 @@ def _must_change_password_redirect():
     right after login, so a viewer can't dodge the forced change by
     hitting some other Stocks URL directly (a bookmark, or typing it in)
     instead of following the post-login redirect. The endpoint check
-    avoids redirecting the change-password page to itself."""
-    if session.get('stocks_must_change_password') and request.endpoint != 'stocks_change_password':
+    avoids redirecting the change-password page to itself -- must compare
+    against the Blueprint-qualified name ('stocks.stocks_change_password'),
+    not the bare view function name; request.endpoint is always
+    Blueprint-namespaced for a route registered on stocks_bp, so comparing
+    against the bare name never matched and sent the change-password page
+    into an infinite redirect loop to itself the moment must_change_password
+    was set -- exactly the one time a viewer actually needs to reach it."""
+    if session.get('stocks_must_change_password') and request.endpoint != 'stocks.stocks_change_password':
         return redirect(url_for('stocks.stocks_change_password'))
     return None
 

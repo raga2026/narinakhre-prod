@@ -327,6 +327,7 @@ def _build_test_app():
         return 'stocks login page', 200
 
     @app.route('/stocks/change-password', endpoint='stocks.stocks_change_password')
+    @stocks_login_required
     def stocks_change_password():
         return 'change password page', 200
 
@@ -473,6 +474,27 @@ def test_must_change_password_redirects_from_stocks_login_required_routes_too():
         sess['stocks_must_change_password'] = True
 
     response = client.get('/stocks/my/suggestions', follow_redirects=True)
+    assert response.status_code == 200
+    assert b'change password page' in response.data
+
+
+def test_change_password_page_itself_does_not_redirect_loop():
+    # Regression test: _must_change_password_redirect() used to compare
+    # request.endpoint against the bare 'stocks_change_password', but a
+    # route registered on stocks_bp always reports the Blueprint-qualified
+    # 'stocks.stocks_change_password' -- that comparison never matched, so
+    # visiting the change-password page itself while must_change_password
+    # was set redirected back to the exact same page forever (an
+    # ERR_TOO_MANY_REDIRECTS loop), for every account with a temporary
+    # password -- precisely the one moment they actually need this page.
+    app = _build_test_app()
+    client = app.test_client()
+    with client.session_transaction() as sess:
+        sess['stocks_admin_id'] = 1
+        sess['stocks_admin_role'] = 'viewer'
+        sess['stocks_must_change_password'] = True
+
+    response = client.get('/stocks/change-password', follow_redirects=False)
     assert response.status_code == 200
     assert b'change password page' in response.data
 
