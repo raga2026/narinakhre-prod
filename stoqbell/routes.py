@@ -1612,7 +1612,12 @@ def stocks_universe_list():
     status is still gated, though: see _can_view_watchlist_signals /
     redact_recommendation_signals -- everyone gets the underlying numbers
     (price, PE, OPM, RSI), only staff and flagged viewers get the
-    buy-signal layer on top."""
+    buy-signal layer on top.
+
+    where_sql's NOT EXISTS clause collapses each NSE/BSE ISIN pair down to
+    one row (see the comment right above it) -- otherwise the same company
+    shows up twice here, once under each exchange's own name for it (e.g.
+    'X Ltd' vs 'X Limited')."""
     db = get_db()
     query = (request.args.get('q') or '').strip()
     industry_filter = (request.args.get('industry') or '').strip()
@@ -1652,7 +1657,30 @@ def stocks_universe_list():
         except ValueError:
             pass  # silently ignored, same as any other malformed query param
 
-    where_sql = 'WHERE u.is_scrape_eligible = true'
+    # Same company, two stock_universe rows -- NSE and BSE each get their
+    # own row (see utils/stock_universe.propagate_bse_market_cap_to_nse's
+    # docstring: "never merges or deletes either row", kept apart on
+    # purpose so both sides of the ISIN pair can independently supply
+    # market cap data). Our NSE and BSE source lists also don't agree on
+    # 'Ltd' vs 'Limited' etc. for the same company (see
+    # stock_shortlist._pick_canonical_listing's identical note), so
+    # without this the exact same company shows up twice here under two
+    # different names. Rather than touching the underlying rows (which
+    # the watchlist shortlist step still needs both of, to later pick
+    # whichever listing actually resolves a Kite instrument token), this
+    # collapses each ISIN pair down to one row for THIS browse list only
+    # -- the NSE listing when one exists, else whichever row has the
+    # lower id. A row with no ISIN on record can't be identified as part
+    # of a pair at all, so it's always shown regardless.
+    where_sql = (
+        'WHERE u.is_scrape_eligible = true '
+        'AND NOT EXISTS ('
+        '  SELECT 1 FROM stock_universe u2 '
+        '  WHERE u2.isin = u.isin AND u2.isin IS NOT NULL AND u2.isin != \'\' '
+        '    AND u2.id != u.id '
+        '    AND ((u2.exchange = \'NSE\' AND u.exchange != \'NSE\') OR (u2.exchange = u.exchange AND u2.id < u.id))'
+        ')'
+    )
     params = []
     if query:
         where_sql += ' AND (u.company_name ILIKE ? OR u.symbol ILIKE ?)'
