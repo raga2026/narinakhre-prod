@@ -41,9 +41,10 @@
                         {{ golden_not_qualified | length }} compan{{ 'y' if golden_not_qualified | length == 1 else 'ies' }} shown
                         &middot; golden cross, not fundamentally qualified
                     {% else %}
-                        {{ rows | length }} compan{{ 'y' if rows | length == 1 else 'ies' }} shown
+                        {{ rows | length }} compan{{ 'y' if rows | length == 1 else 'ies' }} shown, across the full tracked universe
                         {% if cross_filter == 'golden' %}&middot; golden cross only{% endif %}
                         {% if tier_filter and tier_filter != 'all' %}&middot; Tier {{ {'golden': 1, 'silver': 2, 'bronze': 3}[tier_filter] }} ({{ tier_filter | title }}) only{% endif %}
+                        {% if session.stocks_admin_role in ('super_admin', 'child_admin') %}&middot; sorted by StoqBell Score, best first{% endif %}
                     {% endif %}
                 </p>
                 {% if session.stocks_admin_role in ('super_admin', 'child_admin') and cross_filter != 'golden_not_qualified' %}
@@ -168,7 +169,11 @@
                     {% for row in rows %}
                     <tr>
                         <th scope="row">
-                            <a class="company-link" href="{{ url_for('stocks.stocks_company_detail', watchlist_id=row.id) }}">{{ row.name or row.symbol }}</a>
+                            {% if row.watchlist_id %}
+                            <a class="company-link" href="{{ url_for('stocks.stocks_company_detail', watchlist_id=row.watchlist_id) }}">{{ row.name or row.symbol }}</a>
+                            {% else %}
+                            <a class="company-link" href="{{ url_for('stocks.stocks_universe_detail', universe_id=row.universe_id) }}">{{ row.name or row.symbol }}</a>
+                            {% endif %}
                         </th>
                         <td>{{ '₹%.2f'|format(row.latest_price) if row.latest_price is not none else '—' }}</td>
                         <td>
@@ -181,7 +186,7 @@
                     </tr>
                     {% else %}
                     <tr>
-                        <td colspan="3" class="text-slate-400">No symbols in the watchlist yet.</td>
+                        <td colspan="3" class="text-slate-400">No companies match this view right now.</td>
                     </tr>
                     {% endfor %}
                 </tbody>
@@ -214,7 +219,12 @@
                     {% for row in rows %}
                     <tr class="{{ 'is-recommended' if row.is_recommended }}">
                         <th scope="row">
-                            <a class="company-link" href="{{ url_for('stocks.stocks_company_detail', watchlist_id=row.id) }}">{{ row.name or row.symbol }}</a>
+                            {% if row.watchlist_id %}
+                            <a class="company-link" href="{{ url_for('stocks.stocks_company_detail', watchlist_id=row.watchlist_id) }}">{{ row.name or row.symbol }}</a>
+                            {% else %}
+                            <a class="company-link" href="{{ url_for('stocks.stocks_universe_detail', universe_id=row.universe_id) }}">{{ row.name or row.symbol }}</a>
+                            <span class="metric-note">Not on the watchlist</span>
+                            {% endif %}
                         </th>
                         <td>{{ row.symbol }}</td>
                         <td>{{ row.exchange }}</td>
@@ -262,7 +272,7 @@
                     </tr>
                     {% else %}
                     <tr>
-                        <td colspan="14" class="text-slate-400">No symbols in the watchlist yet.</td>
+                        <td colspan="14" class="text-slate-400">No companies match this view right now.</td>
                     </tr>
                     {% endfor %}
                 </tbody>

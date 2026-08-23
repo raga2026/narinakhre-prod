@@ -1386,9 +1386,20 @@ def stocks_news_sync():
 @stocks_bp.route('/stocks/watchlist', methods=['GET'])
 @stocks_watchlist_access_required
 def stocks_watchlist():
-    """Lists every stock_watchlist row with its latest stock_fundamentals,
-    stock_indicators, and stock_daily_data (price) snapshots joined in,
-    including cross_status (golden cross / death cross / no clear trend)
+    """Lists companies across the FULL scrape-eligible stock_universe
+    (~1,067), not just the curated ~80-company stock_watchlist shortlist --
+    widened 2026-08-23 from watchlist-only, because the shortlist alone was
+    too small a pool to reliably have more than a couple of golden-cross
+    companies in it on a given day. watchlist_id (nullable, via LEFT JOIN)
+    is still carried per row so a company that also happens to be
+    watchlisted still links to /stocks/company/<id>; a universe-only row
+    links to /stocks/universe/<id> instead (see the template). Same
+    NSE/BSE ISIN dedup as /stocks/universe's own list query (see
+    stocks_universe_list) -- our NSE and BSE source lists don't agree on
+    'Ltd' vs 'Limited' for the same company, so without this the same
+    company could show up twice.
+
+    Includes cross_status (golden cross / death cross / no clear trend)
     and whether it currently passes the same hard filters the suggestion
     engine uses to decide what to recommend (see
     suggestion_engine.passes_hard_filters) -- shown as "Recommended to buy".
@@ -1409,26 +1420,22 @@ def stocks_watchlist():
     either audience -- see enrich_and_sort_watchlist_rows, which also sorts
     the list by StoqBell Score descending (nns_score, staff only -- see
     compute_watchlist_nns_scores below) so the most-favourable-to-buy
-    company leads. ?filter=all is the explicit opt-in for every is_active=1
-    row regardless of cross-over status. ?filter=golden_not_qualified switches entirely to
+    company leads, golden-cross or not. ?filter=all is the explicit opt-in
+    for every scrape-eligible universe company regardless of cross-over
+    status -- a much longer, unpaginated list (unlike /stocks/universe's
+    own paginated browse view), so the golden-cross default is the page's
+    real everyday view. ?filter=golden_not_qualified switches entirely to
     get_golden_cross_not_qualified()'s list instead -- golden-cross
-    companies from the full scrape-eligible universe (not just the
-    watchlist) that are excluded fundamentally, with the specific reasons
-    why. Staff only (super_admin/child_admin) -- gated by its own inline
-    role check below, not stocks_watchlist_access_required, since a viewer
-    should never see this diagnostic view regardless of watchlist access.
-
-    Only is_active=1 rows are shown -- stock_watchlist never deletes a row,
-    only deactivates it (see run_fundamental_shortlist), so without this
-    filter every company that ever fell out of the screen, plus every
-    pre-dedup duplicate NSE/BSE listing from before ISIN-based dedup
-    existed (see utils/stock_shortlist.py's _pick_canonical_listing), would
-    still show up here forever."""
+    companies from the universe that are excluded fundamentally, with the
+    specific reasons why. Staff only (super_admin/child_admin) -- gated by
+    its own inline role check below, not stocks_watchlist_access_required,
+    since a viewer should never see this diagnostic view regardless of
+    watchlist access."""
     db = get_db()
     # Defaults to golden-cross-only, sorted by StoqBell Score descending
     # (see enrich_and_sort_watchlist_rows) -- the page's own most useful
     # view: "what should I actually consider buying right now, best first",
-    # not every watchlist row regardless of trend. ?filter=all is still an
+    # not every universe row regardless of trend. ?filter=all is still an
     # explicit opt-in for the full unfiltered list (see the "All companies"
     # pill in the template, which now has to pass this explicitly -- it
     # used to rely on no filter param meaning "show everything").
@@ -1445,29 +1452,35 @@ def stocks_watchlist():
         )
 
     rows = db.execute(
-        '''SELECT w.id, w.symbol, w.exchange, w.name, w.is_active, w.fundamental_tier,
-                  u.id AS universe_id, u.industry,
+        '''SELECT u.id AS universe_id, u.symbol, u.exchange, u.company_name AS name, u.industry,
+                  w.id AS watchlist_id, w.fundamental_tier,
                   f.pe_ratio, f.peg_ratio, f.eps, f.opm_pct, f.roce_pct, f.roa_pct,
                   f.quarterly_profit_growth_pct, f.quarterly_revenue_growth_pct, f.price_to_book,
                   f.promoter_holding_pct, f.fii_holding_pct, f.snapshot_date,
                   i.rsi_14, i.cross_status, i.volume_trend, i.calc_date,
                   d.close AS latest_price, d.trade_date AS price_date
-           FROM stock_watchlist w
-           LEFT JOIN stock_universe u ON u.symbol = w.symbol AND u.exchange = w.exchange
-           LEFT JOIN stock_fundamentals f ON f.watchlist_id = w.id
+           FROM stock_universe u
+           LEFT JOIN stock_watchlist w ON w.symbol = u.symbol AND w.exchange = u.exchange AND w.is_active = 1
+           LEFT JOIN stock_fundamentals f ON f.universe_id = u.id
                AND f.snapshot_date = (
-                   SELECT MAX(f2.snapshot_date) FROM stock_fundamentals f2 WHERE f2.watchlist_id = w.id
+                   SELECT MAX(f2.snapshot_date) FROM stock_fundamentals f2 WHERE f2.universe_id = u.id
                )
-           LEFT JOIN stock_indicators i ON i.watchlist_id = w.id
+           LEFT JOIN stock_indicators i ON i.universe_id = u.id
                AND i.calc_date = (
-                   SELECT MAX(i2.calc_date) FROM stock_indicators i2 WHERE i2.watchlist_id = w.id
+                   SELECT MAX(i2.calc_date) FROM stock_indicators i2 WHERE i2.universe_id = u.id
                )
-           LEFT JOIN stock_daily_data d ON d.watchlist_id = w.id
+           LEFT JOIN stock_daily_data d ON d.universe_id = u.id
                AND d.trade_date = (
-                   SELECT MAX(d2.trade_date) FROM stock_daily_data d2 WHERE d2.watchlist_id = w.id
+                   SELECT MAX(d2.trade_date) FROM stock_daily_data d2 WHERE d2.universe_id = u.id
                )
-           WHERE w.is_active = 1
-           ORDER BY w.symbol'''
+           WHERE u.is_scrape_eligible = true
+             AND NOT EXISTS (
+                 SELECT 1 FROM stock_universe u2
+                 WHERE u2.isin = u.isin AND u2.isin IS NOT NULL AND u2.isin != ''
+                   AND u2.id != u.id
+                   AND ((u2.exchange = 'NSE' AND u.exchange != 'NSE') OR (u2.exchange = u.exchange AND u2.id < u.id))
+             )
+           ORDER BY u.company_name'''
     ).fetchall()
 
     # NNS Score for every row, not just ones that also clear
@@ -1485,8 +1498,11 @@ def stocks_watchlist():
     # (golden/silver/bronze, see utils.fundamental_screen.classify_fundamental_tier),
     # not by the golden-cross technical signal. Applied after enrich/sort
     # (which already computed is_recommended/pe_note/etc. for every row)
-    # rather than in SQL, since is_active=1 already includes all three
-    # tiers -- this is purely a display-side narrowing.
+    # rather than in SQL -- purely a display-side narrowing. fundamental_tier
+    # is only ever set on a stock_watchlist row (see run_fundamental_shortlist),
+    # so a universe-only row (never shortlisted) always has None here and is
+    # excluded by any of the three tier filters -- expected, not a bug: tier
+    # filtering only makes sense for companies that were actually screened.
     tier_filter = request.args.get('tier')
     if tier_filter in ('golden', 'silver', 'bronze'):
         rows = [r for r in rows if r.get('fundamental_tier') == tier_filter]

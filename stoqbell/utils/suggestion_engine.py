@@ -172,20 +172,24 @@ def is_suggestion_eligible(candidate):
     return candidate.get('cross_status') == 'golden_cross'
 
 
-def score_candidates(candidates, previous_snapshots_by_watchlist=None, industry_benchmarks_by_industry=None,
+def score_candidates(candidates, previous_snapshots_by_universe=None, industry_benchmarks_by_industry=None,
                       news_sentiment_by_watchlist=None):
     """Scores each candidate with its NNS Score (see
     utils.nns_score.compute_nns_score -- 0-10, one decimal, ten
-    equally-weighted quantified sub-scores). previous_snapshots_by_watchlist
-    ({watchlist_id: previous stock_fundamentals row}),
+    equally-weighted quantified sub-scores). previous_snapshots_by_universe
+    ({universe_id: previous stock_fundamentals row} -- keyed by universe_id,
+    not watchlist_id, since not every candidate is watchlisted but every
+    scored one carries universe_id; see _fetch_previous_snapshots),
     industry_benchmarks_by_industry ({industry: {'pe_ratio','price_to_book'}}),
     and news_sentiment_by_watchlist ({watchlist_id: compute_company_sentiment
     dict, see utils.news_sentiment and _fetch_news_sentiment_by_watchlist
-    below}) are optional batched lookups a caller with DB access can supply
-    (see generate_daily_suggestions) -- omitted (the common case in a plain
-    unit test), every candidate's holding-trend sub-score is 0, PE/price-to-book
-    fall back to the flat bands, and news_sentiment_bonus is 0 (neutral),
-    same as compute_nns_score's own defaults.
+    below -- keyed by watchlist_id here, not universe_id, since stock_news
+    is only ever synced for watchlisted companies) are optional batched
+    lookups a caller with DB access can supply (see generate_daily_suggestions)
+    -- omitted (the common case in a plain unit test), every candidate's
+    holding-trend sub-score is 0, PE/price-to-book fall back to the flat
+    bands, and news_sentiment_bonus is 0 (neutral), same as
+    compute_nns_score's own defaults.
 
     Returns [(candidate, score), ...] sorted highest score first,
     EXCLUDING anything that doesn't reach at least NNS_BRONZE_MIN --
@@ -193,13 +197,13 @@ def score_candidates(candidates, previous_snapshots_by_watchlist=None, industry_
     automatically a suggestion (see is_suggestion_eligible / nns_tier).
     Does NOT apply is_suggestion_eligible itself -- callers are expected
     to filter first (see select_top_suggestions)."""
-    previous_snapshots_by_watchlist = previous_snapshots_by_watchlist or {}
+    previous_snapshots_by_universe = previous_snapshots_by_universe or {}
     industry_benchmarks_by_industry = industry_benchmarks_by_industry or {}
     news_sentiment_by_watchlist = news_sentiment_by_watchlist or {}
 
     scored = []
     for candidate in candidates:
-        previous = previous_snapshots_by_watchlist.get(candidate.get('watchlist_id'))
+        previous = previous_snapshots_by_universe.get(candidate.get('universe_id'))
         benchmarks = industry_benchmarks_by_industry.get(candidate.get('industry'))
         sentiment = news_sentiment_by_watchlist.get(candidate.get('watchlist_id'))
         score, _breakdown = compute_nns_score(
@@ -213,7 +217,7 @@ def score_candidates(candidates, previous_snapshots_by_watchlist=None, industry_
     return scored
 
 
-def select_top_suggestions(candidates, top_n=TOP_N_SUGGESTIONS, previous_snapshots_by_watchlist=None,
+def select_top_suggestions(candidates, top_n=TOP_N_SUGGESTIONS, previous_snapshots_by_universe=None,
                             industry_benchmarks_by_industry=None, news_sentiment_by_watchlist=None):
     """Filters candidates to golden-cross ones (see is_suggestion_eligible),
     scores them (see score_candidates), and returns the top_n as
@@ -230,7 +234,7 @@ def select_top_suggestions(candidates, top_n=TOP_N_SUGGESTIONS, previous_snapsho
     if not eligible:
         return []
     return score_candidates(
-        eligible, previous_snapshots_by_watchlist, industry_benchmarks_by_industry, news_sentiment_by_watchlist
+        eligible, previous_snapshots_by_universe, industry_benchmarks_by_industry, news_sentiment_by_watchlist
     )[:top_n]
 
 
@@ -478,7 +482,7 @@ def _fetch_universe_candidates(db):
 
 
 def _fetch_previous_snapshots(db, candidates):
-    """{watchlist_id: previous stock_fundamentals row} for NNS Score's
+    """{universe_id: previous stock_fundamentals row} for NNS Score's
     promoter/FII holding-trend sub-score (see utils.nns_score.compute_nns_score)
     -- one batched query covering every candidate's universe_id at once,
     not a query per candidate (same N+1-avoidance reasoning, and the exact
@@ -494,7 +498,18 @@ def _fetch_previous_snapshots(db, candidates):
     just-added, not-yet-synced company still shows up with nulls rather
     than being hidden entirely) are skipped -- nothing to compare a
     "previous" snapshot against either way, holding_trend just scores 0
-    for them."""
+    for them.
+
+    Keyed by universe_id, not watchlist_id -- every candidate that carries
+    fundamentals has a universe_id (stock_fundamentals rows are always
+    universe_id-stamped, watchlist_id only when the company also happens to
+    be watchlisted, see the dual-identity pattern noted throughout this
+    codebase), but a universe-only candidate's watchlist_id is None. Keying
+    by watchlist_id would collide every universe-only candidate onto the
+    same None key, each overwriting the last -- silently handing most
+    universe-only candidates a WRONG "previous snapshot" (or none at all)
+    for their holding-trend score. universe_id has no such collision risk,
+    so callers now look candidates up by their own universe_id instead."""
     universe_ids = [c['universe_id'] for c in candidates if c.get('universe_id') is not None]
     if not universe_ids:
         return {}
@@ -509,16 +524,16 @@ def _fetch_previous_snapshots(db, candidates):
     for snap in all_snapshots:
         snapshots_by_universe.setdefault(snap['universe_id'], []).append(snap)
 
-    previous_by_watchlist = {}
+    previous_by_universe = {}
     for candidate in candidates:
         universe_id = candidate.get('universe_id')
         if universe_id is None or candidate.get('snapshot_date') is None:
             continue
         for snap in snapshots_by_universe.get(universe_id, []):
             if snap['snapshot_date'] < candidate['snapshot_date']:
-                previous_by_watchlist[candidate['watchlist_id']] = snap
+                previous_by_universe[universe_id] = snap
                 break
-    return previous_by_watchlist
+    return previous_by_universe
 
 
 def compute_watchlist_nns_scores(db, watchlist_rows):
@@ -547,7 +562,7 @@ def compute_watchlist_nns_scores(db, watchlist_rows):
     previous_snapshots = _fetch_previous_snapshots(db, rows)
     news_sentiment_by_watchlist = _fetch_news_sentiment_by_watchlist(db, rows)
     for row in rows:
-        previous = previous_snapshots.get(row.get('watchlist_id'))
+        previous = previous_snapshots.get(row.get('universe_id'))
         benchmarks = industry_benchmarks.get(row.get('industry'))
         sentiment = news_sentiment_by_watchlist.get(row.get('watchlist_id'))
         score, _breakdown = compute_nns_score(row, previous, benchmarks, sentiment['score'] if sentiment else None)
@@ -848,12 +863,12 @@ def _rank_todays_candidates(db, market_cap_tier=None):
     first, already excluding anything that doesn't clear NNS_BRONZE_MIN or
     isn't golden-cross -- see is_suggestion_eligible/score_candidates."""
     candidates = _fetch_candidates(db, market_cap_tier=market_cap_tier)
-    previous_snapshots_by_watchlist = _fetch_previous_snapshots(db, candidates)
+    previous_snapshots_by_universe = _fetch_previous_snapshots(db, candidates)
     industry_benchmarks_by_industry = _compute_industry_benchmarks(candidates)
     news_sentiment_by_watchlist = _fetch_news_sentiment_by_watchlist(db, candidates)
     eligible = [c for c in candidates if is_suggestion_eligible(c)]
     return score_candidates(
-        eligible, previous_snapshots_by_watchlist, industry_benchmarks_by_industry, news_sentiment_by_watchlist
+        eligible, previous_snapshots_by_universe, industry_benchmarks_by_industry, news_sentiment_by_watchlist
     )
 
 
