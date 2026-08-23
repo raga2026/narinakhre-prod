@@ -12,7 +12,11 @@ quarterly revenue growth, price-to-book fit, reserves-to-debt, free cash
 flow, RSI position, promoter/FII holding trend. This used to be ten
 components at flat equal weight (1.0 point each, no PEG re-check anywhere
 past watchlist admission) -- see the "PEG diagnosis" note below for why
-that changed.
+that changed. On top of those twelve, two additive bonus/malus terms (see
+GOLDEN_CROSS_BONUS and NEWS_SENTIMENT_BONUS_MAX below) rather than a
+thirteenth/fourteenth weighted component -- both would otherwise push the
+natural maximum past 10 and quietly change what every existing threshold
+means.
 
 PE and price-to-book fit reuse the exact same industry-relative bands
 fundamental_screen.py's PASS/FAIL check uses (see
@@ -117,6 +121,22 @@ RSI_HALF_WIDTH = 12.5  # (65 - 40) / 2
 # golden-cross stock still can't outscore a strong non-crossed one on
 # fundamentals alone.
 GOLDEN_CROSS_BONUS = 0.5
+
+# Bonus/malus for aggregate news sentiment across a company's stored
+# stock_news headlines (see utils/news_sentiment.py's compute_company_sentiment)
+# -- added the same way as GOLDEN_CROSS_BONUS above (on top of the twelve
+# weighted sub-scores, then the total is capped back to [0.0, 10.0]), but
+# symmetric: a news_sentiment_score of +1.0 (every scored headline
+# positive) adds this many points, -1.0 (every headline negative)
+# subtracts the same amount, and 0.0 -- no stored headlines at all, or a
+# genuine wash of positive-vs-negative ones, see compute_company_sentiment's
+# own "no news is neutral" rule -- adds nothing either way. Same "own
+# judgment call on the size, not derived from a published study" caveat as
+# GOLDEN_CROSS_BONUS -- small enough that news sentiment alone can't carry
+# a weak fundamentals profile into golden/silver territory, meaningful
+# enough to matter at a tier boundary between two otherwise-similar
+# candidates.
+NEWS_SENTIMENT_BONUS_MAX = 0.5
 
 # ---------------------------------------------------------------------------
 # Weight table -- every component compute_nns_score scores, read top to
@@ -278,7 +298,7 @@ def _score_fcf(free_cash_flow):
     return 1.0 if free_cash_flow is not None and free_cash_flow > 0 else 0.0
 
 
-def compute_nns_score(candidate, previous_fundamentals_row=None, industry_benchmarks=None):
+def compute_nns_score(candidate, previous_fundamentals_row=None, industry_benchmarks=None, news_sentiment_score=None):
     """candidate: dict-like with pe_ratio, peg_ratio, opm_pct, roce_pct,
     roa_pct, quarterly_profit_growth_pct, quarterly_revenue_growth_pct,
     price_to_book, reserves_to_debt_ratio, free_cash_flow, rsi_14,
@@ -286,16 +306,21 @@ def compute_nns_score(candidate, previous_fundamentals_row=None, industry_benchm
     this candidate's own industry's {'pe_ratio', 'price_to_book'} benchmark
     dict -- see stock_shortlist._compute_industry_benchmarks; omit/None
     falls back to the flat bands, same as fundamental_screen.py's own
-    screening.
+    screening. news_sentiment_score: -1.0..1.0 (see
+    utils.news_sentiment.compute_company_sentiment's own 'score') or None
+    -- None is treated as 0.0/neutral, same as "no stored headlines for
+    this company" already scores, so a caller with no news data on hand
+    (a plain unit test, or a candidate compute_company_sentiment was never
+    run for) doesn't need a special case.
 
     Returns (score: float 0-10 with one decimal, breakdown: dict of the
-    twelve individual RAW 0-1 sub-scores plus 'golden_cross_bonus') -- raw,
-    not weighted, so each component stays directly readable/testable on
-    its own 0-1 terms regardless of weight changes; see WEIGHTS above for
-    how a raw sub-score becomes its actual point contribution to the final
-    score. The breakdown is returned so a caller (or a future "why this
-    score" display) can show which specific parameters helped or hurt, not
-    just the final number."""
+    twelve individual RAW 0-1 sub-scores plus 'golden_cross_bonus' and
+    'news_sentiment_bonus') -- raw, not weighted, so each component stays
+    directly readable/testable on its own 0-1 terms regardless of weight
+    changes; see WEIGHTS above for how a raw sub-score becomes its actual
+    point contribution to the final score. The breakdown is returned so a
+    caller (or a future "why this score" display) can show which specific
+    parameters helped or hurt, not just the final number."""
     pe_lo, pe_hi = _pe_band(industry_benchmarks)
     pb_ceiling = _price_to_book_ceiling(industry_benchmarks)
 
@@ -323,9 +348,11 @@ def compute_nns_score(candidate, previous_fundamentals_row=None, industry_benchm
         'holding_trend': _holding_trend_score(candidate, previous_fundamentals_row),
     }
     breakdown['golden_cross_bonus'] = GOLDEN_CROSS_BONUS if candidate.get('cross_status') == 'golden_cross' else 0.0
+    breakdown['news_sentiment_bonus'] = round((news_sentiment_score or 0.0) * NEWS_SENTIMENT_BONUS_MAX, 3)
 
     weighted_total = sum(breakdown[name] * WEIGHTS[name] / 10 for name in WEIGHTS)
-    score = round(min(10.0, weighted_total + breakdown['golden_cross_bonus']), 1)
+    uncapped = weighted_total + breakdown['golden_cross_bonus'] + breakdown['news_sentiment_bonus']
+    score = round(max(0.0, min(10.0, uncapped)), 1)
     return score, breakdown
 
 

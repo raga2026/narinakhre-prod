@@ -324,6 +324,12 @@ class FakeSuggestionDB:
         if normalized.startswith('SELECT universe_id, promoter_holding_pct, fii_holding_pct, snapshot_date'):
             return FakeCursor([])  # no candidate in these tests sets universe_id
 
+        if normalized.startswith('SELECT watchlist_id, headline FROM stock_news'):
+            # No stock_news fixture data in these tests -- every candidate's
+            # news_sentiment_bonus is neutral (0.0), same as a real
+            # watchlist company nothing has been synced for yet.
+            return FakeCursor([])
+
         if normalized.startswith('SELECT score, target_sell_price, pattern_name FROM stock_suggestions'):
             watchlist_id, cutoff, today = params
             matches = sorted(

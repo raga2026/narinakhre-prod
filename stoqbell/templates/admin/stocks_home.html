@@ -220,6 +220,23 @@
             </div>
         </div>
 
+        {% if prominent_news %}
+        <div class="card p-5 mb-6">
+            <h2 class="text-base font-bold text-gray-900 mb-1">In the News</h2>
+            <p class="text-gray-500 text-xs mb-4">Freshest headlines across your watchlist.</p>
+            <div>
+                {% for n in prominent_news %}
+                <div class="suggestion-card">
+                    <div class="suggestion-main">
+                        <a href="{{ n.link }}" target="_blank" rel="noopener noreferrer" class="link">{{ n.headline }}</a>
+                        <div class="suggestion-meta">{{ n.company_name or n.symbol }} &middot; {{ n.source or 'Unknown source' }}</div>
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+        {% endif %}
+
         <div class="card growth-card p-5">
             <h2 class="text-base font-bold text-gray-900 mb-1">Industry Growth</h2>
             {% if industry_growth.available %}

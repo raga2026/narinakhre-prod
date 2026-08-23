@@ -71,7 +71,7 @@
         {% endwith %}
 
         <nav aria-label="Filter watchlist by cross-over status" class="flex gap-2 mb-3 flex-wrap">
-            <a href="{{ url_for('stocks.stocks_watchlist') }}"
+            <a href="{{ url_for('stocks.stocks_watchlist', filter='all') }}"
                class="filter-pill {{ 'active' if cross_filter == 'all' }}"
                {% if cross_filter == 'all' %}aria-current="page"{% endif %}>All companies</a>
             <a href="{{ url_for('stocks.stocks_watchlist', filter='golden') }}"

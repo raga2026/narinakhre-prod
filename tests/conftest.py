@@ -156,7 +156,18 @@ def pytest_runtest_makereport(item: pytest.Item, call: pytest.CallInfo):
     root = Path(__file__).resolve().parents[1]
     safe_name = re.sub(r"[^a-zA-Z0-9_.-]+", "_", item.nodeid)
     screenshot_path = root / "reports" / "screenshots" / f"{safe_name}.png"
-    drv.save_screenshot(str(screenshot_path))
+    try:
+        drv.save_screenshot(str(screenshot_path))
+    except Exception:
+        # The failure that triggered this hook (a page load timing out
+        # against a live test site, most often) frequently kills the
+        # browser session itself -- asking a dead session for a screenshot
+        # then throws inside the webdriver/chromedriver layer, which
+        # pytest can't recover from as a normal test failure and instead
+        # aborts the whole run as an INTERNALERROR. A missing screenshot on
+        # an already-failed test is a minor loss of debugging detail, not
+        # worth losing every other test's result in the same run over.
+        return
 
     # Attach screenshot to pytest-html report when plugin is available.
     pytest_html = item.config.pluginmanager.getplugin("html")

@@ -36,13 +36,15 @@ WORST_CANDIDATE = {
 
 
 def test_excellent_candidate_scores_a_perfect_ten():
-    # No cross_status here -- golden_cross_bonus is 0.0, the other ten are
-    # all 1.0 (see the golden-cross-specific tests below for the bonus
-    # itself).
+    # No cross_status and no news_sentiment_score here -- golden_cross_bonus
+    # and news_sentiment_bonus are both 0.0, the other twelve are all 1.0
+    # (see the golden-cross- and news-sentiment-specific tests below for
+    # the bonuses themselves).
     score, breakdown = compute_nns_score(EXCELLENT_CANDIDATE, EXCELLENT_PREVIOUS)
     assert score == 10.0
     assert breakdown['golden_cross_bonus'] == 0.0
-    assert all(v == 1.0 for k, v in breakdown.items() if k != 'golden_cross_bonus')
+    assert breakdown['news_sentiment_bonus'] == 0.0
+    assert all(v == 1.0 for k, v in breakdown.items() if k not in ('golden_cross_bonus', 'news_sentiment_bonus'))
 
 
 def test_worst_candidate_scores_zero():
@@ -61,7 +63,7 @@ def test_twelve_sub_scores_are_all_present_in_breakdown():
     assert set(breakdown.keys()) == {
         'pe_fit', 'peg', 'opm', 'roce', 'roa', 'profit_growth', 'revenue_growth',
         'price_to_book_fit', 'reserves_to_debt', 'fcf', 'rsi_position', 'holding_trend',
-        'golden_cross_bonus',
+        'golden_cross_bonus', 'news_sentiment_bonus',
     }
 
 
@@ -94,6 +96,60 @@ def test_golden_cross_bonus_does_not_push_score_above_ten():
     score, breakdown = compute_nns_score(already_perfect, EXCELLENT_PREVIOUS)
     assert breakdown['golden_cross_bonus'] == 0.5
     assert score == 10.0  # capped, not 10.5
+
+
+# --- news_sentiment_bonus -------------------------------------------------
+
+def test_positive_sentiment_adds_to_the_score_for_a_middling_candidate():
+    middling = {
+        'pe_ratio': 20, 'peg_ratio': 2.0, 'opm_pct': 0, 'roce_pct': 0, 'roa_pct': 0,
+        'quarterly_profit_growth_pct': 0, 'quarterly_revenue_growth_pct': 0,
+        'price_to_book': 999, 'rsi_14': None, 'promoter_holding_pct': None, 'fii_holding_pct': None,
+    }
+    without_news = compute_nns_score(middling, previous_fundamentals_row=None)
+    with_positive_news = compute_nns_score(middling, previous_fundamentals_row=None, news_sentiment_score=1.0)
+
+    assert with_positive_news[1]['news_sentiment_bonus'] == 0.5
+    assert with_positive_news[0] == round(without_news[0] + 0.5, 1)
+
+
+def test_negative_sentiment_subtracts_from_the_score():
+    middling = {
+        'pe_ratio': 20, 'peg_ratio': 2.0, 'opm_pct': 0, 'roce_pct': 0, 'roa_pct': 0,
+        'quarterly_profit_growth_pct': 0, 'quarterly_revenue_growth_pct': 0,
+        'price_to_book': 999, 'rsi_14': None, 'promoter_holding_pct': None, 'fii_holding_pct': None,
+    }
+    without_news = compute_nns_score(middling, previous_fundamentals_row=None)
+    with_negative_news = compute_nns_score(middling, previous_fundamentals_row=None, news_sentiment_score=-1.0)
+
+    assert with_negative_news[1]['news_sentiment_bonus'] == -0.5
+    assert with_negative_news[0] == round(without_news[0] - 0.5, 1)
+
+
+def test_no_news_score_or_none_is_treated_as_neutral():
+    _, breakdown_omitted = compute_nns_score(WORST_CANDIDATE, previous_fundamentals_row=None)
+    _, breakdown_explicit_none = compute_nns_score(
+        WORST_CANDIDATE, previous_fundamentals_row=None, news_sentiment_score=None
+    )
+    _, breakdown_zero = compute_nns_score(
+        WORST_CANDIDATE, previous_fundamentals_row=None, news_sentiment_score=0.0
+    )
+    assert breakdown_omitted['news_sentiment_bonus'] == 0.0
+    assert breakdown_explicit_none['news_sentiment_bonus'] == 0.0
+    assert breakdown_zero['news_sentiment_bonus'] == 0.0
+
+
+def test_news_sentiment_bonus_does_not_push_score_above_ten():
+    already_perfect = {**EXCELLENT_CANDIDATE, 'cross_status': 'golden_cross'}
+    score, breakdown = compute_nns_score(already_perfect, EXCELLENT_PREVIOUS, news_sentiment_score=1.0)
+    assert breakdown['news_sentiment_bonus'] == 0.5
+    assert score == 10.0  # capped, not 11.0
+
+
+def test_negative_news_sentiment_does_not_push_score_below_zero():
+    score, breakdown = compute_nns_score(WORST_CANDIDATE, previous_fundamentals_row=None, news_sentiment_score=-1.0)
+    assert breakdown['news_sentiment_bonus'] == -0.5
+    assert score == 0.0  # floored, not negative
 
 
 # --- pe_fit -------------------------------------------------------------

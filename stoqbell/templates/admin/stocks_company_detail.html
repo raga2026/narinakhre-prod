@@ -297,6 +297,30 @@
             </div>
         </div>
 
+        <div class="section-card mb-6">
+            <h2 class="text-lg font-bold text-slate-200 mb-4">Recent news</h2>
+            {% if news_sentiment and news_sentiment.headlines_scored %}
+            <p class="text-slate-400 text-sm mb-3">
+                Overall sentiment across these {{ news_sentiment.headlines_scored }} headline{{ 's' if news_sentiment.headlines_scored != 1 }}:
+                <span class="badge badge-{{ 'up' if news_sentiment.label == 'positive' else ('down' if news_sentiment.label == 'negative' else 'flat') }}">{{ news_sentiment.label | title }}</span>
+                ({{ news_sentiment.positive_count }} positive, {{ news_sentiment.negative_count }} negative) --
+                a rule-based reading of the headlines below, not investment advice.
+            </p>
+            {% endif %}
+            {% if recent_news %}
+            <ul>
+                {% for n in recent_news %}
+                <li class="mb-3 pb-3" style="border-bottom: 1px solid rgba(14, 165, 233, 0.15);">
+                    <a href="{{ n.link }}" target="_blank" rel="noopener noreferrer" class="text-sky-300 hover:underline">{{ n.headline }}</a>
+                    <p class="text-slate-500 text-xs mt-1">{{ n.source or 'Unknown source' }}{% if n.published_at %} &middot; {{ n.published_at }}{% endif %}</p>
+                </li>
+                {% endfor %}
+            </ul>
+            {% else %}
+            <p class="text-slate-400 text-sm">No news synced yet for this company.</p>
+            {% endif %}
+        </div>
+
         {% if session.stocks_admin_role in ('super_admin', 'child_admin') %}
         <div class="section-card">
             <h2 class="text-lg font-bold text-slate-200 mb-4">Suggestion history</h2>

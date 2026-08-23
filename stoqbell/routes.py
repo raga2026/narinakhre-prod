@@ -199,6 +199,13 @@ from stoqbell.utils.suggestion_engine import (
     get_special_recommendations_today,
 )
 from stoqbell.utils.industry_growth import compute_industry_growth
+from stoqbell.utils.stock_news import (
+    initialize_stock_news_table_if_needed,
+    sync_stock_news,
+    get_recent_news,
+    get_prominent_news,
+)
+from stoqbell.utils.news_sentiment import compute_company_sentiment
 from stoqbell.utils.suggestion_email import (
     initialize_stocks_email_recipients_table_if_needed,
     send_daily_suggestions_email,
@@ -308,6 +315,7 @@ def init_stocks_tables():
     initialize_starters_suggestions_table_if_needed(client)
     initialize_large_cap_bonus_suggestions_table_if_needed(client)
     initialize_admin_alerts_table_if_needed(client)
+    initialize_stock_news_table_if_needed(client)
 
 
 _LEGACY_STOCKS_ROUTES = [
@@ -1354,6 +1362,27 @@ def stocks_fundamentals_rotation_sync():
     return jsonify({'status': 'ok', **summary})
 
 
+@stocks_bp.route('/stocks/news/sync', methods=['POST'])
+def stocks_news_sync():
+    """Daily Google News RSS fetch for every active stock_watchlist company
+    (see utils/stock_news.sync_stock_news) -- cron-secret only, same
+    reasoning as stocks_fundamentals_rotation_sync above: this hits an
+    external source once per company (~80, ~2s apart) on its own schedule,
+    not something an admin should be able to re-trigger on demand."""
+    if not has_valid_cron_secret(request.headers, STOCKS_FUNDAMENTALS_CRON_SECRET):
+        return jsonify({'status': 'error', 'message': 'Unauthorized'}), 403
+
+    db = get_db()
+    try:
+        summary = sync_stock_news(db)
+    except Exception as e:
+        current_app.logger.error(f'Stock news sync failed: {e}')
+        alert_job_error(db, 'stock_news_sync', str(e))
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+    record_job_success(db, 'stock_news_sync')
+    return jsonify({'status': 'ok', **summary})
+
+
 @stocks_bp.route('/stocks/watchlist', methods=['GET'])
 @stocks_watchlist_access_required
 def stocks_watchlist():
@@ -1376,9 +1405,12 @@ def stocks_watchlist():
     recommending; that stays behind the daily Pick of the Day a paying
     plan actually delivers.
 
-    ?filter=golden narrows the list to golden_cross rows only, for either
-    audience -- the "view only golden cross companies" option.
-    ?filter=golden_not_qualified switches entirely to
+    Defaults (no ?filter, or ?filter=golden) to golden_cross rows only, for
+    either audience -- see enrich_and_sort_watchlist_rows, which also sorts
+    the list by StoqBell Score descending (nns_score, staff only -- see
+    compute_watchlist_nns_scores below) so the most-favourable-to-buy
+    company leads. ?filter=all is the explicit opt-in for every is_active=1
+    row regardless of cross-over status. ?filter=golden_not_qualified switches entirely to
     get_golden_cross_not_qualified()'s list instead -- golden-cross
     companies from the full scrape-eligible universe (not just the
     watchlist) that are excluded fundamentally, with the specific reasons
@@ -1393,7 +1425,14 @@ def stocks_watchlist():
     existed (see utils/stock_shortlist.py's _pick_canonical_listing), would
     still show up here forever."""
     db = get_db()
-    cross_filter = request.args.get('filter')
+    # Defaults to golden-cross-only, sorted by StoqBell Score descending
+    # (see enrich_and_sort_watchlist_rows) -- the page's own most useful
+    # view: "what should I actually consider buying right now, best first",
+    # not every watchlist row regardless of trend. ?filter=all is still an
+    # explicit opt-in for the full unfiltered list (see the "All companies"
+    # pill in the template, which now has to pass this explicitly -- it
+    # used to rely on no filter param meaning "show everything").
+    cross_filter = request.args.get('filter') or 'golden'
 
     if cross_filter == 'golden_not_qualified':
         if session.get('stocks_admin_role') not in ('super_admin', 'child_admin'):
@@ -1453,7 +1492,7 @@ def stocks_watchlist():
         rows = [r for r in rows if r.get('fundamental_tier') == tier_filter]
 
     return render_template(
-        'admin/stocks_watchlist.html', rows=rows, cross_filter=cross_filter or 'all',
+        'admin/stocks_watchlist.html', rows=rows, cross_filter=cross_filter,
         tier_filter=tier_filter or 'all',
     )
 
@@ -1590,11 +1629,14 @@ def stocks_company_detail(watchlist_id):
         (watchlist_id,)
     ).fetchall()
 
+    recent_news = get_recent_news(db, watchlist_id)
+    news_sentiment = compute_company_sentiment(recent_news)
+
     return render_template(
         'admin/stocks_company_detail.html',
         company=company, recent_prices=recent_prices, suggestion_history=suggestion_history,
         sparkline_svg=sparkline_svg, sparkline_summary=sparkline_summary, backtest=backtest,
-        rounding_pattern=rounding_pattern,
+        rounding_pattern=rounding_pattern, recent_news=recent_news, news_sentiment=news_sentiment,
     )
 
 
@@ -1959,6 +2001,8 @@ def stocks_universe_detail(universe_id):
         (company['symbol'], company['exchange'])
     ).fetchone()
     suggestion_history = _suggestion_history_for_company(db, watchlist_row['id'] if watchlist_row else None)
+    recent_news = get_recent_news(db, watchlist_row['id'] if watchlist_row else None)
+    news_sentiment = compute_company_sentiment(recent_news)
 
     if not can_view_signals:
         company = redact_recommendation_signals([company], can_view_signals=False)[0]
@@ -1969,6 +2013,7 @@ def stocks_universe_detail(universe_id):
         sparkline_svg=sparkline_svg, sparkline_summary=sparkline_summary, backtest=backtest,
         rounding_pattern=rounding_pattern, can_view_signals=can_view_signals,
         suggestion_history=suggestion_history, analysis_source_labels=_ANALYSIS_SOURCE_LABELS,
+        recent_news=recent_news, news_sentiment=news_sentiment,
     )
 
 
@@ -2037,11 +2082,13 @@ def stocks_home():
         }
 
     industry_growth = compute_industry_growth(db, top_n=5)
+    prominent_news = get_prominent_news(db)
 
     return render_template(
         'admin/stocks_home.html',
         suggestion_summary=suggestion_summary,
         industry_growth=industry_growth,
+        prominent_news=prominent_news,
     )
 
 

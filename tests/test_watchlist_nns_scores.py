@@ -29,6 +29,8 @@ class FakeSnapshotDB:
         normalized = ' '.join(sql.split())
         if normalized.startswith('SELECT universe_id, promoter_holding_pct, fii_holding_pct, snapshot_date'):
             return FakeCursor(self.snapshot_rows)
+        if normalized.startswith('SELECT watchlist_id, headline FROM stock_news'):
+            return FakeCursor([])  # no stock_news fixture data -- every row's news_sentiment_bonus is neutral
         raise AssertionError(f'Unexpected SQL in test: {sql}')
 
     def commit(self):

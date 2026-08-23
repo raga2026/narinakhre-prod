@@ -61,6 +61,9 @@ class FakeStartersDB:
         if normalized.startswith('SELECT universe_id, promoter_holding_pct, fii_holding_pct, snapshot_date'):
             return FakeCursor([])
 
+        if normalized.startswith('SELECT watchlist_id, headline FROM stock_news'):
+            return FakeCursor([])
+
         if normalized.startswith('SELECT score, target_sell_price, pattern_name FROM stock_starters_suggestions'):
             watchlist_id, cutoff, week_start = params
             matches = sorted(

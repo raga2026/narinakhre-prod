@@ -62,6 +62,9 @@ class FakeAdminAlertsDB:
         if normalized.startswith('SELECT universe_id, promoter_holding_pct, fii_holding_pct, snapshot_date'):
             return FakeCursor([])
 
+        if normalized.startswith('SELECT watchlist_id, headline FROM stock_news'):
+            return FakeCursor([])
+
         if normalized.startswith('INSERT INTO stock_admin_alerts'):
             (watchlist_id, alert_date, buy_price, target_sell_price, stop_loss_price,
              nns_score, nns_tier, pattern_name) = params

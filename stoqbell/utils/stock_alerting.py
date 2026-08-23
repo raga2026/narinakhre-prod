@@ -73,6 +73,12 @@ IST = timezone(timedelta(hours=5, minutes=30))
 #                          every day regardless of whether the simulation
 #                          is actually enabled, always a "success" either
 #                          way, so this is safe to alert on unconditionally)
+#   stock_news_sync        00:00 UTC = 05:30 IST -> expect done by 07:00 IST
+#                          (Google News RSS per watchlist company, see
+#                          utils/stock_news.py and stocks-news-sync.yml --
+#                          no price/fundamentals dependency, runs every
+#                          calendar day, same "always a genuine success"
+#                          reasoning as auto_trade_reconcile above)
 JOB_EXPECTATIONS = {
     'shortlist_refresh': {'expected_by_ist_hour': 6, 'label': '6 AM IST'},
     'price_sync': {'expected_by_ist_hour': 7, 'label': '7 AM IST'},
@@ -107,6 +113,10 @@ JOB_EXPECTATIONS = {
     'subscription_reminders': {'expected_by_ist_hour': 11, 'label': '11 AM IST'},
     'fundamentals_rotation': {'expected_by_ist_hour': 12, 'label': '12 PM IST'},
     'market_cap_filter': {'expected_by_ist_hour': 13, 'label': '1 PM IST'},
+    # Google News RSS fetch for the watchlist (see utils/stock_news.py) --
+    # no price/fundamentals dependency, so it's scheduled independently
+    # rather than chained after price_sync/indicator_calc like those are.
+    'stock_news_sync': {'expected_by_ist_hour': 7, 'label': '7 AM IST'},
 }
 
 STOCK_ALERTING_TABLES_SQL = [

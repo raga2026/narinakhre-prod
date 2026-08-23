@@ -9,6 +9,7 @@ from stoqbell.utils.fundamental_screen import PEG_HARD_EXCLUSION_MAX
 from stoqbell.utils.price_pattern import compute_suggestion_pricing
 from stoqbell.utils.nns_score import NNS_BRONZE_MIN, compute_nns_score, nns_tier
 from stoqbell.utils.stock_shortlist import _compute_industry_benchmarks
+from stoqbell.utils.news_sentiment import compute_company_sentiment
 
 # The daily cap -- exactly one stock_suggestions row per day (the "Pick of
 # the Day"), not every currently-qualifying candidate. Also the default for
@@ -171,16 +172,20 @@ def is_suggestion_eligible(candidate):
     return candidate.get('cross_status') == 'golden_cross'
 
 
-def score_candidates(candidates, previous_snapshots_by_watchlist=None, industry_benchmarks_by_industry=None):
+def score_candidates(candidates, previous_snapshots_by_watchlist=None, industry_benchmarks_by_industry=None,
+                      news_sentiment_by_watchlist=None):
     """Scores each candidate with its NNS Score (see
     utils.nns_score.compute_nns_score -- 0-10, one decimal, ten
     equally-weighted quantified sub-scores). previous_snapshots_by_watchlist
-    ({watchlist_id: previous stock_fundamentals row}) and
-    industry_benchmarks_by_industry ({industry: {'pe_ratio','price_to_book'}})
-    are optional batched lookups a caller with DB access can supply (see
-    generate_daily_suggestions) -- omitted (the common case in a plain unit
-    test), every candidate's holding-trend sub-score is 0 and PE/price-to-book
-    fall back to the flat bands, same as compute_nns_score's own defaults.
+    ({watchlist_id: previous stock_fundamentals row}),
+    industry_benchmarks_by_industry ({industry: {'pe_ratio','price_to_book'}}),
+    and news_sentiment_by_watchlist ({watchlist_id: compute_company_sentiment
+    dict, see utils.news_sentiment and _fetch_news_sentiment_by_watchlist
+    below}) are optional batched lookups a caller with DB access can supply
+    (see generate_daily_suggestions) -- omitted (the common case in a plain
+    unit test), every candidate's holding-trend sub-score is 0, PE/price-to-book
+    fall back to the flat bands, and news_sentiment_bonus is 0 (neutral),
+    same as compute_nns_score's own defaults.
 
     Returns [(candidate, score), ...] sorted highest score first,
     EXCLUDING anything that doesn't reach at least NNS_BRONZE_MIN --
@@ -190,12 +195,16 @@ def score_candidates(candidates, previous_snapshots_by_watchlist=None, industry_
     to filter first (see select_top_suggestions)."""
     previous_snapshots_by_watchlist = previous_snapshots_by_watchlist or {}
     industry_benchmarks_by_industry = industry_benchmarks_by_industry or {}
+    news_sentiment_by_watchlist = news_sentiment_by_watchlist or {}
 
     scored = []
     for candidate in candidates:
         previous = previous_snapshots_by_watchlist.get(candidate.get('watchlist_id'))
         benchmarks = industry_benchmarks_by_industry.get(candidate.get('industry'))
-        score, _breakdown = compute_nns_score(candidate, previous, benchmarks)
+        sentiment = news_sentiment_by_watchlist.get(candidate.get('watchlist_id'))
+        score, _breakdown = compute_nns_score(
+            candidate, previous, benchmarks, sentiment['score'] if sentiment else None
+        )
         if score < NNS_BRONZE_MIN:
             continue
         scored.append((candidate, score))
@@ -205,7 +214,7 @@ def score_candidates(candidates, previous_snapshots_by_watchlist=None, industry_
 
 
 def select_top_suggestions(candidates, top_n=TOP_N_SUGGESTIONS, previous_snapshots_by_watchlist=None,
-                            industry_benchmarks_by_industry=None):
+                            industry_benchmarks_by_industry=None, news_sentiment_by_watchlist=None):
     """Filters candidates to golden-cross ones (see is_suggestion_eligible),
     scores them (see score_candidates), and returns the top_n as
     [(candidate, score), ...], highest first -- since score_candidates
@@ -220,7 +229,39 @@ def select_top_suggestions(candidates, top_n=TOP_N_SUGGESTIONS, previous_snapsho
     eligible = [c for c in candidates if is_suggestion_eligible(c)]
     if not eligible:
         return []
-    return score_candidates(eligible, previous_snapshots_by_watchlist, industry_benchmarks_by_industry)[:top_n]
+    return score_candidates(
+        eligible, previous_snapshots_by_watchlist, industry_benchmarks_by_industry, news_sentiment_by_watchlist
+    )[:top_n]
+
+
+def _fetch_news_sentiment_by_watchlist(db, candidates):
+    """{watchlist_id: compute_company_sentiment dict} for NNS Score's
+    news_sentiment_bonus sub-component (see utils.nns_score.compute_nns_score
+    and utils.news_sentiment.compute_company_sentiment) -- one batched query
+    covering every candidate's watchlist_id at once, same N+1-avoidance
+    reasoning as _fetch_previous_snapshots above.
+
+    A candidate with no watchlist_id (a universe-only candidate, e.g.
+    get_special_recommendations_today's pool) is skipped -- stock_news is
+    only ever synced for watchlist companies (see utils/stock_news.py's own
+    docstring), so there's nothing to look up for one anyway;
+    compute_nns_score already treats a missing news_sentiment_score as
+    neutral, same as a watchlisted company nothing has been synced for
+    yet."""
+    watchlist_ids = [c['watchlist_id'] for c in candidates if c.get('watchlist_id') is not None]
+    if not watchlist_ids:
+        return {}
+    ids_sql = ','.join(str(int(wid)) for wid in watchlist_ids)
+    rows = db.execute(
+        f'SELECT watchlist_id, headline FROM stock_news WHERE watchlist_id IN ({ids_sql})'
+    ).fetchall()
+    headlines_by_watchlist = {}
+    for row in rows:
+        headlines_by_watchlist.setdefault(row['watchlist_id'], []).append(row)
+    return {
+        watchlist_id: compute_company_sentiment(headlines)
+        for watchlist_id, headlines in headlines_by_watchlist.items()
+    }
 
 
 def _build_rationale(candidate, tier=None):
@@ -494,7 +535,8 @@ def compute_watchlist_nns_scores(db, watchlist_rows):
     the fundamentals/indicators columns compute_nns_score reads (see
     app.py's stocks_watchlist route for the exact SELECT) -- same shape
     _fetch_candidates below produces, since this reuses the same
-    industry-benchmark and previous-snapshot batching those candidates get.
+    industry-benchmark, previous-snapshot, and news-sentiment batching
+    those candidates get.
     Returns NEW dicts (does not mutate the input rows); a row with missing
     data still gets a score (compute_nns_score treats missing fields as
     failing that sub-score, same as everywhere else it's used)."""
@@ -503,10 +545,12 @@ def compute_watchlist_nns_scores(db, watchlist_rows):
         row.setdefault('watchlist_id', row.get('id'))
     industry_benchmarks = _compute_industry_benchmarks(rows)
     previous_snapshots = _fetch_previous_snapshots(db, rows)
+    news_sentiment_by_watchlist = _fetch_news_sentiment_by_watchlist(db, rows)
     for row in rows:
         previous = previous_snapshots.get(row.get('watchlist_id'))
         benchmarks = industry_benchmarks.get(row.get('industry'))
-        score, _breakdown = compute_nns_score(row, previous, benchmarks)
+        sentiment = news_sentiment_by_watchlist.get(row.get('watchlist_id'))
+        score, _breakdown = compute_nns_score(row, previous, benchmarks, sentiment['score'] if sentiment else None)
         row['nns_score'] = score
         row['nns_tier'] = nns_tier(score)
     return rows
@@ -806,8 +850,11 @@ def _rank_todays_candidates(db, market_cap_tier=None):
     candidates = _fetch_candidates(db, market_cap_tier=market_cap_tier)
     previous_snapshots_by_watchlist = _fetch_previous_snapshots(db, candidates)
     industry_benchmarks_by_industry = _compute_industry_benchmarks(candidates)
+    news_sentiment_by_watchlist = _fetch_news_sentiment_by_watchlist(db, candidates)
     eligible = [c for c in candidates if is_suggestion_eligible(c)]
-    return score_candidates(eligible, previous_snapshots_by_watchlist, industry_benchmarks_by_industry)
+    return score_candidates(
+        eligible, previous_snapshots_by_watchlist, industry_benchmarks_by_industry, news_sentiment_by_watchlist
+    )
 
 
 def generate_daily_suggestions(db):
@@ -1163,7 +1210,10 @@ def get_special_recommendations_today(db):
     eligible = [c for c in candidates if is_suggestion_eligible(c)]
     previous_snapshots_by_universe = _fetch_previous_snapshots(db, eligible)
     industry_benchmarks_by_industry = _compute_industry_benchmarks(eligible)
-    ranked = score_candidates(eligible, previous_snapshots_by_universe, industry_benchmarks_by_industry)
+    news_sentiment_by_watchlist = _fetch_news_sentiment_by_watchlist(db, eligible)
+    ranked = score_candidates(
+        eligible, previous_snapshots_by_universe, industry_benchmarks_by_industry, news_sentiment_by_watchlist
+    )
 
     results = []
     for candidate, nns_score in ranked:
