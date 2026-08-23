@@ -41,10 +41,12 @@ class FakeAdminAlertsDB:
     stock_admin_alerts, and find_and_notify_intraday_target_hits' pending
     lookups/updates on both stock_suggestions and stock_admin_alerts."""
 
-    def __init__(self, candidate_rows=None, admin_alerts=None, suggestions=None):
+    def __init__(self, candidate_rows=None, admin_alerts=None, suggestions=None, recipients=None):
         self.candidate_rows = candidate_rows or []
         self.admin_alerts = admin_alerts or []
         self.suggestions = suggestions or []
+        self.recipients = recipients or []
+        self.marked_target_hit_ids = []
         self._next_admin_alert_id = max([a['id'] for a in self.admin_alerts], default=0) + 1
 
     def execute(self, sql, params=None):
@@ -103,6 +105,20 @@ class FakeAdminAlertsDB:
             for a in self.admin_alerts:
                 if a['id'] == row_id:
                     a['status'] = 'target_hit'
+            return FakeCursor([])
+
+        if normalized.startswith(
+            "SELECT id, username AS email, name, is_pro, subscription_status, "
+            "subscription_current_period_end, trial_ends_at FROM stocks_admin_users"
+        ):
+            return FakeCursor(self.recipients)
+
+        if normalized.startswith("UPDATE stock_suggestions SET status='target_hit'"):
+            ids = params
+            self.marked_target_hit_ids.extend(ids)
+            for s in self.suggestions:
+                if s['id'] in ids:
+                    s['status'] = 'target_hit'
             return FakeCursor([])
 
         raise AssertionError(f'Unexpected SQL in test: {sql}')
@@ -164,15 +180,16 @@ def test_no_alerts_when_nothing_clears_silver():
 
 # --- find_and_notify_intraday_target_hits ---
 
-def test_suggestion_hit_sets_intraday_alert_sent_at_but_leaves_status_pending():
-    # The whole point of the design: the once-daily customer-facing check
-    # (find_pending_target_hit_suggestions) only looks at status='pending',
-    # so this must NEVER flip status itself.
+def test_suggestion_hit_notifies_customers_and_marks_target_hit_when_no_recipients():
+    # No current Standard-plan recipients -- nothing to send, but nothing
+    # to retry for either, so it's still marked handled (same "no one to
+    # tell" rule as the once-daily fallback job).
     suggestions = [{
         'id': 10, 'watchlist_id': 1, 'symbol': 'HITCO', 'exchange': 'NSE', 'company_name': 'Hit Co',
-        'buy_price': 100.0, 'target_sell_price': 110.0, 'status': 'pending', 'intraday_alert_sent_at': None,
+        'suggestion_date': '2026-08-01', 'buy_price': 100.0, 'target_sell_price': 110.0,
+        'status': 'pending', 'intraday_alert_sent_at': None,
     }]
-    db = FakeAdminAlertsDB(suggestions=suggestions)
+    db = FakeAdminAlertsDB(suggestions=suggestions, recipients=[])
     kite = FakeKiteClient(prices={'NSE:HITCO': 111.0})
 
     with patch('stoqbell.utils.admin_alerts.send_intraday_target_hit_alert_email') as mock_send:
@@ -181,9 +198,63 @@ def test_suggestion_hit_sets_intraday_alert_sent_at_but_leaves_status_pending():
     assert len(summary['hits']) == 1
     assert summary['hits'][0]['source'] == 'suggestion'
     assert summary['hits'][0]['live_price'] == 111.0
+    assert summary['customers_notified'] == 0
     assert db.suggestions[0]['intraday_alert_sent_at'] == 'set'
-    assert db.suggestions[0]['status'] == 'pending'  # untouched -- see docstring
+    assert db.suggestions[0]['status'] == 'target_hit'  # no recipients -- nothing to retry for
     mock_send.assert_called_once_with('raga2020@gmail.com', summary['hits'])
+
+
+def test_suggestion_hit_emails_current_standard_subscribers_and_marks_target_hit():
+    suggestions = [{
+        'id': 10, 'watchlist_id': 1, 'symbol': 'HITCO', 'exchange': 'NSE', 'company_name': 'Hit Co',
+        'suggestion_date': '2026-08-01', 'buy_price': 100.0, 'target_sell_price': 110.0,
+        'status': 'pending', 'intraday_alert_sent_at': None,
+    }]
+    recipients = [
+        {'id': 1, 'email': 'a@example.com', 'name': 'A', 'is_pro': 0, 'subscription_status': 'active',
+         'subscription_current_period_end': None, 'trial_ends_at': None},
+    ]
+    db = FakeAdminAlertsDB(suggestions=suggestions, recipients=recipients)
+    kite = FakeKiteClient(prices={'NSE:HITCO': 111.0})
+
+    with patch('stoqbell.utils.admin_alerts.send_intraday_target_hit_alert_email'), \
+         patch('stoqbell.utils.admin_alerts.send_target_achieved_email', return_value=(True, 'ok')) as mock_customer_send:
+        summary = find_and_notify_intraday_target_hits(db, kite_client=kite)
+
+    assert summary['customers_notified'] == 1
+    mock_customer_send.assert_called_once()
+    call_kwargs = mock_customer_send.call_args
+    assert call_kwargs.args[0] == 'a@example.com'
+    achievements = call_kwargs.args[2]
+    assert achievements[0]['symbol'] == 'HITCO'
+    assert achievements[0]['latest_price'] == 111.0
+    assert db.suggestions[0]['status'] == 'target_hit'
+    assert db.marked_target_hit_ids == [10]
+
+
+def test_suggestion_hit_leaves_status_pending_when_every_customer_send_fails():
+    # Recipients existed but nobody actually got the email -- must NOT mark
+    # as notified, so the once-daily fallback job retries it tomorrow.
+    suggestions = [{
+        'id': 10, 'watchlist_id': 1, 'symbol': 'HITCO', 'exchange': 'NSE', 'company_name': 'Hit Co',
+        'suggestion_date': '2026-08-01', 'buy_price': 100.0, 'target_sell_price': 110.0,
+        'status': 'pending', 'intraday_alert_sent_at': None,
+    }]
+    recipients = [
+        {'id': 1, 'email': 'a@example.com', 'name': 'A', 'is_pro': 0, 'subscription_status': 'active',
+         'subscription_current_period_end': None, 'trial_ends_at': None},
+    ]
+    db = FakeAdminAlertsDB(suggestions=suggestions, recipients=recipients)
+    kite = FakeKiteClient(prices={'NSE:HITCO': 111.0})
+
+    with patch('stoqbell.utils.admin_alerts.send_intraday_target_hit_alert_email'), \
+         patch('stoqbell.utils.admin_alerts.send_target_achieved_email', return_value=(False, 'smtp error')):
+        summary = find_and_notify_intraday_target_hits(db, kite_client=kite)
+
+    assert summary['customers_notified'] == 0
+    assert db.suggestions[0]['intraday_alert_sent_at'] == 'set'  # this check won't retry it again
+    assert db.suggestions[0]['status'] == 'pending'  # but the daily fallback job still will
+    assert db.marked_target_hit_ids == []
 
 
 def test_admin_alert_hit_sets_status_target_hit():
@@ -205,7 +276,8 @@ def test_admin_alert_hit_sets_status_target_hit():
 def test_multiple_simultaneous_hits_combine_into_one_email():
     suggestions = [{
         'id': 10, 'watchlist_id': 1, 'symbol': 'ONECO', 'exchange': 'NSE', 'company_name': 'One Co',
-        'buy_price': 100.0, 'target_sell_price': 105.0, 'status': 'pending', 'intraday_alert_sent_at': None,
+        'suggestion_date': '2026-08-01', 'buy_price': 100.0, 'target_sell_price': 105.0,
+        'status': 'pending', 'intraday_alert_sent_at': None,
     }]
     admin_alerts = [{
         'id': 20, 'watchlist_id': 2, 'symbol': 'TWOCO', 'exchange': 'NSE', 'company_name': 'Two Co',

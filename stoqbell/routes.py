@@ -766,21 +766,33 @@ def stocks_large_cap_bonus_send_email():
 
 @stocks_bp.route('/stocks/suggestions/notify-target-hits', methods=['POST'])
 def stocks_suggestions_notify_target_hits():
-    """Checks every still-'pending' stock_suggestions row against the
-    latest synced close (see suggestion_engine.find_pending_target_hit_suggestions)
-    and, for any that have reached target, emails every stocks_plan='standard'
-    (Rs 299/mo) viewer who ever had access -- is_active never gets reset
-    back to 0 once a trial or subscription starts (only an admin manually
-    suspending an account does that, see toggle_viewer_active), so this
-    deliberately still reaches someone whose free trial expired without
-    subscribing, or whose paid subscription lapsed -- the pick they saw
-    while they had access hit target regardless, and it's exactly the
-    moment they're most likely to come back and subscribe. One email per
-    recipient bundling every hit found this run, not one email per stock
-    -- with the recommended day/price, target price, achieved day, time
-    taken, and profit at today's close, prompting them to consider
-    booking profit themselves, plus a resubscribe nudge for anyone who
-    doesn't currently have access (see send_target_achieved_email). Every
+    """FALLBACK only now -- the primary, fast path is the every-5-minutes
+    intraday check (see utils/admin_alerts.find_and_notify_intraday_target_hits,
+    which now emails customers directly the moment a live Kite quote
+    crosses target, typically within minutes of it actually happening,
+    not the next morning). This once-a-day job exists to catch whatever
+    that one couldn't: a target reached right at close after the last
+    5-minute check, a stretch where the intraday job itself failed, or a
+    day the Kite session was down. It checks every still-'pending'
+    stock_suggestions row against the latest SYNCED close (see
+    suggestion_engine.find_pending_target_hit_suggestions -- a status of
+    'pending' here already means the intraday path either never caught
+    it, or caught it but failed to reach anyone, see
+    _notify_customers_of_suggestion_hits' own docstring for exactly when
+    it leaves status alone for this job to retry) and, for any that have
+    reached target, emails every stocks_plan='standard' (Rs 299/mo) viewer
+    who ever had access -- is_active never gets reset back to 0 once a
+    trial or subscription starts (only an admin manually suspending an
+    account does that, see toggle_viewer_active), so this deliberately
+    still reaches someone whose free trial expired without subscribing,
+    or whose paid subscription lapsed -- the pick they saw while they had
+    access hit target regardless, and it's exactly the moment they're
+    most likely to come back and subscribe. One email per recipient
+    bundling every hit found this run, not one email per stock -- with
+    the recommended day/price, target price, achieved day, time taken,
+    and profit at today's close, prompting them to consider booking
+    profit themselves, plus a resubscribe nudge for anyone who doesn't
+    currently have access (see send_target_achieved_email). Every
     notified suggestion is then marked status='target_hit'
     (mark_suggestions_target_hit) so it's never re-notified about.
 
