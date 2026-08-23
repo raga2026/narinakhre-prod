@@ -28,11 +28,15 @@ GOOD_INDICATORS = {'cross_status': 'golden_cross', 'volume_trend': 'confirming',
 
 # Comfortably clears NNS_BRONZE_MIN (4.0) on every sub-score by default --
 # individual tests override specific fields to compare candidates against
-# each other or push one below the bronze floor.
+# each other or push one below the bronze floor. reserves_to_debt_ratio/
+# free_cash_flow included here too (a "good all-around company" fixture
+# should score well on these new components as well, not silently score 0
+# on them just because these tests predate the two new components existing
+# at all -- see nns_score.py's WEIGHTS/reserves_to_debt/fcf).
 GOOD_FUNDAMENTALS = {
     'pe_ratio': 20, 'peg_ratio': 0.3, 'opm_pct': 32, 'roce_pct': 20, 'roa_pct': 12,
     'quarterly_profit_growth_pct': 20, 'quarterly_revenue_growth_pct': 20,
-    'price_to_book': 4,
+    'price_to_book': 4, 'reserves_to_debt_ratio': 2.0, 'free_cash_flow': 10.0,
 }
 
 
@@ -129,6 +133,51 @@ def test_non_golden_cross_is_excluded_regardless_of_nns_score():
     assert select_top_suggestions([no_trend]) == []
 
 
+def test_peg_above_hard_exclusion_threshold_is_excluded_even_though_golden_cross():
+    # The PEG fix (Part 1): a company whose PEG has drifted past
+    # PEG_HARD_EXCLUSION_MAX (1.5) since it was watchlisted no longer
+    # reaches suggestion output at all, even with a perfect golden cross
+    # and otherwise-excellent fundamentals -- is_suggestion_eligible now
+    # re-checks PEG itself, not just cross_status.
+    bad_peg = _candidate(1, 'BADPEG', peg_ratio=1.5)  # exactly at the exclusion threshold
+    very_bad_peg = _candidate(2, 'VERYBADPEG', peg_ratio=5.0)
+
+    assert is_suggestion_eligible(bad_peg) is False
+    assert is_suggestion_eligible(very_bad_peg) is False
+    assert select_top_suggestions([bad_peg]) == []
+    assert select_top_suggestions([very_bad_peg]) == []
+
+
+def test_peg_missing_is_excluded_same_as_a_bad_peg():
+    no_peg = _candidate(1, 'NOPEG', peg_ratio=None)
+    assert is_suggestion_eligible(no_peg) is False
+    assert select_top_suggestions([no_peg]) == []
+
+
+def test_peg_in_the_tolerated_but_penalized_band_still_reaches_output():
+    # PEG in [1.0, 1.5) is NOT excluded -- it's "heavily penalized but not
+    # excluded" (still scores 0 for the peg component in compute_nns_score,
+    # same as before, just now a bigger share of the total -- see
+    # nns_score.WEIGHTS) -- but still shows up if it otherwise clears
+    # NNS_BRONZE_MIN, unlike PEG >= 1.5.
+    tolerated_peg = _candidate(1, 'TOLERATEDPEG', peg_ratio=1.2)
+    assert is_suggestion_eligible(tolerated_peg) is True
+    top = select_top_suggestions([tolerated_peg])
+    assert [c['symbol'] for c, _ in top] == ['TOLERATEDPEG']
+
+
+def test_peg_just_under_one_scores_meaningfully_higher_than_peg_in_penalized_band():
+    # Confirms PEG < 1 is "scored normally" (full continuous credit) while
+    # PEG in [1.0, 1.5) really is heavily penalized in the actual total,
+    # not just in the isolated sub-score -- see nns_score.WEIGHTS' raised
+    # peg weight (15, up from the old equal 10).
+    good_peg = _candidate(1, 'GOODPEG', peg_ratio=0.05)
+    penalized_peg = _candidate(2, 'PENALIZEDPEG', peg_ratio=1.2)
+    ranked = score_candidates([good_peg, penalized_peg])
+    assert [c['symbol'] for c, _ in ranked] == ['GOODPEG', 'PENALIZEDPEG']
+    assert ranked[0][1] > ranked[1][1] + 1.0  # more than a token difference
+
+
 def test_diverging_volume_no_longer_excludes_a_golden_cross_candidate():
     # volume_trend was part of the old three-way hard filter -- it's not
     # part of is_suggestion_eligible at all anymore (this is the exact
@@ -152,7 +201,10 @@ def test_silver_candidate_preferred_over_a_bronze_one_when_both_available():
 
 
 def test_bronze_candidate_used_when_no_silver_or_better_is_available():
-    bronze_only = _candidate(1, 'BRONZECO', roce_pct=-1, roa_pct=-1)
+    # peg_ratio also weakened here (on top of roce/roa) -- PEG's raised
+    # weight (see nns_score.WEIGHTS) means roce/roa alone no longer pull a
+    # GOOD_FUNDAMENTALS-based fixture down past the silver/bronze boundary.
+    bronze_only = _candidate(1, 'BRONZECO', roce_pct=-1, roa_pct=-1, peg_ratio=0.9)
 
     top = select_top_suggestions([bronze_only], top_n=1)
 

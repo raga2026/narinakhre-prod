@@ -166,6 +166,33 @@ def _parse_quarterly_metrics(soup):
     }
 
 
+# See _compute_reserves_to_debt_ratio's own docstring -- deliberately far
+# above any real ratio a leveraged company could show, and above the
+# scoring ceiling utils/nns_score.py uses for this metric, so it always
+# reads as "maximally healthy" wherever it's consumed.
+RESERVES_TO_DEBT_DEBT_FREE_SENTINEL = 999
+
+
+def _compute_reserves_to_debt_ratio(reserves, borrowings):
+    """reserves_to_debt_ratio = Reserves / Borrowings, both from Screener's
+    simplified Balance Sheet (see _parse_balance_sheet_derived). None when
+    either figure isn't on record at all -- we genuinely don't know the
+    ratio then, not "assume debt-free". When borrowings is confirmed as
+    exactly 0 (a real scraped zero, not missing data), this is a debt-free
+    company -- a plain division would raise ZeroDivisionError, and there's
+    no finite "ratio" to report, so this returns
+    RESERVES_TO_DEBT_DEBT_FREE_SENTINEL instead: a value comfortably above
+    any scoring ceiling utils.nns_score.py would ever use for this metric,
+    so a debt-free company always scores the full points for this
+    component -- "maximally healthy", per instruction, not a computed
+    artifact of dividing by a tiny number."""
+    if reserves is None or borrowings is None:
+        return None
+    if borrowings == 0:
+        return RESERVES_TO_DEBT_DEBT_FREE_SENTINEL
+    return round(reserves / borrowings, 3)
+
+
 def _parse_balance_sheet_derived(soup):
     """debt_to_equity and tol_by_tnw aren't shown as ready-made ratios for
     every company (confirmed: absent from top-ratios for a real debt-light
@@ -176,12 +203,21 @@ def _parse_balance_sheet_derived(soup):
     net_worth, since in this presentation Total Assets == Total Liabilities
     by construction (it's a balance sheet).
 
+    reserves and reserves_to_debt_ratio (Reserves / Borrowings -- see
+    _compute_reserves_to_debt_ratio) are exposed here too now, for the NNS
+    Score's own reserves-to-debt scoring component -- both were already
+    being scraped/computed locally for debt_to_equity/tol_by_tnw above, just
+    never returned on their own before.
+
     current_ratio is deliberately NOT computed or approximated here at all:
     Screener's simplified balance sheet has no current-assets/
     current-liabilities split (confirmed against a real page), so there's
     no sound way to derive it from this data source. It stays None."""
     tables = _get_section_tables(soup, 'balance-sheet')
-    result = {'debt_to_equity': None, 'tol_by_tnw': None, 'total_assets': None}
+    result = {
+        'debt_to_equity': None, 'tol_by_tnw': None, 'total_assets': None,
+        'reserves': None, 'reserves_to_debt_ratio': None,
+    }
     if not tables:
         return result
 
@@ -190,6 +226,8 @@ def _parse_balance_sheet_derived(soup):
     borrowings = _latest_numeric(_row_values(tables, 'Borrowings'))
     total_assets = _latest_numeric(_row_values(tables, 'Total Assets'))
     result['total_assets'] = total_assets
+    result['reserves'] = reserves
+    result['reserves_to_debt_ratio'] = _compute_reserves_to_debt_ratio(reserves, borrowings)
 
     if equity is not None and reserves is not None:
         net_worth = equity + reserves
@@ -352,6 +390,8 @@ def fetch_fundamentals(symbol):
         'quarterly_profit_growth_pct': quarterly['quarterly_profit_growth_pct'],
         'quarterly_revenue_growth_pct': quarterly['quarterly_revenue_growth_pct'],
         'tol_by_tnw': balance_sheet['tol_by_tnw'],
+        'reserves': balance_sheet['reserves'],
+        'reserves_to_debt_ratio': balance_sheet['reserves_to_debt_ratio'],
         'roa_pct': _parse_roa_pct(soup, balance_sheet['total_assets']),
         'free_cash_flow': _parse_free_cash_flow(soup),
         'sector_avg_pe': None,   # peers table is JS/AJAX-loaded, not in the static HTML

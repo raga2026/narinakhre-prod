@@ -5,6 +5,7 @@ used elsewhere in this codebase (e.g. fundamental_screen.py vs stock_shortlist.p
 import random
 from datetime import date, timedelta
 
+from stoqbell.utils.fundamental_screen import PEG_HARD_EXCLUSION_MAX
 from stoqbell.utils.price_pattern import compute_suggestion_pricing
 from stoqbell.utils.nns_score import NNS_BRONZE_MIN, compute_nns_score, nns_tier
 from stoqbell.utils.stock_shortlist import _compute_industry_benchmarks
@@ -145,14 +146,28 @@ def passes_hard_filters(candidate):
 
 def is_suggestion_eligible(candidate):
     """The actual gate for suggestion generation (see generate_daily_suggestions/
-    select_top_suggestions) -- golden cross is required, full stop, but
-    that's it: no separate volume-trend or RSI hard cutoff. RSI still
-    matters, just as one of the NNS Score's own ten sub-scores (see
+    select_top_suggestions) -- golden cross is required, full stop, no
+    separate volume-trend or RSI hard cutoff. RSI still matters, just as
+    one of the NNS Score's own sub-scores (see
     utils.nns_score.compute_nns_score's rsi_position) rather than an
     all-or-nothing gate -- a candidate with poor RSI scores lower and
     ranks behind better ones, it doesn't get excluded outright over it
     alone. Quality is enforced afterward by score_candidates' own
-    NNS_BRONZE_MIN floor, not here."""
+    NNS_BRONZE_MIN floor, not here.
+
+    PEG is the one exception, re-checked here too (a candidate with PEG
+    >= PEG_HARD_EXCLUSION_MAX, or no PEG on record at all, is excluded
+    outright, same as failing golden-cross) -- see
+    fundamental_screen.PEG_HARD_EXCLUSION_MAX's own docstring for exactly
+    why a second PEG check is needed here, on top of the one that already
+    gates watchlist admission: admission is a point-in-time check, and a
+    watchlisted company's PEG can drift upward afterward without being
+    removed from the watchlist for it. Missing PEG data is NOT given the
+    benefit of the doubt here either, same rule fundamental_screen.py's
+    own admission-time check already applies."""
+    peg_ratio = candidate.get('peg_ratio')
+    if peg_ratio is None or peg_ratio >= PEG_HARD_EXCLUSION_MAX:
+        return False
     return candidate.get('cross_status') == 'golden_cross'
 
 

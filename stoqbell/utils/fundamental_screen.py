@@ -4,6 +4,31 @@ stock_shortlist.run_fundamental_shortlist for how this gets applied over
 stock_universe/stock_fundamentals and synced into stock_watchlist)."""
 
 PEG_MAX = 1
+# Re-applied at daily suggestion-ranking time (see
+# suggestion_engine.is_suggestion_eligible), NOT here at watchlist
+# admission -- PEG_MAX above already governs admission (PEG >= PEG_MAX
+# fails outright, never forgiven at any tier, see SILVER/BRONZE_ELIGIBLE_CRITERIA
+# below). The gap this closes: watchlist admission is a POINT-IN-TIME
+# check -- a company's PEG can drift upward after admission (slower
+# earnings growth, or a higher price) without being removed from the
+# watchlist immediately, since re-shortlisting only happens on its own
+# periodic cadence. Suggestion ranking reads the LATEST synced PEG every
+# day, so without its own re-check, an already-watchlisted company whose
+# PEG has since drifted past 1 could still be scored/suggested -- this is
+# confirmed to be exactly how a PEG>1 company was reaching suggestion
+# output despite PEG_MAX supposedly disqualifying it (see nns_score.py's
+# module docstring for the full diagnosis).
+#
+# Deliberately loosened to 1.5 rather than reapplying PEG_MAX (1.0)
+# itself: re-applying the admission-time 1.0 threshold a second time, at
+# ranking time, on top of golden-cross eligibility, risks collapsing the
+# eligible-candidate pool to zero on days when few golden-cross stocks
+# happen to have PEG under 1.0 (the exact failure mode this was checked
+# against before choosing this number). PEG in [1.0, 1.5) still reaches
+# scoring -- and still scores exactly 0 for the PEG component in
+# compute_nns_score, i.e. still meaningfully penalized, just not excluded
+# outright -- only PEG >= 1.5 is dropped from the pool entirely.
+PEG_HARD_EXCLUSION_MAX = 1.5
 QUARTERLY_GROWTH_MIN = 10
 # Large-cap tier only (see score_fundamentals_large_cap below) -- a
 # separate, lower growth floor for the above-30000cr companies, which

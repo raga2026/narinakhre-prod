@@ -72,6 +72,14 @@ STOCK_FUNDAMENTALS_ALTER_SQL = [
     # stays NULL until then.
     'ALTER TABLE stock_fundamentals ADD COLUMN IF NOT EXISTS dii_holding_pct NUMERIC',
     'ALTER TABLE stock_fundamentals ADD COLUMN IF NOT EXISTS promoter_pledge_pct NUMERIC',
+    # Reserves-to-debt ratio scoring component (see utils/nns_score.py) --
+    # reserves is Screener's Balance Sheet 'Reserves' row (already scraped
+    # for debt_to_equity/tol_by_tnw above, just never stored on its own
+    # before); reserves_to_debt_ratio = reserves / Borrowings, computed in
+    # screener_client._compute_reserves_to_debt_ratio (handles zero-debt
+    # as a special case, see its own docstring -- not a divide-by-zero).
+    'ALTER TABLE stock_fundamentals ADD COLUMN IF NOT EXISTS reserves NUMERIC',
+    'ALTER TABLE stock_fundamentals ADD COLUMN IF NOT EXISTS reserves_to_debt_ratio NUMERIC',
 ]
 
 # Every column stock_fundamentals tracks beyond (id, watchlist_id,
@@ -83,7 +91,7 @@ FUNDAMENTALS_COLUMNS = [
     'roce_pct', 'roa_pct', 'current_ratio', 'tol_by_tnw',
     'promoter_holding_pct', 'fii_holding_pct', 'public_holding_pct',
     'quarterly_profit_growth_pct', 'quarterly_revenue_growth_pct', 'free_cash_flow',
-    'dii_holding_pct', 'promoter_pledge_pct',
+    'dii_holding_pct', 'promoter_pledge_pct', 'reserves', 'reserves_to_debt_ratio',
 ]
 
 # How many of the scrape-eligible stock_universe rows to refresh per

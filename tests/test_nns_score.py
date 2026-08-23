@@ -1,4 +1,11 @@
-from stoqbell.utils.nns_score import NNS_BRONZE_MIN, NNS_GOLDEN_MIN, NNS_SILVER_MIN, compute_nns_score, nns_tier
+from stoqbell.utils.nns_score import (
+    NNS_BRONZE_MIN,
+    NNS_GOLDEN_MIN,
+    NNS_SILVER_MIN,
+    WEIGHTS,
+    compute_nns_score,
+    nns_tier,
+)
 
 # Every sub-score at its ceiling/ideal -- should score a perfect (or
 # near-perfect) 10.0.
@@ -11,6 +18,8 @@ EXCELLENT_CANDIDATE = {
     'quarterly_profit_growth_pct': 30,
     'quarterly_revenue_growth_pct': 30,
     'price_to_book': 0.0,
+    'reserves_to_debt_ratio': 2.0,  # at the excellent ceiling
+    'free_cash_flow': 1.0,          # any positive value scores full credit
     'rsi_14': 52.5,        # exact center of 40-65
     'promoter_holding_pct': 60,
     'fii_holding_pct': 20,
@@ -21,7 +30,7 @@ EXCELLENT_PREVIOUS = {'promoter_holding_pct': 55, 'fii_holding_pct': 15}
 WORST_CANDIDATE = {
     'pe_ratio': None, 'peg_ratio': 5.0, 'opm_pct': 0, 'roce_pct': 0, 'roa_pct': 0,
     'quarterly_profit_growth_pct': 0, 'quarterly_revenue_growth_pct': 0,
-    'price_to_book': 999, 'rsi_14': None,
+    'price_to_book': 999, 'reserves_to_debt_ratio': 0, 'free_cash_flow': -1.0, 'rsi_14': None,
     'promoter_holding_pct': None, 'fii_holding_pct': None,
 }
 
@@ -47,11 +56,12 @@ def test_score_is_a_single_decimal_place():
     assert score == round(score, 1)
 
 
-def test_ten_sub_scores_are_all_present_in_breakdown():
+def test_twelve_sub_scores_are_all_present_in_breakdown():
     _, breakdown = compute_nns_score(EXCELLENT_CANDIDATE, EXCELLENT_PREVIOUS)
     assert set(breakdown.keys()) == {
         'pe_fit', 'peg', 'opm', 'roce', 'roa', 'profit_growth', 'revenue_growth',
-        'price_to_book_fit', 'rsi_position', 'holding_trend', 'golden_cross_bonus',
+        'price_to_book_fit', 'reserves_to_debt', 'fcf', 'rsi_position', 'holding_trend',
+        'golden_cross_bonus',
     }
 
 
@@ -173,6 +183,71 @@ def test_holding_trend_half_credit_for_just_one_of_two_improving():
 
 
 # --- nns_tier ---------------------------------------------------------------
+
+# --- reserves_to_debt ------------------------------------------------------
+
+def test_reserves_to_debt_between_floor_and_ceiling_scores_proportionally():
+    _, breakdown = compute_nns_score({**EXCELLENT_CANDIDATE, 'reserves_to_debt_ratio': 1.25})  # halfway 0.5-2.0
+    assert breakdown['reserves_to_debt'] == 0.5
+
+
+def test_reserves_to_debt_missing_scores_zero():
+    _, breakdown = compute_nns_score({**EXCELLENT_CANDIDATE, 'reserves_to_debt_ratio': None})
+    assert breakdown['reserves_to_debt'] == 0.0
+
+
+def test_reserves_to_debt_debt_free_sentinel_scores_full_credit():
+    # See screener_client.RESERVES_TO_DEBT_DEBT_FREE_SENTINEL -- comfortably
+    # above the scoring ceiling, so it reads as "maximally healthy" with no
+    # special-case branch needed in the scoring code itself.
+    from stoqbell.utils.screener_client import RESERVES_TO_DEBT_DEBT_FREE_SENTINEL
+    _, breakdown = compute_nns_score({**EXCELLENT_CANDIDATE, 'reserves_to_debt_ratio': RESERVES_TO_DEBT_DEBT_FREE_SENTINEL})
+    assert breakdown['reserves_to_debt'] == 1.0
+
+
+# --- fcf ---------------------------------------------------------------
+
+def test_fcf_positive_scores_full_credit_negative_or_missing_scores_zero():
+    _, positive = compute_nns_score({**EXCELLENT_CANDIDATE, 'free_cash_flow': 0.01})
+    _, negative = compute_nns_score({**EXCELLENT_CANDIDATE, 'free_cash_flow': -50})
+    _, zero = compute_nns_score({**EXCELLENT_CANDIDATE, 'free_cash_flow': 0})
+    _, missing = compute_nns_score({**EXCELLENT_CANDIDATE, 'free_cash_flow': None})
+    assert positive['fcf'] == 1.0
+    assert negative['fcf'] == 0.0
+    assert zero['fcf'] == 0.0
+    assert missing['fcf'] == 0.0
+
+
+# --- weight table (part 3 of the rebalancing instruction) -------------------
+
+def test_weights_sum_to_100():
+    assert sum(WEIGHTS.values()) == 100
+
+
+def test_opm_weight_is_meaningfully_higher_than_fcf_weight():
+    assert WEIGHTS['opm'] > WEIGHTS['fcf']
+    assert WEIGHTS['opm'] >= WEIGHTS['fcf'] * 1.5  # "meaningfully", not just marginally
+
+
+def test_opm_outweighs_fcf_in_a_synthetic_comparison():
+    # Two candidates, identical except one trades a weak OPM for a strong
+    # FCF and the other trades a weak FCF for a strong OPM -- if OPM truly
+    # outweighs FCF, the strong-OPM/weak-FCF candidate must score higher.
+    strong_opm_weak_fcf = {**EXCELLENT_CANDIDATE, 'opm_pct': 40, 'free_cash_flow': -10}
+    weak_opm_strong_fcf = {**EXCELLENT_CANDIDATE, 'opm_pct': 15, 'free_cash_flow': 10}  # 15 = OPM_SILVER_MIN_PCT floor
+    score_strong_opm, _ = compute_nns_score(strong_opm_weak_fcf)
+    score_weak_opm, _ = compute_nns_score(weak_opm_strong_fcf)
+    assert score_strong_opm > score_weak_opm
+
+
+def test_peg_weight_raised_above_the_old_equal_share():
+    # Old scheme: 10 equally-weighted components, PEG included -- 10 out of
+    # 100. Confirms the rebalancing actually increased it, per the PEG
+    # diagnosis in nns_score.py's own module docstring.
+    assert WEIGHTS['peg'] > 10
+
+
+# --- tier_boundaries ---------------------------------------------------
 
 def test_tier_boundaries():
     assert nns_tier(NNS_GOLDEN_MIN) == 'golden'
