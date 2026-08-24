@@ -289,18 +289,46 @@ def _build_rationale(candidate, tier=None):
     return rationale
 
 
-def _is_genuine_change(existing, new_score, new_target_price):
-    """existing: {'score', 'target_sell_price', 'pattern_name'} -- the most
-    recent stock_suggestions row for this watchlist_id within
+# Ordering for the target-price-change guard below -- None (below bronze,
+# no tier at all) is worse than bronze, which is worse than silver, which
+# is worse than golden.
+_TIER_RANK = {None: 0, 'bronze': 1, 'silver': 2, 'golden': 3}
+
+
+def _is_genuine_change(existing, new_score, new_target_price, new_tier=None):
+    """existing: {'score', 'target_sell_price', 'pattern_name', 'nns_tier'}
+    -- the most recent stock_suggestions row for this watchlist_id within
     SUGGESTION_REPEAT_WINDOW_DAYS. Returns True if today's pick differs
     enough from that one to be worth resending despite the cooldown:
-    either the NNS Score moved by at least NNS_SCORE_CHANGE_THRESHOLD, the
-    target price moved by at least TARGET_PRICE_CHANGE_THRESHOLD_PCT, or
-    the pattern basis itself changed (gaining or losing a confirmed chart
-    pattern is a genuinely different reason to buy even if the score
-    happens to land close to where it was). False means "same pick as
-    last time, nothing meaningfully new to say" -- generate_daily_suggestions
-    skips it and tries the next-best candidate instead."""
+    either the NNS Score moved by at least NNS_SCORE_CHANGE_THRESHOLD (in
+    either direction -- a meaningful move is worth telling the customer
+    about whether the pick got stronger or weaker), the target price moved
+    by at least TARGET_PRICE_CHANGE_THRESHOLD_PCT AND the tier held steady
+    or improved, or the pattern basis itself changed (gaining or losing a
+    confirmed chart pattern is a genuinely different reason to buy even if
+    the score happens to land close to where it was). False means "same
+    pick as last time, nothing meaningfully new to say" --
+    generate_daily_suggestions skips it and tries the next-best candidate
+    instead.
+
+    The tier condition on the target-price criterion exists because target
+    price tracks the stock's own recent price action (see
+    price_pattern.compute_suggestion_pricing), which can drift comfortably
+    past TARGET_PRICE_CHANGE_THRESHOLD_PCT on its own even as the
+    underlying pick gets fundamentally WEAKER -- confirmed as the actual
+    cause of a live incident (2026-08-24, Jayaswal Neco Industries) where a
+    stock whose previous suggestion had already hit target got resent the
+    next trading day at a ~7.5% higher target purely from price momentum,
+    despite its own NNS tier having dropped from Silver to Bronze in the
+    meantime. Without this gate, that reads to a subscriber as "here's
+    another strong reason to buy X" when the real story is "X just got
+    weaker, but its price went up anyway" -- a target-price move alone
+    should never be the reason a resend happens when quality is trending
+    the wrong way; a tier downgrade should send the next-best DIFFERENT
+    candidate instead. The unconditional score-threshold check above isn't
+    gated the same way -- a >=1.0 point score move already IS the
+    tier-strength signal itself, not something that can drift independently
+    of quality the way target price can."""
     old_score = existing.get('score')
     if old_score is not None and abs(new_score - old_score) >= NNS_SCORE_CHANGE_THRESHOLD:
         return True
@@ -308,7 +336,9 @@ def _is_genuine_change(existing, new_score, new_target_price):
     if old_target and new_target_price is not None:
         pct_change = abs(new_target_price - old_target) / old_target * 100
         if pct_change >= TARGET_PRICE_CHANGE_THRESHOLD_PCT:
-            return True
+            old_tier = existing.get('nns_tier')
+            if _TIER_RANK.get(new_tier, 0) >= _TIER_RANK.get(old_tier, 0):
+                return True
     return False
 
 
@@ -972,19 +1002,20 @@ def _create_or_update_suggestion(db, candidate, nns_score, today, repeat_window_
     stop_loss_price = pricing['stop_loss_price']
     pattern_name = pricing['pattern_name']
 
+    tier = nns_tier(nns_score)
+
     existing_recent = db.execute(
-        '''SELECT score, target_sell_price, pattern_name FROM stock_suggestions
+        '''SELECT score, target_sell_price, pattern_name, nns_tier FROM stock_suggestions
            WHERE watchlist_id=? AND suggestion_date >= ? AND suggestion_date < ?
            ORDER BY suggestion_date DESC LIMIT 1''',
         (watchlist_id, repeat_window_cutoff, today)
     ).fetchone()
-    if existing_recent and not _is_genuine_change(existing_recent, nns_score, target_sell_price):
+    if existing_recent and not _is_genuine_change(existing_recent, nns_score, target_sell_price, tier):
         return None, {
             'watchlist_id': watchlist_id, 'symbol': candidate['symbol'], 'exchange': candidate['exchange'],
         }
 
     pattern_note = _build_pattern_note(pattern_name, pricing['pattern_research'])
-    tier = nns_tier(nns_score)
     rationale = _build_rationale(candidate, tier)
 
     db.execute(
@@ -1044,7 +1075,7 @@ def _todays_eligible_candidates_off_cooldown(db):
     for candidate, nns_score in ranked:
         watchlist_id = candidate['watchlist_id']
         existing_recent = db.execute(
-            '''SELECT score, target_sell_price, pattern_name FROM stock_suggestions
+            '''SELECT score, target_sell_price, pattern_name, nns_tier FROM stock_suggestions
                WHERE watchlist_id=? AND suggestion_date >= ? AND suggestion_date < ?
                ORDER BY suggestion_date DESC LIMIT 1''',
             (watchlist_id, repeat_window_cutoff, today)
@@ -1059,7 +1090,7 @@ def _todays_eligible_candidates_off_cooldown(db):
             pricing = compute_suggestion_pricing(
                 price_history, candidate['latest_close'], TARGET_MULTIPLIER, STOP_LOSS_MULTIPLIER
             )
-            if not _is_genuine_change(existing_recent, nns_score, pricing['target_sell_price']):
+            if not _is_genuine_change(existing_recent, nns_score, pricing['target_sell_price'], nns_tier(nns_score)):
                 continue
         off_cooldown.append((candidate, nns_score))
 

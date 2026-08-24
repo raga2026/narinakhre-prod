@@ -132,20 +132,21 @@ def generate_weekly_starters_pick(db, week_start_date=None):
         stop_loss_price = pricing['stop_loss_price']
         pattern_name = pricing['pattern_name']
 
+        tier = nns_tier(nns_score)
+
         existing_recent = db.execute(
-            '''SELECT score, target_sell_price, pattern_name FROM stock_starters_suggestions
+            '''SELECT score, target_sell_price, pattern_name, nns_tier FROM stock_starters_suggestions
                WHERE watchlist_id=? AND week_start_date >= ? AND week_start_date < ?
                ORDER BY week_start_date DESC LIMIT 1''',
             (watchlist_id, repeat_window_cutoff, week_start_iso)
         ).fetchone()
-        if existing_recent and not _is_genuine_change(existing_recent, nns_score, target_sell_price):
+        if existing_recent and not _is_genuine_change(existing_recent, nns_score, target_sell_price, tier):
             skipped_duplicates.append({
                 'watchlist_id': watchlist_id, 'symbol': candidate['symbol'], 'exchange': candidate['exchange'],
             })
             continue
 
         pattern_note = _build_pattern_note(pattern_name, pricing['pattern_research'])
-        tier = nns_tier(nns_score)
         rationale = _build_rationale(candidate, tier)
 
         db.execute(

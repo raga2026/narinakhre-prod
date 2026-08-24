@@ -330,7 +330,7 @@ class FakeSuggestionDB:
             # watchlist company nothing has been synced for yet.
             return FakeCursor([])
 
-        if normalized.startswith('SELECT score, target_sell_price, pattern_name FROM stock_suggestions'):
+        if normalized.startswith('SELECT score, target_sell_price, pattern_name, nns_tier FROM stock_suggestions'):
             watchlist_id, cutoff, today = params
             matches = sorted(
                 (s for s in self.suggestions
@@ -479,6 +479,33 @@ def test_is_genuine_change_pure_function():
     assert _is_genuine_change(existing, 7.0 + NNS_SCORE_CHANGE_THRESHOLD, 100.0) is True
     moved_target = 100.0 * (1 + TARGET_PRICE_CHANGE_THRESHOLD_PCT / 100 + 0.01)
     assert _is_genuine_change(existing, 7.0, moved_target) is True
+
+
+def test_target_price_move_does_not_count_as_genuine_change_if_tier_got_worse():
+    # Live incident, 2026-08-24 (Jayaswal Neco Industries): a stock whose
+    # previous suggestion had already hit target got resent the next
+    # trading day purely because its target price drifted >3% with the
+    # stock's own price action, even though its NNS tier had dropped from
+    # Silver to Bronze in the meantime -- a target-price move alone should
+    # never justify a resend when the pick is trending WEAKER, not stronger.
+    existing_silver = {'score': 6.3, 'target_sell_price': 97.57, 'pattern_name': None, 'nns_tier': 'silver'}
+    moved_target = 97.57 * (1 + TARGET_PRICE_CHANGE_THRESHOLD_PCT / 100 + 0.01)  # >3% move, score barely moves
+
+    # Tier dropped silver -> bronze: the target-price move alone must NOT
+    # count as genuine, even though the score-threshold criterion (a full
+    # 1.0+ point move) also doesn't fire here.
+    assert _is_genuine_change(existing_silver, 5.8, moved_target, 'bronze') is False
+
+    # Tier held steady (silver -> silver) or improved (silver -> golden):
+    # the same target-price move DOES still count as genuine.
+    assert _is_genuine_change(existing_silver, 6.3, moved_target, 'silver') is True
+    assert _is_genuine_change(existing_silver, 8.5, moved_target, 'golden') is True
+
+    # No previous tier on record (a pre-NNS-Score row) is treated as the
+    # worst possible tier -- any new tier at or above "no tier" (i.e. any
+    # tier at all, or still none) still passes.
+    existing_no_tier = {'score': 6.3, 'target_sell_price': 97.57, 'pattern_name': None}
+    assert _is_genuine_change(existing_no_tier, 5.8, moved_target, 'bronze') is True
 
 
 def test_new_suggestion_created_when_no_open_one_exists():
