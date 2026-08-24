@@ -98,8 +98,9 @@ class FakeLivePriceDB:
     have -- this covers the Python-side chunking/mapping logic around it,
     not the SQL engine's own semantics)."""
 
-    def __init__(self, universe_rows):
+    def __init__(self, universe_rows, kite_map_rows=None):
         self.universe_rows = universe_rows
+        self.kite_map_rows = kite_map_rows or []
         self.executed_sql = []
 
     def execute(self, sql, params=None):
@@ -107,6 +108,8 @@ class FakeLivePriceDB:
         self.executed_sql.append(normalized)
         if normalized.startswith('SELECT id, symbol, exchange FROM stock_universe WHERE is_scrape_eligible'):
             return FakeCursor(self.universe_rows)
+        if normalized.startswith('SELECT symbol, exchange, kite_tradingsymbol FROM stock_kite_instrument_map'):
+            return FakeCursor(self.kite_map_rows)
         return FakeCursor([])
 
     def commit(self):
@@ -157,6 +160,38 @@ def test_sync_live_prices_tolerates_a_symbol_kite_does_not_recognize():
     update_sql = next(s for s in db.executed_sql if s.startswith('UPDATE stock_universe'))
     assert '(1, 101.5)' in update_sql
     assert '2,' not in update_sql
+
+
+def test_sync_live_prices_uses_the_cached_kite_tradingsymbol_for_bse():
+    # Live incident, 2026-08-24: BSE listings are stored under our own
+    # numeric scrip code ('522285'), not Kite's own tradingsymbol
+    # ('JAYNECOIND') -- ltp() silently has no quote for the raw code, so
+    # BSE never got a live price at all until this substitution existed.
+    db = FakeLivePriceDB(
+        universe_rows=[{'id': 1, 'symbol': '522285', 'exchange': 'BSE'}],
+        kite_map_rows=[{'symbol': '522285', 'exchange': 'BSE', 'kite_tradingsymbol': 'JAYNECOIND'}],
+    )
+    kite = FakeLtpKiteClient({'BSE:JAYNECOIND': 99.9})
+
+    summary = sync_live_prices(db, kite_client=kite)
+
+    assert summary == {'checked': 1, 'updated': 1}
+    assert kite.calls == [['BSE:JAYNECOIND']]
+    update_sql = next(s for s in db.executed_sql if s.startswith('UPDATE stock_universe'))
+    assert '(1, 99.9)' in update_sql
+
+
+def test_sync_live_prices_falls_back_to_the_raw_symbol_when_unmapped():
+    db = FakeLivePriceDB(
+        universe_rows=[{'id': 1, 'symbol': 'AAA', 'exchange': 'NSE'}],
+        kite_map_rows=[],  # never matched -- no cached tradingsymbol
+    )
+    kite = FakeLtpKiteClient({'NSE:AAA': 55.0})
+
+    summary = sync_live_prices(db, kite_client=kite)
+
+    assert summary == {'checked': 1, 'updated': 1}
+    assert kite.calls == [['NSE:AAA']]
 
 
 def test_sync_live_prices_chunks_the_ltp_calls(monkeypatch):

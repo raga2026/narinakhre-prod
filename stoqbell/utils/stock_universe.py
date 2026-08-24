@@ -351,11 +351,24 @@ def sync_live_prices(db, kite_client=None):
     watchlist/universe pages too, not just the target-hit check that quote
     used to be scoped to alone.
 
-    A symbol Kite doesn't recognize under our stored symbol string (a
-    known gap for a chunk of BSE listings -- see KiteClient.fetch_daily_candles'
-    own comment) is simply absent from fetch_ltp_batch's result and keeps
-    whatever live_price it already had (stale, not wrong) rather than
-    failing the whole sync over a handful of unmatched symbols.
+    Uses stock_kite_instrument_map's cached Kite tradingsymbol (see
+    utils/kite_instrument_map.py) for the ltp() lookup key when one exists,
+    falling back to our own raw stored symbol only when it doesn't --
+    confirmed as the actual cause of a live incident (2026-08-24) where
+    live prices updated for NSE (98%+ match rate on the raw symbol) but
+    NEVER for BSE (0%): a lot of BSE listings are stored here under a
+    numeric scrip code (e.g. '522285'), not Kite's own tradingsymbol
+    ('JAYNECOIND') -- exactly the same symbol-mismatch gap
+    KiteClient.fetch_daily_candles already works around via
+    get_cached_instrument_token, just not one this function was using yet.
+    Fetches the whole mapping table in ONE query up front (thousands of
+    rows, cheaper than one lookup per company) rather than calling
+    get_cached_kite_tradingsymbol per row.
+
+    A symbol still unrecognized by Kite even after that substitution (never
+    matched at all, or delisted/renamed) is simply absent from
+    fetch_ltp_batch's result and keeps whatever live_price it already had
+    (stale, not wrong) rather than failing the whole sync over it.
 
     Every result is written back in ONE set-based UPDATE, not a per-row
     loop -- same "thousands of rows, a Python loop issuing one RPC call
@@ -373,7 +386,15 @@ def sync_live_prices(db, kite_client=None):
     if not rows:
         return {'checked': 0, 'updated': 0}
 
-    id_by_key = {f"{r['exchange']}:{r['symbol']}": r['id'] for r in rows}
+    tradingsymbol_by_symbol_exchange = {
+        (m['symbol'], m['exchange']): m['kite_tradingsymbol']
+        for m in db.execute('SELECT symbol, exchange, kite_tradingsymbol FROM stock_kite_instrument_map').fetchall()
+    }
+
+    id_by_key = {}
+    for r in rows:
+        kite_symbol = tradingsymbol_by_symbol_exchange.get((r['symbol'], r['exchange'])) or r['symbol']
+        id_by_key[f"{r['exchange']}:{kite_symbol}"] = r['id']
     keys = list(id_by_key.keys())
 
     price_by_id = {}
