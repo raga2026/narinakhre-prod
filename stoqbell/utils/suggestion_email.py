@@ -8,6 +8,7 @@ from stoqbell.utils.starters_engine import get_starters_suggestions
 from stoqbell.utils.large_cap_engine import get_large_cap_bonus_suggestions
 from stoqbell.utils.price_pattern import compute_projection_targets
 from stoqbell.utils.stocks_referrals import REFERRALS_PER_FREE_MONTH, get_or_create_referral_code
+from stoqbell.utils.email_delivery_log import record_delivery
 
 DISCLAIMER = (
     "This is independent market research and analysis, not professional "
@@ -1436,6 +1437,7 @@ def send_daily_suggestions_email(db, target_date=None, recipient_ids=None):
             htmlbody=html_body,
             sender_name='StoqBell',
         )
+        record_delivery(db, 'daily', date_iso, r.get('id'), r['email'], 'sent' if ok else 'failed', None if ok else detail)
         if ok:
             sent += 1
         else:
@@ -1567,6 +1569,7 @@ def send_weekly_starters_email(db, target_date=None, recipient_ids=None):
             htmlbody=html_body,
             sender_name='StoqBell',
         )
+        record_delivery(db, 'starters', date_iso, r.get('id'), r['email'], 'sent' if ok else 'failed', None if ok else detail)
         if ok:
             sent += 1
         else:
@@ -1698,6 +1701,7 @@ def send_large_cap_bonus_email(db, target_date=None, recipient_ids=None):
             htmlbody=html_body,
             sender_name='StoqBell',
         )
+        record_delivery(db, 'large_cap', date_iso, r.get('id'), r['email'], 'sent' if ok else 'failed', None if ok else detail)
         if ok:
             sent += 1
         else:

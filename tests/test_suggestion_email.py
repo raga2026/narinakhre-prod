@@ -85,6 +85,9 @@ class FakeEmailDB:
                     r['referral_code'] = code
             return FakeCursor([])
 
+        if normalized.startswith('INSERT INTO stock_email_deliveries'):
+            return FakeCursor([])
+
         raise AssertionError(f'Unexpected SQL in test: {sql}')
 
     def commit(self):
@@ -1046,6 +1049,9 @@ class FakeStartersEmailDB:
                     r['referral_code'] = code
             return FakeCursor([])
 
+        if normalized.startswith('INSERT INTO stock_email_deliveries'):
+            return FakeCursor([])
+
         raise AssertionError(f'Unexpected SQL in test: {sql}')
 
     def commit(self):
@@ -1147,6 +1153,9 @@ class FakeLargeCapBonusEmailDB:
             for r in self.recipient_rows:
                 if r.get('id') == admin_id:
                     r['referral_code'] = code
+            return FakeCursor([])
+
+        if normalized.startswith('INSERT INTO stock_email_deliveries'):
             return FakeCursor([])
 
         raise AssertionError(f'Unexpected SQL in test: {sql}')

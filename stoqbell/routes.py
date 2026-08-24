@@ -207,6 +207,11 @@ from stoqbell.utils.stock_news import (
     get_prominent_news,
     with_published_at_ist,
 )
+from stoqbell.utils.email_delivery_log import (
+    initialize_email_delivery_log_table_if_needed,
+    list_delivery_dates,
+    get_delivery_log,
+)
 from stoqbell.utils.news_sentiment import compute_company_sentiment
 from stoqbell.utils.suggestion_email import (
     initialize_stocks_email_recipients_table_if_needed,
@@ -328,6 +333,7 @@ def init_stocks_tables():
     initialize_large_cap_bonus_suggestions_table_if_needed(client)
     initialize_admin_alerts_table_if_needed(client)
     initialize_stock_news_table_if_needed(client)
+    initialize_email_delivery_log_table_if_needed(client)
 
 
 _LEGACY_STOCKS_ROUTES = [
@@ -2494,6 +2500,50 @@ def stocks_special_recommendations():
     db = get_db()
     picks = get_special_recommendations_today(db)
     return render_template('admin/stocks_special_recommendations.html', picks=picks)
+
+
+@stocks_bp.route('/stocks/notifications/delivery-log', methods=['GET'])
+@stocks_role_required('super_admin')
+def stocks_delivery_log():
+    """super_admin-only: per-recipient delivery status (delivered/failed,
+    with the actual failure reason) for each of the three recommendation
+    broadcast emails (daily Pick of the Day, Starters weekly, large-cap
+    bonus) -- see utils/email_delivery_log.py, written to by each of
+    those three send functions in utils/suggestion_email.py.
+
+    ?source=daily|starters|large_cap&date=YYYY-MM-DD picks which send to
+    show; defaults to the single most recent one logged (list_delivery_dates'
+    own ordering) when neither is given. The picker itself (see the
+    template) only ever lists (source, date) combinations that actually
+    have at least one logged attempt -- there is nothing to show for a day
+    nothing was ever sent."""
+    db = get_db()
+    dates = list_delivery_dates(db)
+
+    source = request.args.get('source')
+    date_param = request.args.get('date')
+    if not (source and date_param) and dates:
+        source, date_param = dates[0]['source'], dates[0]['suggestion_date']
+
+    deliveries = get_delivery_log(db, source, date_param) if source and date_param else []
+    # sent_at comes back from the Supabase RPC bridge as a raw ISO8601
+    # string (see db.py's SupabaseCursor) -- every timestamp shown in
+    # Stocks is IST, not raw UTC (see stocks_admin_dashboard's own
+    # kite_expires_at_ist for the same pattern).
+    deliveries = [dict(d) for d in deliveries]
+    for d in deliveries:
+        if d.get('sent_at'):
+            dt = datetime.fromisoformat(str(d['sent_at']).replace('Z', '+00:00'))
+            d['sent_at'] = dt.astimezone(IST).strftime('%d %b %Y, %I:%M %p IST')
+    sent_count = sum(1 for d in deliveries if d['status'] == 'sent')
+    failed_count = sum(1 for d in deliveries if d['status'] == 'failed')
+
+    return render_template(
+        'admin/stocks_delivery_log.html',
+        dates=dates, selected_source=source, selected_date=date_param,
+        deliveries=deliveries, sent_count=sent_count, failed_count=failed_count,
+        source_labels=_ANALYSIS_SOURCE_LABELS,
+    )
 
 
 def _kite_client_for_auto_trade(db, settings):

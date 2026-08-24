@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <link rel="icon" type="image/png" href="{{ url_for('stocks.static', filename='assets/stoqbell-icon.png') }}">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Delivery Log - StoqBell</title>
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+    <style>
+        body { background: #0f172a; color: #f8fafc; }
+        .stocks-accent { color: #0ea5e9; }
+        table { border-collapse: collapse; width: 100%; }
+        th, td { text-align: left; padding: 0.6rem 0.9rem; border-bottom: 1px solid rgba(14, 165, 233, 0.15); }
+        th { color: #7dd3fc; font-weight: 600; position: sticky; top: 0; background: #1e293b; }
+        tbody tr:hover { background: rgba(14, 165, 233, 0.06); }
+        .badge { display:inline-flex; align-items:center; padding:3px 11px; border-radius:999px; font-size:0.72rem; font-weight:700; white-space:nowrap; }
+        .badge-sent   { background:#166534; color:#dcfce7; }
+        .badge-failed { background:#7f1d1d; color:#fecaca; }
+        .error-detail { color: #94a3b8; font-size: 0.8rem; }
+        select { background: #0f172a; color: #f8fafc; border: 1px solid rgba(14,165,233,0.3); border-radius: 0.5rem; padding: 0.5rem 0.75rem; font-size: 0.9rem; }
+        .stat-card { background: #1e293b; border: 1px solid rgba(14,165,233,0.15); border-radius: 1rem; padding: 1rem 1.25rem; }
+        .stat-label { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.04em; color: #7dd3fc; font-weight: 600; }
+        .stat-value { font-size: 1.4rem; font-weight: 800; margin-top: 4px; }
+    </style>
+</head>
+<body class="min-h-screen p-8">
+    <div class="max-w-5xl mx-auto">
+        <div class="flex items-center justify-between mb-6">
+            <div>
+                <h1 class="text-2xl font-extrabold stocks-accent font-serif">Delivery Log</h1>
+                <p class="text-slate-400 text-sm mt-1">
+                    Who received each recommendation email, and why anyone who didn't get it failed.
+                </p>
+            </div>
+            <a href="{{ url_for('stocks.stocks_admin_dashboard') }}" class="text-sm text-slate-400 hover:text-sky-400 underline">Back to dashboard</a>
+        </div>
+
+        {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+            <div class="mb-6" role="alert" aria-live="assertive">
+            {% for category, msg in messages %}
+                <div class="bg-sky-900/40 text-sky-200 border border-sky-500/30 rounded-xl p-3 mb-2 text-sm">{{ msg }}</div>
+            {% endfor %}
+            </div>
+        {% endif %}
+        {% endwith %}
+
+        {% if not dates %}
+        <div class="bg-slate-800 rounded-2xl p-6 border border-sky-500/20">
+            <p class="text-slate-400 text-sm">No recommendation emails have been sent yet -- nothing logged.</p>
+        </div>
+        {% else %}
+        <form method="get" class="mb-6 flex flex-wrap items-end gap-3" aria-label="Choose which send to view">
+            <div>
+                <label for="delivery-log-picker" class="block text-slate-400 text-xs uppercase tracking-wide mb-1">Send</label>
+                <select id="delivery-log-picker" name="send" onchange="this.form.submit()"
+                        style="min-width: 22rem;">
+                    {% for d in dates %}
+                    <option value="{{ d.source }}|{{ d.suggestion_date }}"
+                        {% if d.source == selected_source and d.suggestion_date|string == selected_date|string %}selected{% endif %}>
+                        {{ source_labels.get(d.source, d.source) }} -- {{ d.suggestion_date }}
+                        ({{ d.sent }} delivered{% if d.failed %}, {{ d.failed }} failed{% endif %})
+                    </option>
+                    {% endfor %}
+                </select>
+            </div>
+            <noscript><button type="submit" class="btn" style="background:#0ea5e9;color:#0f172a;padding:0.5rem 1rem;border-radius:0.5rem;font-weight:700;">Go</button></noscript>
+        </form>
+        <script>
+        (function () {
+            var picker = document.getElementById('delivery-log-picker');
+            var form = picker.closest('form');
+            form.addEventListener('submit', function (e) {
+                e.preventDefault();
+                var parts = picker.value.split('|');
+                window.location.href = '{{ url_for("stocks.stocks_delivery_log") }}?source=' + encodeURIComponent(parts[0]) + '&date=' + encodeURIComponent(parts[1]);
+            });
+        })();
+        </script>
+
+        {% if selected_source and selected_date %}
+        <p class="text-slate-300 text-sm mb-4">
+            Showing <strong>{{ source_labels.get(selected_source, selected_source) }}</strong> -- {{ selected_date }}
+        </p>
+
+        <div class="grid grid-cols-3 gap-3 mb-6">
+            <div class="stat-card">
+                <p class="stat-label">Recipients</p>
+                <p class="stat-value">{{ deliveries | length }}</p>
+            </div>
+            <div class="stat-card">
+                <p class="stat-label">Delivered</p>
+                <p class="stat-value" style="color:#4ade80;">{{ sent_count }}</p>
+            </div>
+            <div class="stat-card">
+                <p class="stat-label">Failed</p>
+                <p class="stat-value" style="color:{{ '#f87171' if failed_count else '#4ade80' }};">{{ failed_count }}</p>
+            </div>
+        </div>
+
+        <div class="bg-slate-800 rounded-2xl p-6 border border-sky-500/20 overflow-x-auto">
+            <table>
+                <caption class="text-left text-slate-400 text-sm mb-3">
+                    Failed recipients listed first. "Delivered" means Zeptomail accepted the send -- not proof the
+                    recipient's own inbox actually received or opened it.
+                </caption>
+                <thead>
+                    <tr>
+                        <th scope="col">Recipient</th>
+                        <th scope="col">Email</th>
+                        <th scope="col">Status</th>
+                        <th scope="col">Reason</th>
+                        <th scope="col">Attempted at</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for d in deliveries %}
+                    <tr>
+                        <th scope="row">{{ d.name or '—' }}</th>
+                        <td>{{ d.email }}</td>
+                        <td>
+                            {% if d.status == 'sent' %}
+                                <span class="badge badge-sent">Delivered</span>
+                            {% else %}
+                                <span class="badge badge-failed">Failed</span>
+                            {% endif %}
+                        </td>
+                        <td class="error-detail">{{ d.error_detail or '—' }}</td>
+                        <td>{{ d.sent_at or '—' }}</td>
+                    </tr>
+                    {% else %}
+                    <tr>
+                        <td colspan="5" class="text-slate-400">No recipients logged for this send.</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% endif %}
+        {% endif %}
+    </div>
+</body>
+</html>
