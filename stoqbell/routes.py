@@ -139,6 +139,7 @@ from stoqbell.utils.kite_session import (
     save_kite_access_token,
     get_kite_access_token,
     get_kite_session_status,
+    is_kite_login_allowed,
     IST,
 )
 from stoqbell.utils.kite_postback import (
@@ -204,6 +205,7 @@ from stoqbell.utils.stock_news import (
     sync_stock_news,
     get_recent_news,
     get_prominent_news,
+    with_published_at_ist,
 )
 from stoqbell.utils.news_sentiment import compute_company_sentiment
 from stoqbell.utils.suggestion_email import (
@@ -1268,7 +1270,22 @@ def stocks_alerts_check_missed_jobs():
 @stocks_role_required('super_admin')
 def stocks_kite_login():
     """Sends the super_admin to Zerodha's login page. Kite redirects back to
-    stocks_kite_callback below with a request_token once they log in there."""
+    stocks_kite_callback below with a request_token once they log in there.
+
+    Blocked on any environment other than narinakhre-production (see
+    is_kite_login_allowed) -- local/test/production share the ONE Supabase
+    project, and stocks_kite_session keeps exactly one row, so completing
+    this flow anywhere but production silently overwrites production's own
+    working Kite access token with one production's api_key then rejects.
+    Confirmed as the actual cause of a live incident (2026-08-24)."""
+    if not is_kite_login_allowed():
+        flash(
+            'Kite login is disabled on this environment -- it shares the same database as '
+            'production, and logging in here would overwrite production\'s working Kite session. '
+            'Reconnect Kite from narinakhre.com instead.', 'error'
+        )
+        return redirect(url_for('stocks.stocks_admin_dashboard'))
+
     try:
         login_url = get_kite_login_url()
     except RuntimeError as e:
@@ -1287,7 +1304,19 @@ def stocks_kite_callback():
     session cookie, which may or may not have survived the round trip).
     Exchanges the request_token for an access_token and stores it -- that's
     the token every subsequent Kite API call uses until it expires tomorrow
-    and a super_admin repeats this flow."""
+    and a super_admin repeats this flow.
+
+    Same is_kite_login_allowed() guard as stocks_kite_login above, checked
+    again here as defense in depth -- stocks_kite_login is the only path
+    that's actually supposed to reach this (Zerodha redirects back to
+    whatever Redirect URL the Kite Connect app has registered, normally
+    production's own), but this route is public/unauthenticated, so nothing
+    stops a stray or manually-replayed request against a non-production
+    environment's own /stocks/kite/callback from reaching here otherwise."""
+    if not is_kite_login_allowed():
+        flash('Kite login is disabled on this environment.', 'error')
+        return redirect(url_for('stocks.stocks_admin_dashboard'))
+
     request_token = request.args.get('request_token')
     status = request.args.get('status')
     if status != 'success' or not request_token:
@@ -1645,7 +1674,7 @@ def stocks_company_detail(watchlist_id):
         (watchlist_id,)
     ).fetchall()
 
-    recent_news = get_recent_news(db, watchlist_id)
+    recent_news = with_published_at_ist(get_recent_news(db, watchlist_id))
     news_sentiment = compute_company_sentiment(recent_news)
 
     return render_template(
@@ -2017,7 +2046,7 @@ def stocks_universe_detail(universe_id):
         (company['symbol'], company['exchange'])
     ).fetchone()
     suggestion_history = _suggestion_history_for_company(db, watchlist_row['id'] if watchlist_row else None)
-    recent_news = get_recent_news(db, watchlist_row['id'] if watchlist_row else None)
+    recent_news = with_published_at_ist(get_recent_news(db, watchlist_row['id'] if watchlist_row else None))
     news_sentiment = compute_company_sentiment(recent_news)
 
     if not can_view_signals:
@@ -3542,6 +3571,16 @@ def stocks_admin_dashboard():
     db = get_db()
     kite_status = get_kite_session_status(db)
 
+    # kite_status.expires_at comes back from the Supabase RPC bridge as a
+    # plain ISO8601 string (see db.py's SupabaseCursor), not a native
+    # datetime -- parse then convert to IST for display, same as
+    # fundamentals_last_synced_ist below (every timestamp shown in Stocks
+    # is IST, not raw UTC).
+    kite_expires_at_ist = None
+    if kite_status and kite_status.get('expires_at'):
+        expires_at = datetime.fromisoformat(str(kite_status['expires_at']).replace('Z', '+00:00'))
+        kite_expires_at_ist = expires_at.astimezone(IST).strftime('%d %b %Y, %I:%M %p IST')
+
     # Read-only -- fundamentals_rotation has no admin-triggerable button
     # (see /stocks/fundamentals/rotation-sync), so this is purely
     # informational: when the automatic, cron-only 15-day-cadence scrape
@@ -3557,6 +3596,8 @@ def stocks_admin_dashboard():
         username=session.get('stocks_admin_username'),
         role=session.get('stocks_admin_role'),
         kite_status=kite_status,
+        kite_expires_at_ist=kite_expires_at_ist,
+        kite_login_allowed=is_kite_login_allowed(),
         fundamentals_last_synced_ist=fundamentals_last_synced_ist,
     )
 

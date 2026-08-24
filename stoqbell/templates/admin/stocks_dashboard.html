@@ -82,17 +82,24 @@
             <p role="status" aria-live="polite"
                class="{{ 'text-emerald-400' if kite_status and kite_status.access_token_encrypted else 'text-amber-400' }}">
                 {% if kite_status and kite_status.access_token_encrypted %}
-                    Connected — expires {{ kite_status.expires_at }}.
+                    Connected — expires {{ kite_expires_at_ist or kite_status.expires_at }}.
                 {% else %}
                     Not connected — click reconnect below.
                 {% endif %}
             </p>
             <p class="text-slate-400 text-sm mt-1">Kite access tokens expire daily -- reconnect each trading day before syncing.</p>
+            {% if kite_login_allowed %}
             <p class="mt-3">
                 <a href="{{ url_for('stocks.stocks_kite_login') }}" class="text-sky-400 hover:text-sky-300 underline">
                     {{ 'Reconnect Kite' if kite_status and kite_status.access_token_encrypted else 'Connect Kite' }}
                 </a>
             </p>
+            {% else %}
+            <p class="text-slate-500 text-sm mt-3">
+                Kite login is disabled on this environment -- it shares the same database as production, and logging
+                in here would overwrite production's own working Kite session. Reconnect from narinakhre.com instead.
+            </p>
+            {% endif %}
         </section>
         {% endif %}
 
@@ -257,7 +264,12 @@
             if (!value) { return null; }
             var d = new Date(value);
             if (isNaN(d.getTime())) { return value; }
-            return d.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
+            // Explicit Asia/Kolkata rather than the browser's own timezone
+            // (the `undefined` locale/no timeZone option this used to pass
+            // defers to whatever the VIEWER's device is set to) -- every
+            // other timestamp in Stocks is shown in IST regardless of who's
+            // looking, and this one shouldn't be the one exception.
+            return d.toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'Asia/Kolkata' }) + ' IST';
         }
 
         function formatProgress(progress) {

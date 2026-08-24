@@ -54,6 +54,24 @@ def _get_api_credentials():
     return api_key, api_secret
 
 
+def is_kite_login_allowed():
+    """True only on the narinakhre-production Render service. stocks_kite_session
+    keeps exactly one row (see save_kite_access_token) and local/test/production
+    all share the ONE Supabase project (see CLAUDE_CODE_CONTEXT.md section 5) --
+    so a Kite login completed on test-retail.narinakhre.com (or a local dev
+    run) silently overwrites production's own working access_token with one
+    tied to whatever STOCKS_KITE_API_KEY that environment has configured,
+    which production's api_key then rejects outright ("Incorrect api_key or
+    access_token"). Confirmed as the actual cause of a live incident
+    (2026-08-24) where the intraday target-hit check kept failing minutes
+    after production had just been freshly reconnected -- the test site had
+    been used to log into Kite in between. RENDER_SERVICE_NAME is set
+    automatically by Render for every deployed service (see render.yaml's
+    `name:` for each) -- not set at all for local dev, which this also
+    correctly excludes since it hits the same shared database."""
+    return os.environ.get('RENDER_SERVICE_NAME') == 'narinakhre-production'
+
+
 def get_kite_login_url():
     api_key, _ = _get_api_credentials()
     return KiteConnect(api_key=api_key).login_url()

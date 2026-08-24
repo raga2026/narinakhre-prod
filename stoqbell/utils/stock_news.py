@@ -22,7 +22,7 @@ returns an empty list, same as any other watchlist-only field elsewhere in
 this codebase (is_recommended, StoqBell Score, etc.)."""
 import time
 import xml.etree.ElementTree as ET
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime
 from urllib.parse import quote
 
@@ -222,3 +222,32 @@ def get_prominent_news(db, limit=6):
            ORDER BY n.published_at DESC NULLS LAST LIMIT ?''',
         (limit,)
     ).fetchall()
+
+
+IST = timezone(timedelta(hours=5, minutes=30))
+
+
+def with_published_at_ist(headlines):
+    """Returns NEW dicts (does not mutate the input rows) with published_at
+    replaced by an IST-formatted display string, or None where it was
+    missing/unparseable -- get_recent_news/get_prominent_news return it as a
+    raw ISO8601 string (see db.py's SupabaseCursor, which doesn't coerce
+    Supabase's JSON response into a native datetime), and every other
+    timestamp shown in Stocks is IST, not raw UTC (see stocks_admin_dashboard's
+    own kite_expires_at_ist/fundamentals_last_synced_ist for the same
+    pattern) -- callers pass the result straight to a template rather than
+    formatting published_at themselves."""
+    result = []
+    for headline in headlines:
+        headline = dict(headline)
+        raw = headline.get('published_at')
+        if raw:
+            try:
+                dt = raw if isinstance(raw, datetime) else datetime.fromisoformat(str(raw).replace('Z', '+00:00'))
+                if dt.tzinfo is None:
+                    dt = dt.replace(tzinfo=timezone.utc)
+                headline['published_at'] = dt.astimezone(IST).strftime('%d %b %Y, %I:%M %p IST')
+            except ValueError:
+                headline['published_at'] = None
+        result.append(headline)
+    return result

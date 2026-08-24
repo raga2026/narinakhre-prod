@@ -20,6 +20,7 @@
         .badge-no_clear_trend  { background:#e2e8f0; color:#475569; }
         .badge-recommended     { background:#166534; color:#dcfce7; }
         .badge-not-recommended { background:#1e293b; color:#64748b; }
+        .badge-bronze { background:#7c2d12; color:#fed7aa; }
         .tier-badge-golden { background:#78350f; color:#fef3c7; }
         .tier-badge-silver { background:#334155; color:#e2e8f0; }
         .tier-badge-bronze { background:#7c2d12; color:#fed7aa; }
@@ -212,12 +213,12 @@
                         <th scope="col">Cross</th>
                         <th scope="col">Tier</th>
                         <th scope="col">StoqBell Score</th>
-                        <th scope="col">Recommended</th>
+                        <th scope="col">Recommendation</th>
                     </tr>
                 </thead>
                 <tbody>
                     {% for row in rows %}
-                    <tr class="{{ 'is-recommended' if row.is_recommended }}">
+                    <tr class="{{ 'is-recommended' if row.nns_tier in ('golden', 'silver') }}">
                         <th scope="row">
                             {% if row.watchlist_id %}
                             <a class="company-link" href="{{ url_for('stocks.stocks_company_detail', watchlist_id=row.watchlist_id) }}">{{ row.name or row.symbol }}</a>
@@ -263,10 +264,12 @@
                             {% endif %}
                         </td>
                         <td>
-                            {% if row.is_recommended %}
-                                <span class="badge badge-recommended">Yes</span>
+                            {% if row.nns_tier in ('golden', 'silver') %}
+                                <span class="badge badge-recommended">Highly Recommended</span>
+                            {% elif row.nns_tier == 'bronze' %}
+                                <span class="badge badge-bronze">Recommended -- extra caution</span>
                             {% else %}
-                                <span class="badge badge-not-recommended">No</span>
+                                <span class="badge badge-not-recommended">Not recommended</span>
                             {% endif %}
                         </td>
                     </tr>
