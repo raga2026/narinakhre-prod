@@ -994,7 +994,7 @@ def _create_or_update_suggestion(db, candidate, nns_score, today, repeat_window_
 
     price_history = _fetch_price_history(db, watchlist_id)
     pricing = compute_suggestion_pricing(
-        price_history, candidate['latest_close'], TARGET_MULTIPLIER, STOP_LOSS_MULTIPLIER
+        price_history, candidate['latest_close'], TARGET_MULTIPLIER, STOP_LOSS_MULTIPLIER, HOLDING_PERIOD_DAYS
     )
 
     buy_price = pricing['buy_price']
@@ -1040,7 +1040,7 @@ def _create_or_update_suggestion(db, candidate, nns_score, today, repeat_window_
                nns_tier = EXCLUDED.nns_tier,
                rationale = EXCLUDED.rationale''',
         (watchlist_id, today, buy_price, target_sell_price, stop_loss_price,
-         HOLDING_PERIOD_DAYS, candidate['rsi_14'], candidate['pe_ratio'],
+         pricing.get('holding_period_days') or HOLDING_PERIOD_DAYS, candidate['rsi_14'], candidate['pe_ratio'],
          candidate['peg_ratio'], candidate['opm_pct'], candidate.get('fundamental_tier'),
          pattern_name, pattern_note, nns_score, tier, rationale)
     )
@@ -1088,7 +1088,7 @@ def _todays_eligible_candidates_off_cooldown(db):
         if existing_recent:
             price_history = _fetch_price_history(db, watchlist_id)
             pricing = compute_suggestion_pricing(
-                price_history, candidate['latest_close'], TARGET_MULTIPLIER, STOP_LOSS_MULTIPLIER
+                price_history, candidate['latest_close'], TARGET_MULTIPLIER, STOP_LOSS_MULTIPLIER, HOLDING_PERIOD_DAYS
             )
             if not _is_genuine_change(existing_recent, nns_score, pricing['target_sell_price'], nns_tier(nns_score)):
                 continue
@@ -1126,7 +1126,7 @@ def get_candidates_for_manual_pick(db, count=2, mode='top'):
         watchlist_id = candidate['watchlist_id']
         price_history = _fetch_price_history(db, watchlist_id)
         pricing = compute_suggestion_pricing(
-            price_history, candidate['latest_close'], TARGET_MULTIPLIER, STOP_LOSS_MULTIPLIER
+            price_history, candidate['latest_close'], TARGET_MULTIPLIER, STOP_LOSS_MULTIPLIER, HOLDING_PERIOD_DAYS
         )
         results.append({
             'watchlist_id': watchlist_id, 'symbol': candidate['symbol'], 'exchange': candidate['exchange'],
@@ -1213,7 +1213,7 @@ def get_all_highly_recommended_today(db):
         watchlist_id = candidate['watchlist_id']
         price_history = _fetch_price_history(db, watchlist_id)
         pricing = compute_suggestion_pricing(
-            price_history, candidate['latest_close'], TARGET_MULTIPLIER, STOP_LOSS_MULTIPLIER
+            price_history, candidate['latest_close'], TARGET_MULTIPLIER, STOP_LOSS_MULTIPLIER, HOLDING_PERIOD_DAYS
         )
         pattern_note = _build_pattern_note(pricing['pattern_name'], pricing['pattern_research'])
         rationale = _build_rationale(candidate, tier)
@@ -1221,7 +1221,8 @@ def get_all_highly_recommended_today(db):
             'watchlist_id': watchlist_id, 'symbol': candidate['symbol'], 'exchange': candidate['exchange'],
             'company_name': candidate.get('company_name'), 'universe_id': candidate.get('universe_id'),
             'buy_price': pricing['buy_price'], 'target_sell_price': pricing['target_sell_price'],
-            'stop_loss_price': pricing['stop_loss_price'], 'holding_period_days': HOLDING_PERIOD_DAYS,
+            'stop_loss_price': pricing['stop_loss_price'],
+            'holding_period_days': pricing.get('holding_period_days') or HOLDING_PERIOD_DAYS,
             'rsi_at_suggestion': candidate['rsi_14'], 'pe_at_suggestion': candidate['pe_ratio'],
             'peg_at_suggestion': candidate['peg_ratio'], 'opm_at_suggestion': candidate['opm_pct'],
             'fundamental_tier': candidate.get('fundamental_tier'),
@@ -1270,7 +1271,7 @@ def get_special_recommendations_today(db):
         universe_id = candidate['universe_id']
         price_history = _fetch_price_history(db, watchlist_id=watchlist_id, universe_id=universe_id)
         pricing = compute_suggestion_pricing(
-            price_history, candidate['latest_close'], TARGET_MULTIPLIER, STOP_LOSS_MULTIPLIER
+            price_history, candidate['latest_close'], TARGET_MULTIPLIER, STOP_LOSS_MULTIPLIER, HOLDING_PERIOD_DAYS
         )
         pattern_note = _build_pattern_note(pricing['pattern_name'], pricing['pattern_research'])
         rationale = _build_rationale(candidate, tier)
@@ -1279,7 +1280,8 @@ def get_special_recommendations_today(db):
             'symbol': candidate['symbol'], 'exchange': candidate['exchange'],
             'company_name': candidate.get('company_name'),
             'buy_price': pricing['buy_price'], 'target_sell_price': pricing['target_sell_price'],
-            'stop_loss_price': pricing['stop_loss_price'], 'holding_period_days': HOLDING_PERIOD_DAYS,
+            'stop_loss_price': pricing['stop_loss_price'],
+            'holding_period_days': pricing.get('holding_period_days') or HOLDING_PERIOD_DAYS,
             'rsi_at_suggestion': candidate['rsi_14'], 'pe_at_suggestion': candidate['pe_ratio'],
             'peg_at_suggestion': candidate['peg_ratio'], 'opm_at_suggestion': candidate['opm_pct'],
             'fundamental_tier': candidate.get('fundamental_tier'),

@@ -515,8 +515,8 @@ def send_subscription_welcome_email(email, name, current_period_end_label, sugge
     this module free of date-formatting/timezone concerns.
 
     plan ('standard' or 'starters', see STOCKS_AUTH_ALTER_SQL's stocks_plan
-    column) picks the right price/cadence copy -- Rs 299/mo daily for
-    'standard', Rs 99/mo up to two picks a week for 'starters'. Matters
+    column) picks the right price/cadence copy -- Rs 352.82/mo daily for
+    'standard', Rs 116.82/mo up to two picks a week for 'starters'. Matters
     here specifically because this text used to hardcode "Rs 299/month"
     unconditionally, which was wrong for a Starters signup.
 
@@ -545,14 +545,14 @@ def send_subscription_welcome_email(email, name, current_period_end_label, sugge
     )
     if is_starters:
         price_cadence_text = (
-            "Your Rs 99/month Starters subscription is active. Up to twice a week (Mondays), we send a "
+            "Your Rs 116.82/month Starters subscription is active. Up to twice a week (Mondays), we send a "
             "separately-curated stock that clears our strictest, golden-tier quality bar -- buy price, "
             "target sell price, and the reasoning behind it. Some weeks nothing clears that bar, so there's "
             "no email that week."
         )
     else:
         price_cadence_text = (
-            "Your Rs 299/month subscription is active. Each day we pick a single stock that clears our "
+            "Your Rs 352.82/month subscription is active. Each day we pick a single stock that clears our "
             "screening bar and email it to you -- buy price, target sell price, and the reasoning "
             "behind it, marked Highly Recommended or Recommended so you know at a glance how strong the pick "
             "is. Some days nothing clears the bar, so there's no email that day."
@@ -581,7 +581,9 @@ def send_subscription_welcome_email(email, name, current_period_end_label, sugge
         for s in suggestions:
             intro_text += _render_stock_card_text(s) + '\n\n'
         any_horizon_targets = any(
-            compute_projection_targets(s.get('buy_price'), s.get('target_sell_price'), s.get('pattern_name'))
+            compute_projection_targets(
+            s.get('buy_price'), s.get('target_sell_price'), s.get('pattern_name'), s.get('holding_period_days')
+        )
             for s in suggestions
         )
         if any_horizon_targets:
@@ -640,7 +642,7 @@ def send_subscription_expiry_reminder_email(email, name, current_period_end_labe
         subject = f'StoqBell -- renews on {current_period_end_label}'
         headline = (
             f"Your StoqBell subscription will auto-renew on "
-            f"{current_period_end_label} for Rs 299. No action needed if you'd "
+            f"{current_period_end_label} for Rs 352.82. No action needed if you'd "
             f"like to continue -- this is just a heads-up before the charge."
         )
     else:
@@ -681,10 +683,10 @@ def send_trial_ended_email(email, name):
         "no trial reset, this is a real subscription from here."
     )
     plans_text = (
-        'Standard -- Rs 299/month: Pick of the Day with full reasoning, buy/target '
+        'Standard -- Rs 352.82/month: Pick of the Day with full reasoning, buy/target '
         'prices, StoqBell Score breakdown, target-hit alerts, bonus large-cap pick '
         'twice a week.\n'
-        'Starters -- Rs 99/month: up to two golden-tier picks a week, every Monday, '
+        'Starters -- Rs 116.82/month: up to two golden-tier picks a week, every Monday, '
         'with buy/target prices.'
     )
     text_body = f'Hi {greeting},\n\n{headline}\n\n{plans_text}\n\nLog in to subscribe: {STOCKS_LOGIN_URL}\n\n{DISCLAIMER}\n'
@@ -695,12 +697,12 @@ def send_trial_ended_email(email, name):
         'style="max-width:600px;width:100%;margin:12px 0;border-collapse:collapse;">'
         '<tr>'
         '<td style="width:50%;vertical-align:top;padding:12px;border:1px solid #e2e8f0;border-radius:8px;">'
-        '<div style="font-weight:bold;color:#0f172a;">Standard -- Rs 299/month</div>'
+        '<div style="font-weight:bold;color:#0f172a;">Standard -- Rs 352.82/month</div>'
         '<div style="color:#475569;font-size:13px;margin-top:6px;">Pick of the Day with full reasoning, '
         'buy/target prices, StoqBell Score breakdown, target-hit alerts, bonus large-cap pick twice a week.</div>'
         '</td>'
         '<td style="width:50%;vertical-align:top;padding:12px;border:1px solid #e2e8f0;border-radius:8px;">'
-        '<div style="font-weight:bold;color:#0f172a;">Starters -- Rs 99/month</div>'
+        '<div style="font-weight:bold;color:#0f172a;">Starters -- Rs 116.82/month</div>'
         '<div style="color:#475569;font-size:13px;margin-top:6px;">Up to two golden-tier picks a week, '
         'every Monday, with buy/target prices.</div>'
         '</td>'
@@ -756,12 +758,12 @@ def send_admin_new_subscriber_email(email, name):
     subject = f'New StoqBell subscriber: {greeting}'
     text_body = (
         f'{greeting} ({email}) just signed up and completed payment for the '
-        f'Rs 299/month StoqBell subscription.\n'
+        f'Rs 352.82/month StoqBell subscription.\n'
     )
     html_body = (
         f'{_stoqbell_logo_header_html()}'
         f'<p><strong>{greeting}</strong> ({email}) just signed up and completed payment for the '
-        f'Rs 299/month StoqBell subscription.</p>'
+        f'Rs 352.82/month StoqBell subscription.</p>'
     )
     return send_zeptomail_stocks_email(
         to_email=STOCKS_ADMIN_NOTIFY_EMAIL, to_name='Nari Nakhre', subject=subject,
@@ -781,12 +783,12 @@ def send_admin_subscription_cancelled_email(email, name):
     greeting = name or email
     subject = f'StoqBell subscription cancelled: {greeting}'
     text_body = (
-        f'{greeting} ({email}) just cancelled their Rs 299/month StoqBell subscription. '
+        f'{greeting} ({email}) just cancelled their Rs 352.82/month StoqBell subscription. '
         f'Their access continues through the end of the period already paid for.\n'
     )
     html_body = (
         f'{_stoqbell_logo_header_html()}'
-        f'<p><strong>{greeting}</strong> ({email}) just cancelled their Rs 299/month StoqBell '
+        f'<p><strong>{greeting}</strong> ({email}) just cancelled their Rs 352.82/month StoqBell '
         f'subscription. Their access continues through the end of the period already paid for.</p>'
     )
     return send_zeptomail_stocks_email(
@@ -1006,12 +1008,20 @@ def _highlights(s):
 
 
 def _timing_text(s):
-    """A pattern-based suggestion (see suggestion_engine.generate_daily_suggestions
+    """A confirmed-chart-pattern suggestion (see suggestion_engine.generate_daily_suggestions
     / utils.price_pattern.compute_suggestion_pricing) shows the cited
     pattern_note INSTEAD OF a "hold N days" figure -- chart-pattern shape
     doesn't reliably predict timing the way a specific day-count would
-    misleadingly imply. holding_period_days is only ever a fixed internal
-    default in that case, not shown here."""
+    misleadingly imply; holding_period_days is only ever the flat internal
+    default in that case, not shown here.
+
+    Otherwise (the common case, no confirmed pattern), holding_period_days
+    itself is no longer a single fixed number for every stock: it's this
+    stock's own RSI-zone-backtest window (5/10/20 trading days, see
+    compute_suggestion_pricing's own _pricing_from_rsi_backtest) whenever
+    that stock's history shows an actual edge, and only the flat default
+    otherwise -- either way, this just shows whatever value was actually
+    stored for this suggestion."""
     return s['pattern_note'] if s.get('pattern_name') else f"Hold {s['holding_period_days']} days."
 
 
@@ -1021,7 +1031,9 @@ def _render_stock_card_text(s):
     version below is what most recipients actually see)."""
     trend = _trend_label(s)
     fundamentals_note = _fundamentals_note(s)
-    projection = compute_projection_targets(s.get('buy_price'), s.get('target_sell_price'), s.get('pattern_name'))
+    projection = compute_projection_targets(
+            s.get('buy_price'), s.get('target_sell_price'), s.get('pattern_name'), s.get('holding_period_days')
+        )
 
     lines = [
         f"{_company_display_name(s)} ({_identity_suffix(s)}) — {trend}",
@@ -1082,7 +1094,9 @@ def _render_stock_card_html(s):
     target_label = 'Target' if s.get('pattern_name') else f"Target ({s['holding_period_days']}-day)"
     target_pct = _pct_increase(s.get('buy_price'), s.get('target_sell_price'))
     target_pct_html = f' <span style="color:#15803d;font-size:13px;font-weight:normal;">(+{target_pct}%)</span>' if target_pct is not None else ''
-    projection = compute_projection_targets(s.get('buy_price'), s.get('target_sell_price'), s.get('pattern_name'))
+    projection = compute_projection_targets(
+            s.get('buy_price'), s.get('target_sell_price'), s.get('pattern_name'), s.get('holding_period_days')
+        )
     chart_uri = build_prediction_chart_image_url(s.get('buy_price'), projection)
 
     horizon_block = ''
@@ -1245,7 +1259,7 @@ def _referral_footer_text(referral_code):
     link = f'{STOCKS_BASE_URL}/stocks/signup?ref={referral_code}'
     return (
         f'Refer {REFERRALS_PER_FREE_MONTH} people who subscribe and get a month free -- they get their first '
-        f'month for Rs 199 instead of Rs 299 with your link: {link} (or share code {referral_code}).'
+        f'month for Rs 234.82 instead of Rs 352.82 with your link: {link} (or share code {referral_code}).'
     )
 
 
@@ -1255,7 +1269,7 @@ def _referral_footer_html(referral_code):
         '<p style="color:#64748b;font-size:0.8em;margin-top:16px;font-family:Arial,Helvetica,sans-serif;'
         'border-top:1px solid #e2e8f0;padding-top:12px;">'
         f'Refer {REFERRALS_PER_FREE_MONTH} people who subscribe and get a month free -- they get their first month '
-        f'for Rs 199 instead of Rs 299 with <a href="{link}" style="color:#0ea5e9;">your referral link</a> '
+        f'for Rs 234.82 instead of Rs 352.82 with <a href="{link}" style="color:#0ea5e9;">your referral link</a> '
         f'(or share code <strong>{referral_code}</strong>).</p>'
     )
 
@@ -1305,7 +1319,9 @@ def _build_email_content(suggestions, today_label):
 
     heading = "Today's Recommendation" if len(suggestions) == 1 else "Today's Recommendations"
     any_horizon_targets = any(
-        compute_projection_targets(s.get('buy_price'), s.get('target_sell_price'), s.get('pattern_name'))
+        compute_projection_targets(
+            s.get('buy_price'), s.get('target_sell_price'), s.get('pattern_name'), s.get('holding_period_days')
+        )
         for s in suggestions
     )
 
@@ -1450,7 +1466,9 @@ def _build_starters_email_content(suggestions, week_label):
 
     heading = "This Week's Pick" if len(suggestions) == 1 else "This Week's Picks"
     any_horizon_targets = any(
-        compute_projection_targets(s.get('buy_price'), s.get('target_sell_price'), s.get('pattern_name'))
+        compute_projection_targets(
+            s.get('buy_price'), s.get('target_sell_price'), s.get('pattern_name'), s.get('holding_period_days')
+        )
         for s in suggestions
     )
 
@@ -1580,7 +1598,9 @@ def _build_large_cap_bonus_email_content(suggestions, date_label):
         'drawn only from large, established companies (market cap above Rs 30,000 crore).'
     )
     any_horizon_targets = any(
-        compute_projection_targets(s.get('buy_price'), s.get('target_sell_price'), s.get('pattern_name'))
+        compute_projection_targets(
+            s.get('buy_price'), s.get('target_sell_price'), s.get('pattern_name'), s.get('holding_period_days')
+        )
         for s in suggestions
     )
 

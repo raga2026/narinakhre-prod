@@ -124,7 +124,7 @@ def generate_weekly_starters_pick(db, week_start_date=None):
 
         price_history = _fetch_price_history(db, watchlist_id)
         pricing = compute_suggestion_pricing(
-            price_history, candidate['latest_close'], TARGET_MULTIPLIER, STOP_LOSS_MULTIPLIER
+            price_history, candidate['latest_close'], TARGET_MULTIPLIER, STOP_LOSS_MULTIPLIER, HOLDING_PERIOD_DAYS
         )
 
         buy_price = pricing['buy_price']
@@ -171,7 +171,7 @@ def generate_weekly_starters_pick(db, week_start_date=None):
                    nns_tier = EXCLUDED.nns_tier,
                    rationale = EXCLUDED.rationale''',
             (watchlist_id, week_start_iso, buy_price, target_sell_price, stop_loss_price,
-             HOLDING_PERIOD_DAYS, candidate['rsi_14'], candidate['pe_ratio'],
+             pricing.get('holding_period_days') or HOLDING_PERIOD_DAYS, candidate['rsi_14'], candidate['pe_ratio'],
              candidate['peg_ratio'], candidate['opm_pct'], candidate.get('fundamental_tier'),
              pattern_name, pattern_note, nns_score, tier, rationale)
         )

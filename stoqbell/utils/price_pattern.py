@@ -585,6 +585,12 @@ def _pattern_pricing_from_head_and_shoulders(closes_oldest_first, latest_close):
         'pattern_name': 'head_and_shoulders_bottom',
         'pattern_detail': hs,
         'pattern_research': PATTERN_RESEARCH_CONTEXT['head_and_shoulders_bottom'],
+        # No fixed day count here -- pattern_note (built from pattern_research's
+        # own typical_move_duration_days above) is what callers show instead;
+        # see compute_suggestion_pricing's own module comment on why a
+        # confirmed pattern deliberately never gets a specific day count.
+        'holding_period_days': None,
+        'rsi_backtest_detail': None,
     }
 
 
@@ -604,27 +610,113 @@ def _pattern_pricing_from_rounding_bottom(closes_oldest_first, latest_close):
         'pattern_name': 'rounding_bottom',
         'pattern_detail': rounding,
         'pattern_research': PATTERN_RESEARCH_CONTEXT['rounding_bottom'],
+        'holding_period_days': None,
+        'rsi_backtest_detail': None,
     }
 
 
-def compute_suggestion_pricing(closes_oldest_first, latest_close, fallback_target_multiplier, fallback_stop_loss_multiplier):
+# How many past occurrences a backtest window needs before its average
+# return is trusted enough to become an actual suggested target -- same
+# "very small sample, treat cautiously" bar already shown alongside this
+# same backtest on the company detail page (see backtest_rsi_zone_outcomes'
+# own callers), just enforced here rather than merely flagged, since this
+# feeds a real suggested price rather than an informational display.
+RSI_BACKTEST_MIN_SAMPLE_SIZE = 5
+
+
+def _pricing_from_rsi_backtest(closes_oldest_first, latest_close):
+    """The near-term target/holding-period derived from this stock's OWN
+    RSI-zone history (see backtest_rsi_zone_outcomes) -- tried when neither
+    confirmed chart pattern above applies (by far the common case), instead
+    of immediately falling back to a flat percentage/day-count applied
+    identically to every stock regardless of its own behavior.
+
+    Among the backtest's three windows (5/10/20 trading days) that clear
+    RSI_BACKTEST_MIN_SAMPLE_SIZE and show a positive historical average
+    return, picks the one with the LARGEST sample size -- the most
+    statistically-supported of the genuinely positive windows, not
+    whichever shows the single biggest historical move (which could be a
+    thin-sample outlier) and not always the same fixed window regardless of
+    what this stock's own history actually supports.
+
+    Returns None (falls through to compute_suggestion_pricing's own flat
+    percentage fallback) when there isn't enough price history to compute a
+    current RSI, backtest_rsi_zone_outcomes itself returns nothing, or none
+    of the three windows clears both the sample-size bar and a positive
+    average return -- i.e. this stock's own history doesn't actually show
+    an edge to build a target from. stop_loss_price is deliberately left
+    unset here (None) -- the backtest has no natural stop-loss level of its
+    own the way a chart pattern's neckline does, so
+    compute_suggestion_pricing fills it in from the same flat percentage
+    the ultimate fallback uses."""
+    current_rsi = calculate_rsi(closes_oldest_first, period=14)
+    if current_rsi is None:
+        return None
+    backtest = backtest_rsi_zone_outcomes(closes_oldest_first, current_rsi)
+    if not backtest:
+        return None
+
+    candidates = [
+        (window, outcome) for window, outcome in backtest['outcomes'].items()
+        if outcome and outcome['sample_size'] >= RSI_BACKTEST_MIN_SAMPLE_SIZE and outcome['avg_return_pct'] > 0
+    ]
+    if not candidates:
+        return None
+    window, outcome = max(candidates, key=lambda pair: pair[1]['sample_size'])
+
+    target = round(latest_close * (1 + outcome['avg_return_pct'] / 100), 2)
+    if target <= latest_close:
+        return None
+
+    return {
+        'buy_price': latest_close, 'target_sell_price': target, 'stop_loss_price': None,
+        'pattern_name': None, 'pattern_detail': None, 'pattern_research': None,
+        'holding_period_days': window,
+        'rsi_backtest_detail': {
+            'window': window, 'sample_size': outcome['sample_size'],
+            'avg_return_pct': outcome['avg_return_pct'], 'pct_positive': outcome['pct_positive'],
+            'rsi_zone': backtest['zone'], 'rsi': backtest['rsi'],
+        },
+    }
+
+
+def compute_suggestion_pricing(closes_oldest_first, latest_close, fallback_target_multiplier,
+                                fallback_stop_loss_multiplier, fallback_holding_period_days=10):
     """Tries a confirmed reverse head-and-shoulders first, then a confirmed
-    rounding bottom, falling back to the plain percentage method
-    (fallback_target_multiplier/fallback_stop_loss_multiplier applied to
-    latest_close) when neither is found, confirmed, or makes directional
-    sense. buy_price is always latest_close either way -- a pattern informs
-    the TARGET and STOP, not when to buy; the suggestion itself already
-    means "buy now."
+    rounding bottom, then this stock's OWN RSI-zone historical backtest
+    (see _pricing_from_rsi_backtest -- a genuinely per-stock target/holding-
+    period when its own history shows an actual edge), falling back to the
+    plain percentage method (fallback_target_multiplier/
+    fallback_stop_loss_multiplier/fallback_holding_period_days applied to
+    latest_close, identically for every stock) only when none of the three
+    apply. buy_price is always latest_close either way -- none of these
+    inform WHEN to buy, only the target/stop/holding-period; the suggestion
+    itself already means "buy now." fallback_holding_period_days defaults
+    to 10, matching suggestion_engine.HOLDING_PERIOD_DAYS by convention (see
+    _FALLBACK_PROJECTION_BASELINE_DAYS below for the same "kept in sync by
+    convention, not imported" reasoning) -- callers pass their own value
+    explicitly rather than relying on this default staying in sync forever.
 
     Returns {'buy_price', 'target_sell_price', 'stop_loss_price',
     'pattern_name': None|str, 'pattern_detail': None|dict,
-    'pattern_research': None|dict} -- pattern_research is the matching
-    PATTERN_RESEARCH_CONTEXT entry when a pattern was used, for the email
-    to cite (hit rate, typical duration, source) alongside the price."""
+    'pattern_research': None|dict, 'holding_period_days': None|int,
+    'rsi_backtest_detail': None|dict} -- pattern_research is the matching
+    PATTERN_RESEARCH_CONTEXT entry when a confirmed chart pattern was used,
+    for the email to cite (hit rate, typical duration, source) alongside
+    the price. holding_period_days is None for a confirmed-chart-pattern
+    result (pattern_note is what callers show instead -- see
+    suggestion_engine._build_pattern_note) and otherwise an actual day
+    count: this stock's own backtest window when rsi_backtest_detail is
+    set, else fallback_holding_period_days."""
     for finder in (_pattern_pricing_from_head_and_shoulders, _pattern_pricing_from_rounding_bottom):
         result = finder(closes_oldest_first, latest_close)
         if result:
             return result
+
+    rsi_result = _pricing_from_rsi_backtest(closes_oldest_first, latest_close)
+    if rsi_result:
+        rsi_result['stop_loss_price'] = round(latest_close * fallback_stop_loss_multiplier, 2)
+        return rsi_result
 
     return {
         'buy_price': latest_close,
@@ -633,6 +725,8 @@ def compute_suggestion_pricing(closes_oldest_first, latest_close, fallback_targe
         'pattern_name': None,
         'pattern_detail': None,
         'pattern_research': None,
+        'holding_period_days': fallback_holding_period_days,
+        'rsi_backtest_detail': None,
     }
 
 
@@ -688,11 +782,24 @@ def _humanize_days(days):
     return f'~{value_str} {unit_name}{plural}'
 
 
-def compute_projection_targets(buy_price, target_sell_price, pattern_name):
+def compute_projection_targets(buy_price, target_sell_price, pattern_name, near_term_days=None):
     """Projects price at two checkpoints -- a mid-period one and a
     longer-term one -- each labeled with the ACTUAL duration it represents
     for this specific stock (see _humanize_days), not a fixed calendar
     point shared by every suggestion.
+
+    near_term_days: the actual holding_period_days this suggestion's own
+    near-term target_sell_price is anchored to (see compute_suggestion_pricing
+    -- this stock's own RSI-zone-backtest window, 5/10/20 trading days, when
+    one applies, else the flat default) -- used ONLY in the 'extrapolated'
+    (no-pattern) case below as the sqrt-of-time scaling baseline, so a
+    target reached via a 5-day backtest window isn't scaled as if it were a
+    10-day move (which would understate how fast this stock's own history
+    says it moves) and a 20-day one isn't scaled as if it were faster than
+    it really is. None (the default, and what every caller passed before
+    near_term_days existed) falls back to _FALLBACK_PROJECTION_BASELINE_DAYS,
+    the prior fixed assumption -- unchanged behavior for anything that
+    doesn't have this value on hand.
 
     When pattern_name is a confirmed pattern compute_suggestion_pricing can
     actually produce ('head_and_shoulders_bottom' or 'rounding_bottom'):
@@ -760,7 +867,10 @@ def compute_projection_targets(buy_price, target_sell_price, pattern_name):
     def price_at(days):
         if method == 'pattern' and days >= long_days:
             return round(target_sell_price, 2)
-        base_days = long_days if method == 'pattern' else _FALLBACK_PROJECTION_BASELINE_DAYS
+        if method == 'pattern':
+            base_days = long_days
+        else:
+            base_days = near_term_days or _FALLBACK_PROJECTION_BASELINE_DAYS
         fraction = math.sqrt(days / base_days)
         return round(buy_price + move * fraction, 2)
 

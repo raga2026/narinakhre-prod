@@ -439,18 +439,33 @@ def test_head_and_shoulders_takes_priority_over_rounding_when_both_present():
 
 
 def test_no_pattern_falls_back_to_flat_percentages():
+    # Flat prices have zero return in every RSI-zone-backtest window (no
+    # price movement at all to backtest), so RSI_BACKTEST_MIN_SAMPLE_SIZE's
+    # "positive average return" requirement is never cleared -- this
+    # correctly falls all the way through to the flat percentage tier.
     flat = [100.0] * 950  # no shape at all
-    result = compute_suggestion_pricing(flat, 100.0, fallback_target_multiplier=1.05, fallback_stop_loss_multiplier=0.97)
+    result = compute_suggestion_pricing(
+        flat, 100.0, fallback_target_multiplier=1.05, fallback_stop_loss_multiplier=0.97,
+        fallback_holding_period_days=10
+    )
 
     assert result['pattern_name'] is None
     assert result['pattern_research'] is None
+    assert result['rsi_backtest_detail'] is None
     assert result['buy_price'] == 100.0
     assert result['target_sell_price'] == 105.0
     assert result['stop_loss_price'] == 97.0
+    assert result['holding_period_days'] == 10
 
 
 def test_unconfirmed_head_and_shoulders_falls_back():
-    # Stop right after the right shoulder forms -- no breakout yet.
+    # Stop right after the right shoulder forms -- no breakout yet -- so
+    # this must NOT use the pattern's own measured-move target, whatever
+    # tier it actually falls through to next (an RSI-zone-backtest-derived
+    # target when this stock's own history shows one, else the flat
+    # percentage -- see test_rsi_backtest_tier_used_when_it_shows_an_edge
+    # and test_no_pattern_falls_back_to_flat_percentages for each tier on
+    # its own).
     no_breakout_yet = CLEAN_HS_BOTTOM[:91]
     latest_close = no_breakout_yet[-1]
     result = compute_suggestion_pricing(
@@ -458,16 +473,52 @@ def test_unconfirmed_head_and_shoulders_falls_back():
     )
 
     assert result['pattern_name'] is None
-    assert result['target_sell_price'] == round(latest_close * 1.05, 2)
+    # Not the confirmed pattern's own eventual measured-move target either
+    # (computed from the FULL series, where the breakout does confirm --
+    # see test_no_time_estimate_is_ever_returned).
+    confirmed = compute_suggestion_pricing(
+        CLEAN_HS_BOTTOM, CLEAN_HS_BOTTOM[-1], fallback_target_multiplier=1.05, fallback_stop_loss_multiplier=0.97
+    )
+    assert result['target_sell_price'] != confirmed['target_sell_price']
+
+
+def test_rsi_backtest_tier_used_when_it_shows_an_edge():
+    # This stock's own price history (the same clean, non-flat
+    # head-and-shoulders shape, pre-breakout) has a genuine positive
+    # RSI-zone-backtest edge -- see backtest_rsi_zone_outcomes -- so the
+    # near-term target/holding-period should come from THAT, not the flat
+    # fallback_target_multiplier/fallback_holding_period_days, even though
+    # no confirmed chart pattern applies.
+    no_breakout_yet = CLEAN_HS_BOTTOM[:91]
+    latest_close = no_breakout_yet[-1]
+    result = compute_suggestion_pricing(
+        no_breakout_yet, latest_close,
+        fallback_target_multiplier=1.05, fallback_stop_loss_multiplier=0.97, fallback_holding_period_days=10
+    )
+
+    assert result['pattern_name'] is None
+    assert result['rsi_backtest_detail'] is not None
+    assert result['holding_period_days'] == result['rsi_backtest_detail']['window']
+    assert result['holding_period_days'] != 10  # not the flat fallback's day count
+    assert result['target_sell_price'] != round(latest_close * 1.05, 2)  # not the flat fallback's target
+    assert result['rsi_backtest_detail']['sample_size'] >= 5
+    assert result['rsi_backtest_detail']['avg_return_pct'] > 0
+    # stop_loss_price still comes from the flat percentage -- the backtest
+    # has no natural stop level of its own the way a chart pattern's
+    # neckline does.
+    assert result['stop_loss_price'] == round(latest_close * 0.97, 2)
 
 
 def test_no_time_estimate_is_ever_returned():
-    # The whole point of this feature: patterns drive price targets, never
-    # a fabricated day-count/holding-period prediction.
+    # The whole point of this feature: a CONFIRMED chart pattern drives
+    # price targets, never a fabricated day-count/holding-period
+    # prediction -- pattern_note (built elsewhere, from this same result's
+    # pattern_research) is what callers show instead.
     result = compute_suggestion_pricing(
         CLEAN_HS_BOTTOM, CLEAN_HS_BOTTOM[-1], fallback_target_multiplier=1.05, fallback_stop_loss_multiplier=0.97
     )
-    assert 'holding_period_days' not in result
+    assert result['pattern_name'] == 'head_and_shoulders_bottom'
+    assert result['holding_period_days'] is None
     assert 'estimated_days' not in result
     assert 'wait_days' not in result
 
@@ -488,6 +539,30 @@ def test_no_pattern_falls_back_to_a_generic_six_month_one_year_pair():
     assert result['long_term']['price'] == round(100.0 + 5.0 * math.sqrt(365 / 10), 2)
     # Uncapped -- keeps growing past mid_period, unlike the pattern case.
     assert result['mid_period']['price'] < result['long_term']['price']
+
+
+def test_near_term_days_changes_the_extrapolated_scaling_baseline():
+    # A near-term target reached over a stock's own 5-day RSI-backtest
+    # window (see compute_suggestion_pricing) implies faster movement than
+    # the same target reached over 20 days -- the sqrt-of-time projection
+    # should scale from whichever baseline actually produced this target,
+    # not silently assume the old fixed 10-day one regardless.
+    fast = compute_projection_targets(100.0, 105.0, None, near_term_days=5)
+    slow = compute_projection_targets(100.0, 105.0, None, near_term_days=20)
+
+    assert fast['mid_period']['price'] == round(100.0 + 5.0 * math.sqrt(182 / 5), 2)
+    assert slow['mid_period']['price'] == round(100.0 + 5.0 * math.sqrt(182 / 20), 2)
+    # Implying the same move happened faster projects a HIGHER price at the
+    # same future checkpoint than implying it happened slower.
+    assert fast['mid_period']['price'] > slow['mid_period']['price']
+
+
+def test_near_term_days_omitted_falls_back_to_the_prior_fixed_baseline():
+    # Omitting near_term_days (every caller before it existed) must behave
+    # exactly as before -- the fixed 10-day baseline.
+    with_default = compute_projection_targets(100.0, 105.0, None)
+    explicit_ten = compute_projection_targets(100.0, 105.0, None, near_term_days=10)
+    assert with_default == explicit_ten
 
 
 def test_head_and_shoulders_pattern_uses_its_own_published_duration_not_the_generic_pair():

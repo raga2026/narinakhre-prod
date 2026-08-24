@@ -276,8 +276,18 @@ RAZORPAY_WEBHOOK_SECRET = os.environ.get('RAZORPAY_WEBHOOK_SECRET', '')
 # for cycle 2 onward via subscription.edit(..., schedule_change_at='cycle_end').
 # Same one-time-setup nature as RAZORPAY_STOCKS_PLAN_ID above.
 RAZORPAY_STOCKS_REFERRAL_PLAN_ID = os.environ.get('RAZORPAY_STOCKS_REFERRAL_PLAN_ID', '')
-STOCKS_SUBSCRIPTION_PRICE_DISPLAY = 'Rs 299'
-STOCKS_REFERRAL_PRICE_DISPLAY = 'Rs 199'
+# GST-inclusive display text (Rs 299/Rs 99/Rs 199 + 18% GST, SAC code 9971
+# -- financial/investment-advisory services; see
+# create_gst_inclusive_stocks_plans.py's own docstring for the rate
+# reasoning). The actual amount CHARGED is whatever RAZORPAY_STOCKS_PLAN_ID/
+# RAZORPAY_STOCKS_STARTERS_PLAN_ID/RAZORPAY_STOCKS_REFERRAL_PLAN_ID's own
+# Plan object was created with on Razorpay's side (see that script) -- this
+# text must be kept in sync with whatever those three env vars actually
+# point at, since this code has no way to read a Plan's amount back from
+# Razorpay to derive this automatically without an extra API call on every
+# checkout page load.
+STOCKS_SUBSCRIPTION_PRICE_DISPLAY = 'Rs 352.82'
+STOCKS_REFERRAL_PRICE_DISPLAY = 'Rs 234.82'
 # Starters tier (see STOCKS_AUTH_ALTER_SQL's stocks_plan column,
 # stoqbell/utils/starters_engine.py) -- Rs 99/month, one separately-curated
 # golden-tier-only pick a week instead of the daily one. Its own Plan
@@ -285,7 +295,7 @@ STOCKS_REFERRAL_PRICE_DISPLAY = 'Rs 199'
 # variant exists for this tier (the referral discount stays Standard-only,
 # see /stocks/signup).
 RAZORPAY_STOCKS_STARTERS_PLAN_ID = os.environ.get('RAZORPAY_STOCKS_STARTERS_PLAN_ID', '')
-STOCKS_STARTERS_PRICE_DISPLAY = 'Rs 99'
+STOCKS_STARTERS_PRICE_DISPLAY = 'Rs 116.82'
 # Shared secret for every Stocks cron-triggered route (price sync, indicator
 # calc, fundamentals rotation scrape, etc.) -- the caller is always a
 # GitHub Actions workflow (.github/workflows/stocks-*.yml), not a Render
@@ -2075,7 +2085,8 @@ def _annotate_suggestions_with_projection(suggestions):
     for row in suggestions:
         row = dict(row)
         row['projection'] = compute_projection_targets(
-            row.get('buy_price'), row.get('target_sell_price'), row.get('pattern_name')
+            row.get('buy_price'), row.get('target_sell_price'), row.get('pattern_name'),
+            row.get('holding_period_days')
         )
         annotated.append(row)
     return annotated
@@ -2219,7 +2230,8 @@ def stocks_suggestion_analysis(source, suggestion_id):
         return redirect(url_for('stocks.stocks_home'))
 
     projection = compute_projection_targets(
-        suggestion.get('buy_price'), suggestion.get('target_sell_price'), suggestion.get('pattern_name')
+        suggestion.get('buy_price'), suggestion.get('target_sell_price'), suggestion.get('pattern_name'),
+        suggestion.get('holding_period_days')
     )
     target_pct = _pct_increase(suggestion.get('buy_price'), suggestion.get('target_sell_price'))
     mid_pct = _pct_increase(suggestion.get('buy_price'), projection.get('mid_period', {}).get('price')) if projection else None
@@ -2459,7 +2471,8 @@ def stocks_recommendations_tracker():
             row.get('latest_price'), row['suggestion_date'], target_hit_date=row.get('target_hit_date'),
         ))
         row['projection'] = compute_projection_targets(
-            row.get('buy_price'), row.get('target_sell_price'), row.get('pattern_name')
+            row.get('buy_price'), row.get('target_sell_price'), row.get('pattern_name'),
+            row.get('holding_period_days')
         )
         tracker_rows.append(row)
     return render_template('admin/stocks_recommendation_tracker.html', tracker_rows=tracker_rows)
