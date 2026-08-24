@@ -6,7 +6,9 @@ from stoqbell.utils.stock_auth import (
     change_own_password,
     create_viewer_account,
     delete_viewer_account,
+    find_pending_activation_viewers,
     list_viewers,
+    regenerate_temp_password,
     safe_stocks_next_url,
     set_viewer_plan,
     stocks_login_required,
@@ -119,6 +121,22 @@ class FakeViewerDB:
                     r['must_change_password'] = 0
             return FakeCursor([])
 
+        if normalized.startswith("SELECT id, username AS email, name FROM stocks_admin_users WHERE role='viewer' "
+                                  "AND is_active=1 AND trial_pending_password_change=1"):
+            matches = [
+                {'id': r['id'], 'email': r['username'], 'name': r.get('name')}
+                for r in self.rows
+                if r['role'] == 'viewer' and r.get('is_active') == 1 and r.get('trial_pending_password_change') == 1
+            ]
+            return FakeCursor(matches)
+
+        if normalized.startswith('UPDATE stocks_admin_users SET password_hash=?, updated_at=NOW() WHERE id=?'):
+            password_hash, admin_id = params
+            for r in self.rows:
+                if r['id'] == admin_id:
+                    r['password_hash'] = password_hash
+            return FakeCursor([])
+
         if normalized.startswith('UPDATE stocks_admin_users SET is_pro=?, updated_at=NOW() WHERE id=?'):
             new_status, admin_id = params
             for r in self.rows:
@@ -194,6 +212,34 @@ def test_create_viewer_account_with_start_trial_is_not_pro_and_flags_pending_tri
     assert db.rows[0]['is_pro'] == 0
     assert db.rows[0]['trial_pending_password_change'] == 1
     assert db.rows[0]['subscription_status'] == 'none'  # not trialing yet -- only on password change
+
+
+def test_find_pending_activation_viewers_returns_only_still_pending_accounts():
+    db = FakeViewerDB()
+    create_viewer_account(db, 'pending@example.com', 'Pending', created_by_id=1, start_trial=True)
+    create_viewer_account(db, 'activated@example.com', 'Activated', created_by_id=1, start_trial=True)
+    create_viewer_account(db, 'permanent@example.com', 'Permanent', created_by_id=1)  # start_trial=False
+
+    activated_id = next(r['id'] for r in db.rows if r['username'] == 'activated@example.com')
+    change_own_password(db, activated_id, 'newpassword123')  # clears trial_pending_password_change
+
+    pending = find_pending_activation_viewers(db)
+
+    assert [p['email'] for p in pending] == ['pending@example.com']
+
+
+def test_regenerate_temp_password_changes_the_hash_without_touching_must_change_password():
+    db = FakeViewerDB()
+    create_viewer_account(db, 'a@example.com', 'A', created_by_id=1, start_trial=True)
+    admin_id = db.rows[0]['id']
+    old_hash = db.rows[0]['password_hash']
+
+    new_password = regenerate_temp_password(db, admin_id)
+
+    assert db.rows[0]['password_hash'] != old_hash
+    assert db.rows[0]['must_change_password'] == 1  # still forced through the change-password flow
+    from werkzeug.security import check_password_hash
+    assert check_password_hash(db.rows[0]['password_hash'], new_password)
 
 
 def test_password_change_activates_the_pending_trial():

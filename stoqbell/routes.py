@@ -51,6 +51,8 @@ from stoqbell.utils.stock_auth import (
     create_pending_google_subscriber,
     safe_stocks_next_url,
     verify_and_apply_unsubscribe,
+    find_pending_activation_viewers,
+    regenerate_temp_password,
 )
 from stoqbell.utils.stocks_subscription import (
     SUBSCRIPTION_TOTAL_COUNT_MONTHS,
@@ -155,6 +157,7 @@ from stoqbell.utils.stock_universe import (
     initialize_stock_universe_table_if_needed,
     refresh_market_cap_filter,
     rebucket_large_cap_eligibility,
+    sync_live_prices,
 )
 from stoqbell.utils.stock_shortlist import run_fundamental_shortlist, get_golden_cross_not_qualified, run_large_cap_shortlist
 from stoqbell.utils.fundamental_screen import get_metric_note
@@ -229,6 +232,7 @@ from stoqbell.utils.suggestion_email import (
     send_weekly_starters_email,
     send_large_cap_bonus_email,
     send_rebrand_announcement_to_all_viewers,
+    send_activation_reminder_email,
 )
 from stoqbell.utils.trading_calendar import is_trading_day, is_within_trading_hours
 from stoqbell.utils.admin_alerts import (
@@ -366,6 +370,25 @@ def register_legacy_stocks_routes(app):
             view_func=legacy_stocks_redirect(_new_endpoint, code=_code),
             methods=_methods,
         )
+
+
+def _format_ist_timestamp(raw):
+    """Parses a raw ISO8601 string (as TIMESTAMPTZ columns come back from
+    the Supabase RPC bridge -- see db.py's SupabaseCursor) and formats it
+    in IST -- every timestamp shown in Stocks is IST, not raw UTC (see
+    stocks_admin_dashboard's own kite_expires_at_ist for the pattern this
+    generalizes). Returns None unchanged for a missing/unparseable value,
+    so callers can use `x or '—'` the same way they already do for a plain
+    missing field."""
+    if not raw:
+        return None
+    try:
+        dt = raw if isinstance(raw, datetime) else datetime.fromisoformat(str(raw).replace('Z', '+00:00'))
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone(IST).strftime('%d %b %Y, %I:%M %p IST')
+    except ValueError:
+        return None
 
 
 def _dispatch_stocks_job(db, is_cron, job_name, job_fn):
@@ -1237,17 +1260,29 @@ def stocks_indicators_calculate_universe():
 
 @stocks_bp.route('/stocks/notifications/check-intraday-hits', methods=['POST'])
 def stocks_notifications_check_intraday_hits():
-    """Every-5-minutes, market-hours-only intraday target-hit check (see
-    utils/admin_alerts.find_and_notify_intraday_target_hits) -- cron-only,
-    same convention as /stocks/alerts/check-missed-jobs, called by its own
+    """Every-5-minutes, market-hours-only intraday check -- cron-only, same
+    convention as /stocks/alerts/check-missed-jobs, called by its own
     GitHub Actions workflow (stocks-intraday-target-hit-check.yml), never
     from the dashboard. Skips (without error) outside actual trading
     hours/days -- the cron schedule itself is deliberately a little
     generous around NSE/BSE's 09:15-15:30 IST session, this is the precise
-    gate. A Kite session issue (expired daily access token -- see
-    KiteClient) is reported as an error but never raises past this route,
-    since a stuck cron step here would otherwise fail every run for the
-    rest of the day until someone notices."""
+    gate.
+
+    Does two things off the ONE Kite session (built once, shared, so this
+    doesn't authenticate twice every 5 minutes): the original target-hit
+    check (see utils/admin_alerts.find_and_notify_intraday_target_hits),
+    and (added 2026-08-24) refreshing every scrape-eligible stock_universe
+    row's live_price/live_price_updated_at (see
+    utils.stock_universe.sync_live_prices) -- what actually makes "we
+    already fetch a live price every 5 minutes" show up on the company/
+    watchlist/universe pages, not just feed the target-hit comparison. The
+    two are independent: a live-price sync failure is logged but never
+    fails this route (a stuck cron step here would otherwise fail every
+    run for the rest of the day until someone notices, same reasoning the
+    target-hit check itself already followed) -- this only actually raises
+    past this route if the Kite session itself couldn't be built at all
+    (expired daily access token -- see KiteClient), or the target-hit
+    check itself fails."""
     if not has_valid_cron_secret(request.headers, STOCKS_FUNDAMENTALS_CRON_SECRET):
         return jsonify({'status': 'error', 'message': 'Unauthorized'}), 403
 
@@ -1256,11 +1291,24 @@ def stocks_notifications_check_intraday_hits():
 
     db = get_db()
     try:
-        summary = find_and_notify_intraday_target_hits(db)
+        kite_client = KiteClient(db=db)
+    except Exception as e:
+        current_app.logger.error(f'Intraday check could not start (Kite session issue): {e}')
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+    try:
+        summary = find_and_notify_intraday_target_hits(db, kite_client=kite_client)
     except Exception as e:
         current_app.logger.error(f'Intraday target-hit check failed: {e}')
         return jsonify({'status': 'error', 'message': str(e)}), 500
-    return jsonify({'status': 'ok', **summary})
+
+    try:
+        live_price_summary = sync_live_prices(db, kite_client=kite_client)
+    except Exception as e:
+        current_app.logger.error(f'Live price sync failed: {e}')
+        live_price_summary = {'checked': 0, 'updated': 0, 'error': str(e)}
+
+    return jsonify({'status': 'ok', **summary, 'live_prices': live_price_summary})
 
 
 @stocks_bp.route('/stocks/alerts/check-missed-jobs', methods=['POST'])
@@ -1503,7 +1551,8 @@ def stocks_watchlist():
                   f.quarterly_profit_growth_pct, f.quarterly_revenue_growth_pct, f.price_to_book,
                   f.promoter_holding_pct, f.fii_holding_pct, f.snapshot_date,
                   i.rsi_14, i.cross_status, i.volume_trend, i.calc_date,
-                  d.close AS latest_price, d.trade_date AS price_date
+                  d.close AS latest_price, d.trade_date AS price_date,
+                  u.live_price, u.live_price_updated_at
            FROM stock_universe u
            LEFT JOIN stock_watchlist w ON w.symbol = u.symbol AND w.exchange = u.exchange AND w.is_active = 1
            LEFT JOIN stock_fundamentals f ON f.universe_id = u.id
@@ -1527,6 +1576,7 @@ def stocks_watchlist():
              )
            ORDER BY u.company_name'''
     ).fetchall()
+    rows = [{**r, 'live_price_updated_at_ist': _format_ist_timestamp(r.get('live_price_updated_at'))} for r in rows]
 
     # NNS Score for every row, not just ones that also clear
     # passes_hard_filters -- see compute_watchlist_nns_scores's docstring.
@@ -1590,8 +1640,10 @@ def stocks_company_detail(watchlist_id):
                   f.free_cash_flow, f.snapshot_date AS fundamentals_date,
                   i.ma_5, i.ma_21, i.ma_50, i.ma_200, i.rsi_14, i.volume_avg_20d,
                   i.cross_status, i.volume_trend, i.calc_date AS indicators_date,
-                  d.close AS latest_price, d.trade_date AS price_date
+                  d.close AS latest_price, d.trade_date AS price_date,
+                  u.live_price, u.live_price_updated_at
            FROM stock_watchlist w
+           LEFT JOIN stock_universe u ON u.symbol = w.symbol AND u.exchange = w.exchange
            LEFT JOIN stock_fundamentals f ON f.watchlist_id = w.id
                AND f.snapshot_date = (
                    SELECT MAX(f2.snapshot_date) FROM stock_fundamentals f2 WHERE f2.watchlist_id = w.id
@@ -1633,6 +1685,7 @@ def stocks_company_detail(watchlist_id):
         **company,
         'pe_note': get_metric_note('pe_ratio', company.get('pe_ratio')),
         'opm_note': get_metric_note('opm_pct', company.get('opm_pct')),
+        'live_price_updated_at_ist': _format_ist_timestamp(company.get('live_price_updated_at')),
         'is_recommended': passes_hard_filters(company),
         'trends': {
             field: trend_note(company.get(field), previous_fundamentals.get(field))
@@ -1966,7 +2019,8 @@ def stocks_universe_detail(universe_id):
                   f.free_cash_flow, f.snapshot_date AS fundamentals_date,
                   i.ma_5, i.ma_21, i.ma_50, i.ma_200, i.rsi_14, i.volume_avg_20d,
                   i.cross_status, i.volume_trend, i.calc_date AS indicators_date,
-                  d.close AS latest_price, d.trade_date AS price_date
+                  d.close AS latest_price, d.trade_date AS price_date,
+                  u.live_price, u.live_price_updated_at
            FROM stock_universe u
            LEFT JOIN stock_fundamentals f ON f.universe_id = u.id
                AND f.snapshot_date = (
@@ -2009,6 +2063,7 @@ def stocks_universe_detail(universe_id):
         **company,
         'pe_note': get_metric_note('pe_ratio', company.get('pe_ratio')),
         'opm_note': get_metric_note('opm_pct', company.get('opm_pct')),
+        'live_price_updated_at_ist': _format_ist_timestamp(company.get('live_price_updated_at')),
         'is_recommended': passes_hard_filters(company),
         'trends': {
             field: trend_note(company.get(field), previous_fundamentals.get(field))
@@ -3407,6 +3462,54 @@ def stocks_subscriptions_send_expiry_reminders():
         return summary
 
     return _dispatch_stocks_job(db, is_cron, 'subscription_reminders', _job)
+
+
+@stocks_bp.route('/stocks/notifications/send-activation-reminders', methods=['POST'])
+def stocks_notifications_send_activation_reminders():
+    """Weekly nudge for every viewer still stuck in
+    trial_pending_password_change=1 (see utils.stock_auth.find_pending_activation_viewers)
+    -- created with a trial invite, never logged in to set their own
+    password, so their 7-day free trial hasn't started and (since
+    2026-08-24) they're excluded from every recommendation email. Each
+    reminder carries a freshly-regenerated temp password (see
+    regenerate_temp_password) rather than assuming the original welcome
+    email is still around. Same dual auth as every other Stocks cron route.
+
+    Triggered by a DAILY cron, not a Monday-only one -- this job body
+    itself checks the weekday and always calls record_job_success either
+    way, same "self-gate on the weekday, stay monitorable by the daily
+    missed-job check" pattern stocks_starters_send_weekly_email already
+    uses (see JOB_EXPECTATIONS in utils/stock_alerting.py)."""
+    is_cron = has_valid_cron_secret(request.headers, STOCKS_FUNDAMENTALS_CRON_SECRET)
+    if not is_cron and not session.get('stocks_admin_id'):
+        return redirect(url_for('stocks.stocks_admin_login'))
+
+    db = get_db()
+
+    def _job(job_db):
+        if date.today().weekday() != 0:
+            record_job_success(job_db, 'activation_reminders')
+            return {'status': 'skipped', 'reason': 'not Monday'}
+        try:
+            rows = find_pending_activation_viewers(job_db)
+            sent = 0
+            failed = 0
+            for row in rows:
+                password = regenerate_temp_password(job_db, row['id'])
+                ok, _detail = send_activation_reminder_email(row['email'], row.get('name'), password)
+                if ok:
+                    sent += 1
+                else:
+                    failed += 1
+            summary = {'checked': len(rows), 'sent': sent, 'failed': failed}
+        except Exception as e:
+            current_app.logger.error(f'Activation reminders failed: {e}')
+            alert_job_error(job_db, 'activation_reminders', str(e))
+            raise
+        record_job_success(job_db, 'activation_reminders')
+        return summary
+
+    return _dispatch_stocks_job(db, is_cron, 'activation_reminders', _job)
 
 
 @stocks_bp.route('/stocks/subscription/notify-trial-ended', methods=['POST'])

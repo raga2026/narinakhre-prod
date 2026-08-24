@@ -117,6 +117,11 @@ JOB_EXPECTATIONS = {
     # no price/fundamentals dependency, so it's scheduled independently
     # rather than chained after price_sync/indicator_calc like those are.
     'stock_news_sync': {'expected_by_ist_hour': 7, 'label': '7 AM IST'},
+    # Runs daily (see stocks-activation-reminders.yml) but only does real
+    # work on a Monday -- same skip-but-record-success pattern as
+    # starters_weekly_email above (see
+    # app.py's /stocks/notifications/send-activation-reminders).
+    'activation_reminders': {'expected_by_ist_hour': 9, 'label': '9 AM IST'},
 }
 
 STOCK_ALERTING_TABLES_SQL = [

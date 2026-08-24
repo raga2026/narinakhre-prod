@@ -53,6 +53,17 @@ STOCK_UNIVERSE_ALTER_SQL = [
     # already uses), with NO upper bound, unlike is_scrape_eligible's
     # 5000-30000cr window.
     "ALTER TABLE stock_universe ADD COLUMN IF NOT EXISTS is_large_cap_eligible BOOLEAN DEFAULT false",
+    # Live intraday price -- see sync_live_prices below, called every 5
+    # minutes during market hours alongside the existing intraday
+    # target-hit check (utils/admin_alerts.find_and_notify_intraday_target_hits).
+    # Deliberately separate from stock_daily_data.close, which stays a pure
+    # end-of-day figure that suggestion pricing (buy/target/stop-loss) is
+    # computed against -- these two columns are DISPLAY ONLY, never read by
+    # any scoring/pricing/suggestion-generation code, so a live quote
+    # updating every 5 minutes can never silently change what a suggestion
+    # is priced against.
+    "ALTER TABLE stock_universe ADD COLUMN IF NOT EXISTS live_price NUMERIC(12,2)",
+    "ALTER TABLE stock_universe ADD COLUMN IF NOT EXISTS live_price_updated_at TIMESTAMPTZ",
 ]
 
 
@@ -320,6 +331,76 @@ def refresh_market_cap_filter(db):
         'remaining_without_market_cap': propagation['remaining_without_market_cap'],
         'scrape_eligible_count': eligible_count,
     }
+
+
+# Kite's ltp() endpoint has a per-call instrument limit -- chunked rather
+# than sent as one call for the full ~1,067-company universe.
+LIVE_PRICE_LTP_CHUNK_SIZE = 200
+
+
+def sync_live_prices(db, kite_client=None):
+    """Refreshes live_price/live_price_updated_at (see STOCK_UNIVERSE_ALTER_SQL's
+    own comment on these two columns -- DISPLAY ONLY, never read by
+    suggestion pricing) for every is_scrape_eligible stock_universe row
+    from a live Kite LTP quote. Called every 5 minutes during market hours,
+    right alongside the existing intraday target-hit check (see app.py's
+    /stocks/notifications/check-intraday-hits and
+    utils.admin_alerts.find_and_notify_intraday_target_hits, which already
+    runs on this exact cadence/gate) -- this is what actually makes "we
+    already fetch a live price every 5 minutes" true for the company/
+    watchlist/universe pages too, not just the target-hit check that quote
+    used to be scoped to alone.
+
+    A symbol Kite doesn't recognize under our stored symbol string (a
+    known gap for a chunk of BSE listings -- see KiteClient.fetch_daily_candles'
+    own comment) is simply absent from fetch_ltp_batch's result and keeps
+    whatever live_price it already had (stale, not wrong) rather than
+    failing the whole sync over a handful of unmatched symbols.
+
+    Every result is written back in ONE set-based UPDATE, not a per-row
+    loop -- same "thousands of rows, a Python loop issuing one RPC call
+    each would be far slower over HTTP" reasoning as
+    propagate_bse_market_cap_to_nse above. kite_client defaults to a fresh
+    KiteClient(db=db); tests pass a fake directly. Returns {'checked': N,
+    'updated': N}."""
+    from stoqbell.utils.kite_client import KiteClient
+
+    kite_client = kite_client or KiteClient(db=db)
+
+    rows = db.execute(
+        "SELECT id, symbol, exchange FROM stock_universe WHERE is_scrape_eligible = true"
+    ).fetchall()
+    if not rows:
+        return {'checked': 0, 'updated': 0}
+
+    id_by_key = {f"{r['exchange']}:{r['symbol']}": r['id'] for r in rows}
+    keys = list(id_by_key.keys())
+
+    price_by_id = {}
+    for i in range(0, len(keys), LIVE_PRICE_LTP_CHUNK_SIZE):
+        chunk = keys[i:i + LIVE_PRICE_LTP_CHUNK_SIZE]
+        quotes = kite_client.fetch_ltp_batch(chunk)
+        for key, price in quotes.items():
+            universe_id = id_by_key.get(key)
+            if universe_id is not None and price is not None:
+                price_by_id[universe_id] = price
+
+    if not price_by_id:
+        return {'checked': len(rows), 'updated': 0}
+
+    # Prices are numeric values straight from Kite's own API response, not
+    # user-supplied text -- safe to inline directly, same as
+    # propagate_bse_market_cap_to_nse's plain db.execute(sql) above (no
+    # dynamic ? params fit a variable-length VALUES list anyway).
+    values_sql = ',\n'.join(f'({universe_id}, {price})' for universe_id, price in price_by_id.items())
+    db.execute(
+        f'''UPDATE stock_universe SET live_price = v.price, live_price_updated_at = NOW()
+            FROM (VALUES {values_sql}) AS v(id, price)
+            WHERE stock_universe.id = v.id'''
+    )
+    db.commit()
+
+    return {'checked': len(rows), 'updated': len(price_by_id)}
 
 
 def seed_bse_universe(client, rows, batch_size=200):

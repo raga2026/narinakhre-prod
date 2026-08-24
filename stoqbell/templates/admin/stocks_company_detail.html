@@ -83,7 +83,12 @@
                     ({{ '+' if company.day_change.change_amount >= 0 }}₹{{ '%.2f'|format(company.day_change.change_amount) }}) vs previous close
                 </p>
                 {% endif %}
-                <p class="text-slate-500 text-xs mt-1">as of {{ company.price_date or '—' }}</p>
+                <p class="text-slate-500 text-xs mt-1">Close as of {{ company.price_date or '—' }}</p>
+                {% if company.live_price is not none %}
+                <p class="metric-note" style="color:#38bdf8;">
+                    Live: ₹{{ '%.2f'|format(company.live_price) }}{% if company.live_price_updated_at_ist %} as of {{ company.live_price_updated_at_ist }}{% endif %}
+                </p>
+                {% endif %}
             </div>
             <div class="stat-card">
                 <p class="stat-label">52-week range</p>

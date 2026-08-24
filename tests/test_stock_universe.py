@@ -1,7 +1,8 @@
 from pathlib import Path
 
 from stoqbell.utils.fundamentals_ingestion import STOCK_FUNDAMENTALS_ALTER_SQL
-from stoqbell.utils.stock_universe import parse_nse_equity_csv
+from stoqbell.utils.stock_universe import parse_nse_equity_csv, sync_live_prices
+import stoqbell.utils.stock_universe as stock_universe_module
 
 # A real snapshot of NSE's official EQUITY_L.csv, fetched while building
 # this -- not a synthetic fixture -- so the "thousands of rows" sanity
@@ -73,3 +74,121 @@ def test_new_fundamentals_columns_are_added_as_nullable():
         # None of these should be declared NOT NULL -- they populate gradually.
         column_statement = next(s for s in STOCK_FUNDAMENTALS_ALTER_SQL if f' {column} ' in s)
         assert 'NOT NULL' not in column_statement.upper()
+
+
+# --- sync_live_prices -------------------------------------------------------
+
+class FakeCursor:
+    def __init__(self, rows):
+        self._rows = rows
+
+    def fetchall(self):
+        return self._rows
+
+    def fetchone(self):
+        return self._rows[0] if self._rows else None
+
+
+class FakeLivePriceDB:
+    """Minimal stand-in -- just enough to run sync_live_prices' own SELECT
+    and capture whatever UPDATE it issues, without needing a real Postgres
+    UPDATE...FROM (VALUES ...) to actually execute (same "no fake DB for
+    the actual bulk-SQL orchestration functions in this file" gap
+    propagate_bse_market_cap_to_nse/rebucket_market_cap_bands already
+    have -- this covers the Python-side chunking/mapping logic around it,
+    not the SQL engine's own semantics)."""
+
+    def __init__(self, universe_rows):
+        self.universe_rows = universe_rows
+        self.executed_sql = []
+
+    def execute(self, sql, params=None):
+        normalized = ' '.join(sql.split())
+        self.executed_sql.append(normalized)
+        if normalized.startswith('SELECT id, symbol, exchange FROM stock_universe WHERE is_scrape_eligible'):
+            return FakeCursor(self.universe_rows)
+        return FakeCursor([])
+
+    def commit(self):
+        pass
+
+
+class FakeLtpKiteClient:
+    """quotes: {'EXCHANGE:SYMBOL': price} -- a key simply absent models a
+    symbol Kite doesn't recognize (see fetch_ltp_batch's own tolerance)."""
+
+    def __init__(self, quotes):
+        self.quotes = quotes
+        self.calls = []
+
+    def fetch_ltp_batch(self, instrument_keys):
+        self.calls.append(list(instrument_keys))
+        return {k: self.quotes[k] for k in instrument_keys if k in self.quotes}
+
+
+def test_sync_live_prices_updates_every_matched_row():
+    db = FakeLivePriceDB(universe_rows=[
+        {'id': 1, 'symbol': 'AAA', 'exchange': 'NSE'},
+        {'id': 2, 'symbol': 'BBB', 'exchange': 'NSE'},
+    ])
+    kite = FakeLtpKiteClient({'NSE:AAA': 101.5, 'NSE:BBB': 202.75})
+
+    summary = sync_live_prices(db, kite_client=kite)
+
+    assert summary == {'checked': 2, 'updated': 2}
+    update_sql = next(s for s in db.executed_sql if s.startswith('UPDATE stock_universe'))
+    assert '(1, 101.5)' in update_sql
+    assert '(2, 202.75)' in update_sql
+
+
+def test_sync_live_prices_tolerates_a_symbol_kite_does_not_recognize():
+    # A BSE listing whose stored symbol doesn't match Kite's own
+    # tradingsymbol -- known gap, see fetch_daily_candles' own comment.
+    # Should not fail the whole sync, just skip that one row.
+    db = FakeLivePriceDB(universe_rows=[
+        {'id': 1, 'symbol': 'AAA', 'exchange': 'NSE'},
+        {'id': 2, 'symbol': 'UNKNOWN', 'exchange': 'BSE'},
+    ])
+    kite = FakeLtpKiteClient({'NSE:AAA': 101.5})
+
+    summary = sync_live_prices(db, kite_client=kite)
+
+    assert summary == {'checked': 2, 'updated': 1}
+    update_sql = next(s for s in db.executed_sql if s.startswith('UPDATE stock_universe'))
+    assert '(1, 101.5)' in update_sql
+    assert '2,' not in update_sql
+
+
+def test_sync_live_prices_chunks_the_ltp_calls(monkeypatch):
+    monkeypatch.setattr(stock_universe_module, 'LIVE_PRICE_LTP_CHUNK_SIZE', 2)
+    db = FakeLivePriceDB(universe_rows=[
+        {'id': i, 'symbol': f'SYM{i}', 'exchange': 'NSE'} for i in range(1, 6)
+    ])
+    kite = FakeLtpKiteClient({f'NSE:SYM{i}': float(i) for i in range(1, 6)})
+
+    summary = sync_live_prices(db, kite_client=kite)
+
+    assert summary == {'checked': 5, 'updated': 5}
+    # 5 instruments at a chunk size of 2 -> 3 calls (2, 2, 1), never all at once.
+    assert len(kite.calls) == 3
+    assert all(len(call) <= 2 for call in kite.calls)
+
+
+def test_sync_live_prices_returns_early_with_no_universe_rows():
+    db = FakeLivePriceDB(universe_rows=[])
+    kite = FakeLtpKiteClient({})
+
+    summary = sync_live_prices(db, kite_client=kite)
+
+    assert summary == {'checked': 0, 'updated': 0}
+    assert kite.calls == []
+
+
+def test_sync_live_prices_issues_no_update_when_nothing_matched():
+    db = FakeLivePriceDB(universe_rows=[{'id': 1, 'symbol': 'AAA', 'exchange': 'NSE'}])
+    kite = FakeLtpKiteClient({})  # Kite has no quote for anything
+
+    summary = sync_live_prices(db, kite_client=kite)
+
+    assert summary == {'checked': 1, 'updated': 0}
+    assert not any(s.startswith('UPDATE stock_universe') for s in db.executed_sql)

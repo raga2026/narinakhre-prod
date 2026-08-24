@@ -592,6 +592,49 @@ def create_viewer_account(db, email, name, created_by_id, can_view_watchlist=Fal
     return row, password, None
 
 
+def find_pending_activation_viewers(db):
+    """role='viewer' accounts whose free trial hasn't started because they
+    haven't logged in and set their own password yet (see
+    create_viewer_account's start_trial=True and change_own_password's
+    trial_started) -- the ones the weekly activation-reminder email (see
+    utils/suggestion_email.send_activation_reminder_email) targets, and the
+    ones the three recommendation broadcast emails (daily Pick of the Day,
+    Starters weekly, large-cap bonus -- see utils/suggestion_email.py's own
+    recipient queries) now deliberately exclude: an account that's never
+    proven it's actually the person who was invited (still using the
+    plaintext temp password emailed to them) hasn't started its trial and
+    has no business receiving paid-tier recommendation content, confirmed
+    reason for a live incident (2026-08-24)."""
+    return db.execute(
+        "SELECT id, username AS email, name FROM stocks_admin_users "
+        "WHERE role='viewer' AND is_active=1 AND trial_pending_password_change=1"
+    ).fetchall()
+
+
+def regenerate_temp_password(db, admin_id):
+    """Generates and stores a brand new random temp password for admin_id,
+    returning it in plaintext -- same one-shot-visibility contract as
+    create_viewer_account (nothing else stores or logs it, only its hash
+    persists). Used by the weekly activation-reminder email so a recipient
+    who lost or deleted their original welcome email always has a working
+    password to log in with, however many weeks have passed since account
+    creation -- there's still no separate password-reset flow anywhere in
+    this codebase (see create_viewer_account's own docstring), so this is
+    the only way such an account can recover access at all.
+    must_change_password is untouched (already 1 for a still-pending
+    account) -- logging in with this new password still forces the same
+    /stocks/change-password step, which is what actually starts the trial
+    (see change_own_password)."""
+    password = _generate_simple_password()
+    password_hash = generate_password_hash(password)
+    db.execute(
+        'UPDATE stocks_admin_users SET password_hash=?, updated_at=NOW() WHERE id=?',
+        (password_hash, admin_id)
+    )
+    db.commit()
+    return password
+
+
 MIN_PASSWORD_LENGTH = 8
 
 

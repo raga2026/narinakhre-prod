@@ -4,6 +4,7 @@ from unittest.mock import patch
 from stoqbell.utils.suggestion_email import (
     DISCLAIMER,
     STOCKS_LOGIN_URL,
+    send_activation_reminder_email,
     send_admin_new_subscriber_email,
     send_admin_subscription_cancelled_email,
     send_daily_suggestions_email,
@@ -49,6 +50,7 @@ class FakeEmailDB:
         self.suggestion_rows = suggestion_rows
         self.recipient_rows = recipient_rows
         self.last_query_params = None
+        self.last_recipient_sql = None
 
     def execute(self, sql, params=None):
         normalized = ' '.join(sql.split())
@@ -59,6 +61,7 @@ class FakeEmailDB:
             return FakeCursor(self.suggestion_rows)
 
         if normalized.startswith("SELECT id, username AS email, name FROM stocks_admin_users WHERE role='viewer'"):
+            self.last_recipient_sql = normalized
             if 'AND id IN (' in normalized:
                 wanted = set(params)
                 return FakeCursor([r for r in self.recipient_rows if r.get('id') in wanted])
@@ -141,6 +144,22 @@ def test_email_sent_to_every_active_recipient_and_includes_disclaimer():
 
     assert summary['suggestion_count'] == 1
     assert summary['sent'] == 2
+
+
+def test_daily_email_excludes_accounts_with_a_pending_first_password_change():
+    # A viewer created with start_trial=True whose trial hasn't started yet
+    # (they haven't logged in and set their own password -- see
+    # create_viewer_account/change_own_password) must not receive the
+    # recommendation blast; asserting on the SQL text is what proves the
+    # production query actually excludes them, not just "no rows happened
+    # to match" in this particular fixture.
+    db = FakeEmailDB(
+        suggestion_rows=[{'symbol': 'ABC', 'exchange': 'NSE', 'buy_price': 100.0, 'target_sell_price': 105.0, 'stop_loss_price': 97.0, 'holding_period_days': 10, 'rationale': 'Golden cross with confirming volume'}],
+        recipient_rows=[{'email': 'a@example.com', 'name': 'A'}],
+    )
+    with patch('stoqbell.utils.suggestion_email.send_zeptomail_stocks_email', return_value=(True, 'ok')):
+        send_daily_suggestions_email(db)
+    assert 'trial_pending_password_change' in db.last_recipient_sql
 
 
 def test_golden_nns_suggestion_shows_highly_recommended_without_pe_or_opm():
@@ -688,6 +707,31 @@ def test_viewer_welcome_email_falls_back_to_email_as_greeting_when_no_name():
     assert kwargs['to_name'] == 'noname@example.com'
 
 
+def test_activation_reminder_email_includes_login_link_username_and_fresh_password():
+    with patch('stoqbell.utils.suggestion_email.send_zeptomail_stocks_email', return_value=(True, 'ok')) as mock_send:
+        sent, detail = send_activation_reminder_email('pending@example.com', 'Pending Viewer', 'fr35hPass123')
+
+    assert sent is True
+    assert detail == 'ok'
+    kwargs = mock_send.call_args.kwargs
+    assert kwargs['to_email'] == 'pending@example.com'
+    assert kwargs['to_name'] == 'Pending Viewer'
+    assert 'pending@example.com' in kwargs['textbody']
+    assert 'fr35hPass123' in kwargs['textbody']
+    assert 'fr35hPass123' in kwargs['htmlbody']
+    assert '/stocks/login' in kwargs['textbody']
+    assert 'trial' in kwargs['textbody'].lower()
+    assert DISCLAIMER in kwargs['textbody']
+
+
+def test_activation_reminder_email_falls_back_to_email_as_greeting_when_no_name():
+    with patch('stoqbell.utils.suggestion_email.send_zeptomail_stocks_email', return_value=(True, 'ok')) as mock_send:
+        send_activation_reminder_email('noname@example.com', '', 'somepass')
+
+    kwargs = mock_send.call_args.kwargs
+    assert kwargs['to_name'] == 'noname@example.com'
+
+
 def test_subscription_welcome_email_without_suggestions_is_the_plain_welcome():
     with patch('stoqbell.utils.suggestion_email.send_zeptomail_stocks_email', return_value=(True, 'ok')) as mock_send:
         send_subscription_welcome_email('new@example.com', 'New Sub', '17 Sep 2026')
@@ -1021,6 +1065,7 @@ class FakeStartersEmailDB:
     def __init__(self, suggestion_rows, recipient_rows):
         self.suggestion_rows = suggestion_rows
         self.recipient_rows = recipient_rows
+        self.last_recipient_sql = None
 
     def execute(self, sql, params=None):
         normalized = ' '.join(sql.split())
@@ -1029,6 +1074,7 @@ class FakeStartersEmailDB:
             return FakeCursor(self.suggestion_rows)
 
         if "stocks_plan='starters'" in normalized and normalized.startswith("SELECT id, username AS email, name FROM stocks_admin_users WHERE role='viewer'"):
+            self.last_recipient_sql = normalized
             if 'AND id IN (' in normalized:
                 wanted = set(params)
                 return FakeCursor([r for r in self.recipient_rows if r.get('id') in wanted])
@@ -1091,6 +1137,16 @@ def test_weekly_starters_email_sends_only_to_starters_recipients_with_the_weekly
     assert DISCLAIMER in kwargs['textbody']
 
 
+def test_starters_email_excludes_accounts_with_a_pending_first_password_change():
+    db = FakeStartersEmailDB(
+        suggestion_rows=[{'symbol': 'GLD', 'exchange': 'NSE', 'buy_price': 100.0, 'target_sell_price': 105.0, 'stop_loss_price': 97.0, 'holding_period_days': 10, 'nns_tier': 'golden', 'rationale': 'Golden cross with confirming volume'}],
+        recipient_rows=[{'id': 1, 'email': 'starter@example.com', 'name': 'Starter'}],
+    )
+    with patch('stoqbell.utils.suggestion_email.send_zeptomail_stocks_email', return_value=(True, 'ok')):
+        send_weekly_starters_email(db)
+    assert 'trial_pending_password_change' in db.last_recipient_sql
+
+
 def test_weekly_starters_email_includes_both_picks_when_two_cleared_the_bar():
     db = FakeStartersEmailDB(
         suggestion_rows=[
@@ -1126,6 +1182,7 @@ class FakeLargeCapBonusEmailDB:
     def __init__(self, suggestion_rows, recipient_rows):
         self.suggestion_rows = suggestion_rows
         self.recipient_rows = recipient_rows
+        self.last_recipient_sql = None
 
     def execute(self, sql, params=None):
         normalized = ' '.join(sql.split())
@@ -1135,6 +1192,7 @@ class FakeLargeCapBonusEmailDB:
             return FakeCursor(self.suggestion_rows)
 
         if "stocks_plan='standard'" in normalized and normalized.startswith("SELECT id, username AS email, name FROM stocks_admin_users WHERE role='viewer'"):
+            self.last_recipient_sql = normalized
             if 'AND id IN (' in normalized:
                 wanted = set(params)
                 return FakeCursor([r for r in self.recipient_rows if r.get('id') in wanted])
@@ -1196,3 +1254,13 @@ def test_large_cap_bonus_email_sends_only_to_standard_recipients():
     assert 'Bonus Large-Cap Pick' in kwargs['textbody']
     assert kwargs['htmlbody'].strip().startswith('<!doctype html>')
     assert DISCLAIMER in kwargs['textbody']
+
+
+def test_large_cap_bonus_email_excludes_accounts_with_a_pending_first_password_change():
+    db = FakeLargeCapBonusEmailDB(
+        suggestion_rows=[{'symbol': 'BIGC', 'exchange': 'NSE', 'buy_price': 200.0, 'target_sell_price': 210.0, 'stop_loss_price': 194.0, 'holding_period_days': 10, 'nns_tier': 'golden', 'rationale': 'Golden cross with confirming volume'}],
+        recipient_rows=[{'id': 1, 'email': 'standard@example.com', 'name': 'Standard Sub'}],
+    )
+    with patch('stoqbell.utils.suggestion_email.send_zeptomail_stocks_email', return_value=(True, 'ok')):
+        send_large_cap_bonus_email(db)
+    assert 'trial_pending_password_change' in db.last_recipient_sql

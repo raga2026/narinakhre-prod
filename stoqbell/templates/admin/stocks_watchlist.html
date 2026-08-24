@@ -176,7 +176,15 @@
                             <a class="company-link" href="{{ url_for('stocks.stocks_universe_detail', universe_id=row.universe_id) }}">{{ row.name or row.symbol }}</a>
                             {% endif %}
                         </th>
-                        <td>{{ '₹%.2f'|format(row.latest_price) if row.latest_price is not none else '—' }}</td>
+                        <td>
+                            {% if row.live_price is not none %}
+                                ₹{{ '%.2f'|format(row.live_price) }}
+                                <span class="metric-note" title="{{ row.live_price_updated_at_ist or '' }}">Live{% if row.live_price_updated_at_ist %}, {{ row.live_price_updated_at_ist }}{% endif %}</span>
+                            {% else %}
+                                {{ '₹%.2f'|format(row.latest_price) if row.latest_price is not none else '—' }}
+                                <span class="metric-note">Close, {{ row.price_date or '—' }}</span>
+                            {% endif %}
+                        </td>
                         <td>
                             {% if row.cross_status %}
                                 <span class="badge badge-{{ row.cross_status }}">{{ row.cross_status.replace('_', ' ') | title }}</span>
@@ -229,7 +237,15 @@
                         </th>
                         <td>{{ row.symbol }}</td>
                         <td>{{ row.exchange }}</td>
-                        <td>{{ '₹%.2f'|format(row.latest_price) if row.latest_price is not none else '—' }}</td>
+                        <td>
+                            {% if row.live_price is not none %}
+                                ₹{{ '%.2f'|format(row.live_price) }}
+                                <span class="metric-note" title="{{ row.live_price_updated_at_ist or '' }}">Live{% if row.live_price_updated_at_ist %}, {{ row.live_price_updated_at_ist }}{% endif %}</span>
+                            {% else %}
+                                {{ '₹%.2f'|format(row.latest_price) if row.latest_price is not none else '—' }}
+                                <span class="metric-note">Close, {{ row.price_date or '—' }}</span>
+                            {% endif %}
+                        </td>
                         <td>
                             {{ '%.2fx'|format(row.pe_ratio) if row.pe_ratio is not none else '—' }}
                             {% if row.pe_note %}<span class="metric-note">{{ row.pe_note }}</span>{% endif %}

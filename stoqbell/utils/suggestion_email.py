@@ -139,6 +139,51 @@ def send_viewer_welcome_email(email, name, password, db=None, admin_id=None):
         textbody=text_body, htmlbody=html_body, sender_name='StoqBell',
     )
 
+
+def send_activation_reminder_email(email, name, password):
+    """Weekly nudge for a viewer created with start_trial=True who still
+    hasn't logged in and set their own password -- their 7-day free trial
+    doesn't start until they do (see utils.stock_auth.change_own_password's
+    trial_started), and they're deliberately excluded from every
+    recommendation email until then (see send_daily_suggestions_email/
+    send_weekly_starters_email/send_large_cap_bonus_email's own
+    trial_pending_password_change exclusion). password is a FRESH temp
+    password (see utils.stock_auth.regenerate_temp_password, called right
+    before this on every reminder) rather than the original one -- someone
+    who hasn't acted on the first welcome email in a week has plausibly
+    lost or deleted it, and there's still no separate password-reset flow
+    to point them at instead, so each reminder has to be self-sufficient.
+    Returns (success, detail), same shape as send_zeptomail_stocks_email."""
+    greeting = name or email
+    subject = 'StoqBell -- your free trial is waiting, log in to start it'
+    text_body = (
+        f'Hi {greeting},\n\n'
+        f"You were invited to StoqBell but haven't logged in yet -- your 7-day free trial only starts "
+        f"once you do and set your own password. Until then you won't receive any recommendation emails.\n\n"
+        f'Login: {STOCKS_LOGIN_URL}\n'
+        f'Username: {email}\n'
+        f'Password: {password}\n\n'
+        f"This is a fresh temporary password (your original one still works too, if you kept it) -- "
+        f"you'll be asked to set your own the moment you log in, and that's what starts your trial.\n\n"
+        f'{DISCLAIMER}\n'
+    )
+    html_body = (
+        f'{_stoqbell_logo_header_html()}'
+        f'<p>Hi {greeting},</p>'
+        f"<p>You were invited to StoqBell but haven't logged in yet -- your 7-day free trial only starts "
+        f"once you do and set your own password. Until then you won't receive any recommendation emails.</p>"
+        f'<p><a href="{STOCKS_LOGIN_URL}">{STOCKS_LOGIN_URL}</a><br>'
+        f'Username: {email}<br>'
+        f'Password: {password}</p>'
+        f"<p>This is a fresh temporary password (your original one still works too, if you kept it) -- "
+        f"you'll be asked to set your own the moment you log in, and that's what starts your trial.</p>"
+        f'<p style="color:#64748b;font-size:0.85em;margin-top:16px;">{DISCLAIMER}</p>'
+    )
+    return send_zeptomail_stocks_email(
+        to_email=email, to_name=greeting, subject=subject,
+        textbody=text_body, htmlbody=html_body, sender_name='StoqBell',
+    )
+
 def send_stop_loss_review_email(to_email, trade, pnl_amount, pnl_pct):
     """Sent once per stop-loss trigger, to the fixed auto-trader alert
     address (see utils.auto_trader.STOP_LOSS_ALERT_EMAIL and app.py's
@@ -1396,7 +1441,9 @@ def send_daily_suggestions_email(db, target_date=None, recipient_ids=None):
             placeholders = ','.join('?' * len(recipient_ids))
             recipients = db.execute(
                 f"SELECT id, username AS email, name FROM stocks_admin_users "
-                f"WHERE role='viewer' AND is_active=1 AND email_unsubscribed_at IS NULL AND id IN ({placeholders})",
+                f"WHERE role='viewer' AND is_active=1 AND email_unsubscribed_at IS NULL "
+                f"AND (trial_pending_password_change IS NULL OR trial_pending_password_change=0) "
+                f"AND id IN ({placeholders})",
                 tuple(recipient_ids)
             ).fetchall()
         else:
@@ -1404,7 +1451,8 @@ def send_daily_suggestions_email(db, target_date=None, recipient_ids=None):
     else:
         recipients = db.execute(
             "SELECT id, username AS email, name FROM stocks_admin_users "
-            "WHERE role='viewer' AND is_active=1 AND email_unsubscribed_at IS NULL"
+            "WHERE role='viewer' AND is_active=1 AND email_unsubscribed_at IS NULL "
+            "AND (trial_pending_password_change IS NULL OR trial_pending_password_change=0)"
         ).fetchall()
 
     sent = 0
@@ -1535,7 +1583,9 @@ def send_weekly_starters_email(db, target_date=None, recipient_ids=None):
             recipients = db.execute(
                 f"SELECT id, username AS email, name FROM stocks_admin_users "
                 f"WHERE role='viewer' AND is_active=1 AND stocks_plan='starters' "
-                f"AND email_unsubscribed_at IS NULL AND id IN ({placeholders})",
+                f"AND email_unsubscribed_at IS NULL "
+                f"AND (trial_pending_password_change IS NULL OR trial_pending_password_change=0) "
+                f"AND id IN ({placeholders})",
                 tuple(recipient_ids)
             ).fetchall()
         else:
@@ -1543,7 +1593,8 @@ def send_weekly_starters_email(db, target_date=None, recipient_ids=None):
     else:
         recipients = db.execute(
             "SELECT id, username AS email, name FROM stocks_admin_users "
-            "WHERE role='viewer' AND is_active=1 AND stocks_plan='starters' AND email_unsubscribed_at IS NULL"
+            "WHERE role='viewer' AND is_active=1 AND stocks_plan='starters' AND email_unsubscribed_at IS NULL "
+            "AND (trial_pending_password_change IS NULL OR trial_pending_password_change=0)"
         ).fetchall()
 
     sent = 0
@@ -1667,7 +1718,9 @@ def send_large_cap_bonus_email(db, target_date=None, recipient_ids=None):
             recipients = db.execute(
                 f"SELECT id, username AS email, name FROM stocks_admin_users "
                 f"WHERE role='viewer' AND is_active=1 AND stocks_plan='standard' "
-                f"AND email_unsubscribed_at IS NULL AND id IN ({placeholders})",
+                f"AND email_unsubscribed_at IS NULL "
+                f"AND (trial_pending_password_change IS NULL OR trial_pending_password_change=0) "
+                f"AND id IN ({placeholders})",
                 tuple(recipient_ids)
             ).fetchall()
         else:
@@ -1675,7 +1728,8 @@ def send_large_cap_bonus_email(db, target_date=None, recipient_ids=None):
     else:
         recipients = db.execute(
             "SELECT id, username AS email, name FROM stocks_admin_users "
-            "WHERE role='viewer' AND is_active=1 AND stocks_plan='standard' AND email_unsubscribed_at IS NULL"
+            "WHERE role='viewer' AND is_active=1 AND stocks_plan='standard' AND email_unsubscribed_at IS NULL "
+            "AND (trial_pending_password_change IS NULL OR trial_pending_password_change=0)"
         ).fetchall()
 
     sent = 0
