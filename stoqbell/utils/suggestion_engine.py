@@ -1138,6 +1138,43 @@ def get_candidates_for_manual_pick(db, count=2, mode='top'):
     return results
 
 
+def get_candidate_for_manual_pick(db, watchlist_id):
+    """Single-stock counterpart of get_candidates_for_manual_pick above --
+    powers the Notifications page's "Send mail" entry point from the
+    Watchlist table (see app.py's /stocks/notifications?watchlist_id=),
+    where the admin has already picked a specific Highly Recommended
+    company and just wants to jump straight to reviewing/sending it,
+    without going through the top-N/random preview flow.
+
+    Looks the requested watchlist_id up in the exact same today's eligible,
+    off-cooldown pool get_candidates_for_manual_pick draws from -- so this
+    can only ever return a stock that's genuinely sendable right now, same
+    guarantee as the normal flow. Returns None (not an error) when the
+    requested stock isn't in that pool today -- e.g. it's since dropped off
+    golden-cross, fallen on cooldown, or the id was stale -- the caller
+    (the route) is expected to fall back to the normal empty-preview state
+    with an explanatory flash rather than treat this as a crash.
+
+    Returns the same single-dict shape as one entry of
+    get_candidates_for_manual_pick's list, or None."""
+    pool = _todays_eligible_candidates_off_cooldown(db)
+    for candidate, nns_score in pool:
+        if candidate['watchlist_id'] != watchlist_id:
+            continue
+        price_history = _fetch_price_history(db, watchlist_id)
+        pricing = compute_suggestion_pricing(
+            price_history, candidate['latest_close'], TARGET_MULTIPLIER, STOP_LOSS_MULTIPLIER, HOLDING_PERIOD_DAYS
+        )
+        return {
+            'watchlist_id': watchlist_id, 'symbol': candidate['symbol'], 'exchange': candidate['exchange'],
+            'company_name': candidate.get('company_name'),
+            'nns_score': nns_score, 'nns_tier': nns_tier(nns_score),
+            'buy_price': pricing['buy_price'], 'target_sell_price': pricing['target_sell_price'],
+            'pattern_name': pricing['pattern_name'],
+        }
+    return None
+
+
 def create_manual_suggestions(db, watchlist_ids):
     """Creates today's stock_suggestions row(s) for admin-chosen
     watchlist_ids (from the Notifications page's preview step, see

@@ -80,8 +80,22 @@ def test_decreasing_promoter_holding_fails_that_check_only():
     assert failed == ['promoter holding trend']
 
 
-def test_flat_fii_holding_fails_since_it_must_strictly_increase():
-    row = {**PASSING_ROW, 'fii_holding_pct': 15}  # equal to previous (15), not increasing
+def test_flat_fii_holding_passes_same_as_flat_promoter_holding():
+    # FII holding is a quarterly-disclosed figure -- two snapshots taken
+    # within the same quarter (the common case once a company has been
+    # rescraped) will show the exact same value, with no real trend to
+    # observe yet. That must pass, same as stable promoter holding does,
+    # not be punished as if it were a decline.
+    row = {**PASSING_ROW, 'fii_holding_pct': 15}  # equal to previous (15)
+
+    passes, failed = evaluate_fundamentals(row, PASSING_PREVIOUS_ROW)
+
+    assert passes is True
+    assert failed == []
+
+
+def test_decreasing_fii_holding_fails_that_check_only():
+    row = {**PASSING_ROW, 'fii_holding_pct': 10}  # below previous (15)
 
     passes, failed = evaluate_fundamentals(row, PASSING_PREVIOUS_ROW)
 

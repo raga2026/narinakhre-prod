@@ -199,6 +199,7 @@ from stoqbell.utils.suggestion_engine import (
     compute_watchlist_nns_scores,
     get_top_stocks,
     get_candidates_for_manual_pick,
+    get_candidate_for_manual_pick,
     create_manual_suggestions,
     get_special_recommendations_today,
 )
@@ -936,10 +937,38 @@ def stocks_notifications():
     sample from today's golden-cross-eligible pool, review the specific
     stock(s) surfaced (see /stocks/notifications/preview-picks) before
     committing, and choose which viewers receive them (see
-    /stocks/notifications/send). Same recipient list as the resend page."""
+    /stocks/notifications/send). Same recipient list as the resend page.
+
+    An optional ?watchlist_id= (see the Watchlist page's own "Send mail"
+    link, shown next to each Highly Recommended company) skips straight to
+    reviewing that one specific stock instead of the normal top-N/random
+    flow -- see get_candidate_for_manual_pick. Passed to the template as
+    preselected_candidate (a single dict, JSON-serializable) so the page's
+    JS can render it immediately via the same renderCandidates() the AJAX
+    preview endpoint uses, without the admin having to click "Get
+    candidates" first. None (the normal case, or a stale/no-longer-eligible
+    id) falls back to the ordinary empty starting state, with a flash
+    explaining why when an id was actually requested but not found."""
     db = get_db()
     recipients = [v for v in list_viewers(db) if v.get('is_active')]
-    return render_template('admin/stocks_notifications.html', recipients=recipients)
+
+    preselected_candidate = None
+    raw_watchlist_id = request.args.get('watchlist_id')
+    if raw_watchlist_id:
+        try:
+            preselected_candidate = get_candidate_for_manual_pick(db, int(raw_watchlist_id))
+        except ValueError:
+            preselected_candidate = None
+        if preselected_candidate is None:
+            flash(
+                "That company isn't currently sendable -- it may have dropped off golden-cross, "
+                "fallen on cooldown, or already been suggested today. Use \"Get candidates\" below instead.",
+                'error'
+            )
+
+    return render_template(
+        'admin/stocks_notifications.html', recipients=recipients, preselected_candidate=preselected_candidate
+    )
 
 
 @stocks_bp.route('/stocks/notifications/preview-picks', methods=['POST'])
@@ -973,8 +1002,20 @@ def stocks_notifications_send():
     job uses (send_daily_suggestions_email(target_date=today,
     recipient_ids=...)) -- no separate email-building code. Runs
     synchronously, same reasoning as /stocks/suggestions/resend: a handful
-    of stocks and recipients, not a slow sync job worth backgrounding."""
+    of stocks and recipients, not a slow sync job worth backgrounding.
+
+    include_custom_message='on' (the page's own checkbox) opts the send
+    into also passing custom_message through to send_daily_suggestions_email
+    -- unchecked, custom_message is ignored even if the textarea somehow
+    still has stale text in it (e.g. re-submitted form), same as it being
+    empty. See send_daily_suggestions_email's own custom_message param for
+    what a non-empty one actually does to the email."""
     db = get_db()
+
+    custom_message = None
+    if request.form.get('include_custom_message') == 'on':
+        raw_message = (request.form.get('custom_message') or '').strip()
+        custom_message = raw_message or None
 
     raw_watchlist_ids = request.form.getlist('watchlist_ids')
     if not raw_watchlist_ids:
@@ -999,7 +1040,7 @@ def stocks_notifications_send():
     try:
         creation_summary = create_manual_suggestions(db, watchlist_ids)
         send_summary = send_daily_suggestions_email(
-            db, target_date=date.today(), recipient_ids=recipient_ids
+            db, target_date=date.today(), recipient_ids=recipient_ids, custom_message=custom_message
         )
     except Exception as e:
         current_app.logger.error(f'Manual notification send failed: {e}')

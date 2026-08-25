@@ -1,3 +1,4 @@
+import html
 from datetime import date
 
 from supabase_storage import public_url as _supabase_public_url
@@ -1394,7 +1395,21 @@ def _build_email_content(suggestions, today_label):
     return subject, text_body, html_inner
 
 
-def send_daily_suggestions_email(db, target_date=None, recipient_ids=None):
+def _render_custom_message_html(message):
+    """Wraps an admin-written custom message (see send_daily_suggestions_email's
+    custom_message param) in its own callout box, shown ahead of the stock
+    card(s) -- html.escape'd since this is free-typed admin text landing in
+    every recipient's inbox, not a fixed internal string like everything
+    else this module renders."""
+    escaped = html.escape(message).replace('\n', '<br>')
+    return (
+        '<div style="background:#f0f9ff;border-left:4px solid #0ea5e9;padding:12px 16px;'
+        'margin-bottom:16px;border-radius:4px;font-family:Arial,Helvetica,sans-serif;'
+        f'color:#0f172a;font-size:14px;line-height:1.6;">{escaped}</div>'
+    )
+
+
+def send_daily_suggestions_email(db, target_date=None, recipient_ids=None, custom_message=None):
     """Fetches target_date's stock_suggestions rows via the shared
     suggestion_engine.get_suggestions() query and emails every active
     role='viewer' account in stocks_admin_users -- one send per recipient.
@@ -1423,7 +1438,15 @@ def send_daily_suggestions_email(db, target_date=None, recipient_ids=None):
     "everyone" -- the caller is expected to stop a genuinely-empty
     selection before calling this (see the resend route's own validation),
     but this function itself never reinterprets "nobody chosen" as "no
-    filter"."""
+    filter".
+
+    custom_message=None (the normal path) leaves the email exactly as
+    _build_email_content produces it. A non-empty string (see the
+    Notifications page's optional custom-message checkbox) is shown in its
+    own callout box ahead of the stock card(s), same for every recipient --
+    for a short admin note ("sending this one a day early", context on why
+    a pick looks unusual, etc.) alongside the actual recommendation, not
+    instead of it."""
     if target_date is None:
         target_date = date.today()
     elif isinstance(target_date, str):
@@ -1434,6 +1457,10 @@ def send_daily_suggestions_email(db, target_date=None, recipient_ids=None):
     suggestions = get_suggestions(db, start_date=date_iso, end_date=date_iso)
 
     subject, text_body_base, html_inner_base = _build_email_content(suggestions, date_label)
+
+    if custom_message:
+        text_body_base = f'{custom_message.strip()}\n\n{text_body_base}'
+        html_inner_base = _render_custom_message_html(custom_message) + html_inner_base
 
     if recipient_ids is not None:
         recipient_ids = list(recipient_ids)

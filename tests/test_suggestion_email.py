@@ -146,6 +146,59 @@ def test_email_sent_to_every_active_recipient_and_includes_disclaimer():
     assert summary['sent'] == 2
 
 
+def test_custom_message_shown_ahead_of_the_recommendation():
+    db = FakeEmailDB(
+        suggestion_rows=[
+            {'symbol': 'ABC', 'exchange': 'NSE', 'buy_price': 100.0, 'target_sell_price': 105.0,
+             'stop_loss_price': 97.0, 'holding_period_days': 10, 'rationale': 'Golden cross with confirming volume'},
+        ],
+        recipient_rows=[{'email': 'a@example.com', 'name': 'A'}],
+    )
+
+    with patch('stoqbell.utils.suggestion_email.send_zeptomail_stocks_email', return_value=(True, 'ok')) as mock_send:
+        send_daily_suggestions_email(db, custom_message='Sending this one a day early.')
+
+    textbody = mock_send.call_args.kwargs['textbody']
+    htmlbody = mock_send.call_args.kwargs['htmlbody']
+    assert 'Sending this one a day early.' in textbody
+    assert 'Sending this one a day early.' in htmlbody
+    # Custom message comes before the stock content in both bodies.
+    assert textbody.index('Sending this one a day early.') < textbody.index('ABC')
+    assert htmlbody.index('Sending this one a day early.') < htmlbody.index('ABC')
+
+
+def test_custom_message_html_is_escaped():
+    db = FakeEmailDB(
+        suggestion_rows=[
+            {'symbol': 'ABC', 'exchange': 'NSE', 'buy_price': 100.0, 'target_sell_price': 105.0,
+             'stop_loss_price': 97.0, 'holding_period_days': 10, 'rationale': 'Golden cross with confirming volume'},
+        ],
+        recipient_rows=[{'email': 'a@example.com', 'name': 'A'}],
+    )
+
+    with patch('stoqbell.utils.suggestion_email.send_zeptomail_stocks_email', return_value=(True, 'ok')) as mock_send:
+        send_daily_suggestions_email(db, custom_message='<script>alert(1)</script>')
+
+    htmlbody = mock_send.call_args.kwargs['htmlbody']
+    assert '<script>alert(1)</script>' not in htmlbody
+    assert '&lt;script&gt;' in htmlbody
+
+
+def test_no_custom_message_leaves_email_unchanged():
+    db = FakeEmailDB(
+        suggestion_rows=[
+            {'symbol': 'ABC', 'exchange': 'NSE', 'buy_price': 100.0, 'target_sell_price': 105.0,
+             'stop_loss_price': 97.0, 'holding_period_days': 10, 'rationale': 'Golden cross with confirming volume'},
+        ],
+        recipient_rows=[{'email': 'a@example.com', 'name': 'A'}],
+    )
+
+    with patch('stoqbell.utils.suggestion_email.send_zeptomail_stocks_email', return_value=(True, 'ok')) as mock_send:
+        send_daily_suggestions_email(db, custom_message=None)
+
+    assert 'background:#f0f9ff' not in mock_send.call_args.kwargs['htmlbody']
+
+
 def test_daily_email_excludes_accounts_with_a_pending_first_password_change():
     # A viewer created with start_trial=True whose trial hasn't started yet
     # (they haven't logged in and set their own password -- see

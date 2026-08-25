@@ -118,7 +118,7 @@ def evaluate_fundamentals(fundamentals_row, previous_fundamentals_row=None, indu
       - Price-to-book no more than 1.5x its industry's average (falls back
         to a flat <=10 ceiling without a trusted industry benchmark -- see
         PRICE_TO_BOOK_FALLBACK_MAX above)
-      - Promoter holding stable or increasing, and FII holding increasing
+      - Promoter holding and FII holding both stable or increasing
         -- both compare fundamentals_row against previous_fundamentals_row
         (that same company's prior snapshot). Pass previous_fundamentals_row=
         None when there isn't one yet (a brand new company with only one
@@ -200,7 +200,7 @@ def evaluate_fundamentals(fundamentals_row, previous_fundamentals_row=None, indu
 
         fii_now = fundamentals_row.get('fii_holding_pct')
         fii_before = previous_fundamentals_row.get('fii_holding_pct')
-        if fii_now is not None and fii_before is not None and not (fii_now > fii_before):
+        if fii_now is not None and fii_before is not None and fii_now < fii_before:
             failed.append('FII holding trend')
 
     return (len(failed) == 0, failed)
@@ -398,7 +398,7 @@ def evaluate_fundamentals_large_cap(fundamentals_row, previous_fundamentals_row=
 
         fii_now = fundamentals_row.get('fii_holding_pct')
         fii_before = previous_fundamentals_row.get('fii_holding_pct')
-        if fii_now is not None and fii_before is not None and not (fii_now > fii_before):
+        if fii_now is not None and fii_before is not None and fii_now < fii_before:
             failed.append('FII holding trend')
 
     return (len(failed) == 0, failed)

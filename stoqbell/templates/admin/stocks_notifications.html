@@ -81,6 +81,21 @@
             <div id="candidates-checkbox-list"></div>
 
             <div class="bg-slate-800 rounded-2xl p-6 border border-sky-500/20 mb-6">
+                <label class="flex items-center gap-2 text-sm text-slate-200 mb-3">
+                    <input type="checkbox" id="include-custom-message" name="include_custom_message"
+                           onchange="document.getElementById('custom-message-wrap').classList.toggle('hidden', !this.checked)">
+                    Include a custom message
+                </label>
+                <div id="custom-message-wrap" class="hidden">
+                    <label for="custom-message" class="block text-sm text-slate-300 mb-2">Message shown above the recommendation, same for every recipient</label>
+                    <textarea id="custom-message" name="custom_message" rows="4" maxlength="2000"
+                              placeholder="e.g. Sending this one a day early because..."
+                              class="w-full rounded-xl px-4 py-3 text-sm"
+                              style="background:#1e293b;color:#f8fafc;border:1px solid #334155;"></textarea>
+                </div>
+            </div>
+
+            <div class="bg-slate-800 rounded-2xl p-6 border border-sky-500/20 mb-6">
                 <div class="flex items-center justify-between mb-2">
                     <label class="block text-sm text-slate-300">Recipients</label>
                     {% if recipients %}
@@ -203,6 +218,10 @@
             var recipientCount = document.querySelectorAll('input[name="recipient_ids"]:checked').length;
             return confirm('Send ' + stockCount + ' recommendation(s) to ' + recipientCount + ' selected recipient(s)? This sends a real email.');
         }
+
+        {% if preselected_candidate %}
+        renderCandidates([{{ preselected_candidate | tojson }}]);
+        {% endif %}
     </script>
 </body>
 </html>

@@ -282,6 +282,10 @@
                         <td>
                             {% if row.nns_tier in ('golden', 'silver') %}
                                 <span class="badge badge-recommended">Highly Recommended</span>
+                                {% if row.watchlist_id and session.stocks_admin_role == 'super_admin' %}
+                                <a href="{{ url_for('stocks.stocks_notifications', watchlist_id=row.watchlist_id) }}"
+                                   class="metric-note" style="color:#38bdf8;text-decoration:underline;">Send mail</a>
+                                {% endif %}
                             {% elif row.nns_tier == 'bronze' %}
                                 <span class="badge badge-bronze">Recommended -- extra caution</span>
                             {% else %}

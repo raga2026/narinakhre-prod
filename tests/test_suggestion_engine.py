@@ -13,6 +13,7 @@ from stoqbell.utils.suggestion_engine import (
     find_pending_target_hit_suggestions,
     generate_daily_suggestions,
     get_all_highly_recommended_today,
+    get_candidate_for_manual_pick,
     get_candidates_for_manual_pick,
     get_special_recommendations_today,
     get_suggestion_by_id,
@@ -907,6 +908,42 @@ def test_manual_pick_empty_when_nothing_is_off_cooldown():
     }])
 
     assert get_candidates_for_manual_pick(db, count=2, mode='random') == []
+
+
+def test_get_candidate_for_manual_pick_returns_the_requested_stock():
+    wanted = _candidate(1, 'WANTEDCO')
+    other = _candidate(2, 'OTHERCO', peg_ratio=0.9, quarterly_profit_growth_pct=11,
+                        opm_pct=26, roce_pct=10, roa_pct=5)
+    db = FakeSuggestionDB([wanted, other])
+
+    result = get_candidate_for_manual_pick(db, 1)
+
+    assert result is not None
+    assert result['watchlist_id'] == 1
+    assert result['symbol'] == 'WANTEDCO'
+
+
+def test_get_candidate_for_manual_pick_none_when_id_not_in_todays_pool():
+    candidate = _candidate(1, 'ONLYCO')
+    db = FakeSuggestionDB([candidate])
+
+    assert get_candidate_for_manual_pick(db, 999) is None
+
+
+def test_get_candidate_for_manual_pick_none_when_stock_is_on_cooldown():
+    on_cooldown = _candidate(1, 'COOLDOWNCO')
+    baseline = FakeSuggestionDB([on_cooldown])
+    generate_daily_suggestions(baseline)
+    seeded_score = baseline.suggestions[0]['score']
+    seeded_target = baseline.suggestions[0]['target_sell_price']
+
+    within_window = (date.today() - timedelta(days=1)).isoformat()
+    db = FakeSuggestionDB([on_cooldown], existing_suggestions=[{
+        'id': 99, 'watchlist_id': 1, 'suggestion_date': within_window,
+        'score': seeded_score, 'target_sell_price': seeded_target, 'pattern_name': None, 'status': 'pending',
+    }])
+
+    assert get_candidate_for_manual_pick(db, 1) is None
 
 
 def test_create_manual_suggestions_creates_rows_only_for_requested_watchlist_ids():
