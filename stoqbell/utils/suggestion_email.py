@@ -561,8 +561,8 @@ def send_subscription_welcome_email(email, name, current_period_end_label, sugge
     this module free of date-formatting/timezone concerns.
 
     plan ('standard' or 'starters', see STOCKS_AUTH_ALTER_SQL's stocks_plan
-    column) picks the right price/cadence copy -- Rs 352.82/mo daily for
-    'standard', Rs 116.82/mo up to two picks a week for 'starters'. Matters
+    column) picks the right price/cadence copy -- Rs 299 + GST (Rs 352.82)/mo daily for
+    'standard', Rs 99 + GST (Rs 116.82)/mo up to two picks a week for 'starters'. Matters
     here specifically because this text used to hardcode "Rs 299/month"
     unconditionally, which was wrong for a Starters signup.
 
@@ -591,14 +591,14 @@ def send_subscription_welcome_email(email, name, current_period_end_label, sugge
     )
     if is_starters:
         price_cadence_text = (
-            "Your Rs 116.82/month Starters subscription is active. Up to twice a week (Mondays), we send a "
+            "Your Rs 99 + GST (Rs 116.82)/month Starters subscription is active. Up to twice a week (Mondays), we send a "
             "separately-curated stock that clears our strictest, golden-tier quality bar -- buy price, "
             "target sell price, and the reasoning behind it. Some weeks nothing clears that bar, so there's "
             "no email that week."
         )
     else:
         price_cadence_text = (
-            "Your Rs 352.82/month subscription is active. Each day we pick a single stock that clears our "
+            "Your Rs 299 + GST (Rs 352.82)/month subscription is active. Each day we pick a single stock that clears our "
             "screening bar and email it to you -- buy price, target sell price, and the reasoning "
             "behind it, marked Highly Recommended or Recommended so you know at a glance how strong the pick "
             "is. Some days nothing clears the bar, so there's no email that day."
@@ -688,7 +688,7 @@ def send_subscription_expiry_reminder_email(email, name, current_period_end_labe
         subject = f'StoqBell -- renews on {current_period_end_label}'
         headline = (
             f"Your StoqBell subscription will auto-renew on "
-            f"{current_period_end_label} for Rs 352.82. No action needed if you'd "
+            f"{current_period_end_label} for Rs 299 + GST (Rs 352.82). No action needed if you'd "
             f"like to continue -- this is just a heads-up before the charge."
         )
     else:
@@ -729,10 +729,10 @@ def send_trial_ended_email(email, name):
         "no trial reset, this is a real subscription from here."
     )
     plans_text = (
-        'Standard -- Rs 352.82/month: Pick of the Day with full reasoning, buy/target '
+        'Standard -- Rs 299 + GST (Rs 352.82)/month: Pick of the Day with full reasoning, buy/target '
         'prices, StoqBell Score breakdown, target-hit alerts, bonus large-cap pick '
         'twice a week.\n'
-        'Starters -- Rs 116.82/month: up to two golden-tier picks a week, every Monday, '
+        'Starters -- Rs 99 + GST (Rs 116.82)/month: up to two golden-tier picks a week, every Monday, '
         'with buy/target prices.'
     )
     text_body = f'Hi {greeting},\n\n{headline}\n\n{plans_text}\n\nLog in to subscribe: {STOCKS_LOGIN_URL}\n\n{DISCLAIMER}\n'
@@ -743,12 +743,12 @@ def send_trial_ended_email(email, name):
         'style="max-width:600px;width:100%;margin:12px 0;border-collapse:collapse;">'
         '<tr>'
         '<td style="width:50%;vertical-align:top;padding:12px;border:1px solid #e2e8f0;border-radius:8px;">'
-        '<div style="font-weight:bold;color:#0f172a;">Standard -- Rs 352.82/month</div>'
+        '<div style="font-weight:bold;color:#0f172a;">Standard -- Rs 299 + GST (Rs 352.82)/month</div>'
         '<div style="color:#475569;font-size:13px;margin-top:6px;">Pick of the Day with full reasoning, '
         'buy/target prices, StoqBell Score breakdown, target-hit alerts, bonus large-cap pick twice a week.</div>'
         '</td>'
         '<td style="width:50%;vertical-align:top;padding:12px;border:1px solid #e2e8f0;border-radius:8px;">'
-        '<div style="font-weight:bold;color:#0f172a;">Starters -- Rs 116.82/month</div>'
+        '<div style="font-weight:bold;color:#0f172a;">Starters -- Rs 99 + GST (Rs 116.82)/month</div>'
         '<div style="color:#475569;font-size:13px;margin-top:6px;">Up to two golden-tier picks a week, '
         'every Monday, with buy/target prices.</div>'
         '</td>'
@@ -804,12 +804,12 @@ def send_admin_new_subscriber_email(email, name):
     subject = f'New StoqBell subscriber: {greeting}'
     text_body = (
         f'{greeting} ({email}) just signed up and completed payment for the '
-        f'Rs 352.82/month StoqBell subscription.\n'
+        f'Rs 299 + GST (Rs 352.82)/month StoqBell subscription.\n'
     )
     html_body = (
         f'{_stoqbell_logo_header_html()}'
         f'<p><strong>{greeting}</strong> ({email}) just signed up and completed payment for the '
-        f'Rs 352.82/month StoqBell subscription.</p>'
+        f'Rs 299 + GST (Rs 352.82)/month StoqBell subscription.</p>'
     )
     return send_zeptomail_stocks_email(
         to_email=STOCKS_ADMIN_NOTIFY_EMAIL, to_name='Nari Nakhre', subject=subject,
@@ -829,12 +829,12 @@ def send_admin_subscription_cancelled_email(email, name):
     greeting = name or email
     subject = f'StoqBell subscription cancelled: {greeting}'
     text_body = (
-        f'{greeting} ({email}) just cancelled their Rs 352.82/month StoqBell subscription. '
+        f'{greeting} ({email}) just cancelled their Rs 299 + GST (Rs 352.82)/month StoqBell subscription. '
         f'Their access continues through the end of the period already paid for.\n'
     )
     html_body = (
         f'{_stoqbell_logo_header_html()}'
-        f'<p><strong>{greeting}</strong> ({email}) just cancelled their Rs 352.82/month StoqBell '
+        f'<p><strong>{greeting}</strong> ({email}) just cancelled their Rs 299 + GST (Rs 352.82)/month StoqBell '
         f'subscription. Their access continues through the end of the period already paid for.</p>'
     )
     return send_zeptomail_stocks_email(
@@ -1305,7 +1305,7 @@ def _referral_footer_text(referral_code):
     link = f'{STOCKS_BASE_URL}/stocks/signup?ref={referral_code}'
     return (
         f'Refer {REFERRALS_PER_FREE_MONTH} people who subscribe and get a month free -- they get their first '
-        f'month for Rs 234.82 instead of Rs 352.82 with your link: {link} (or share code {referral_code}).'
+        f'month for Rs 199 + GST (Rs 234.82) instead of Rs 299 + GST (Rs 352.82) with your link: {link} (or share code {referral_code}).'
     )
 
 
@@ -1315,7 +1315,7 @@ def _referral_footer_html(referral_code):
         '<p style="color:#64748b;font-size:0.8em;margin-top:16px;font-family:Arial,Helvetica,sans-serif;'
         'border-top:1px solid #e2e8f0;padding-top:12px;">'
         f'Refer {REFERRALS_PER_FREE_MONTH} people who subscribe and get a month free -- they get their first month '
-        f'for Rs 234.82 instead of Rs 352.82 with <a href="{link}" style="color:#0ea5e9;">your referral link</a> '
+        f'for Rs 199 + GST (Rs 234.82) instead of Rs 299 + GST (Rs 352.82) with <a href="{link}" style="color:#0ea5e9;">your referral link</a> '
         f'(or share code <strong>{referral_code}</strong>).</p>'
     )
 

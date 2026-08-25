@@ -758,8 +758,8 @@ def test_subscription_welcome_email_with_suggestions_includes_todays_pick():
     assert 'Golden Co Ltd' in kwargs['htmlbody']
     assert kwargs['htmlbody'].strip().startswith('<!doctype html>')
     assert DISCLAIMER in kwargs['textbody']
-    assert 'Rs 352.82/month' in kwargs['textbody']
-    assert 'Rs 116.82/month' not in kwargs['textbody']
+    assert 'Rs 299 + GST (Rs 352.82)/month' in kwargs['textbody']
+    assert 'Rs 99 + GST (Rs 116.82)/month' not in kwargs['textbody']
 
 
 def test_subscription_welcome_email_defaults_to_standard_plan_pricing():
@@ -767,7 +767,7 @@ def test_subscription_welcome_email_defaults_to_standard_plan_pricing():
         send_subscription_welcome_email('new@example.com', 'New Sub', '17 Sep 2026')
 
     kwargs = mock_send.call_args.kwargs
-    assert 'Rs 352.82/month' in kwargs['textbody']
+    assert 'Rs 299 + GST (Rs 352.82)/month' in kwargs['textbody']
     assert 'Each day we pick' in kwargs['textbody']
 
 
@@ -776,8 +776,8 @@ def test_subscription_welcome_email_starters_plan_shows_the_correct_price_and_ca
         send_subscription_welcome_email('new@example.com', 'New Sub', '17 Sep 2026', plan='starters')
 
     kwargs = mock_send.call_args.kwargs
-    assert 'Rs 116.82/month' in kwargs['textbody']
-    assert 'Rs 352.82/month' not in kwargs['textbody']
+    assert 'Rs 99 + GST (Rs 116.82)/month' in kwargs['textbody']
+    assert 'Rs 299 + GST (Rs 352.82)/month' not in kwargs['textbody']
     assert 'Starters' in kwargs['textbody']
     assert 'no pick to show yet' in kwargs['textbody'].lower()
 
@@ -797,7 +797,7 @@ def test_subscription_welcome_email_starters_plan_with_suggestions_uses_weekly_h
     assert "this week's pick" in kwargs['subject'].lower()
     assert "today's recommendation" not in kwargs['subject'].lower()
     assert 'Golden Co Ltd' in kwargs['textbody']
-    assert 'Rs 116.82/month' in kwargs['textbody']
+    assert 'Rs 99 + GST (Rs 116.82)/month' in kwargs['textbody']
 
 
 def test_admin_new_subscriber_email_goes_to_the_fixed_admin_address():

@@ -295,8 +295,8 @@ RAZORPAY_STOCKS_REFERRAL_PLAN_ID = os.environ.get('RAZORPAY_STOCKS_REFERRAL_PLAN
 # point at, since this code has no way to read a Plan's amount back from
 # Razorpay to derive this automatically without an extra API call on every
 # checkout page load.
-STOCKS_SUBSCRIPTION_PRICE_DISPLAY = 'Rs 352.82'
-STOCKS_REFERRAL_PRICE_DISPLAY = 'Rs 234.82'
+STOCKS_SUBSCRIPTION_PRICE_DISPLAY = 'Rs 299 + GST (Rs 352.82)'
+STOCKS_REFERRAL_PRICE_DISPLAY = 'Rs 199 + GST (Rs 234.82)'
 # Starters tier (see STOCKS_AUTH_ALTER_SQL's stocks_plan column,
 # stoqbell/utils/starters_engine.py) -- Rs 99/month, one separately-curated
 # golden-tier-only pick a week instead of the daily one. Its own Plan
@@ -304,7 +304,7 @@ STOCKS_REFERRAL_PRICE_DISPLAY = 'Rs 234.82'
 # variant exists for this tier (the referral discount stays Standard-only,
 # see /stocks/signup).
 RAZORPAY_STOCKS_STARTERS_PLAN_ID = os.environ.get('RAZORPAY_STOCKS_STARTERS_PLAN_ID', '')
-STOCKS_STARTERS_PRICE_DISPLAY = 'Rs 116.82'
+STOCKS_STARTERS_PRICE_DISPLAY = 'Rs 99 + GST (Rs 116.82)'
 # Shared secret for every Stocks cron-triggered route (price sync, indicator
 # calc, fundamentals rotation scrape, etc.) -- the caller is always a
 # GitHub Actions workflow (.github/workflows/stocks-*.yml), not a Render
