@@ -48,6 +48,25 @@ def compute_day_change(closes_desc):
     }
 
 
+def apply_live_price_to_day_change(day_change, live_price):
+    """Re-expresses change_amount/change_pct against the intraday live_price
+    instead of the prior EOD close-to-close move, so the day-change badge
+    shown right under the live price actually matches it (display only --
+    latest_close/previous_close stay the real EOD figures; nothing here
+    touches suggestion pricing). Returns day_change unchanged if there's no
+    day_change to begin with or no live_price to apply."""
+    if day_change is None or live_price is None:
+        return day_change
+    previous_close = day_change['previous_close']
+    if not previous_close:
+        return day_change
+    return {
+        **day_change,
+        'change_amount': round(live_price - previous_close, 2),
+        'change_pct': round((live_price - previous_close) / previous_close * 100, 2),
+    }
+
+
 def compute_52_week_range(highs, lows):
     """highs/lows: daily high/low values, any order, None entries ignored.
     Returns (week52_high, week52_low) -- either side is None if no data

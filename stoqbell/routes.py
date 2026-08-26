@@ -164,6 +164,7 @@ from stoqbell.utils.fundamental_screen import get_metric_note
 from stoqbell.utils.watchlist_view import enrich_and_sort_watchlist_rows, redact_recommendation_signals
 from stoqbell.utils.price_pattern import (
     compute_day_change,
+    apply_live_price_to_day_change,
     compute_52_week_range,
     trend_note,
     build_price_sparkline_svg,
@@ -1748,7 +1749,7 @@ def stocks_company_detail(watchlist_id):
     ).fetchall()
 
     closes_desc = [p['close'] for p in price_history if p.get('close') is not None]
-    day_change = compute_day_change(closes_desc)
+    day_change = apply_live_price_to_day_change(compute_day_change(closes_desc), company.get('live_price'))
     week52_high, week52_low = compute_52_week_range(
         [p.get('high') for p in price_history], [p.get('low') for p in price_history]
     )
@@ -2124,7 +2125,7 @@ def stocks_universe_detail(universe_id):
     ).fetchall()
 
     closes_desc = [p['close'] for p in price_history if p.get('close') is not None]
-    day_change = compute_day_change(closes_desc)
+    day_change = apply_live_price_to_day_change(compute_day_change(closes_desc), company.get('live_price'))
     week52_high, week52_low = compute_52_week_range(
         [p.get('high') for p in price_history], [p.get('low') for p in price_history]
     )

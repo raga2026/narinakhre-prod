@@ -159,18 +159,24 @@
         <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
             <div class="stat-card">
                 <p class="stat-label">Price</p>
-                <p class="stat-value">{{ '₹%.2f'|format(company.latest_price) if company.latest_price is not none else '—' }}</p>
+                <p class="stat-value">
+                    {% if company.live_price is not none %}
+                        ₹{{ '%.2f'|format(company.live_price) }}
+                        <span class="metric-note" style="color:#38bdf8;">Live</span>
+                    {% else %}
+                        {{ '₹%.2f'|format(company.latest_price) if company.latest_price is not none else '—' }}
+                    {% endif %}
+                </p>
                 {% if company.day_change %}
                 <p class="metric-note {{ 'text-green-600' if company.day_change.change_pct >= 0 else 'text-red-600' }}">
                     {{ '+' if company.day_change.change_pct >= 0 }}{{ company.day_change.change_pct }}%
                     ({{ '+' if company.day_change.change_amount >= 0 }}₹{{ '%.2f'|format(company.day_change.change_amount) }}) vs previous close
                 </p>
                 {% endif %}
-                <p class="text-gray-400 text-xs mt-1">Close as of {{ company.price_date or '—' }}</p>
                 {% if company.live_price is not none %}
-                <p class="metric-note" style="color: var(--accent);">
-                    Live: ₹{{ '%.2f'|format(company.live_price) }}{% if company.live_price_updated_at_ist %} as of {{ company.live_price_updated_at_ist }}{% endif %}
-                </p>
+                <p class="text-gray-400 text-xs mt-1">As of {{ company.live_price_updated_at_ist or '—' }} &middot; previous close ₹{{ '%.2f'|format(company.latest_price) if company.latest_price is not none else '—' }} ({{ company.price_date or '—' }})</p>
+                {% else %}
+                <p class="text-gray-400 text-xs mt-1">Close as of {{ company.price_date or '—' }}</p>
                 {% endif %}
             </div>
             <div class="stat-card">
