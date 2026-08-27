@@ -1,0 +1,14 @@
+{#- Apoorva theme: mobile category scroll-strip, included in every real
+   page's header block after {{ "{{ super() }}" }} -- e.g.
+   {% block header %}{{ "{{ super() }}" }}{% include "retail/_mobile_cat_strip.html" %}{% endblock %}.
+   Real categories/links (from the `categories` context variable every
+   retail page already receives via render_site), shown only below 768px --
+   the same breakpoint the real header already uses for its own
+   hamburger/desktop-nav switch. See _shared_styles.html for its CSS. -#}
+<nav class="mobile-cat-strip" aria-label="Shop by category (scroll for more)">
+    <ul>
+        {% for cat in categories %}
+        <li><a href="/retail/category/{{ cat }}">{{ cat }}</a></li>
+        {% endfor %}
+    </ul>
+</nav>

@@ -1,0 +1,171 @@
+{#- Apoorva theme: JS shared by every real retail page, included inside each
+   page's own <script> block -- e.g. {% include "retail/_shared_scripts.html" %}.
+   Self-contained: registers its own DOMContentLoaded listener, so an
+   including page doesn't need to remember to call anything itself. -#}
+async function shareProduct(name, url, imageUrl) {
+    const shareData = {
+        title: name + ' | Nari Nakhre',
+        text: '✨ ' + name + ' — Premium Ethnic Jewellery by Nari Nakhre',
+        url: url
+    };
+    if (imageUrl && navigator.canShare && window.File) {
+        try {
+            const r = await fetch(imageUrl, { mode: 'cors' });
+            if (r.ok) {
+                const blob = await r.blob();
+                const file = new File([blob], name.replace(/\W+/g,'-').toLowerCase()+'.jpg', { type: blob.type });
+                const sd = { ...shareData, files: [file] };
+                if (navigator.canShare(sd)) { await navigator.share(sd); return; }
+            }
+        } catch(e) {}
+    }
+    if (navigator.share) {
+        navigator.share(shareData).catch(()=>{});
+        return;
+    }
+    const msg = encodeURIComponent(shareData.text + '\n' + url);
+    window.open('https://wa.me/?text=' + msg, '_blank');
+}
+
+function copyOfferCode(code, btn) {
+    navigator.clipboard.writeText(code).then(function () {
+        var original = btn.textContent;
+        btn.textContent = 'Copied!';
+        setTimeout(function () { btn.textContent = original; }, 1500);
+    });
+}
+
+document.addEventListener('DOMContentLoaded', function () {
+
+    /* ── Offers/announcement carousel: auto-rotate slides -- shared by
+       every page's .offers-carousel (the homepage's full-size one and
+       product_detail's compact one alike; sizing differences are just
+       CSS). Each slide's own focusable element (the coupon-code button, or
+       the whole slide when it's a product link) gets tabindex="-1" while
+       hidden -- otherwise every inactive slide's control would still sit
+       in the Tab order despite being invisible (opacity:0, not
+       display:none). Mirrors setSlideA11y in the hero carousel below. */
+    function setOfferSlideA11y(slide, active) {
+        slide.setAttribute('aria-hidden', active ? 'false' : 'true');
+        var focusable = slide.tagName === 'A' ? slide : slide.querySelector('button, a');
+        if (focusable) {
+            if (active) focusable.removeAttribute('tabindex');
+            else focusable.setAttribute('tabindex', '-1');
+        }
+    }
+    document.querySelectorAll('.offers-carousel').forEach(function (carousel) {
+        var offersSlides = carousel.querySelectorAll('.offers-slide');
+        if (offersSlides.length <= 1) return;
+        var offersIdx = 0;
+        setInterval(function () {
+            offersSlides[offersIdx].classList.remove('active');
+            setOfferSlideA11y(offersSlides[offersIdx], false);
+            offersIdx = (offersIdx + 1) % offersSlides.length;
+            offersSlides[offersIdx].classList.add('active');
+            setOfferSlideA11y(offersSlides[offersIdx], true);
+        }, 4000);
+    });
+
+    /* ── Coverflow shelves: whichever card sits nearest a shelf's own
+       center gets --focus=1 (full scale/opacity via the CSS), fading out
+       toward the edges -- recomputed on every scroll frame so it tracks a
+       drag/swipe/auto-scroll in real time rather than only updating after
+       it settles. Shared by Trending, every category shelf, and "You May
+       Also Like" -- nothing here is page-specific. Tabbing into a card
+       also scrolls it to center (instant, not animated, when the visitor
+       prefers reduced motion), so keyboard use gets the same "whichever
+       one you're on is in focus" behavior as touch/mouse. */
+    (function initCoverflowShelves() {
+        var reduceMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+        function initShelf(shelf) {
+            var cards = Array.prototype.slice.call(shelf.querySelectorAll('.coverflow-card'));
+            if (!cards.length) return;
+            var ticking = false;
+
+            function update() {
+                ticking = false;
+                var shelfRect = shelf.getBoundingClientRect();
+                var shelfCenter = shelfRect.left + shelfRect.width / 2;
+                cards.forEach(function (card) {
+                    var rect = card.getBoundingClientRect();
+                    var cardCenter = rect.left + rect.width / 2;
+                    var distance = Math.abs(shelfCenter - cardCenter);
+                    var maxDistance = (shelfRect.width / 2) + (rect.width / 2);
+                    var focus = maxDistance > 0 ? Math.max(0, 1 - (distance / maxDistance)) : 1;
+                    card.style.setProperty('--focus', focus.toFixed(3));
+                });
+            }
+            function onScroll() {
+                if (ticking) return;
+                ticking = true;
+                requestAnimationFrame(update);
+            }
+
+            shelf.addEventListener('scroll', onScroll, { passive: true });
+            window.addEventListener('resize', onScroll);
+            shelf.addEventListener('focusin', function (e) {
+                var card = e.target.closest('.coverflow-card');
+                if (card) card.scrollIntoView({ behavior: reduceMotion ? 'auto' : 'smooth', inline: 'center', block: 'nearest' });
+            });
+            update();
+        }
+
+        document.querySelectorAll('.coverflow-shelf').forEach(initShelf);
+    })();
+
+    /* ── Per-card image carousel: each product with 2+ photos crossfades
+       through all of them on its own timer, independent of the coverflow
+       shelf's own focus state -- see the .card-img-layer CSS. Pauses while
+       that specific card is hovered/focused, and only runs once the card
+       has scrolled into view (IntersectionObserver-gated). Skipped
+       entirely under prefers-reduced-motion. */
+    (function initCardImageCarousels() {
+        if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+
+        function initOne(media) {
+            var raw = media.dataset.images;
+            if (!raw) return;
+            var images;
+            try { images = JSON.parse(raw); } catch (e) { return; }
+            if (!images || images.length <= 1) return;
+
+            var layers = Array.prototype.slice.call(media.querySelectorAll('.card-img-layer'));
+            if (layers.length < 2) return;
+
+            var frontIndex = 0;
+            var nextImageIndex = 1 % images.length;
+            var timer = null;
+            var paused = false;
+
+            function tick() {
+                if (paused) return;
+                var hiddenLayer = layers[1 - frontIndex];
+                hiddenLayer.src = images[nextImageIndex];
+                nextImageIndex = (nextImageIndex + 1) % images.length;
+                layers[frontIndex].classList.remove('is-front');
+                hiddenLayer.classList.add('is-front');
+                frontIndex = 1 - frontIndex;
+            }
+            function start() { if (!timer) timer = setInterval(tick, 2600); }
+            function stop() { clearInterval(timer); timer = null; }
+
+            media.addEventListener('mouseenter', function () { paused = true; });
+            media.addEventListener('mouseleave', function () { paused = false; });
+            media.addEventListener('focusin', function () { paused = true; });
+            media.addEventListener('focusout', function () { paused = false; });
+
+            if ('IntersectionObserver' in window) {
+                new IntersectionObserver(function (entries) {
+                    entries.forEach(function (entry) {
+                        if (entry.isIntersecting) start(); else stop();
+                    });
+                }, { threshold: 0.2 }).observe(media);
+            } else {
+                start();
+            }
+        }
+
+        document.querySelectorAll('.card-media[data-images]').forEach(initOne);
+    })();
+});

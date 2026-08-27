@@ -1,1 +1,411 @@
-{% extends "default/retail/product_detail.html" %}
+{% extends "retail/base.html" %}
+
+{% block seo_tags %}
+{%- set prod_desc = product.description|default('Buy ' ~ product.name ~ ' at Nari Nakhre.')|striptags|truncate(155) -%}
+{%- set prod_img = image_urls[0] if image_urls else '' -%}
+<title>{{ product.name }} | Nari Nakhre</title>
+<meta name="description" content="{{ prod_desc }}">
+<meta property="og:title" content="{{ product.name }} | Nari Nakhre">
+<meta property="og:description" content="{{ prod_desc }}">
+<meta property="og:image" content="{{ prod_img }}">
+<meta property="og:image:width" content="800">
+<meta property="og:image:height" content="800">
+<meta property="og:url" content="{{ request.url }}">
+<meta property="og:type" content="product">
+<meta property="og:site_name" content="Nari Nakhre">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="{{ product.name }} | Nari Nakhre">
+<meta name="twitter:description" content="{{ prod_desc }}">
+<meta name="twitter:image" content="{{ prod_img }}">
+<script type="application/ld+json">
+{
+  "@context":"https://schema.org","@type":"Product",
+  "name":{{ product.name|tojson }},
+  "description":{{ prod_desc|tojson }},
+  "image":{{ prod_img|tojson }},
+  "sku":{{ product.sku|tojson }},
+  "brand":{"@type":"Brand","name":"Nari Nakhre"},
+  "offers":{"@type":"Offer","priceCurrency":"INR","price":{{ product.retail_price|default(0) }},"availability":"https://schema.org/InStock","url":{{ request.url|tojson }}}
+}
+</script>
+{% endblock %}
+
+{% block theme_notice %}{% endblock %}
+
+{% block header %}
+{{ super() }}
+{% include "retail/_mobile_cat_strip.html" %}
+{% endblock %}
+
+{% block content %}
+<style>
+  {% include "retail/_shared_styles.html" %}
+
+  .pd-wrap { max-width: 1000px; margin: 0 auto; padding: 16px 16px 48px; }
+
+  /* ── Compact offers carousel (reuses .offers-carousel/.offers-slide's
+       shared structure/JS from _shared_styles.html/_shared_scripts.html --
+       this class just makes it shorter, matching the original page's
+       "half the homepage version" mini carousel) ── */
+  .offers-carousel--compact { min-height:56px; border-radius:12px; margin-bottom:16px; }
+  .offers-carousel--compact .offer-discount-big { font-size:1rem; }
+  .offers-carousel--compact .offer-product-card { padding:6px 12px; gap:10px; max-width:100%; }
+  .offers-carousel--compact .offer-product-img-wrap { width:36px; height:36px; }
+  .offers-carousel--compact .offer-product-title { max-width:130px; }
+  @media (min-width:768px) {
+    .offers-carousel--compact { min-height:68px; }
+    .offers-carousel--compact .offer-discount-big { font-size:1.3rem; }
+    .offers-carousel--compact .offer-product-title { max-width:220px; }
+  }
+
+  /* ── Image gallery ── */
+  .pd-main-img-wrap {
+    position: relative; width: 100%; background: var(--ivory-deep);
+    border-radius: 20px; overflow: hidden; aspect-ratio: 1 / 1; max-height: 420px;
+  }
+  .pd-main-img-wrap img { width: 100%; height: 100%; object-fit: contain; border-radius: 20px; }
+  .pd-share-btn {
+    position: absolute; top: 10px; right: 10px; background: var(--ivory); border: none;
+    border-radius: 50%; width: 36px; height: 36px; display: flex; align-items: center;
+    justify-content: center; cursor: pointer; box-shadow: 0 2px 8px rgba(0,0,0,0.12); z-index: 10;
+  }
+  .pd-nav-btn {
+    position: absolute; top: 50%; transform: translateY(-50%); background: rgba(250,246,240,.85);
+    border: none; border-radius: 50%; width: 34px; height: 34px; font-size: 1.1rem; cursor: pointer;
+    display: flex; align-items: center; justify-content: center; box-shadow: 0 2px 6px rgba(0,0,0,0.1);
+    z-index: 10; color: var(--wine);
+  }
+  .pd-nav-prev { left: 8px; }
+  .pd-nav-next { right: 8px; }
+
+  .pd-thumbs { display: flex; gap: 8px; overflow-x: auto; padding: 10px 0 4px; scrollbar-width: none; }
+  .pd-thumbs::-webkit-scrollbar { display: none; }
+  .pd-thumb {
+    flex-shrink: 0; width: 56px; height: 56px; object-fit: contain; border-radius: 10px;
+    border: 2px solid var(--line); background: #fff; cursor: pointer; transition: border-color 0.15s;
+  }
+  .pd-thumb.active { border-color: var(--wine); }
+
+  .pd-title { font-family:'Fraunces', serif; font-size: 1.2rem; font-weight: 700; color: var(--wine); line-height: 1.35; margin: 14px 0 6px; }
+  @media (min-width: 640px) { .pd-title { font-size: 1.5rem; } }
+  .pd-price { font-size: 1.5rem; font-weight: 800; color: var(--wine); margin-bottom: 10px; }
+
+  .pd-btn-add {
+    width: 100%; padding: 12px; border-radius: 999px; font-weight: 700; font-size: 0.95rem;
+    border: 2px solid var(--wine); background: #fff; color: var(--wine); cursor: pointer;
+    letter-spacing: 0.02em; transition: background 0.15s;
+  }
+  .pd-btn-add:hover { background: var(--ivory-deep); }
+  .pd-btn-buy {
+    width: 100%; padding: 12px; border-radius: 999px; font-weight: 700; font-size: 0.95rem;
+    border: none; background: var(--marigold); color: var(--ink); cursor: pointer;
+    letter-spacing: 0.02em; margin-top: 8px; transition: background 0.15s;
+  }
+  .pd-btn-buy:hover { background: var(--marigold-deep); }
+  .pd-unit-counter {
+    display: flex; align-items: center; justify-content: space-between; border: 2px solid var(--marigold);
+    background: var(--ivory-deep); border-radius: 999px; padding: 4px 10px; margin-bottom: 0;
+  }
+  .pd-uc-btn {
+    width: 32px; height: 32px; border-radius: 50%; border: none; background: var(--ivory);
+    color: var(--wine); font-size: 1.1rem; font-weight: bold; cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .pd-uc-btn:hover { background: var(--line); }
+  .pd-qty-display { font-weight: 800; font-size: 1.1rem; color: var(--wine); }
+
+  /* ── Lightbox ── */
+  #pd-lightbox {
+    display: none; position: fixed; inset: 0; z-index: 300;
+    background: rgba(20,8,10,0.92); align-items: center; justify-content: center;
+  }
+  #pd-lightbox.open { display: flex; }
+  #pd-lightbox img { max-width: 90vw; max-height: 85vh; object-fit: contain; border-radius: 16px; }
+  .lb-close { position: absolute; top: 16px; right: 20px; font-size: 2rem; color: var(--ivory); background: none; border: none; cursor: pointer; }
+  .lb-nav { position: absolute; top: 50%; transform: translateY(-50%); background: rgba(250,246,240,.15); border: none; color: var(--ivory); font-size: 1.8rem; border-radius: 50%; width: 44px; height: 44px; cursor: pointer; }
+  #lb-prev { left: 12px; }
+  #lb-next { right: 12px; }
+
+  /* ── Meta chips (color/material) ── */
+  .pd-meta-row { display: flex; gap: 8px; flex-wrap: wrap; margin: 2px 0 14px; }
+  .pd-chip { font-size: 0.72rem; font-weight: 700; color: var(--wine); background: var(--ivory-deep); border: 1px solid var(--line); border-radius: 999px; padding: 4px 12px; }
+
+  /* ── Details (description + key features) ── */
+  .pd-details-section { margin-top: 32px; border-top: 1px solid var(--line); padding-top: 24px; }
+  .pd-section-title { font-family:'Fraunces', serif; font-size: 1.05rem; font-weight: 700; color: var(--wine); margin: 0 0 10px; display: flex; align-items: center; gap: 8px; }
+  .pd-section-title::before { content: ''; width: 4px; height: 16px; background: var(--marigold); border-radius: 2px; display: inline-block; }
+  .pd-desc-card { font-size: 0.9rem; color: #4b5563; background: var(--ivory-deep); border-radius: 14px; padding: 16px; margin-bottom: 24px; line-height: 1.7; border: 1px solid var(--line); }
+  .pd-features-list { list-style: none; padding: 0; margin: 0; display: grid; gap: 10px; }
+  .pd-features-list li { display: flex; align-items: flex-start; gap: 10px; font-size: 0.9rem; color: #374151; line-height: 1.5; }
+  .pd-feature-check { flex-shrink: 0; width: 20px; height: 20px; border-radius: 50%; background: var(--ivory-deep); color: var(--wine); display: flex; align-items: center; justify-content: center; font-size: 0.68rem; font-weight: 900; margin-top: 1px; }
+
+  /* ── "You May Also Like" -- reuses the shared coverflow-shelf/card, same
+       component as Trending/category shelves on the homepage. ── */
+  .pd-related-heading { font-size: 1.3rem; color: var(--wine); font-weight: 600; margin: 40px 0 4px; }
+</style>
+
+<div class="pd-wrap">
+
+{% if product.status != 'published' %}
+<div style="background:#fef3c7;border:1.5px solid #f59e0b;color:#92400e;font-weight:700;font-size:0.82rem;padding:10px 14px;border-radius:10px;margin-bottom:14px;text-align:center;">
+    👁️ Preview only — this listing is a draft and isn't visible to customers yet.
+</div>
+{% endif %}
+
+{% set has_coupons_mini = public_coupons and public_coupons|length > 0 %}
+{% set has_products_mini = carousel_products and carousel_products|length > 0 %}
+{% if has_coupons_mini or has_products_mini %}
+{% set ns_mini = namespace(first=true) %}
+<div class="offers-carousel offers-carousel--compact" id="offers-carousel">
+    {% for c in public_coupons[:4] %}
+    <div class="offers-slide{% if ns_mini.first %} active{% endif %}" aria-hidden="{{ 'false' if ns_mini.first else 'true' }}">
+        <div class="offer-discount-line">
+            <span class="offer-discount-big">{{ c.discount_percent|int }}% OFF</span>
+            {% if c.max_discount_amount %}<span class="offer-discount-cap">up to ₹{{ c.max_discount_amount|round(0)|int }}</span>{% endif %}
+        </div>
+        <div class="offer-code-row">
+            <span class="offer-code-label">Use code</span>
+            <button type="button" class="offer-code-inline" {% if not ns_mini.first %}tabindex="-1"{% endif %}
+                    onclick="copyOfferCode('{{ c.code }}', this)"
+                    aria-label="Coupon code {{ c.code }}, tap to copy">{{ c.code }}</button>
+        </div>
+    </div>
+    {% set ns_mini.first = false %}
+    {% endfor %}
+    {% for p in carousel_products %}
+    <a href="{{ url_for('product_detail_retail', product_id=p.id) }}"
+       class="offers-slide offer-product-slide{% if ns_mini.first %} active{% endif %}"
+       aria-hidden="{{ 'false' if ns_mini.first else 'true' }}" {% if not ns_mini.first %}tabindex="-1"{% endif %}
+       aria-label="{{ p.name }} — {{ p.disc_pct }}% off, now ₹{{ p.current_price|round(0)|int }}, view product">
+        <div class="offer-product-card">
+            <div class="offer-product-img-wrap">
+                <img src="{{ p.thumb }}" alt="" class="offer-product-img" loading="lazy"
+                     onerror="this.onerror=null;this.src='/static/assets/products/default.jpg';">
+                <span class="offer-product-badge">{{ p.disc_pct }}% OFF</span>
+            </div>
+            <div class="offer-product-price">
+                <span class="offer-product-mrp">₹{{ p.mrp_price|round(0)|int }}</span>
+                <span class="offer-product-current">₹{{ p.current_price|round(0)|int }}</span>
+            </div>
+            <div class="offer-product-title">{{ p.name }}</div>
+        </div>
+    </a>
+    {% set ns_mini.first = false %}
+    {% endfor %}
+</div>
+{% endif %}
+
+  <!-- ── IMAGE + INFO ── -->
+  <div class="md:grid md:grid-cols-2 md:gap-8">
+
+    <div>
+      <div class="pd-main-img-wrap" id="pd-img-wrap">
+        <button class="pd-share-btn" onclick="pdShare()">
+          <img src="{{ url_for('static', filename='assets/share.svg') }}" alt="Share" style="width:18px;height:18px;">
+        </button>
+        <button class="pd-nav-btn pd-nav-prev" onclick="pdNav(-1)">&#10094;</button>
+        <img id="pd-main" src="{{ image_urls[0] if image_urls else 'https://eopqwvssznmxfxrfzqbx.supabase.co/storage/v1/object/public/products/site/logo.png' }}"
+             alt="{{ product.name }}"
+             onclick="pdOpenLightbox(pdIdx)"
+             onerror="this.onerror=null;this.src='{{ url_for('static', filename='assets/logo.png') }}'">
+        <button class="pd-nav-btn pd-nav-next" onclick="pdNav(1)">&#10095;</button>
+      </div>
+      <div class="pd-thumbs" id="pd-thumbs">
+        {% for img in image_urls %}
+        <img src="{{ img }}" alt="thumb"
+             class="pd-thumb{% if loop.index0 == 0 %} active{% endif %}"
+             onclick="pdSetImg({{ loop.index0 }})"
+             onerror="this.style.display='none'">
+        {% endfor %}
+      </div>
+    </div>
+
+    <div class="mt-2 md:mt-0">
+      <h1 class="pd-title">{% if product.brand_name %}{{ product.brand_name }} {% endif %}{{ product.name }}{% if product.pack_unit and product.pack_count %} <span style="font-size:0.7em;font-weight:700;color:#9f9f9f;">&#8211; {{ product.pack_unit }} Of {{ product.pack_count }}</span>{% endif %}{% if product.model_number %} <span style="font-size:0.62em;font-weight:600;color:#9ca3af;">({{ product.model_number }})</span>{% endif %}</h1>
+      {%- set mrp = product.mrp_price or 0 -%}
+      {%- set rp  = product.retail_price or product.price1 or 0 -%}
+      {%- set disc = ((mrp - rp) / mrp * 100)|round(0)|int if mrp and mrp > rp else 0 -%}
+      <div class="prod-price-wrap" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:10px 0;">
+        {% if mrp and mrp > rp %}
+        <span class="prod-mrp" style="font-size:1rem;">
+          <span style="font-size:0.6rem;font-weight:600;">MRP</span> ₹{{ mrp|round(0)|int }}
+        </span>
+        {% endif %}
+        <span class="prod-price pd-price" style="margin:0;">₹{{ rp|round(0)|int }}</span>
+        {% if disc > 0 %}<span class="prod-disc" style="font-size:0.8rem;padding:2px 8px;">{{ disc }}% off</span>{% endif %}
+      </div>
+
+      {% set has_color = product.color and product.color != 'N/A' %}
+      {% set has_material = product.material and product.material != 'N/A' and product.material != 'material' %}
+      {% if has_color or has_material %}
+      <div class="pd-meta-row">
+        {% if has_color %}<span class="pd-chip">Color: {{ product.color }}</span>{% endif %}
+        {% if has_material %}<span class="pd-chip">Material: {{ product.material }}</span>{% endif %}
+      </div>
+      {% endif %}
+
+      {% set is_bangle = 'bangle' in (product.category|lower if product.category else '') or 'bangle' in (product.sub_category|lower if product.sub_category else '') or 'bangle' in (product.name|lower if product.name else '') %}
+      {% if is_bangle %}
+      <div class="mb-3">
+        <label style="display:block;font-size:.72rem;font-weight:700;color:var(--wine);margin-bottom:4px;text-transform:uppercase;">Size</label>
+        <select id="size-main" class="size-select input-field" style="padding:10px;border-radius:12px;font-weight:600;">
+          {% for bsize in ['2.4', '2.6', '2.8'] %}
+          {%- set bstock = product.size_stock.get(bsize, 0) if product.size_stock else None -%}
+          <option value="{{ bsize }}" {% if bstock is not none and bstock <= 0 %}disabled{% endif %}>{{ bsize }}{% if bstock is not none and bstock <= 0 %} (Out of stock){% endif %}</option>
+          {% endfor %}
+        </select>
+      </div>
+      {% elif product.size %}
+      <div class="mb-3">
+        <label style="display:block;font-size:.72rem;font-weight:700;color:var(--wine);margin-bottom:4px;text-transform:uppercase;">Size</label>
+        <select id="size-main" class="size-select input-field" style="padding:10px;border-radius:12px;font-weight:600;">
+          {% for s in product.size.split(',') %}<option value="{{ s|trim }}">{{ s|trim }}</option>{% endfor %}
+        </select>
+      </div>
+      {% endif %}
+
+      <div class="cart-container" style="display:grid;gap:8px;margin-top:12px;" id="cart-action-{{ product.sku }}">
+        {% if product.stock_total and product.stock_total > 0 %}
+        <button class="add-to-cart-btn pd-btn-add"
+                data-sku="{{ product.sku }}" data-price="{{ product.retail_price }}" data-name="{{ product.name }}">
+          🛒 Add to Cart
+        </button>
+        <div class="counter-size-label hidden" style="font-size:0.75rem;font-weight:700;color:var(--wine);margin-bottom:2px;"></div>
+        <div class="unit-counter pd-unit-counter hidden">
+          <button class="decrement-btn pd-uc-btn">−</button>
+          <span class="qty-display pd-qty-display">1</span>
+          <button class="increment-btn pd-uc-btn">+</button>
+        </div>
+        <button class="buy-now-btn pd-btn-buy"
+                data-sku="{{ product.sku }}" data-price="{{ product.retail_price }}" data-name="{{ product.name }}">
+          ⚡ Buy Now
+        </button>
+        {% else %}
+        <button disabled style="width:100%;padding:14px;border-radius:12px;background:#e5e7eb;color:#9f9f9f;font-weight:700;border:none;cursor:not-allowed;font-size:0.95rem;">Out of Stock</button>
+        <p style="font-size:0.78rem;color:#dc2626;margin-top:6px;text-align:center;">This item is currently out of stock.</p>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+
+  {% set has_description = product.description and product.description.strip() %}
+  {% set feature_list = (product.key_features or '').split('\n') | select | map('trim') | select | list %}
+  {% if has_description or feature_list %}
+  <div class="pd-details-section">
+    {% if has_description %}
+    <h2 class="pd-section-title">Description</h2>
+    <div class="pd-desc-card">{{ product.description }}</div>
+    {% endif %}
+    {% if feature_list %}
+    <h2 class="pd-section-title">Key Features</h2>
+    <ul class="pd-features-list">
+      {% for feature in feature_list %}
+      <li><span class="pd-feature-check">&#10003;</span> {{ feature }}</li>
+      {% endfor %}
+    </ul>
+    {% endif %}
+  </div>
+  {% endif %}
+
+  {% if related_products %}
+  <section>
+    <h2 class="pd-related-heading">You May Also Like</h2>
+    <div class="coverflow-shelf" id="related-shelf">
+      {% for rel in related_products %}
+      {%- set rel_images = rel.images or [] -%}
+      {%- set rel_primary = rel_images[0] if rel_images|length > 0 else '/static/assets/products/default.jpg' -%}
+      {%- set rel_hover = rel_images[1] if rel_images|length > 1 else none -%}
+      {%- set relmrp = rel.mrp_price or 0 -%}
+      {%- set relrp  = rel.retail_price or 0 -%}
+      {%- set reldisc = ((relmrp - relrp) / relmrp * 100)|round(0)|int if relmrp and relmrp > relrp else 0 -%}
+      <div class="product-card coverflow-card">
+        <button class="share-btn"
+            onclick="shareProduct(
+                {{ rel.name|tojson|forceescape }},
+                {{ (request.url_root.rstrip('/') ~ '/retail/product/' ~ rel.id)|tojson|forceescape }},
+                {{ rel_primary|tojson|forceescape }})">
+            <img src="{{ url_for('static', filename='assets/share.svg') }}" alt="Share" style="width:14px;height:14px;" />
+        </button>
+        <a href="/retail/product/{{ rel.id }}" class="card-media" {% if rel_images|length > 1 %}data-images='{{ rel_images|tojson }}'{% endif %}>
+          {% if reldisc > 0 %}<span class="card-badge">{{ reldisc }}% off</span>{% endif %}
+          <img class="prod-img card-img-layer is-front" loading="lazy" src="{{ rel_primary }}" alt="{{ rel.name }}"
+               onerror="this.onerror=null;this.src='/static/assets/products/default.jpg';">
+          {% if rel_hover %}
+          <img class="prod-img card-img-layer" loading="lazy" src="{{ rel_hover }}" alt="" aria-hidden="true">
+          {% endif %}
+        </a>
+        <a href="/retail/product/{{ rel.id }}" style="text-decoration:none;color:inherit;display:block;">
+          <div class="prod-name">{{ rel.name }}</div>
+          <div class="prod-price-wrap">
+            {% if relmrp and relmrp > relrp %}<span class="prod-mrp">₹{{ relmrp|round(0)|int }}</span>{% endif %}
+            <span class="prod-price">₹{{ relrp|round(0)|int }}</span>
+          </div>
+        </a>
+        <div class="cart-container">
+          <button class="add-to-cart-btn btn-add-cart"
+                  data-sku="{{ rel.sku }}" data-price="{{ rel.retail_price }}" data-name="{{ rel.name }}">🛒 Add to Cart</button>
+          <div class="counter-size-label hidden" style="font-size:.65rem;font-weight:700;color:var(--wine);margin:6px 0 2px;"></div>
+          <div class="unit-counter hidden">
+            <button class="decrement-btn">-</button>
+            <span class="qty-display">1</span>
+            <button class="increment-btn">+</button>
+          </div>
+          <button class="buy-now-btn btn-buy-now"
+                  data-sku="{{ rel.sku }}" data-price="{{ rel.retail_price }}" data-name="{{ rel.name }}">⚡ Buy Now</button>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+  </section>
+  {% endif %}
+</div>
+
+<!-- Lightbox -->
+<div id="pd-lightbox">
+  <button class="lb-close" onclick="pdCloseLightbox()">×</button>
+  <button class="lb-nav" id="lb-prev" onclick="pdLbNav(-1)">&#10094;</button>
+  <img id="lb-img" src="" alt="">
+  <button class="lb-nav" id="lb-next" onclick="pdLbNav(1)">&#10095;</button>
+</div>
+
+<script>
+{% include "retail/_shared_scripts.html" %}
+
+const PD_IMGS = {{ image_urls|tojson|safe }};
+let pdIdx = 0;
+
+function pdSetImg(i) {
+    pdIdx = i;
+    const src = PD_IMGS[i] || '';
+    document.getElementById('pd-main').src = src;
+    document.querySelectorAll('.pd-thumb').forEach((t,j) => t.classList.toggle('active', j===i));
+}
+function pdNav(dir) {
+    pdSetImg((pdIdx + dir + PD_IMGS.length) % PD_IMGS.length);
+}
+function pdOpenLightbox(i) {
+    pdIdx = i;
+    document.getElementById('lb-img').src = PD_IMGS[i] || '';
+    document.getElementById('pd-lightbox').classList.add('open');
+}
+function pdCloseLightbox() {
+    document.getElementById('pd-lightbox').classList.remove('open');
+}
+function pdLbNav(dir) {
+    pdIdx = (pdIdx + dir + PD_IMGS.length) % PD_IMGS.length;
+    document.getElementById('lb-img').src = PD_IMGS[pdIdx] || '';
+}
+
+function pdShare() {
+    const name = {{ product.name|tojson }};
+    const url  = window.location.href;
+    const img  = PD_IMGS[0] || '';
+    const text = '✨ ' + name + ' — Nari Nakhre';
+    if (navigator.share) {
+        navigator.share({ title: name, text: text, url: url }).catch(()=>{});
+    } else {
+        window.open('https://wa.me/?text=' + encodeURIComponent(text + '\n' + url), '_blank');
+    }
+}
+</script>
+{% endblock %}

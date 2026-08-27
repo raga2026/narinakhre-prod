@@ -1,0 +1,143 @@
+{#- Apoorva theme: CSS shared by every real retail page (currently
+   retail/index.html and retail/product_detail.html), included inside each
+   page's own <style> block -- e.g. {% include "retail/_shared_styles.html" %}.
+   Still "inline styles, not a separate stylesheet file" per the theme's own
+   convention (this is a Jinja template partial, not a linked .css asset) --
+   it just avoids the color/font/token block drifting out of sync between
+   pages as more of them get built. Page-specific styles (hero, quickstrip,
+   signup band, product-detail's gallery/lightbox, etc.) stay inline in each
+   page's own <style>, not here. -#}
+@import url('https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,500;0,9..144,700;1,9..144,600;1,9..144,700&family=Work+Sans:wght@400;500;600;700&display=swap');
+
+:root{
+  --ink:#2b1810; --ivory:#faf6f0; --ivory-deep:#f2e9dd;
+  --wine:#6b1e3c; --wine-deep:#4a1329;
+  --marigold:#e8a33d; --marigold-deep:#c8842a;
+  --rose:#d46a8c; --line:#e6dccb;
+}
+
+/* ── Restyle the real header/footer (rendered via {{ "{{ super() }}" }} from
+     retail/base.html) to the Apoorva palette -- colors/fonts/spacing only.
+     Every selector here already exists in retail/base.html's own CSS; none
+     of the show/hide/positioning rules that make search, the categories/
+     profile dropdowns, and the mobile nav actually work are touched -- this
+     block only ever changes color, background, border-color and
+     font-family, and wins the cascade purely by appearing later in the
+     document (this <style> renders inside <body>, after retail/base.html's
+     <head> styles), not by overriding anything structurally. ── */
+body.retail { background: var(--ivory); font-family:'Work Sans', sans-serif; color: var(--ink); }
+h1, h2, h3 { font-family:'Fraunces', serif; }
+.site-header { background: var(--ivory); border-bottom: 1px solid var(--line); box-shadow:none; }
+.site-logo span { font-family:'Fraunces', serif; font-style:italic; color: var(--wine); }
+.hamburger span { background: var(--wine); }
+.mobile-home-icon svg, .mobile-cart-icon svg { stroke: var(--wine); }
+.search-input { border-color: var(--line); background: var(--ivory-deep); color: var(--ink); }
+.search-input:focus { border-color: var(--wine); background: #fff; }
+.search-icon { color: var(--wine); opacity:.7; }
+.desktop-nav a, .desktop-nav button.nav-signin-btn, .cat-dropdown-btn { color: var(--wine); }
+.desktop-nav a:hover, .cat-dropdown-btn:hover { background: var(--ivory-deep); }
+.cart-count { background: var(--marigold); color: var(--ink); }
+.cat-menu { border-color: var(--line); }
+.cat-menu a { color: var(--wine); font-family:'Fraunces', serif; }
+.cat-menu a:hover { background: var(--ivory-deep); }
+.mobile-nav { border-color: var(--line); }
+.mobile-nav > a, .mobile-nav > button.nav-signin-btn, .mobile-cat-toggle { color: var(--wine); font-family:'Fraunces', serif; }
+.mobile-cat-list a { color: var(--wine); }
+.pincode-bar { background: var(--ivory-deep); }
+.pincode-check-btn { background: var(--ink); }
+.mobile-cat-pill-btn { border-color: var(--marigold); color: var(--wine); }
+.home-auth-links button { color: var(--wine); }
+.retail-footer { background: var(--ivory-deep); border-top-color: var(--wine); }
+.retail-footer .footer-links a { color: var(--wine); }
+.retail-footer .footer-copy div:last-child a { color: var(--wine); }
+
+/* ── Mobile category strip (see _mobile_cat_strip.html, added in the
+     header block) ── */
+.mobile-cat-strip {
+    display:none; overflow-x:auto; -webkit-overflow-scrolling:touch; scrollbar-width:none;
+    background: var(--ivory-deep); border-top:1px solid var(--line);
+}
+.mobile-cat-strip::-webkit-scrollbar { display:none; }
+.mobile-cat-strip ul { list-style:none; display:flex; gap:1.2rem; margin:0; padding:.6rem 1rem; white-space:nowrap; }
+.mobile-cat-strip a { text-decoration:none; color:var(--wine); font-size:.76rem; font-weight:700; letter-spacing:.02em; text-transform:uppercase; }
+@media (max-width:767px) { .mobile-cat-strip { display:block; } }
+
+/* ── Skip link ── */
+.skip-link{ position:absolute; left:-999px; top:0; background:var(--ink); color:var(--ivory); padding:.75rem 1.25rem; z-index:300; text-decoration:none; }
+.skip-link:focus{ left:1rem; top:1rem; }
+
+/* ── Shared CTA button (hero, "View All" links, signup band, etc.) ── */
+.cta-btn{ display:inline-block; background:var(--marigold); color:var(--ink); font-weight:700; text-decoration:none; padding:.75rem 1.5rem; border-radius:999px; font-size:.88rem; letter-spacing:.02em; border:none; cursor:pointer; }
+.cta-btn:hover, .cta-btn:focus-visible{ background:var(--ivory); }
+
+/* ── Product shelf: "coverflow" carousel -- the card nearest the shelf's
+     center scales up to full size/opacity, neighbors shrink and dim, and
+     CSS scroll-snap centers whichever card you drag/swipe to nearest.
+     Shared by every horizontally-scrolling product row on any page
+     (Trending, category shelves, "You May Also Like", etc). The actual
+     scale/opacity math lives in --focus, a 0..1 custom property the shared
+     JS (_shared_scripts.html) sets per-card on every scroll frame based on
+     real distance from center; a plain CSS transition on top of that is
+     what gives the "liquid" easing rather than a snap-into-place jump.
+     Falls back to a plain full-scale, full-opacity static shelf (still
+     scrollable, still functional) if JS ever fails to run, since --focus
+     defaults to 1 with no JS setting it otherwise. ── */
+.coverflow-shelf{
+    --card-w: 210px;
+    display:flex; gap:1.1rem; overflow-x:auto; padding:1rem 0 1.4rem;
+    scroll-snap-type:x mandatory; -webkit-overflow-scrolling:touch; scrollbar-width:none;
+}
+.coverflow-shelf::-webkit-scrollbar{ display:none; }
+/* Lets the FIRST and LAST cards reach true center too, instead of only
+   being able to scroll as far as the shelf's own edge. */
+.coverflow-shelf::before, .coverflow-shelf::after{
+    content:""; flex:0 0 calc(50% - (var(--card-w) / 2));
+}
+@media (max-width:767px){ .coverflow-shelf{ --card-w: 168px; gap:.85rem; } }
+
+.coverflow-card{
+    flex:0 0 var(--card-w); width:var(--card-w);
+    scroll-snap-align:center;
+    transform:scale(calc(0.8 + 0.2 * var(--focus, 1)));
+    opacity:calc(0.55 + 0.45 * var(--focus, 1));
+    transition:transform .35s cubic-bezier(.22,.61,.36,1), opacity .35s ease;
+}
+@media (prefers-reduced-motion: reduce){ .coverflow-card{ transition:none; } }
+
+/* ── Shared product-card component (Trending, category shelves, related
+     products) -- outer card box, image area, name/price typography, cart
+     controls. Page-specific card TREATMENT (e.g. a different width) can
+     still override these per-page since this loads before any page's own
+     <style> content. ── */
+.product-card, .prod-card{ background:#fff; border-radius:16px; padding:.6rem; box-shadow:0 2px 10px rgba(107,30,60,.08); border:1px solid var(--line); position:relative; display:flex; flex-direction:column; text-decoration:none; color:var(--ink); }
+.card-media{ position:relative; display:block; aspect-ratio:4/5; border-radius:12px; overflow:hidden; background:var(--ivory-deep); margin-bottom:.7rem; }
+.card-media .prod-img{ position:absolute; inset:0; width:100%; height:100%; object-fit:cover; }
+/* ── Per-card image carousel -- each product's own photos crossfade on a
+     timer (see initCardImageCarousels in _shared_scripts.html), independent
+     of whichever card the coverflow shelf currently has in focus. Two
+     stacked <img> layers ping-pong: JS loads the next photo into whichever
+     layer is currently hidden, then swaps which one has .is-front. A
+     product with only one photo never gets a second <img> layer at all
+     (see the Jinja in each page), so it just sits still. ── */
+.card-img-layer{ opacity:0; transition:opacity .6s ease; }
+.card-img-layer.is-front{ opacity:1; }
+@media (prefers-reduced-motion: reduce){ .card-img-layer{ transition:none; } }
+.card-badge{ position:absolute; top:.6rem; left:.6rem; background:var(--ivory); color:var(--wine); font-size:.66rem; font-weight:700; padding:.2rem .55rem; border-radius:999px; letter-spacing:.02em; z-index:2; }
+.share-btn{ position:absolute; top:.5rem; right:.5rem; background:var(--ivory); border:none; border-radius:50%; padding:6px; cursor:pointer; z-index:3; }
+
+.prod-name{ font-weight:600; font-size:.82rem; margin:0 0 .2rem; color:var(--ink); line-height:1.3; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
+.prod-price-wrap{ display:flex; align-items:baseline; gap:.35rem; flex-wrap:wrap; margin:.1rem 0 .3rem; }
+.prod-mrp{ font-size:.68rem; color:#9a8f80; text-decoration:line-through; }
+.prod-disc{ font-size:.62rem; font-weight:800; color:#16a34a; background:#dcfce7; border-radius:5px; padding:1px 5px; }
+.prod-price{ font-size:.92rem; font-weight:800; color:var(--wine); }
+
+.input-field{ width:100%; border:1px solid var(--line); border-radius:6px; padding:3px 6px; font-size:.72rem; margin-bottom:3px; }
+
+.btn-add-cart{ width:100%; padding:.5rem 0; border-radius:999px; font-weight:700; font-size:.78rem; border:1.5px solid var(--wine); background:#fff; color:var(--wine); cursor:pointer; }
+.btn-add-cart:hover{ background:var(--ivory-deep); }
+.btn-buy-now{ width:100%; padding:.5rem 0; border-radius:999px; font-weight:700; font-size:.78rem; border:none; background:var(--marigold); color:var(--ink); cursor:pointer; margin-top:.35rem; }
+.btn-buy-now:hover{ background:var(--marigold-deep); }
+.unit-counter{ border:1.5px solid var(--marigold); background:var(--ivory-deep); border-radius:999px; display:flex; align-items:center; justify-content:space-between; padding:2px 8px; margin-bottom:3px; }
+.unit-counter button{ width:22px; height:22px; border-radius:50%; background:var(--ivory); border:none; font-size:.9rem; font-weight:bold; color:var(--wine); cursor:pointer; }
+.qty-display{ font-weight:bold; font-size:.85rem; color:var(--wine); }
+.hidden{ display:none !important; }
