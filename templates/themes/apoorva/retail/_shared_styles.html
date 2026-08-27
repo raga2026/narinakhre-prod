@@ -91,8 +91,8 @@ h1, h2, h3 { font-family:'Fraunces', serif; }
      scrollable, still functional) if JS ever fails to run, since --focus
      defaults to 1 with no JS setting it otherwise. ── */
 .coverflow-shelf{
-    --card-w: 210px;
-    display:flex; gap:1.1rem; overflow-x:auto; padding:1rem 0 1.4rem;
+    --card-w: 250px;
+    display:flex; gap:1.1rem; overflow-x:auto; padding:1rem 0 .5rem;
     scroll-snap-type:x mandatory; -webkit-overflow-scrolling:touch; scrollbar-width:none;
 }
 .coverflow-shelf::-webkit-scrollbar{ display:none; }
@@ -101,7 +101,7 @@ h1, h2, h3 { font-family:'Fraunces', serif; }
 .coverflow-shelf::before, .coverflow-shelf::after{
     content:""; flex:0 0 calc(50% - (var(--card-w) / 2));
 }
-@media (max-width:767px){ .coverflow-shelf{ --card-w: 168px; gap:.85rem; } }
+@media (max-width:767px){ .coverflow-shelf{ --card-w: 205px; gap:.85rem; } }
 
 .coverflow-card{
     flex:0 0 var(--card-w); width:var(--card-w);
@@ -117,7 +117,7 @@ h1, h2, h3 { font-family:'Fraunces', serif; }
      controls. Page-specific card TREATMENT (e.g. a different width) can
      still override these per-page since this loads before any page's own
      <style> content. ── */
-.product-card, .prod-card{ background:#fff; border-radius:16px; padding:.6rem; box-shadow:0 2px 10px rgba(107,30,60,.08); border:1px solid var(--line); position:relative; display:flex; flex-direction:column; text-decoration:none; color:var(--ink); }
+.product-card, .prod-card{ background:#fff; border-radius:16px; padding:.45rem; box-shadow:0 2px 10px rgba(107,30,60,.08); border:1px solid var(--line); position:relative; display:flex; flex-direction:column; text-decoration:none; color:var(--ink); }
 /* ── Image area -- sized by card-image-wrap (aspect-ratio lives here now,
      not on card-media itself) so the small floating Add button below can
      be absolutely positioned inside the SAME box as the image without

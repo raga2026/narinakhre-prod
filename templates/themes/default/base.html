@@ -269,12 +269,15 @@ async function getRecaptchaToken(action) {
 
 /* ── Sign-in / Create-account modal (shared by retail + wholesale) ── */
 let authModalLastFocused = null;
+const AUTH_MODAL_DEFAULT_SUBTITLE = 'To enjoy coupons and Nari Nakhre Credits, log in.';
 
-function openAuthModal(mode) {
+function openAuthModal(mode, subtitle) {
     const overlay = document.getElementById('auth-modal-overlay');
     if (!overlay) return;
     authModalLastFocused = document.activeElement;
     overlay.hidden = false;
+    const subtitleEl = overlay.querySelector('.auth-modal-subtitle');
+    if (subtitleEl) subtitleEl.textContent = subtitle || AUTH_MODAL_DEFAULT_SUBTITLE;
     showAuthTab(mode === 'signup' ? 'signup' : 'signin');
     document.addEventListener('keydown', authModalKeydown);
     const modal = overlay.querySelector('.auth-modal');
@@ -432,19 +435,25 @@ async function submitSignUp(e) {
 }
 
 {% if not logged_in_user %}
-/* ── Auto-open sign-in prompt for guests, every few days rather than
-   once-ever (so it keeps nudging signups) or every visit (which would
-   be annoying). Runs on every page (search, product detail, category,
-   etc.), not just the home page, so a short delay before it appears
-   means it doesn't interrupt the instant the page loads. ── */
+/* ── Auto-open signup prompt for guests, once per 30-minute cooldown
+   rather than once-ever (so it keeps nudging signups) or every single
+   page view (which would be annoying) -- localStorage means the cooldown
+   survives a refresh, but once 30 minutes have genuinely passed, the very
+   next page load/refresh shows it again. Runs on every page (search,
+   product detail, category, etc.), not just the home page, so a short
+   delay before it appears means it doesn't interrupt the instant the page
+   loads. Opens the Create Account tab specifically (not Sign In) with the
+   real welcome-coupon value (see generate_welcome_coupon/
+   send_welcome_email in app.py -- an actual 15%-off-up-to-Rs75 coupon
+   really is emailed on signup, this isn't just marketing copy). ── */
 document.addEventListener('DOMContentLoaded', function () {
-    var STORAGE_KEY = 'nn_signin_prompt_last_shown';
-    var COOLDOWN_MS = 3 * 24 * 60 * 60 * 1000; // 3 days
+    var STORAGE_KEY = 'nn_signup_prompt_last_shown';
+    var COOLDOWN_MS = 30 * 60 * 1000; // 30 minutes
     var lastShown = parseInt(localStorage.getItem(STORAGE_KEY) || '0', 10);
     var dueForPrompt = !lastShown || (Date.now() - lastShown) > COOLDOWN_MS;
     if (dueForPrompt && typeof openAuthModal === 'function') {
         setTimeout(function () {
-            openAuthModal('signin');
+            openAuthModal('signup', 'Sign up now and get 15% off your first order (up to ₹75).');
             localStorage.setItem(STORAGE_KEY, String(Date.now()));
         }, 2500);
     }
