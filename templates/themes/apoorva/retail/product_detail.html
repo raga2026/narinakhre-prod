@@ -319,21 +319,35 @@
       {%- set relrp  = rel.retail_price or 0 -%}
       {%- set reldisc = ((relmrp - relrp) / relmrp * 100)|round(0)|int if relmrp and relmrp > relrp else 0 -%}
       <div class="product-card coverflow-card">
-        <button class="share-btn"
-            onclick="shareProduct(
-                {{ rel.name|tojson|forceescape }},
-                {{ (request.url_root.rstrip('/') ~ '/retail/product/' ~ rel.id)|tojson|forceescape }},
-                {{ rel_primary|tojson|forceescape }})">
-            <img src="{{ url_for('static', filename='assets/share.svg') }}" alt="Share" style="width:14px;height:14px;" />
-        </button>
-        <a href="/retail/product/{{ rel.id }}" class="card-media" {% if rel_images|length > 1 %}data-images='{{ rel_images|tojson }}'{% endif %}>
-          {% if reldisc > 0 %}<span class="card-badge">{{ reldisc }}% off</span>{% endif %}
-          <img class="prod-img card-img-layer is-front" loading="lazy" src="{{ rel_primary }}" alt="{{ rel.name }}"
-               onerror="this.onerror=null;this.src='/static/assets/products/default.jpg';">
-          {% if rel_hover %}
-          <img class="prod-img card-img-layer" loading="lazy" src="{{ rel_hover }}" alt="" aria-hidden="true">
-          {% endif %}
-        </a>
+        <div class="card-image-wrap">
+          <a href="/retail/product/{{ rel.id }}" class="card-media" {% if rel_images|length > 1 %}data-images='{{ rel_images|tojson }}'{% endif %}>
+            {% if reldisc > 0 %}<span class="card-badge">{{ reldisc }}% off</span>{% endif %}
+            <img class="prod-img card-img-layer is-front" loading="lazy" src="{{ rel_primary }}" alt="{{ rel.name }}"
+                 onerror="this.onerror=null;this.src='/static/assets/products/default.jpg';">
+            {% if rel_hover %}
+            <img class="prod-img card-img-layer" loading="lazy" src="{{ rel_hover }}" alt="" aria-hidden="true">
+            {% endif %}
+          </a>
+          <button class="share-btn"
+              onclick="shareProduct(
+                  {{ rel.name|tojson|forceescape }},
+                  {{ (request.url_root.rstrip('/') ~ '/retail/product/' ~ rel.id)|tojson|forceescape }},
+                  {{ rel_primary|tojson|forceescape }})">
+              <img src="{{ url_for('static', filename='assets/share.svg') }}" alt="Share" style="width:14px;height:14px;" />
+          </button>
+          <div class="cart-container mini">
+            <button class="add-to-cart-btn mini-add-btn"
+                    data-sku="{{ rel.sku }}" data-price="{{ rel.retail_price }}" data-name="{{ rel.name }}">
+                <span aria-hidden="true">+</span> Add
+            </button>
+            <div class="counter-size-label hidden" style="font-size:.6rem;font-weight:700;color:var(--wine);"></div>
+            <div class="unit-counter hidden">
+              <button class="decrement-btn">-</button>
+              <span class="qty-display">1</span>
+              <button class="increment-btn">+</button>
+            </div>
+          </div>
+        </div>
         <a href="/retail/product/{{ rel.id }}" style="text-decoration:none;color:inherit;display:block;">
           <div class="prod-name">{{ rel.name }}</div>
           <div class="prod-price-wrap">
@@ -341,18 +355,6 @@
             <span class="prod-price">₹{{ relrp|round(0)|int }}</span>
           </div>
         </a>
-        <div class="cart-container">
-          <button class="add-to-cart-btn btn-add-cart"
-                  data-sku="{{ rel.sku }}" data-price="{{ rel.retail_price }}" data-name="{{ rel.name }}">🛒 Add to Cart</button>
-          <div class="counter-size-label hidden" style="font-size:.65rem;font-weight:700;color:var(--wine);margin:6px 0 2px;"></div>
-          <div class="unit-counter hidden">
-            <button class="decrement-btn">-</button>
-            <span class="qty-display">1</span>
-            <button class="increment-btn">+</button>
-          </div>
-          <button class="buy-now-btn btn-buy-now"
-                  data-sku="{{ rel.sku }}" data-price="{{ rel.retail_price }}" data-name="{{ rel.name }}">⚡ Buy Now</button>
-        </div>
       </div>
       {% endfor %}
     </div>
@@ -371,8 +373,52 @@
 <script>
 {% include "retail/_shared_scripts.html" %}
 
-const PD_IMGS = {{ image_urls|tojson|safe }};
+let PD_IMGS = {{ image_urls|tojson|safe }};
 let pdIdx = 0;
+
+/* get_product_images() (app.py) always returns up to 9 SKU_1..SKU_9 URL
+   slots regardless of how many photos actually exist for this product --
+   the thumbnail strip's own onerror hides a broken THUMBNAIL, but PD_IMGS
+   itself still had every blank slot in it, so pdNav()/the lightbox would
+   still cycle through them (an empty/broken main image flashing in).
+   Pre-validates every URL once on load, then rebuilds PD_IMGS and the
+   thumbnail strip down to just the photos that actually loaded, in their
+   original order, before any prev/next/lightbox navigation can happen. */
+document.addEventListener('DOMContentLoaded', function () {
+    if (!PD_IMGS.length) return;
+    var validated = new Array(PD_IMGS.length);
+    var checked = 0;
+    PD_IMGS.forEach(function (url, i) {
+        var probe = new Image();
+        function done() {
+            checked++;
+            if (checked === PD_IMGS.length) {
+                PD_IMGS = validated.filter(Boolean);
+                if (!PD_IMGS.length) PD_IMGS = ['/static/assets/products/default.jpg'];
+                rebuildGallery();
+            }
+        }
+        probe.onload = function () { validated[i] = url; done(); };
+        probe.onerror = done;
+        probe.src = url;
+    });
+
+    function rebuildGallery() {
+        var thumbsWrap = document.getElementById('pd-thumbs');
+        if (thumbsWrap) {
+            thumbsWrap.innerHTML = '';
+            PD_IMGS.forEach(function (url, i) {
+                var thumb = document.createElement('img');
+                thumb.src = url;
+                thumb.alt = 'thumb';
+                thumb.className = 'pd-thumb' + (i === 0 ? ' active' : '');
+                thumb.addEventListener('click', function () { pdSetImg(i); });
+                thumbsWrap.appendChild(thumb);
+            });
+        }
+        pdSetImg(0);
+    }
+});
 
 function pdSetImg(i) {
     pdIdx = i;

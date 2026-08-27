@@ -118,7 +118,15 @@ h1, h2, h3 { font-family:'Fraunces', serif; }
      still override these per-page since this loads before any page's own
      <style> content. ── */
 .product-card, .prod-card{ background:#fff; border-radius:16px; padding:.6rem; box-shadow:0 2px 10px rgba(107,30,60,.08); border:1px solid var(--line); position:relative; display:flex; flex-direction:column; text-decoration:none; color:var(--ink); }
-.card-media{ position:relative; display:block; aspect-ratio:4/5; border-radius:12px; overflow:hidden; background:var(--ivory-deep); margin-bottom:.7rem; }
+/* ── Image area -- sized by card-image-wrap (aspect-ratio lives here now,
+     not on card-media itself) so the small floating Add button below can
+     be absolutely positioned inside the SAME box as the image without
+     nesting a <button> inside the <a> that makes the image clickable
+     (invalid HTML -- interactive elements can't nest). Making the button
+     float over the image instead of taking its own full-width row below
+     is what lets the image itself run bigger in the same card height. ── */
+.card-image-wrap{ position:relative; aspect-ratio:4/5; border-radius:12px; margin-bottom:.7rem; }
+.card-media{ position:absolute; inset:0; display:block; border-radius:12px; overflow:hidden; background:var(--ivory-deep); }
 .card-media .prod-img{ position:absolute; inset:0; width:100%; height:100%; object-fit:cover; }
 /* ── Per-card image carousel -- each product's own photos crossfade on a
      timer (see initCardImageCarousels in _shared_scripts.html), independent
@@ -126,7 +134,12 @@ h1, h2, h3 { font-family:'Fraunces', serif; }
      stacked <img> layers ping-pong: JS loads the next photo into whichever
      layer is currently hidden, then swaps which one has .is-front. A
      product with only one photo never gets a second <img> layer at all
-     (see the Jinja in each page), so it just sits still. ── */
+     (see the Jinja in each page), so it just sits still. get_product_images()
+     server-side always returns up to 9 SKU_1..SKU_9 URL slots regardless of
+     how many actually exist, so initCardImageCarousels pre-validates which
+     ones really load before cycling -- otherwise this would crossfade
+     through several blank/broken images for any product with fewer than 9
+     real photos. ── */
 .card-img-layer{ opacity:0; transition:opacity .6s ease; }
 .card-img-layer.is-front{ opacity:1; }
 @media (prefers-reduced-motion: reduce){ .card-img-layer{ transition:none; } }
@@ -141,10 +154,18 @@ h1, h2, h3 { font-family:'Fraunces', serif; }
 
 .input-field{ width:100%; border:1px solid var(--line); border-radius:6px; padding:3px 6px; font-size:.72rem; margin-bottom:3px; }
 
-.btn-add-cart{ width:100%; padding:.5rem 0; border-radius:999px; font-weight:700; font-size:.78rem; border:1.5px solid var(--wine); background:#fff; color:var(--wine); cursor:pointer; }
-.btn-add-cart:hover{ background:var(--ivory-deep); }
-.btn-buy-now{ width:100%; padding:.5rem 0; border-radius:999px; font-weight:700; font-size:.78rem; border:none; background:var(--marigold); color:var(--ink); cursor:pointer; margin-top:.35rem; }
-.btn-buy-now:hover{ background:var(--marigold-deep); }
+/* ── Blinkit-style mini cart control -- floats at the bottom-right of the
+     card's image instead of a full-width button row, so the image gets to
+     be the largest thing on the card. Still the exact same JS-required
+     classes (.cart-container/.add-to-cart-btn/.unit-counter/etc, see
+     retail_cart.js) -- only the visual treatment changes via this .mini
+     modifier. No "Buy Now" here (Blinkit's own pattern doesn't have one on
+     the card either) -- that stays on the full product detail page. ── */
+.cart-container.mini{ position:absolute; right:.5rem; bottom:.5rem; z-index:4; display:flex; flex-direction:column; align-items:flex-end; gap:.3rem; }
+.mini-add-btn{ background:#fff; border:1.5px solid var(--wine); color:var(--wine); font-weight:800; font-size:.72rem; padding:.35rem .85rem; border-radius:999px; cursor:pointer; box-shadow:0 2px 8px rgba(0,0,0,.18); display:flex; align-items:center; gap:.15rem; line-height:1; }
+.mini-add-btn:hover{ background:var(--ivory-deep); }
+.mini-oos-badge{ background:rgba(229,231,235,.95); color:#6b7280; font-size:.66rem; font-weight:700; padding:.35rem .7rem; border-radius:999px; }
+.cart-container.mini .unit-counter{ background:#fff; box-shadow:0 2px 8px rgba(0,0,0,.18); margin-bottom:0; }
 .unit-counter{ border:1.5px solid var(--marigold); background:var(--ivory-deep); border-radius:999px; display:flex; align-items:center; justify-content:space-between; padding:2px 8px; margin-bottom:3px; }
 .unit-counter button{ width:22px; height:22px; border-radius:50%; background:var(--ivory); border:none; font-size:.9rem; font-weight:bold; color:var(--wine); cursor:pointer; }
 .qty-display{ font-weight:bold; font-size:.85rem; color:var(--wine); }

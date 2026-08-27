@@ -251,21 +251,39 @@
     {%- set rp  = product.retail_price or product.price1 or 0 -%}
     {%- set disc = ((mrp - rp) / mrp * 100)|round(0)|int if mrp and mrp > rp else 0 -%}
     <div class="prod-card coverflow-card">
-        <button class="share-btn"
-            onclick="shareProduct(
-                {{ product.name|tojson|forceescape }},
-                {{ (request.url_root.rstrip('/') ~ '/retail/product/' ~ product.id)|tojson|forceescape }},
-                {{ img_primary|tojson|forceescape }})">
-            <img src="{{ url_for('static', filename='assets/share.svg') }}" alt="Share" style="width:14px;height:14px;" />
-        </button>
-        <a href="/retail/product/{{ product.id }}" class="card-media" {% if images|length > 1 %}data-images='{{ images|tojson }}'{% endif %}>
-            {% if disc > 0 %}<span class="card-badge">{{ disc }}% off</span>{% endif %}
-            <img class="prod-img card-img-layer is-front" loading="lazy" src="{{ img_primary }}" alt="{{ product.name }}"
-                 onerror="this.onerror=null;this.src='/static/assets/products/default.jpg';">
-            {% if img_hover %}
-            <img class="prod-img card-img-layer" loading="lazy" src="{{ img_hover }}" alt="" aria-hidden="true">
+        <div class="card-image-wrap">
+            <a href="/retail/product/{{ product.id }}" class="card-media" {% if images|length > 1 %}data-images='{{ images|tojson }}'{% endif %}>
+                {% if disc > 0 %}<span class="card-badge">{{ disc }}% off</span>{% endif %}
+                <img class="prod-img card-img-layer is-front" loading="lazy" src="{{ img_primary }}" alt="{{ product.name }}"
+                     onerror="this.onerror=null;this.src='/static/assets/products/default.jpg';">
+                {% if img_hover %}
+                <img class="prod-img card-img-layer" loading="lazy" src="{{ img_hover }}" alt="" aria-hidden="true">
+                {% endif %}
+            </a>
+            <button class="share-btn"
+                onclick="shareProduct(
+                    {{ product.name|tojson|forceescape }},
+                    {{ (request.url_root.rstrip('/') ~ '/retail/product/' ~ product.id)|tojson|forceescape }},
+                    {{ img_primary|tojson|forceescape }})">
+                <img src="{{ url_for('static', filename='assets/share.svg') }}" alt="Share" style="width:14px;height:14px;" />
+            </button>
+            {% if product.stock_total and product.stock_total > 0 %}
+            <div class="cart-container mini">
+                <button class="add-to-cart-btn mini-add-btn"
+                        data-sku="{{ product.sku }}" data-price="{{ rp }}" data-name="{{ product.name }}">
+                    <span aria-hidden="true">+</span> Add
+                </button>
+                <div class="counter-size-label hidden" style="font-size:.6rem;font-weight:700;color:var(--wine);"></div>
+                <div class="unit-counter hidden">
+                    <button class="decrement-btn">-</button>
+                    <span class="qty-display">1</span>
+                    <button class="increment-btn">+</button>
+                </div>
+            </div>
+            {% else %}
+            <div class="cart-container mini"><span class="mini-oos-badge">Out of Stock</span></div>
             {% endif %}
-        </a>
+        </div>
         <a href="/retail/product/{{ product.id }}" style="text-decoration:none;color:inherit;display:block;">
             <div class="prod-name">{% if product.brand_name %}{{ product.brand_name }} {% endif %}{{ product.name }}</div>
             <div class="prod-price-wrap">
@@ -292,22 +310,6 @@
             </select>
         </div>
         {% endif %}
-        {% if product.stock_total and product.stock_total > 0 %}
-        <div class="cart-container">
-            <button class="add-to-cart-btn btn-add-cart"
-                    data-sku="{{ product.sku }}" data-price="{{ rp }}" data-name="{{ product.name }}">
-                🛒 Add to Cart
-            </button>
-            <div class="counter-size-label hidden" style="font-size:.65rem;font-weight:700;color:var(--wine);margin:6px 0 2px;"></div>
-            <div class="unit-counter hidden">
-                <button class="decrement-btn">-</button>
-                <span class="qty-display">1</span>
-                <button class="increment-btn">+</button>
-            </div>
-        </div>
-        {% else %}
-        <button disabled class="btn-add-cart" style="opacity:.5;cursor:not-allowed;">Out of Stock</button>
-        {% endif %}
     </div>
     {% endfor %}
     </div>
@@ -329,21 +331,39 @@
         {%- set rp  = product.retail_price or product.price1 or 0 -%}
         {%- set disc = ((mrp - rp) / mrp * 100)|round(0)|int if mrp and mrp > rp else 0 -%}
         <div class="product-card coverflow-card">
-            <button class="share-btn"
-                onclick="shareProduct(
-                    {{ product.name|tojson|forceescape }},
-                    {{ (request.url_root.rstrip('/') ~ '/retail/product/' ~ product.id)|tojson|forceescape }},
-                    {{ img_primary|tojson|forceescape }})">
-                <img src="{{ url_for('static', filename='assets/share.svg') }}" alt="Share" style="width:16px;height:16px;" />
-            </button>
-            <a href="/retail/product/{{ product.id }}" class="card-media" {% if images|length > 1 %}data-images='{{ images|tojson }}'{% endif %}>
-                {% if disc > 0 %}<span class="card-badge">{{ disc }}% off</span>{% endif %}
-                <img class="prod-img card-img-layer is-front" src="{{ img_primary }}" alt="{{ product.name }}"
-                     onerror="this.onerror=null;this.src='/static/assets/products/default.jpg';">
-                {% if img_hover %}
-                <img class="prod-img card-img-layer" src="{{ img_hover }}" alt="" aria-hidden="true">
+            <div class="card-image-wrap">
+                <a href="/retail/product/{{ product.id }}" class="card-media" {% if images|length > 1 %}data-images='{{ images|tojson }}'{% endif %}>
+                    {% if disc > 0 %}<span class="card-badge">{{ disc }}% off</span>{% endif %}
+                    <img class="prod-img card-img-layer is-front" src="{{ img_primary }}" alt="{{ product.name }}"
+                         onerror="this.onerror=null;this.src='/static/assets/products/default.jpg';">
+                    {% if img_hover %}
+                    <img class="prod-img card-img-layer" src="{{ img_hover }}" alt="" aria-hidden="true">
+                    {% endif %}
+                </a>
+                <button class="share-btn"
+                    onclick="shareProduct(
+                        {{ product.name|tojson|forceescape }},
+                        {{ (request.url_root.rstrip('/') ~ '/retail/product/' ~ product.id)|tojson|forceescape }},
+                        {{ img_primary|tojson|forceescape }})">
+                    <img src="{{ url_for('static', filename='assets/share.svg') }}" alt="Share" style="width:16px;height:16px;" />
+                </button>
+                {% if product.stock_total and product.stock_total > 0 %}
+                <div class="cart-container mini" id="cart-action-{{ product.sku }}">
+                    <button class="add-to-cart-btn mini-add-btn"
+                            data-sku="{{ product.sku }}" data-price="{{ product.retail_price or product.price1 }}" data-name="{{ product.name }}">
+                        <span aria-hidden="true">+</span> Add
+                    </button>
+                    <div class="counter-size-label hidden" style="font-size:.6rem;font-weight:700;color:var(--wine);"></div>
+                    <div class="unit-counter hidden">
+                        <button class="decrement-btn">-</button>
+                        <span class="qty-display">1</span>
+                        <button class="increment-btn">+</button>
+                    </div>
+                </div>
+                {% else %}
+                <div class="cart-container mini" id="cart-action-{{ product.sku }}"><span class="mini-oos-badge">Out of Stock</span></div>
                 {% endif %}
-            </a>
+            </div>
             <a href="/retail/product/{{ product.id }}" style="text-decoration:none;color:inherit;display:block;">
                 <div class="prod-name">{% if product.brand_name %}{{ product.brand_name }} {% endif %}{{ product.name }}</div>
                 <div class="prod-price-wrap">
@@ -371,26 +391,6 @@
                 </select>
             </div>
             {% endif %}
-            <div class="cart-container" style="margin-top:auto;" id="cart-action-{{ product.sku }}">
-                {% if product.stock_total and product.stock_total > 0 %}
-                <button class="btn-add-cart add-to-cart-btn"
-                        data-sku="{{ product.sku }}" data-price="{{ product.retail_price or product.price1 }}" data-name="{{ product.name }}">
-                    🛒 Add to Cart
-                </button>
-                <div class="counter-size-label hidden" style="font-size:.65rem;font-weight:700;color:var(--wine);margin:0 0 2px;"></div>
-                <div class="unit-counter hidden">
-                    <button class="decrement-btn">-</button>
-                    <span class="qty-display">1</span>
-                    <button class="increment-btn">+</button>
-                </div>
-                <button class="btn-buy-now buy-now-btn"
-                        data-sku="{{ product.sku }}" data-price="{{ product.retail_price or product.price1 }}" data-name="{{ product.name }}">
-                    ⚡ Buy Now
-                </button>
-                {% else %}
-                <button disabled class="btn-add-cart" style="opacity:.5;cursor:not-allowed;">Out of Stock</button>
-                {% endif %}
-            </div>
         </div>
         {% endfor %}
     </div>

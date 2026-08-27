@@ -133,36 +133,60 @@ document.addEventListener('DOMContentLoaded', function () {
             var layers = Array.prototype.slice.call(media.querySelectorAll('.card-img-layer'));
             if (layers.length < 2) return;
 
-            var frontIndex = 0;
-            var nextImageIndex = 1 % images.length;
-            var timer = null;
-            var paused = false;
+            /* get_product_images() (app.py) always returns up to 9
+               SKU_1..SKU_9 URL slots regardless of how many photos
+               actually exist for that product -- callers are expected to
+               ignore the ones that 404. Cycling through those blank ones
+               is exactly the "scrolls through empty images" bug this
+               avoids: probe every URL first, then only ever cycle through
+               the ones that actually loaded, in their original order. */
+            var validImages = new Array(images.length);
+            var checked = 0;
+            images.forEach(function (url, i) {
+                var probe = new Image();
+                function done() {
+                    checked++;
+                    if (checked === images.length) startCycle(validImages.filter(Boolean));
+                }
+                probe.onload = function () { validImages[i] = url; done(); };
+                probe.onerror = done;
+                probe.src = url;
+            });
 
-            function tick() {
-                if (paused) return;
-                var hiddenLayer = layers[1 - frontIndex];
-                hiddenLayer.src = images[nextImageIndex];
-                nextImageIndex = (nextImageIndex + 1) % images.length;
-                layers[frontIndex].classList.remove('is-front');
-                hiddenLayer.classList.add('is-front');
-                frontIndex = 1 - frontIndex;
-            }
-            function start() { if (!timer) timer = setInterval(tick, 2600); }
-            function stop() { clearInterval(timer); timer = null; }
+            function startCycle(validImages) {
+                if (validImages.length <= 1) return; // nothing real to cycle through
 
-            media.addEventListener('mouseenter', function () { paused = true; });
-            media.addEventListener('mouseleave', function () { paused = false; });
-            media.addEventListener('focusin', function () { paused = true; });
-            media.addEventListener('focusout', function () { paused = false; });
+                var frontIndex = 0;
+                var nextImageIndex = 1 % validImages.length;
+                var timer = null;
+                var paused = false;
 
-            if ('IntersectionObserver' in window) {
-                new IntersectionObserver(function (entries) {
-                    entries.forEach(function (entry) {
-                        if (entry.isIntersecting) start(); else stop();
-                    });
-                }, { threshold: 0.2 }).observe(media);
-            } else {
-                start();
+                function tick() {
+                    if (paused) return;
+                    var hiddenLayer = layers[1 - frontIndex];
+                    hiddenLayer.src = validImages[nextImageIndex];
+                    nextImageIndex = (nextImageIndex + 1) % validImages.length;
+                    layers[frontIndex].classList.remove('is-front');
+                    hiddenLayer.classList.add('is-front');
+                    frontIndex = 1 - frontIndex;
+                }
+                function start() { if (!timer) timer = setInterval(tick, 2600); }
+                function stop() { clearInterval(timer); timer = null; }
+
+                media.addEventListener('mouseenter', function () { paused = true; });
+                media.addEventListener('mouseleave', function () { paused = false; });
+                media.addEventListener('focusin', function () { paused = true; });
+                media.addEventListener('focusout', function () { paused = false; });
+
+                if ('IntersectionObserver' in window) {
+                    new IntersectionObserver(function (entries) {
+                        entries.forEach(function (entry) {
+                            if (entry.isIntersecting) start(); else stop();
+                        });
+                    }, { threshold: 0.2 }).observe(media);
+                } else {
+                    start();
+                }
             }
         }
 
