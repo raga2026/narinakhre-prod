@@ -32,6 +32,36 @@
             <a href="{{ url_for('stocks.stocks_admin_dashboard') }}" class="text-sm text-slate-400 hover:text-sky-400 underline">Back to dashboard</a>
         </div>
 
+        {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+            <div class="mb-6" role="alert" aria-live="assertive">
+            {% for category, msg in messages %}
+                <div class="{{ 'bg-rose-900/40 text-rose-200 border-rose-500/30' if category == 'error' else 'bg-sky-900/40 text-sky-200 border-sky-500/30' }} border rounded-xl p-3 mb-2 text-sm">{{ msg }}</div>
+            {% endfor %}
+            </div>
+        {% endif %}
+        {% endwith %}
+
+        {% if today_email_overdue and session.stocks_admin_role == 'super_admin' %}
+        <div class="bg-amber-900/30 border border-amber-500/40 rounded-xl p-4 mb-6 flex items-center justify-between gap-4 flex-wrap">
+            <p class="text-amber-200 text-sm">
+                Today's Pick of the Day email hasn't gone out yet -- the automatic morning job may not have run.
+            </p>
+            <form method="POST" action="{{ url_for('stocks.stocks_recommendations_tracker_send_today') }}">
+                <button type="submit" class="bg-amber-500 hover:bg-amber-400 text-slate-900 font-bold text-sm px-4 py-2 rounded-lg"
+                        onclick="return confirm('Send today\'s recommendation email to every active subscriber now?');">
+                    Send today's recommendation manually
+                </button>
+            </form>
+        </div>
+        {% elif today_email_overdue %}
+        <div class="bg-amber-900/30 border border-amber-500/40 rounded-xl p-4 mb-6">
+            <p class="text-amber-200 text-sm">
+                Today's Pick of the Day email hasn't gone out yet -- the automatic morning job may not have run. A super_admin can send it manually.
+            </p>
+        </div>
+        {% endif %}
+
         <div class="bg-slate-800 rounded-2xl p-6 border border-sky-500/20 overflow-x-auto">
             <table>
                 <caption class="text-left text-slate-400 text-sm mb-3">

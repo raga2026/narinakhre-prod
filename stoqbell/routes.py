@@ -185,6 +185,8 @@ from stoqbell.utils.stock_alerting import (
     record_job_success,
     check_missed_jobs,
     get_last_success_at,
+    job_ran_today,
+    JOB_EXPECTATIONS,
 )
 from stoqbell.utils.suggestion_engine import (
     initialize_stock_suggestions_table_if_needed,
@@ -667,6 +669,49 @@ def stocks_suggestions_generate():
     return jsonify({'status': 'ok', **summary})
 
 
+def _generate_and_send_daily_suggestions(db):
+    """Shared body for the automatic daily cron job
+    (/stocks/suggestions/send-daily-email) and the recommendation tracker
+    page's manual "send today's recommendation" button
+    (/stocks/recommendations/tracker/send-today) -- same suggestion
+    generation, auto-trade opening, and Raghav's own Highly Recommended
+    alerts as the automatic path, so a manual send after a missed automatic
+    run behaves identically rather than being a stripped-down substitute."""
+    generation_summary = generate_daily_suggestions(db)
+    if generation_summary.get('created'):
+        # A no-op unless a super_admin has explicitly turned this
+        # on from /stocks/auto-trader. Failures here must never
+        # take the actual suggestion email down with them -- see
+        # utils/auto_trader.py's module docstring for dry_run vs
+        # live behavior.
+        try:
+            auto_trade_settings = get_auto_trade_settings(db)
+            auto_trade_kite_client = _kite_client_for_auto_trade(db, auto_trade_settings)
+        except Exception as e:
+            current_app.logger.error(f'Auto-trade Kite session unavailable: {e}')
+            auto_trade_settings, auto_trade_kite_client = None, None
+        if auto_trade_settings is not None:
+            for created in generation_summary['created']:
+                try:
+                    open_auto_trade_if_enabled(db, created, kite_client=auto_trade_kite_client)
+                except Exception as e:
+                    current_app.logger.error(f'Auto-trade open failed for {created.get("symbol")}: {e}')
+    # Raghav's own uncapped "Highly Recommended" alerts (see
+    # utils/admin_alerts.py) -- every golden/silver candidate from
+    # today's analysis, not just the one that became the customer
+    # Pick of the Day above (that pick can be empty on a day
+    # everything qualifying is on cooldown for customers, while
+    # Raghav's own list -- which ignores that cooldown entirely --
+    # still has entries), so this runs unconditionally, not nested
+    # under generation_summary['created']. Never blocks the actual
+    # daily customer email below on a failure here.
+    try:
+        record_and_send_highly_recommended_alerts(db)
+    except Exception as e:
+        current_app.logger.warning(f'Highly Recommended alert emails failed: {e}')
+    return send_daily_suggestions_email(db)
+
+
 @stocks_bp.route('/stocks/suggestions/send-daily-email', methods=['POST'])
 def stocks_suggestions_send_daily_email():
     """Generates today's suggestions (if not already run) and emails every
@@ -691,40 +736,17 @@ def stocks_suggestions_send_daily_email():
             # today, not a missed job.
             record_job_success(job_db, 'suggestion_email')
             return {'status': 'skipped', 'reason': 'not a trading day'}
+        if job_ran_today(job_db, 'suggestion_email'):
+            # Today's email already went out -- either this same cron
+            # already ran once today (a retry/duplicate trigger) or a
+            # super_admin already used the tracker page's manual "send
+            # today's recommendation" button after this cron failed to
+            # fire on time. Either way, recipients must never get today's
+            # Pick of the Day twice, so skip silently rather than sending
+            # again.
+            return {'status': 'skipped', 'reason': 'already sent today'}
         try:
-            generation_summary = generate_daily_suggestions(job_db)
-            if generation_summary.get('created'):
-                # A no-op unless a super_admin has explicitly turned this
-                # on from /stocks/auto-trader. Failures here must never
-                # take the actual suggestion email down with them -- see
-                # utils/auto_trader.py's module docstring for dry_run vs
-                # live behavior.
-                try:
-                    auto_trade_settings = get_auto_trade_settings(job_db)
-                    auto_trade_kite_client = _kite_client_for_auto_trade(job_db, auto_trade_settings)
-                except Exception as e:
-                    current_app.logger.error(f'Auto-trade Kite session unavailable: {e}')
-                    auto_trade_settings, auto_trade_kite_client = None, None
-                if auto_trade_settings is not None:
-                    for created in generation_summary['created']:
-                        try:
-                            open_auto_trade_if_enabled(job_db, created, kite_client=auto_trade_kite_client)
-                        except Exception as e:
-                            current_app.logger.error(f'Auto-trade open failed for {created.get("symbol")}: {e}')
-            # Raghav's own uncapped "Highly Recommended" alerts (see
-            # utils/admin_alerts.py) -- every golden/silver candidate from
-            # today's analysis, not just the one that became the customer
-            # Pick of the Day above (that pick can be empty on a day
-            # everything qualifying is on cooldown for customers, while
-            # Raghav's own list -- which ignores that cooldown entirely --
-            # still has entries), so this runs unconditionally, not nested
-            # under generation_summary['created']. Never blocks the actual
-            # daily customer email below on a failure here.
-            try:
-                record_and_send_highly_recommended_alerts(job_db)
-            except Exception as e:
-                current_app.logger.warning(f'Highly Recommended alert emails failed: {e}')
-            summary = send_daily_suggestions_email(job_db)
+            summary = _generate_and_send_daily_suggestions(job_db)
         except Exception as e:
             current_app.logger.error(f'Daily suggestions email failed: {e}')
             alert_job_error(job_db, 'suggestion_email', str(e))
@@ -2578,7 +2600,66 @@ def stocks_recommendations_tracker():
             row.get('holding_period_days')
         )
         tracker_rows.append(row)
-    return render_template('admin/stocks_recommendation_tracker.html', tracker_rows=tracker_rows)
+
+    # Only flag today's automatic send as overdue once its expected-by hour
+    # (IST) has actually passed -- same threshold check_missed_jobs uses for
+    # 'suggestion_email' (see JOB_EXPECTATIONS) -- so this banner doesn't
+    # falsely accuse the morning cron of having failed before it's even had
+    # its turn. Not a trading day means there was never anything to send.
+    today_email_sent = job_ran_today(db, 'suggestion_email')
+    now_ist_hour = datetime.now(timezone.utc).astimezone(IST).hour
+    today_email_overdue = (
+        not today_email_sent
+        and is_trading_day()
+        and now_ist_hour >= JOB_EXPECTATIONS['suggestion_email']['expected_by_ist_hour']
+    )
+    return render_template(
+        'admin/stocks_recommendation_tracker.html', tracker_rows=tracker_rows,
+        today_email_sent=today_email_sent, today_email_overdue=today_email_overdue,
+    )
+
+
+@stocks_bp.route('/stocks/recommendations/tracker/send-today', methods=['POST'])
+@stocks_role_required('super_admin')
+def stocks_recommendations_tracker_send_today():
+    """super_admin-only: manually runs today's Pick of the Day generation
+    and customer email, for when the automatic cron
+    (stocks-suggestions-email.yml, 02:00 UTC / 07:30 IST) didn't fire at
+    all -- see the tracker page's "today's email hasn't gone out yet"
+    banner, driven by today_email_overdue above. Uses the exact same
+    _generate_and_send_daily_suggestions body the automatic job runs, then
+    records the same job-success marker (record_job_success(db,
+    'suggestion_email')) so /stocks/alerts/check-missed-jobs doesn't ALSO
+    flag today as missed, and so the automatic cron -- if it's merely
+    delayed rather than fully dead and fires later the same day -- sees
+    today's job_ran_today() already true (see the guard in
+    /stocks/suggestions/send-daily-email) and skips instead of emailing
+    every recipient a second time."""
+    db = get_db()
+    if not is_trading_day():
+        flash("Today isn't a trading day -- there's nothing to send.", 'error')
+        return redirect(url_for('stocks.stocks_recommendations_tracker'))
+    if job_ran_today(db, 'suggestion_email'):
+        flash("Today's recommendation email has already been sent.", 'error')
+        return redirect(url_for('stocks.stocks_recommendations_tracker'))
+
+    try:
+        summary = _generate_and_send_daily_suggestions(db)
+    except Exception as e:
+        current_app.logger.error(f'Manual daily suggestion send failed: {e}')
+        alert_job_error(db, 'suggestion_email', str(e))
+        flash(f'Send failed: {e}', 'error')
+        return redirect(url_for('stocks.stocks_recommendations_tracker'))
+
+    record_job_success(db, 'suggestion_email')
+    stock_word = 'stock' if summary['suggestion_count'] == 1 else 'stocks'
+    message = (
+        f"Sent today's recommendation ({summary['suggestion_count']} {stock_word}) "
+        f"to {summary['sent']} of {summary['recipient_count']} recipients"
+        + (f", {summary['failed']} failed" if summary['failed'] else '') + '.'
+    )
+    flash(message, 'error' if summary['failed'] else 'info')
+    return redirect(url_for('stocks.stocks_recommendations_tracker'))
 
 
 @stocks_bp.route('/stocks/special-recommendations', methods=['GET'])

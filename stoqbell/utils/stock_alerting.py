@@ -354,6 +354,27 @@ def record_job_success(db, source):
         print(f'record_job_success failed for {source}: {type(e).__name__}: {e}')
 
 
+def job_ran_today(db, source, now=None):
+    """True if stock_job_runs.source has a recorded successful run since
+    today's IST midnight -- the same "ran_today" check check_missed_jobs
+    applies per JOB_EXPECTATIONS entry, pulled out standalone so a single
+    job can be checked outside the once-a-day missed-jobs sweep. Used by
+    the recommendation tracker page to show whether today's automatic Pick
+    of the Day email has gone out yet, and as a guard so the automatic cron
+    (/stocks/suggestions/send-daily-email) and the tracker page's manual
+    "send today's recommendation" button (/stocks/recommendations/tracker/
+    send-today) never both send the same day's email."""
+    now = now or datetime.now(timezone.utc)
+    now_ist = now.astimezone(IST)
+    today_start_ist = now_ist.replace(hour=0, minute=0, second=0, microsecond=0)
+    row = db.execute(
+        'SELECT last_success_at FROM stock_job_runs WHERE source=?',
+        (source,)
+    ).fetchone()
+    last_success = _parse_timestamp(row['last_success_at']) if row and row.get('last_success_at') else None
+    return last_success is not None and last_success.astimezone(IST) >= today_start_ist
+
+
 def check_missed_jobs(db, now=None):
     """For each job in JOB_EXPECTATIONS, checks whether it has a recorded
     successful run (stock_job_runs.last_success_at) since today's IST
@@ -370,7 +391,6 @@ def check_missed_jobs(db, now=None):
     with a Mock rather than a real type)."""
     now = now or datetime.now(timezone.utc)
     now_ist = now.astimezone(IST)
-    today_start_ist = now_ist.replace(hour=0, minute=0, second=0, microsecond=0)
 
     checked = []
     missed = []
@@ -380,15 +400,7 @@ def check_missed_jobs(db, now=None):
             continue
 
         checked.append(source)
-        row = db.execute(
-            'SELECT last_success_at FROM stock_job_runs WHERE source=?',
-            (source,)
-        ).fetchone()
-
-        last_success = _parse_timestamp(row['last_success_at']) if row and row.get('last_success_at') else None
-        ran_today = last_success is not None and last_success.astimezone(IST) >= today_start_ist
-
-        if not ran_today:
+        if not job_ran_today(db, source, now=now):
             missed.append(source)
             alert_job_missed(db, source, expected_by=expectation['label'])
 
