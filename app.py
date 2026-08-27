@@ -41,7 +41,167 @@ def load_env_file(env_path):
             os.environ.setdefault(key.strip(), value.strip().strip('"').strip("'"))
 
 
-app = Flask(__name__)
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+# .env has to load before Flask(__name__, ...) below, since ACTIVE_THEME (and
+# which template_folder/static_folder Flask ends up serving from) is read
+# from it right away -- unlike every other os.environ.get() in this file,
+# which can afford to run later since nothing reads them before a request
+# comes in.
+load_env_file(os.path.join(BASE_DIR, '.env'))
+
+# Storefront theme (retail/wholesale/admin templates + static assets) --
+# see templates/themes/<name>/ and static/themes/<name>/. 'default' is the
+# original design, moved into its own theme folder as step 1 of a themeable
+# restructure; ACTIVE_THEME picks which theme's folders Flask actually
+# serves from, below. A relative path (not BASE_DIR-joined) is deliberate --
+# Flask resolves template_folder/static_folder relative to the app's own
+# root_path when given a relative string, same as the bare 'templates'/
+# 'static' defaults this replaces.
+ACTIVE_THEME = os.environ.get('ACTIVE_THEME', 'default')
+
+app = Flask(
+    __name__,
+    template_folder=os.path.join('templates', 'themes', ACTIVE_THEME),
+    # Flask's automatic /static/<path:filename> route is disabled here
+    # (static_folder=None) in favor of the hand-registered 'static' endpoint
+    # below, which needs to check more than one directory per request -- see
+    # that endpoint's own comment for why.
+    static_folder=None,
+)
+app.config['ACTIVE_THEME'] = ACTIVE_THEME
+
+# Local-dev-only convenience: lets a developer preview a different theme by
+# visiting ?theme=<name> once, without restarting the process or touching
+# ACTIVE_THEME/.env -- never set true in Render (test or production), so in
+# both deployed environments _effective_theme() below always short-circuits
+# straight to ACTIVE_THEME and this whole mechanism is a no-op.
+ALLOW_DEV_THEME_OVERRIDE = os.environ.get('ALLOW_DEV_THEME_OVERRIDE', 'false').lower() == 'true'
+
+
+def _is_real_theme(name):
+    return bool(name) and re.fullmatch(r'[a-zA-Z0-9_-]+', name) and \
+        os.path.isdir(os.path.join(BASE_DIR, 'templates', 'themes', name))
+
+
+@app.before_request
+def _apply_dev_theme_override():
+    """?theme=<name> (dev-only, see ALLOW_DEV_THEME_OVERRIDE) sticks in the
+    session for the rest of the browsing session, rather than only applying
+    to the one request that carries the query param -- Step 5's test
+    checklist needs a full flow (browse -> add to cart -> checkout ->
+    order-placed banner) to stay on the previewed theme across many page
+    loads, none of which have any reason to carry ?theme= themselves.
+    ?theme=default (or any other real theme name) switches back the same
+    way; ?theme=<anything invalid, including empty> clears the override
+    back to ACTIVE_THEME. Runs for every request, including the static
+    endpoint below, so CSS/JS/images switch along with templates."""
+    if not ALLOW_DEV_THEME_OVERRIDE or 'theme' not in request.args:
+        return
+    requested = request.args.get('theme', '')
+    if _is_real_theme(requested):
+        session['dev_theme_override'] = requested
+    else:
+        session.pop('dev_theme_override', None)
+
+
+def _effective_theme():
+    """ACTIVE_THEME, unless ALLOW_DEV_THEME_OVERRIDE is on and this request's
+    session has a valid ?theme= override recorded above -- the single
+    source of truth both the Jinja loader and the static endpoint below
+    resolve through, so templates and static assets never disagree about
+    which theme is active for a given request."""
+    if ALLOW_DEV_THEME_OVERRIDE and has_request_context():
+        override = session.get('dev_theme_override')
+        if _is_real_theme(override):
+            return override
+    return ACTIVE_THEME
+
+
+from jinja2 import BaseLoader, ChoiceLoader, PrefixLoader, FileSystemLoader
+
+
+class _ActiveThemeTemplateLoader(BaseLoader):
+    """Resolves templates from _effective_theme()'s folder, re-evaluated on
+    every lookup instead of fixed at process startup -- what makes the
+    ?theme= override above actually change which templates render, not just
+    which theme name is recorded in the session. Behaves exactly like the
+    plain FileSystemLoader(ACTIVE_THEME's folder) this replaces whenever
+    ALLOW_DEV_THEME_OVERRIDE is off (the normal case in every deployed
+    environment), since _effective_theme() then always returns ACTIVE_THEME."""
+    def get_source(self, environment, template):
+        directory = os.path.join(BASE_DIR, 'templates', 'themes', _effective_theme())
+        return FileSystemLoader(directory).get_source(environment, template)
+
+
+_default_template_loader = FileSystemLoader(os.path.join(BASE_DIR, 'templates', 'themes', 'default'))
+app.jinja_loader = ChoiceLoader([
+    # Normal resolution: _effective_theme()'s own template_folder (ACTIVE_THEME,
+    # or the dev-only session override -- see _ActiveThemeTemplateLoader).
+    _ActiveThemeTemplateLoader(),
+    # Safety net (multi-theme migration step 3): a template that exists in
+    # `default` but is genuinely MISSING from ACTIVE_THEME's own folder --
+    # e.g. a page added to `default` after apoorva's scaffold was last
+    # brought up to date, or any theme that's deliberately a partial
+    # override rather than a full mirror -- falls back to default's copy
+    # instead of raising TemplateNotFound. A no-op whenever ACTIVE_THEME is
+    # already 'default' (this and the line above would resolve the same
+    # file) or whenever the active theme's own copy of a file exists (that
+    # copy always wins, tried first).
+    _default_template_loader,
+    # Exposes templates/themes/default/ under a "default/" prefix TOO, on
+    # top of the two unprefixed entries above -- lets any theme's templates
+    # (e.g. apoorva, see templates/themes/apoorva/) explicitly
+    # {% extends "default/retail/base.html" %} to reuse the real default
+    # page structure/blocks/variables wholesale while only overriding a
+    # block or two of their own (or overriding none at all, rendering
+    # byte-identical to default) -- distinct from the plain fallback above,
+    # which only kicks in when the active theme has NO file of its own to
+    # render at all.
+    PrefixLoader({'default': _default_template_loader}),
+])
+
+
+# Multi-theme migration step 3's static-file counterpart to the template
+# fallback above: Flask's built-in static handling only ever serves from one
+# directory, so recreating "ACTIVE_THEME's own file if present, else
+# default's" for /static/<path:filename> needs a hand-rolled view rather
+# than a loader class. Endpoint is named 'static' (matching the function
+# name Flask uses by default) specifically so every existing
+# url_for('static', filename=...) call in every template keeps resolving
+# without modification -- this replaces Flask's automatic route, it doesn't
+# add a second one.
+_DEFAULT_THEME_STATIC_DIR = os.path.join(BASE_DIR, 'static', 'themes', 'default')
+
+
+def _resolve_theme_static_dir(filename):
+    """Returns the first of (_effective_theme()'s static dir, default's
+    static dir) that actually has `filename`, or None if neither does -- the
+    same apoorva-first-then-default fallback the 'static' endpoint below
+    uses, factored out so favicon() (which used Flask's own
+    app.send_static_file(), no longer available now that static_folder=None
+    above) can resolve through it too instead of hardcoding one theme's
+    path. Re-evaluates _effective_theme() on every call (not a fixed
+    directory captured once at startup) so the dev-only ?theme= override
+    applies to static assets exactly like it does to templates."""
+    from werkzeug.utils import safe_join
+    active_theme_dir = os.path.join(BASE_DIR, 'static', 'themes', _effective_theme())
+    for directory in (active_theme_dir, _DEFAULT_THEME_STATIC_DIR):
+        candidate = safe_join(directory, filename)
+        if candidate and os.path.isfile(candidate):
+            return directory
+    return None
+
+
+@app.route('/static/<path:filename>')
+def static(filename):
+    from flask import send_from_directory
+    from werkzeug.exceptions import NotFound
+    directory = _resolve_theme_static_dir(filename)
+    if directory is None:
+        raise NotFound()
+    return send_from_directory(directory, filename)
+
+
 # Render sits in front of the app behind a proxy; without this, request.remote_addr
 # shows an internal 10.x.x.x hop IP (see Render logs) instead of the real visitor IP,
 # which makes IP-based bot/rate-limit checks useless.
@@ -56,7 +216,6 @@ def fromjson_filter(value):
         return json.loads(value)
     except Exception:
         return []
-load_env_file(os.path.join(os.path.dirname(os.path.abspath(__file__)), '.env'))
 app.secret_key = os.environ.get('FLASK_SECRET_KEY', 'nari-nakhre-dev-secret')
 # Without this, session.permanent defaults to False, which makes Flask omit
 # Expires/Max-Age from the session cookie entirely -- a "browser session"
@@ -74,8 +233,6 @@ app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(days=30)
 @app.before_request
 def _make_session_permanent():
     session.permanent = True
-
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 app.config['SHIPPING_PROVIDER'] = os.environ.get('SHIPPING_PROVIDER', 'mock')
 app.config['DELHIVERY_API_KEY'] = os.environ.get('DELHIVERY_API_KEY', '')
@@ -2841,7 +2998,12 @@ def product_detail(product_id):
 
 @app.route('/favicon.ico')
 def favicon():
-    return app.send_static_file('assets/favicon.ico')
+    from flask import send_from_directory
+    from werkzeug.exceptions import NotFound
+    directory = _resolve_theme_static_dir('assets/favicon.ico')
+    if directory is None:
+        raise NotFound()
+    return send_from_directory(directory, 'assets/favicon.ico')
 
 @app.route('/robots.txt')
 def robots():

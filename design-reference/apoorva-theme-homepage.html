@@ -1,0 +1,574 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Nari Nakhre — ApoorvaTheme Homepage Concept</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,500;0,9..144,700;1,9..144,600;1,9..144,700&family=Work+Sans:wght@400;500;600;700&display=swap');
+
+  :root{
+    /* ===== Token system ===== */
+    --ink:#2b1810;
+    --ivory:#faf6f0;
+    --ivory-deep:#f2e9dd;
+    --wine:#6b1e3c;
+    --wine-deep:#4a1329;
+    --marigold:#e8a33d;
+    --marigold-deep:#c8842a;
+    --rose:#d46a8c;
+    --line:#e6dccb;
+    --focus:#1d5fd6;
+    font-size:16px;
+  }
+
+  *{box-sizing:border-box;}
+  body{
+    margin:0;
+    background:var(--ivory);
+    color:var(--ink);
+    font-family:'Work Sans', sans-serif;
+    line-height:1.5;
+  }
+  h1,h2,h3{
+    font-family:'Fraunces', serif;
+    font-weight:600;
+    margin:0;
+  }
+  a{color:inherit;}
+  img,.ph{display:block;}
+
+  /* Skip link */
+  .skip-link{
+    position:absolute; left:-999px; top:0;
+    background:var(--ink); color:var(--ivory);
+    padding:.75rem 1.25rem; z-index:200;
+  }
+  .skip-link:focus{left:1rem; top:1rem;}
+
+  :focus-visible{outline:3px solid var(--focus); outline-offset:2px;}
+
+  /* ===== Announcement bar (replaces old popup) ===== */
+  .announce{
+    background:var(--wine);
+    color:var(--ivory);
+    text-align:center;
+    font-size:.85rem;
+    letter-spacing:.04em;
+    padding:.5rem 1rem;
+    font-weight:600;
+  }
+  .announce strong{color:var(--marigold);}
+
+  /* ===== Header / Nav ===== */
+  header.site{
+    background:var(--ivory);
+    border-bottom:1px solid var(--line);
+    position:sticky; top:0; z-index:100;
+  }
+  .nav-wrap{
+    max-width:1200px; margin:0 auto; padding:.9rem 1.5rem;
+    display:flex; align-items:center; justify-content:space-between; gap:1.5rem;
+  }
+  .logo{
+    font-family:'Fraunces', serif; font-style:italic; font-weight:700;
+    font-size:1.7rem; color:var(--wine); text-decoration:none;
+    letter-spacing:.01em;
+  }
+  .logo small{
+    display:block; font-family:'Work Sans',sans-serif; font-style:normal;
+    font-weight:600; font-size:.6rem; letter-spacing:.18em; color:var(--marigold-deep);
+  }
+  nav.primary ul{
+    list-style:none; display:flex; gap:1.75rem; margin:0; padding:0;
+    font-size:.92rem; font-weight:600;
+  }
+  nav.primary a{text-decoration:none; padding:.3rem 0; border-bottom:2px solid transparent; white-space:nowrap;}
+  nav.primary a:hover, nav.primary a:focus-visible{border-bottom-color:var(--marigold);}
+  .nav-actions{display:flex; align-items:center; gap:1.25rem; font-size:.85rem; font-weight:600;}
+  .nav-actions a{text-decoration:none; display:flex; align-items:center; gap:.35rem;}
+  .cart-count{
+    background:var(--marigold); color:var(--ink); border-radius:999px;
+    font-size:.72rem; padding:.05rem .4rem; font-weight:700;
+  }
+
+  /* Mobile category scroll-strip (Elra/JanpathOnline style top nav) */
+  .mobile-cat-strip{
+    display:none;
+    overflow-x:auto; -webkit-overflow-scrolling:touch;
+    scrollbar-width:none;
+    background:var(--ivory-deep); border-top:1px solid var(--line);
+  }
+  .mobile-cat-strip::-webkit-scrollbar{display:none;}
+  .mobile-cat-strip ul{
+    list-style:none; display:flex; gap:1.4rem; margin:0;
+    padding:.65rem 1rem; white-space:nowrap;
+  }
+  .mobile-cat-strip a{
+    text-decoration:none; color:var(--wine); font-size:.78rem; font-weight:700;
+    letter-spacing:.02em; text-transform:uppercase;
+  }
+
+  /* ===== Hero carousel ===== */
+  .hero{position:relative; background:var(--ink);}
+  .hero-track{position:relative; height:min(70vh, 560px); overflow:hidden;}
+  .slide{
+    position:absolute; inset:0; opacity:0; transition:opacity .6s ease;
+    display:flex; align-items:flex-end;
+  }
+  .slide.is-active{opacity:1; z-index:2;}
+  .slide-bg{
+    position:absolute; inset:0;
+    background-size:cover; background-position:center;
+  }
+  .slide-bg::after{
+    content:""; position:absolute; inset:0;
+    background:linear-gradient(0deg, rgba(20,8,10,.75) 0%, rgba(20,8,10,.15) 55%, rgba(20,8,10,0) 100%);
+  }
+  .slide[data-cat="bangles"] .slide-bg{background-image:linear-gradient(135deg,#d46a8c,#6b1e3c 60%,#3d0f22);}
+  .slide[data-cat="hair"] .slide-bg{background-image:linear-gradient(135deg,#e8a33d,#a5651e 55%,#5b330d);}
+  .slide[data-cat="toe"] .slide-bg{background-image:linear-gradient(135deg,#7a9e8e,#2e5245 55%,#132a22);}
+
+  .slide-content{
+    position:relative; z-index:3; padding:2.5rem clamp(1.5rem,5vw,4rem) 3rem;
+    color:var(--ivory); max-width:640px;
+  }
+  .slide-eyebrow{
+    font-size:.78rem; letter-spacing:.22em; text-transform:uppercase;
+    color:var(--marigold); font-weight:700; margin-bottom:.6rem;
+  }
+  .slide-content h2{font-size:clamp(1.8rem,4vw,2.9rem); line-height:1.05; margin-bottom:.6rem;}
+  .slide-content p{font-size:1rem; opacity:.9; margin-bottom:1.3rem; max-width:36ch;}
+  .cta-btn{
+    display:inline-block; background:var(--marigold); color:var(--ink);
+    font-weight:700; text-decoration:none; padding:.8rem 1.6rem; border-radius:999px;
+    font-size:.9rem; letter-spacing:.02em;
+  }
+  .cta-btn:hover, .cta-btn:focus-visible{background:var(--ivory);}
+
+  .hero-controls{
+    position:absolute; inset:0; z-index:4; pointer-events:none;
+    display:flex; align-items:center; justify-content:space-between;
+    padding:0 1rem;
+  }
+  .hero-controls button{
+    pointer-events:auto; background:rgba(250,246,240,.85); border:none;
+    width:2.6rem; height:2.6rem; border-radius:999px; font-size:1.1rem;
+    cursor:pointer; color:var(--wine); font-weight:700;
+  }
+  .hero-controls button:hover{background:var(--ivory);}
+
+  .hero-dots{
+    position:absolute; bottom:1rem; left:50%; transform:translateX(-50%);
+    z-index:5; display:flex; gap:.6rem;
+  }
+  .hero-dots button{
+    width:1.4rem; height:1.4rem; border-radius:50%; border:2px solid var(--ivory);
+    background:transparent; cursor:pointer; padding:0; position:relative;
+  }
+  .hero-dots button[aria-current="true"]{background:var(--marigold); border-color:var(--marigold);}
+
+  /* ===== Category quick-strip ===== */
+  .quickstrip{
+    max-width:1200px; margin:0 auto; padding:2.5rem 1.5rem 1rem;
+    display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr));
+    gap:1.25rem; text-align:center;
+  }
+  .quickstrip a{
+    text-decoration:none; color:var(--ink); display:flex; flex-direction:column;
+    align-items:center; gap:.6rem; font-weight:600; font-size:.85rem;
+  }
+  .quick-icon{
+    width:3.4rem; height:3.4rem; border-radius:50%; background:var(--ivory-deep);
+    border:1px solid var(--line); display:flex; align-items:center; justify-content:center;
+    font-size:1.4rem;
+  }
+  .quickstrip a:hover .quick-icon, .quickstrip a:focus-visible .quick-icon{
+    background:var(--marigold); border-color:var(--marigold);
+  }
+  @media (max-width:640px){
+    .quickstrip{
+      display:flex; overflow-x:auto; -webkit-overflow-scrolling:touch;
+      scroll-snap-type:x proximity; justify-content:flex-start;
+      padding:1.5rem 1rem 1rem;
+    }
+    .quickstrip a{flex:0 0 auto; width:5.2rem; scroll-snap-align:start;}
+  }
+
+  /* ===== Section heading ===== */
+  .section{max-width:1200px; margin:0 auto; padding:2.5rem 1.5rem;}
+  .section-head{display:flex; align-items:baseline; justify-content:space-between; margin-bottom:1.5rem; flex-wrap:wrap; gap:.5rem;}
+  .section-head h2{font-size:1.7rem; color:var(--wine);}
+  .section-head a{font-size:.85rem; font-weight:700; text-decoration:none; color:var(--marigold-deep);}
+
+  /* ===== Product grid: 3 per row, larger images, hover-swap ===== */
+  .grid{
+    display:grid; grid-template-columns:repeat(3, 1fr); gap:1.75rem;
+  }
+  @media (max-width:820px){.grid{grid-template-columns:repeat(2,1fr);}}
+  @media (max-width:520px){.grid{grid-template-columns:1fr;}}
+
+  .card{text-decoration:none; color:var(--ink); display:block;}
+  .card-media{
+    position:relative; aspect-ratio:4/5; border-radius:14px; overflow:hidden;
+    background:var(--ivory-deep); margin-bottom:.85rem;
+  }
+  .card-media .ph{
+    position:absolute; inset:0; display:flex; align-items:center; justify-content:center;
+    color:var(--ivory); font-size:.8rem; font-weight:600; text-align:center; padding:1rem;
+    transition:opacity .35s ease;
+  }
+  .ph.primary{background:linear-gradient(160deg,var(--rose),var(--wine));}
+  .ph.hover{background:linear-gradient(160deg,var(--marigold),var(--marigold-deep)); opacity:0;}
+  .card:hover .ph.hover, .card:focus-visible .ph.hover{opacity:1;}
+  .card-badge{
+    position:absolute; top:.7rem; left:.7rem; background:var(--ivory);
+    color:var(--wine); font-size:.68rem; font-weight:700; padding:.25rem .55rem;
+    border-radius:999px; letter-spacing:.03em; z-index:2;
+  }
+  .card h3{font-size:.98rem; margin-bottom:.25rem;}
+  .card .price{font-weight:700; color:var(--wine);}
+  .card .price .strike{color:#9a8f80; text-decoration:line-through; font-weight:500; margin-left:.4rem; font-size:.85rem;}
+
+  /* ===== Inline incentive signup (replaces intrusive popup) ===== */
+  .signup-band{
+    background:var(--wine-deep); color:var(--ivory);
+    border-radius:18px; max-width:1200px; margin:2rem auto; padding:2.2rem clamp(1.5rem,4vw,3rem);
+    display:flex; align-items:center; justify-content:space-between; gap:2rem; flex-wrap:wrap;
+  }
+  .signup-band h2{font-size:1.5rem; margin-bottom:.4rem;}
+  .signup-band p{opacity:.85; font-size:.9rem; max-width:38ch; margin:0;}
+  .signup-form{display:flex; gap:.6rem; flex-wrap:wrap;}
+  .signup-form label{position:absolute; left:-9999px;}
+  .signup-form input{
+    padding:.75rem 1rem; border-radius:999px; border:none; min-width:220px; font-size:.9rem;
+  }
+  .signup-form button{
+    background:var(--marigold); color:var(--ink); border:none; font-weight:700;
+    padding:.75rem 1.4rem; border-radius:999px; cursor:pointer; font-size:.9rem;
+  }
+  .signup-note{width:100%; font-size:.72rem; opacity:.65; margin-top:.4rem;}
+
+  /* ===== Footer ===== */
+  footer.site{
+    background:var(--ivory-deep); border-top:1px solid var(--line);
+    padding:3rem 1.5rem 2rem; font-size:.85rem;
+  }
+  .footer-grid{
+    max-width:1200px; margin:0 auto; display:grid;
+    grid-template-columns:1.4fr 1fr 1fr 1fr; gap:2rem;
+  }
+  @media (max-width:720px){.footer-grid{grid-template-columns:1fr 1fr;}}
+  .footer-grid h4{font-size:.8rem; text-transform:uppercase; letter-spacing:.08em; margin-bottom:.9rem; color:var(--wine);}
+  .footer-grid ul{list-style:none; margin:0; padding:0; display:grid; gap:.5rem;}
+  .footer-grid a{text-decoration:none; color:var(--ink);}
+  .footer-bottom{max-width:1200px; margin:2rem auto 0; padding-top:1.5rem; border-top:1px solid var(--line); font-size:.75rem; opacity:.7;}
+
+  @media (prefers-reduced-motion: reduce){
+    .slide{transition:none;}
+  }
+
+  /* ===== Mobile layout, matching Elra / JanpathOnline reference pattern ===== */
+  @media (max-width:700px){
+    .nav-wrap{padding:.65rem 1rem; gap:.75rem;}
+    .logo{font-size:1.25rem;}
+    .logo small{font-size:.52rem; letter-spacing:.12em;}
+    nav.primary{display:none;}
+    .nav-actions{gap:.85rem; font-size:0;}
+    .nav-actions a{font-size:.72rem; flex-direction:column; gap:.15rem;}
+    .cart-count{position:relative; top:-1px;}
+    .mobile-cat-strip{display:block;}
+
+    .hero-track{height:78vw; min-height:340px;}
+    .slide-content{padding:1.4rem 1.2rem 1.8rem; max-width:100%;}
+    .slide-content h2{font-size:1.5rem;}
+    .slide-content p{font-size:.85rem; max-width:30ch;}
+    .cta-btn{padding:.65rem 1.25rem; font-size:.82rem;}
+    .hero-controls button{width:2.1rem; height:2.1rem; font-size:.9rem;}
+
+    .section{padding:2rem 1rem;}
+    .section-head h2{font-size:1.35rem;}
+    .grid{gap:.9rem;}
+    .card h3{font-size:.85rem;}
+
+    .signup-band{flex-direction:column; align-items:flex-start; padding:1.6rem 1.3rem; border-radius:14px;}
+    .signup-form{width:100%;}
+    .signup-form input{flex:1; min-width:0;}
+    .signup-form button{flex:0 0 auto;}
+  }
+</style>
+</head>
+<body>
+
+<a class="skip-link" href="#main">Skip to main content</a>
+
+<div class="announce" role="note">
+  Use code <strong>NNRAKSH10</strong> for 10% off, up to ₹50 — automatically applied at checkout
+</div>
+
+<header class="site">
+  <div class="nav-wrap">
+    <a class="logo" href="#">Nari Nakhre<small>Handcrafted &middot; Playful &middot; Yours</small></a>
+    <nav class="primary" aria-label="Main">
+      <ul>
+        <li><a href="#">Bangles</a></li>
+        <li><a href="#">Earrings &amp; Jhumkas</a></li>
+        <li><a href="#">Hair Accessories</a></li>
+        <li><a href="#">Toe Rings</a></li>
+        <li><a href="#">Wholesale</a></li>
+      </ul>
+    </nav>
+    <div class="nav-actions">
+      <a href="#">Track Order</a>
+      <a href="#">Account</a>
+      <a href="#">Cart <span class="cart-count">2</span></a>
+    </div>
+  </div>
+  <nav class="mobile-cat-strip" aria-label="Shop by category (scroll for more)">
+    <ul>
+      <li><a href="#">Bangles</a></li>
+      <li><a href="#">Earrings &amp; Jhumkas</a></li>
+      <li><a href="#">Hair Accessories</a></li>
+      <li><a href="#">Toe Rings</a></li>
+      <li><a href="#">Wholesale</a></li>
+      <li><a href="#">Track Order</a></li>
+    </ul>
+  </nav>
+</header>
+
+<main id="main">
+
+  <!-- ===== Hero carousel ===== -->
+  <section class="hero" aria-roledescription="carousel" aria-label="Featured collections">
+    <div class="hero-track" id="heroTrack">
+
+      <div class="slide is-active" data-cat="bangles" role="group" aria-roledescription="slide" aria-label="1 of 3">
+        <div class="slide-bg"></div>
+        <div class="slide-content">
+          <p class="slide-eyebrow">New Arrivals</p>
+          <h2>Bangles that catch the light&nbsp;&mdash; and the room</h2>
+          <p>Stacked sets in glass, stone, and thread, handcrafted for every wrist and every occasion.</p>
+          <a class="cta-btn" href="#">Shop Bangles</a>
+        </div>
+      </div>
+
+      <div class="slide" data-cat="hair" role="group" aria-roledescription="slide" aria-label="2 of 3">
+        <div class="slide-bg"></div>
+        <div class="slide-content">
+          <p class="slide-eyebrow">Festive Edit</p>
+          <h2>Parandas &amp; hair jewellery for the bride in you</h2>
+          <p>From everyday clips to full bridal parandas, handcrafted detail in every strand.</p>
+          <a class="cta-btn" href="#">Shop Hair Accessories</a>
+        </div>
+      </div>
+
+      <div class="slide" data-cat="toe" role="group" aria-roledescription="slide" aria-label="3 of 3">
+        <div class="slide-bg"></div>
+        <div class="slide-content">
+          <p class="slide-eyebrow">Bridal Essentials</p>
+          <h2>Toe rings, finished the traditional way</h2>
+          <p>Silver-finish bichhiya, adjustable fits, and pairs made for the mandap and beyond.</p>
+          <a class="cta-btn" href="#">Shop Toe Rings</a>
+        </div>
+      </div>
+
+      <div class="hero-controls">
+        <button type="button" id="prevSlide" aria-label="Previous slide">&#10094;</button>
+        <button type="button" id="nextSlide" aria-label="Next slide">&#10095;</button>
+      </div>
+      <div class="hero-dots" role="tablist" aria-label="Choose slide" id="heroDots">
+        <button type="button" role="tab" aria-current="true" aria-label="Slide 1: Bangles" data-index="0"></button>
+        <button type="button" role="tab" aria-current="false" aria-label="Slide 2: Hair Accessories" data-index="1"></button>
+        <button type="button" role="tab" aria-current="false" aria-label="Slide 3: Toe Rings" data-index="2"></button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===== Quick category strip (kept from current site, styled cleaner) ===== -->
+  <nav class="quickstrip" aria-label="Shop by category">
+    <a href="#"><span class="quick-icon" aria-hidden="true">&#9673;</span>Bangles</a>
+    <a href="#"><span class="quick-icon" aria-hidden="true">&#10052;</span>Earrings &amp; Jhumkas</a>
+    <a href="#"><span class="quick-icon" aria-hidden="true">&#9670;</span>Hair Accessories</a>
+    <a href="#"><span class="quick-icon" aria-hidden="true">&#9679;</span>Toe Rings</a>
+    <a href="#"><span class="quick-icon" aria-hidden="true">&#9733;</span>Wholesale</a>
+  </nav>
+
+  <!-- ===== Product grid, 3-up, hover swap ===== -->
+  <section class="section" aria-labelledby="trending-heading">
+    <div class="section-head">
+      <h2 id="trending-heading">Trending This Week</h2>
+      <a href="#">View all &rarr;</a>
+    </div>
+    <div class="grid">
+
+      <a class="card" href="#">
+        <div class="card-media">
+          <span class="card-badge">Bestseller</span>
+          <div class="ph primary">Green &amp; Golden Stone Glass Bangle Set — Photo A</div>
+          <div class="ph hover">Green &amp; Golden Stone Glass Bangle Set — Photo B (worn)</div>
+        </div>
+        <h3>Green &amp; Golden Stone Glass Bangles (Set of 4)</h3>
+        <p class="price">₹299 <span class="strike">₹1,999</span></p>
+      </a>
+
+      <a class="card" href="#">
+        <div class="card-media">
+          <span class="card-badge">New</span>
+          <div class="ph primary">Zard Peach Roshna Bangles — Photo A</div>
+          <div class="ph hover">Zard Peach Roshna Bangles — Photo B (worn)</div>
+        </div>
+        <h3>Zard Peach Roshna Bangles (Set of 12)</h3>
+        <p class="price">₹549</p>
+      </a>
+
+      <a class="card" href="#">
+        <div class="card-media">
+          <div class="ph primary">Morni Deep Blue Roshna Bangles — Photo A</div>
+          <div class="ph hover">Morni Deep Blue Roshna Bangles — Photo B (worn)</div>
+        </div>
+        <h3>Morni Deep Blue Roshna Bangles (Set of 10)</h3>
+        <p class="price">₹479</p>
+      </a>
+
+      <a class="card" href="#">
+        <div class="card-media">
+          <div class="ph primary">Golden Kundan Jhumkas — Photo A</div>
+          <div class="ph hover">Golden Kundan Jhumkas — Photo B (worn)</div>
+        </div>
+        <h3>Golden Kundan Jhumkas</h3>
+        <p class="price">₹389</p>
+      </a>
+
+      <a class="card" href="#">
+        <div class="card-media">
+          <span class="card-badge">Bridal</span>
+          <div class="ph primary">Silver Bichhiya Toe Ring Pair — Photo A</div>
+          <div class="ph hover">Silver Bichhiya Toe Ring Pair — Photo B (worn)</div>
+        </div>
+        <h3>Silver Bichhiya Toe Ring (Pair)</h3>
+        <p class="price">₹249</p>
+      </a>
+
+      <a class="card" href="#">
+        <div class="card-media">
+          <div class="ph primary">Rose Gold Paranda — Photo A</div>
+          <div class="ph hover">Rose Gold Paranda — Photo B (worn)</div>
+        </div>
+        <h3>Rose Gold Paranda, Full Length</h3>
+        <p class="price">₹699</p>
+      </a>
+
+    </div>
+  </section>
+
+  <!-- ===== Inline incentive signup (replaces the old blocking popup) ===== -->
+  <section class="signup-band" aria-labelledby="signup-heading">
+    <div>
+      <h2 id="signup-heading">Get 10% off your first order</h2>
+      <p>Join the list for early access to new drops and festive collections. No spam, unsubscribe anytime.</p>
+    </div>
+    <form class="signup-form" aria-describedby="signup-note">
+      <label for="signup-email">Email address</label>
+      <input id="signup-email" type="email" placeholder="you@example.com" required>
+      <button type="submit">Get My Code</button>
+      <p class="signup-note" id="signup-note">We'll only use this to send your welcome code and occasional updates — see our Privacy Policy.</p>
+    </form>
+  </section>
+
+</main>
+
+<footer class="site">
+  <div class="footer-grid">
+    <div>
+      <p class="logo" style="font-size:1.4rem;">Nari Nakhre</p>
+      <p style="max-width:32ch; opacity:.8;">Your one-stop shop for handcrafted Indian jewellery — browse, order, and track it all in one place.</p>
+    </div>
+    <div>
+      <h4>Shop</h4>
+      <ul>
+        <li><a href="#">Bangles</a></li>
+        <li><a href="#">Earrings &amp; Jhumkas</a></li>
+        <li><a href="#">Hair Accessories</a></li>
+        <li><a href="#">Toe Rings</a></li>
+      </ul>
+    </div>
+    <div>
+      <h4>Support</h4>
+      <ul>
+        <li><a href="#">Track Your Order</a></li>
+        <li><a href="#">Contact Us</a></li>
+        <li><a href="#">Wholesale Enquiries</a></li>
+        <li><a href="#">Privacy Policy</a></li>
+      </ul>
+    </div>
+    <div>
+      <h4>Sign In</h4>
+      <ul>
+        <li><a href="#">Continue with Google</a></li>
+        <li><a href="#">Create Account</a></li>
+      </ul>
+    </div>
+  </div>
+  <p class="footer-bottom">&copy; 2026 Nari Nakhre. Handcrafted with nakhre, since day one.</p>
+</footer>
+
+<script>
+  (function(){
+    var slides = Array.prototype.slice.call(document.querySelectorAll('.slide'));
+    var dots = Array.prototype.slice.call(document.querySelectorAll('#heroDots button'));
+    var current = 0;
+    var timer;
+    var track = document.getElementById('heroTrack');
+    var reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+    function show(index){
+      slides[current].classList.remove('is-active');
+      dots[current].setAttribute('aria-current', 'false');
+      current = (index + slides.length) % slides.length;
+      slides[current].classList.add('is-active');
+      dots[current].setAttribute('aria-current', 'true');
+    }
+
+    function next(){ show(current + 1); }
+    function prev(){ show(current - 1); }
+
+    document.getElementById('nextSlide').addEventListener('click', function(){ next(); resetTimer(); });
+    document.getElementById('prevSlide').addEventListener('click', function(){ prev(); resetTimer(); });
+    dots.forEach(function(dot, i){
+      dot.addEventListener('click', function(){ show(i); resetTimer(); });
+    });
+
+    function startTimer(){
+      if(reduceMotion) return;
+      timer = setInterval(next, 5500);
+    }
+    function resetTimer(){
+      clearInterval(timer);
+      startTimer();
+    }
+    track.addEventListener('mouseenter', function(){ clearInterval(timer); });
+    track.addEventListener('mouseleave', startTimer);
+    track.addEventListener('focusin', function(){ clearInterval(timer); });
+    track.addEventListener('focusout', startTimer);
+
+    /* Swipe support for mobile, matching reference sites' touch carousels */
+    var touchStartX = 0, touchEndX = 0;
+    track.addEventListener('touchstart', function(e){
+      touchStartX = e.changedTouches[0].screenX;
+      clearInterval(timer);
+    }, {passive:true});
+    track.addEventListener('touchend', function(e){
+      touchEndX = e.changedTouches[0].screenX;
+      var delta = touchEndX - touchStartX;
+      if(Math.abs(delta) > 40){
+        delta < 0 ? next() : prev();
+      }
+      resetTimer();
+    }, {passive:true});
+
+    startTimer();
+  })();
+</script>
+
+</body>
+</html>

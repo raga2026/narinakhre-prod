@@ -1,0 +1,696 @@
+{% extends "retail/base.html" %}
+
+{% block seo_tags %}
+<meta property="og:title" content="Nari Nakhre | Premium Ethnic Jewellery &amp; Accessories">
+<meta property="og:description" content="Shop premium handcrafted Indian jewellery — bangles, bridal sets, hair accessories and more. Free delivery across India.">
+<meta property="og:image" content="https://eopqwvssznmxfxrfzqbx.supabase.co/storage/v1/object/public/products/site/logo.png">
+<meta property="og:url" content="{{ request.url }}">
+<meta property="og:type" content="website">
+<meta name="description" content="Shop premium handcrafted Indian jewellery — bangles, bridal sets, hair accessories and more. Free delivery across India.">
+<meta name="keywords" content="ethnic jewelry, Indian jewelry, bangles, bridal jewelry, hair accessories, Nari Nakhre">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:image" content="https://eopqwvssznmxfxrfzqbx.supabase.co/storage/v1/object/public/products/site/logo.png">
+{% endblock %}
+
+{% block theme_notice %}{% endblock %}
+
+{% block header %}
+{{ super() }}
+<!-- Apoorva theme addition: compact horizontally-scrollable category strip
+     (Elra/JanpathOnline pattern), real categories/links -- everything above
+     (search, cart, categories dropdown, sign-in, hamburger) is the real
+     header, unchanged, via {{ "{{ super() }}" }}. Shown only below 768px --
+     the same breakpoint the real header already uses for its own
+     hamburger/desktop-nav switch, not the design reference's 700px, so
+     there's no gap where neither nav shows. -->
+<nav class="mobile-cat-strip" aria-label="Shop by category (scroll for more)">
+    <ul>
+        {% for cat in categories %}
+        <li><a href="/retail/category/{{ cat }}">{{ cat }}</a></li>
+        {% endfor %}
+    </ul>
+</nav>
+{% endblock %}
+
+{% block content %}
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,500;0,9..144,700;1,9..144,600;1,9..144,700&family=Work+Sans:wght@400;500;600;700&display=swap');
+
+  :root{
+    --ink:#2b1810; --ivory:#faf6f0; --ivory-deep:#f2e9dd;
+    --wine:#6b1e3c; --wine-deep:#4a1329;
+    --marigold:#e8a33d; --marigold-deep:#c8842a;
+    --rose:#d46a8c; --line:#e6dccb;
+  }
+
+  /* ── Restyle the real header/footer (rendered above/below via
+       {{ "{{ super() }}" }} from retail/base.html) to the Apoorva palette --
+       colors/fonts/spacing only. Every selector here already exists in
+       retail/base.html's own CSS; none of the show/hide/positioning rules
+       that make search, the categories/profile dropdowns, and the mobile
+       nav actually work are touched -- this block only ever changes color,
+       background, border-color and font-family, and wins the cascade
+       purely by appearing later in the document (this <style> renders
+       inside <body>, after retail/base.html's <head> styles), not by
+       overriding anything structurally. ── */
+  body.retail { background: var(--ivory); font-family:'Work Sans', sans-serif; color: var(--ink); }
+  h1, h2, h3 { font-family:'Fraunces', serif; }
+  .site-header { background: var(--ivory); border-bottom: 1px solid var(--line); box-shadow:none; }
+  .site-logo span { font-family:'Fraunces', serif; font-style:italic; color: var(--wine); }
+  .hamburger span { background: var(--wine); }
+  .mobile-home-icon svg, .mobile-cart-icon svg { stroke: var(--wine); }
+  .search-input { border-color: var(--line); background: var(--ivory-deep); color: var(--ink); }
+  .search-input:focus { border-color: var(--wine); background: #fff; }
+  .search-icon { color: var(--wine); opacity:.7; }
+  .desktop-nav a, .desktop-nav button.nav-signin-btn, .cat-dropdown-btn { color: var(--wine); }
+  .desktop-nav a:hover, .cat-dropdown-btn:hover { background: var(--ivory-deep); }
+  .cart-count { background: var(--marigold); color: var(--ink); }
+  .cat-menu { border-color: var(--line); }
+  .cat-menu a { color: var(--wine); font-family:'Fraunces', serif; }
+  .cat-menu a:hover { background: var(--ivory-deep); }
+  .mobile-nav { border-color: var(--line); }
+  .mobile-nav > a, .mobile-nav > button.nav-signin-btn, .mobile-cat-toggle { color: var(--wine); font-family:'Fraunces', serif; }
+  .mobile-cat-list a { color: var(--wine); }
+  .pincode-bar { background: var(--ivory-deep); }
+  .pincode-check-btn { background: var(--ink); }
+  .mobile-cat-pill-btn { border-color: var(--marigold); color: var(--wine); }
+  .home-auth-links button { color: var(--wine); }
+  .retail-footer { background: var(--ivory-deep); border-top-color: var(--wine); }
+  .retail-footer .footer-links a { color: var(--wine); }
+  .retail-footer .footer-copy div:last-child a { color: var(--wine); }
+
+  /* ── New mobile category strip added in the header block above ── */
+  .mobile-cat-strip {
+      display:none; overflow-x:auto; -webkit-overflow-scrolling:touch; scrollbar-width:none;
+      background: var(--ivory-deep); border-top:1px solid var(--line);
+  }
+  .mobile-cat-strip::-webkit-scrollbar { display:none; }
+  .mobile-cat-strip ul { list-style:none; display:flex; gap:1.2rem; margin:0; padding:.6rem 1rem; white-space:nowrap; }
+  .mobile-cat-strip a { text-decoration:none; color:var(--wine); font-size:.76rem; font-weight:700; letter-spacing:.02em; text-transform:uppercase; }
+  @media (max-width:767px) { .mobile-cat-strip { display:block; } }
+
+  /* ── Skip link / focus ring (matches design-reference/apoorva-theme-homepage.html) ── */
+  .skip-link{ position:absolute; left:-999px; top:0; background:var(--ink); color:var(--ivory); padding:.75rem 1.25rem; z-index:300; text-decoration:none; }
+  .skip-link:focus{ left:1rem; top:1rem; }
+
+  /* ── Offers / announcement carousel -- SAME public_coupons/carousel_products
+       markup and JS as the default theme (see the loop below and the
+       DOMContentLoaded rotator script), only restyled to the reference's
+       slimmer top-bar look. Structure/positioning rules are page-owned CSS
+       (not inherited from anywhere), so they're written once, directly in
+       the new palette, rather than layered on top of anything. ── */
+  .offers-carousel { position:relative; overflow:hidden; min-height:88px; background: var(--wine); }
+  .offers-carousel::before { content:""; position:absolute; inset:0; pointer-events:none; background-image: repeating-linear-gradient(135deg, rgba(255,255,255,0.06) 0 3px, transparent 3px 14px); }
+  .offers-slide { position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:2px; padding:10px 16px; opacity:0; transition:opacity .5s ease; pointer-events:none; }
+  .offers-slide.active { opacity:1; pointer-events:auto; }
+  .offer-discount-line { display:flex; align-items:baseline; gap:6px; }
+  .offer-discount-big { font-family:'Fraunces', serif; font-weight:700; font-size:1.4rem; color:var(--ivory); line-height:1.1; }
+  .offer-discount-cap { font-size:.68rem; color:var(--ivory); opacity:.85; font-weight:700; }
+  .offer-code-row { display:flex; align-items:center; gap:6px; margin-top:4px; }
+  .offer-code-label { font-size:.6rem; color:var(--ivory); opacity:.85; font-weight:700; letter-spacing:.08em; text-transform:uppercase; }
+  .offer-code-inline { background:var(--marigold); border:none; border-radius:6px; padding:2px 10px; font-family:monospace; font-weight:800; font-size:.72rem; color:var(--ink); letter-spacing:.4px; cursor:pointer; }
+  .offer-product-slide { text-decoration:none; }
+  .offer-product-card { display:flex; align-items:center; gap:12px; background:var(--ivory); border:1px solid rgba(255,255,255,.4); border-radius:16px; padding:8px 14px; box-shadow:0 4px 16px rgba(0,0,0,.25); width:calc(100% - 32px); max-width:460px; }
+  .offer-product-img-wrap { position:relative; width:44px; height:44px; flex-shrink:0; border-radius:10px; background:var(--ivory-deep); display:flex; align-items:center; justify-content:center; }
+  .offer-product-img { max-width:100%; max-height:100%; object-fit:contain; }
+  .offer-product-badge { position:absolute; top:-8px; left:-8px; background:var(--wine); color:var(--ivory); font-weight:800; font-size:.58rem; padding:2px 6px; border-radius:8px; white-space:nowrap; }
+  .offer-product-price { display:flex; flex-direction:column; align-items:flex-start; flex-shrink:0; padding-right:10px; border-right:1.5px solid var(--line); }
+  .offer-product-mrp { font-size:.6rem; color:#9a8f80; text-decoration:line-through; }
+  .offer-product-current { font-size:.9rem; font-weight:800; color:var(--wine); line-height:1.2; }
+  .offer-product-title { flex:1; min-width:0; text-align:left; font-size:.72rem; font-weight:700; color:var(--ink); line-height:1.3; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
+  @media (min-width:768px) {
+    .offers-carousel { min-height:104px; }
+    .offer-discount-big { font-size:1.9rem; }
+    .offer-product-card { max-width:600px; padding:12px 20px; gap:16px; }
+    .offer-product-img-wrap { width:64px; height:64px; }
+  }
+
+  /* ── Hero carousel ── */
+  .hero{ position:relative; background:var(--ink); }
+  .hero-track{ position:relative; height:min(60vh, 480px); overflow:hidden; }
+  .slide{ position:absolute; inset:0; opacity:0; transition:opacity .6s ease; display:flex; align-items:flex-end; }
+  .slide.is-active{ opacity:1; z-index:2; }
+  .slide-bg{ position:absolute; inset:0; background-size:cover; background-position:center; background-color: var(--wine-deep); }
+  .slide-bg::after{ content:""; position:absolute; inset:0; background:linear-gradient(0deg, rgba(20,8,10,.78) 0%, rgba(20,8,10,.2) 55%, rgba(20,8,10,0) 100%); }
+  .slide-bg.slide-bg-fallback{ background-image:linear-gradient(135deg,var(--rose),var(--wine) 60%,var(--wine-deep)); }
+  .slide-content{ position:relative; z-index:3; padding:2rem clamp(1.25rem,5vw,3.5rem) 2.5rem; color:var(--ivory); max-width:600px; }
+  .slide-eyebrow{ font-size:.76rem; letter-spacing:.2em; text-transform:uppercase; color:var(--marigold); font-weight:700; margin-bottom:.5rem; }
+  .slide-content h2{ font-size:clamp(1.5rem,4vw,2.5rem); line-height:1.1; margin-bottom:.5rem; font-weight:600; }
+  .slide-content p{ font-size:.92rem; opacity:.9; margin-bottom:1.1rem; max-width:34ch; }
+  .cta-btn{ display:inline-block; background:var(--marigold); color:var(--ink); font-weight:700; text-decoration:none; padding:.75rem 1.5rem; border-radius:999px; font-size:.88rem; letter-spacing:.02em; border:none; cursor:pointer; }
+  .cta-btn:hover, .cta-btn:focus-visible{ background:var(--ivory); }
+  .hero-controls{ position:absolute; inset:0; z-index:4; pointer-events:none; display:flex; align-items:center; justify-content:space-between; padding:0 1rem; }
+  .hero-controls button{ pointer-events:auto; background:rgba(250,246,240,.85); border:none; width:2.4rem; height:2.4rem; border-radius:999px; font-size:1rem; cursor:pointer; color:var(--wine); font-weight:700; }
+  .hero-controls button:hover{ background:var(--ivory); }
+  .hero-dots{ position:absolute; bottom:.9rem; left:50%; transform:translateX(-50%); z-index:5; display:flex; gap:.5rem; }
+  .hero-dots button{ width:1.2rem; height:1.2rem; border-radius:50%; border:2px solid var(--ivory); background:transparent; cursor:pointer; padding:0; }
+  .hero-dots button[aria-current="true"]{ background:var(--marigold); border-color:var(--marigold); }
+  @media (max-width:767px){
+    .hero-track{ height:78vw; min-height:300px; }
+    .slide-content{ padding:1.2rem 1.1rem 1.6rem; max-width:100%; }
+    .slide-content h2{ font-size:1.35rem; }
+    .slide-content p{ font-size:.82rem; max-width:28ch; }
+  }
+  @media (prefers-reduced-motion: reduce){ .slide{ transition:none; } }
+
+  /* ── Category quick-strip (desktop icon row -- distinct from the mobile
+       scroll-strip added in the header block) ── */
+  .quickstrip{ max-width:1200px; margin:0 auto; padding:2rem 1.5rem .5rem; display:grid; grid-template-columns:repeat(auto-fit,minmax(140px,1fr)); gap:1.1rem; text-align:center; }
+  .quickstrip a{ text-decoration:none; color:var(--ink); display:flex; flex-direction:column; align-items:center; gap:.55rem; font-weight:600; font-size:.82rem; }
+  .quick-icon{ width:3.2rem; height:3.2rem; border-radius:50%; background:var(--ivory-deep); border:1px solid var(--line); display:flex; align-items:center; justify-content:center; font-size:1.3rem; color: var(--wine); }
+  .quickstrip a:hover .quick-icon, .quickstrip a:focus-visible .quick-icon{ background:var(--marigold); border-color:var(--marigold); color:var(--ink); }
+  @media (max-width:767px){ .quickstrip{ display:none; } /* the mobile-cat-strip in the header already covers this on small screens */ }
+
+  /* ── Section heading ── */
+  .section{ max-width:1200px; margin:0 auto; padding:2rem 1.5rem; }
+  .section-head{ display:flex; align-items:baseline; justify-content:space-between; margin-bottom:1.25rem; flex-wrap:wrap; gap:.5rem; }
+  .section-head h2{ font-size:1.5rem; color:var(--wine); font-weight:600; margin:0; }
+  .section-head h2 a{ color:inherit; text-decoration:none; }
+  .section-head h2 a:hover{ text-decoration:underline; }
+
+  /* ── Product grid: 3-up desktop / 2-up mobile, hover-swap card media ── */
+  .grid{ display:grid; grid-template-columns:repeat(3, 1fr); gap:1.4rem; }
+  @media (max-width:820px){ .grid{ grid-template-columns:repeat(2,1fr); gap:.9rem; } }
+
+  .prod-grid{ display:flex; gap:1.1rem; overflow-x:auto; padding:.25rem .1rem 1rem; scroll-snap-type:x mandatory; -webkit-overflow-scrolling:touch; scrollbar-width:none; }
+  .prod-grid::-webkit-scrollbar{ display:none; }
+  .prod-grid .prod-card{ flex:0 0 200px; width:200px; scroll-snap-align:start; }
+
+  .product-card, .prod-card{ background:#fff; border-radius:16px; padding:.6rem; box-shadow:0 2px 10px rgba(107,30,60,.08); border:1px solid var(--line); position:relative; display:flex; flex-direction:column; text-decoration:none; color:var(--ink); }
+  .card-media{ position:relative; display:block; aspect-ratio:4/5; border-radius:12px; overflow:hidden; background:var(--ivory-deep); margin-bottom:.7rem; }
+  .card-media .prod-img{ position:absolute; inset:0; width:100%; height:100%; object-fit:cover; transition:opacity .35s ease; }
+  .card-img-hover{ opacity:0; }
+  .product-card:hover .card-img-hover, .product-card:focus-within .card-img-hover,
+  .prod-card:hover .card-img-hover, .prod-card:focus-within .card-img-hover{ opacity:1; }
+  .card-badge{ position:absolute; top:.6rem; left:.6rem; background:var(--ivory); color:var(--wine); font-size:.66rem; font-weight:700; padding:.2rem .55rem; border-radius:999px; letter-spacing:.02em; z-index:2; }
+  .share-btn{ position:absolute; top:.5rem; right:.5rem; background:var(--ivory); border:none; border-radius:50%; padding:6px; cursor:pointer; z-index:3; }
+
+  .prod-name{ font-weight:600; font-size:.82rem; margin:0 0 .2rem; color:var(--ink); line-height:1.3; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
+  .prod-price-wrap{ display:flex; align-items:baseline; gap:.35rem; flex-wrap:wrap; margin:.1rem 0 .3rem; }
+  .prod-mrp{ font-size:.68rem; color:#9a8f80; text-decoration:line-through; }
+  .prod-disc{ font-size:.62rem; font-weight:800; color:#16a34a; background:#dcfce7; border-radius:5px; padding:1px 5px; }
+  .prod-price{ font-size:.92rem; font-weight:800; color:var(--wine); }
+
+  .input-field{ width:100%; border:1px solid var(--line); border-radius:6px; padding:3px 6px; font-size:.72rem; margin-bottom:3px; }
+
+  .btn-add-cart{ width:100%; padding:.5rem 0; border-radius:999px; font-weight:700; font-size:.78rem; border:1.5px solid var(--wine); background:#fff; color:var(--wine); cursor:pointer; }
+  .btn-add-cart:hover{ background:var(--ivory-deep); }
+  .btn-buy-now{ width:100%; padding:.5rem 0; border-radius:999px; font-weight:700; font-size:.78rem; border:none; background:var(--marigold); color:var(--ink); cursor:pointer; margin-top:.35rem; }
+  .btn-buy-now:hover{ background:var(--marigold-deep); }
+  .unit-counter{ border:1.5px solid var(--marigold); background:var(--ivory-deep); border-radius:999px; display:flex; align-items:center; justify-content:space-between; padding:2px 8px; margin-bottom:3px; }
+  .unit-counter button{ width:22px; height:22px; border-radius:50%; background:var(--ivory); border:none; font-size:.9rem; font-weight:bold; color:var(--wine); cursor:pointer; }
+  .qty-display{ font-weight:bold; font-size:.85rem; color:var(--wine); }
+  .hidden{ display:none !important; }
+
+  /* ── Inline incentive signup band ── */
+  .signup-band{ background:var(--wine-deep); color:var(--ivory); border-radius:18px; max-width:1200px; margin:1.5rem auto; padding:1.8rem clamp(1.25rem,4vw,2.5rem); display:flex; align-items:center; justify-content:space-between; gap:1.5rem; flex-wrap:wrap; }
+  .signup-band h2{ font-size:1.3rem; margin:0 0 .3rem; }
+  .signup-band p{ opacity:.85; font-size:.86rem; max-width:38ch; margin:0; }
+  @media (max-width:700px){ .signup-band{ flex-direction:column; align-items:flex-start; padding:1.4rem 1.2rem; border-radius:14px; } }
+</style>
+
+<div id="order-placed-banner" role="status">
+    <span id="order-placed-text"></span>
+    <button type="button" id="order-placed-dismiss" aria-label="Dismiss notification">&times;</button>
+</div>
+<script>
+(function () {
+    try {
+        var raw = sessionStorage.getItem('nn_order_notice');
+        if (!raw) return;
+        sessionStorage.removeItem('nn_order_notice');
+        var notice = JSON.parse(raw);
+        var banner = document.getElementById('order-placed-banner');
+        var textEl = document.getElementById('order-placed-text');
+        if (!banner || !textEl) return;
+        textEl.textContent = '✅ Your order has been placed! ';
+        if (notice.orderUrl) {
+            var link = document.createElement('a');
+            link.href = notice.orderUrl;
+            link.textContent = 'View Details';
+            textEl.appendChild(link);
+        }
+        banner.style.display = 'block';
+        document.getElementById('order-placed-dismiss').addEventListener('click', function () {
+            banner.style.display = 'none';
+        });
+    } catch (e) {}
+})();
+</script>
+
+{% set has_coupons = public_coupons and public_coupons|length > 0 %}
+{% set has_carousel_products = carousel_products and carousel_products|length > 0 %}
+{% if has_coupons or has_carousel_products %}
+{% set ns = namespace(first=true) %}
+<div class="offers-carousel" id="offers-carousel">
+    {% for c in public_coupons[:4] %}
+    <div class="offers-slide{% if ns.first %} active{% endif %}" aria-hidden="{{ 'false' if ns.first else 'true' }}">
+        <div class="offer-discount-line">
+            <span class="offer-discount-big">{{ c.discount_percent|int }}% OFF</span>
+            {% if c.max_discount_amount %}
+            <span class="offer-discount-cap">up to ₹{{ c.max_discount_amount|round(0)|int }}</span>
+            {% endif %}
+        </div>
+        <div class="offer-code-row">
+            <span class="offer-code-label">Use code</span>
+            <button type="button" class="offer-code-inline" {% if not ns.first %}tabindex="-1"{% endif %}
+                    onclick="copyOfferCode('{{ c.code }}', this)"
+                    aria-label="Coupon code {{ c.code }}, tap to copy">{{ c.code }}</button>
+        </div>
+    </div>
+    {% set ns.first = false %}
+    {% endfor %}
+    {% for p in carousel_products %}
+    <a href="{{ url_for('product_detail_retail', product_id=p.id) }}"
+       class="offers-slide offer-product-slide{% if ns.first %} active{% endif %}"
+       aria-hidden="{{ 'false' if ns.first else 'true' }}" {% if not ns.first %}tabindex="-1"{% endif %}
+       aria-label="{{ p.name }} — {{ p.disc_pct }}% off, now ₹{{ p.current_price|round(0)|int }}, view product">
+        <div class="offer-product-card">
+            <div class="offer-product-img-wrap">
+                <img src="{{ p.thumb }}" alt="" class="offer-product-img" loading="lazy"
+                     onerror="this.onerror=null;this.src='/static/assets/products/default.jpg';">
+                <span class="offer-product-badge">{{ p.disc_pct }}% OFF</span>
+            </div>
+            <div class="offer-product-price">
+                <span class="offer-product-mrp">₹{{ p.mrp_price|round(0)|int }}</span>
+                <span class="offer-product-current">₹{{ p.current_price|round(0)|int }}</span>
+            </div>
+            <div class="offer-product-title">{{ p.name }}</div>
+        </div>
+    </a>
+    {% set ns.first = false %}
+    {% endfor %}
+</div>
+{% endif %}
+
+{% if not logged_in_user %}
+<div class="home-auth-links" style="display:flex;justify-content:flex-end;align-items:center;gap:6px;padding:6px 16px;font-size:.72rem;">
+    <button type="button" onclick="openAuthModal('signup')">Create Account</button>
+    <span style="color:#d1d5db;">|</span>
+    <button type="button" onclick="openAuthModal('signin')">Sign In</button>
+</div>
+{% endif %}
+
+<!-- ── HERO CAROUSEL — real hero_images as backgrounds, generic mood copy
+       (hero_images isn't per-category, so slide text doesn't assume which
+       categories exist) ── -->
+{% set mood_slides = [
+    {'eyebrow': 'New Arrivals', 'title': 'Pieces that catch the light — and the room', 'cta': 'Shop Now'},
+    {'eyebrow': 'Festive Edit', 'title': 'Handcrafted detail for every celebration', 'cta': 'Shop Now'},
+    {'eyebrow': 'Everyday Favourites', 'title': 'Jewellery made for the everyday and the extraordinary', 'cta': 'Shop Now'}
+] %}
+{% set hero_slide_count = [hero_images|length, mood_slides|length]|min %}
+{% if hero_slide_count == 0 %}{% set hero_slide_count = 1 %}{% endif %}
+<section class="hero" aria-roledescription="carousel" aria-label="Featured collections">
+    <div class="hero-track" id="heroTrack">
+        {% for i in range(hero_slide_count) %}
+        {% set mood = mood_slides[i] %}
+        <div class="slide{% if i == 0 %} is-active{% endif %}" role="group" aria-roledescription="slide"
+             aria-label="{{ i + 1 }} of {{ hero_slide_count }}" aria-hidden="{{ 'false' if i == 0 else 'true' }}">
+            <div class="slide-bg{% if i >= hero_images|length %} slide-bg-fallback{% endif %}"
+                 {% if i < hero_images|length %}style="background-image:url('{{ hero_images[i] }}');"{% endif %}></div>
+            <div class="slide-content">
+                <p class="slide-eyebrow">{{ mood.eyebrow }}</p>
+                <h2>{{ mood.title }}</h2>
+                <a class="cta-btn" href="#shop-section" {% if i != 0 %}tabindex="-1"{% endif %}
+                   onclick="document.getElementById('shop-section').scrollIntoView({behavior:'smooth'}); return false;">{{ mood.cta }}</a>
+            </div>
+        </div>
+        {% endfor %}
+        {% if hero_slide_count > 1 %}
+        <div class="hero-controls">
+            <button type="button" id="prevSlide" aria-label="Previous slide">&#10094;</button>
+            <button type="button" id="nextSlide" aria-label="Next slide">&#10095;</button>
+        </div>
+        <div class="hero-dots" role="tablist" aria-label="Choose slide" id="heroDots">
+            {% for i in range(hero_slide_count) %}
+            <button type="button" role="tab" aria-current="{{ 'true' if i == 0 else 'false' }}" aria-label="Slide {{ i + 1 }} of {{ hero_slide_count }}" data-index="{{ i }}"></button>
+            {% endfor %}
+        </div>
+        {% endif %}
+    </div>
+</section>
+
+<!-- ── Desktop category quick-strip (mobile gets the header's own scroll-strip) ── -->
+<nav class="quickstrip" aria-label="Shop by category">
+    {% for cat in categories %}
+    <a href="/retail/category/{{ cat }}"><span class="quick-icon" aria-hidden="true">&#10022;</span>{{ cat }}</a>
+    {% endfor %}
+</nav>
+
+<!-- ── PRODUCTS ── -->
+<div id="shop-section">
+{% if trending and trending|length > 0 %}
+<section class="section" aria-labelledby="trending-heading">
+    <div class="section-head">
+        <h2 id="trending-heading">🔥 Trending This Week</h2>
+        <span style="font-size:.72rem;color:#9f9f9f;">Refreshes every visit</span>
+    </div>
+    <div class="prod-grid" id="trending-grid">
+    {% for product in trending %}
+    {%- set images = product.images or [] -%}
+    {%- set img_primary = images[0] if images|length > 0 else '/static/assets/products/default.jpg' -%}
+    {%- set img_hover = images[1] if images|length > 1 else none -%}
+    {%- set mrp = product.mrp_price or 0 -%}
+    {%- set rp  = product.retail_price or product.price1 or 0 -%}
+    {%- set disc = ((mrp - rp) / mrp * 100)|round(0)|int if mrp and mrp > rp else 0 -%}
+    <div class="prod-card">
+        <button class="share-btn"
+            onclick="shareProduct(
+                {{ product.name|tojson|forceescape }},
+                {{ (request.url_root.rstrip('/') ~ '/retail/product/' ~ product.id)|tojson|forceescape }},
+                {{ img_primary|tojson|forceescape }})">
+            <img src="{{ url_for('static', filename='assets/share.svg') }}" alt="Share" style="width:14px;height:14px;" />
+        </button>
+        <a href="/retail/product/{{ product.id }}" class="card-media">
+            {% if disc > 0 %}<span class="card-badge">{{ disc }}% off</span>{% endif %}
+            <img class="prod-img card-img-primary" loading="lazy" src="{{ img_primary }}" alt="{{ product.name }}"
+                 onerror="this.onerror=null;this.src='/static/assets/products/default.jpg';">
+            {% if img_hover %}
+            <img class="prod-img card-img-hover" loading="lazy" src="{{ img_hover }}" alt="" aria-hidden="true">
+            {% endif %}
+        </a>
+        <a href="/retail/product/{{ product.id }}" style="text-decoration:none;color:inherit;display:block;">
+            <div class="prod-name">{% if product.brand_name %}{{ product.brand_name }} {% endif %}{{ product.name }}</div>
+            <div class="prod-price-wrap">
+                {% if mrp and mrp > rp %}<span class="prod-mrp">₹{{ mrp|round(0)|int }}</span>{% endif %}
+                <span class="prod-price">₹{{ rp|round(0)|int }}</span>
+            </div>
+        </a>
+        {% set is_bangle = 'bangle' in (product.category|lower if product.category else '') or 'bangle' in (product.sub_category|lower if product.sub_category else '') or 'bangle' in (product.name|lower if product.name else '') %}
+        {% if is_bangle %}
+        <div style="display:flex;align-items:center;gap:4px;margin-bottom:2px;">
+            <label style="font-size:.65rem;font-weight:600;color:#9f9f9f;white-space:nowrap;">Size</label>
+            <select class="input-field size-select" id="size-trending-{{ product.sku }}" style="margin-bottom:0;flex:1;">
+                {% for bsize in ['2.4', '2.6', '2.8'] %}
+                {%- set bstock = product.size_stock.get(bsize, 0) if product.size_stock else None -%}
+                <option value="{{ bsize }}" {% if bstock is not none and bstock <= 0 %}disabled{% endif %}>{{ bsize }}{% if bstock is not none and bstock <= 0 %} (Out of stock){% endif %}</option>
+                {% endfor %}
+            </select>
+        </div>
+        {% elif product.size %}
+        <div style="display:flex;align-items:center;gap:4px;margin-bottom:2px;">
+            <label style="font-size:.65rem;font-weight:600;color:#9f9f9f;white-space:nowrap;">Size</label>
+            <select class="input-field size-select" id="size-trending-{{ product.sku }}" style="margin-bottom:0;flex:1;">
+                {% for s in product.size.split(',') %}<option value="{{ s|trim }}">{{ s|trim }}</option>{% endfor %}
+            </select>
+        </div>
+        {% endif %}
+        {% if product.stock_total and product.stock_total > 0 %}
+        <div class="cart-container">
+            <button class="add-to-cart-btn btn-add-cart"
+                    data-sku="{{ product.sku }}" data-price="{{ rp }}" data-name="{{ product.name }}">
+                🛒 Add to Cart
+            </button>
+            <div class="counter-size-label hidden" style="font-size:.65rem;font-weight:700;color:var(--wine);margin:6px 0 2px;"></div>
+            <div class="unit-counter hidden">
+                <button class="decrement-btn">-</button>
+                <span class="qty-display">1</span>
+                <button class="increment-btn">+</button>
+            </div>
+        </div>
+        {% else %}
+        <button disabled class="btn-add-cart" style="opacity:.5;cursor:not-allowed;">Out of Stock</button>
+        {% endif %}
+    </div>
+    {% endfor %}
+    </div>
+</section>
+{% endif %}
+
+{% for category, products in grouped_products.items() %}
+<section class="section" aria-labelledby="cat-heading-{{ loop.index }}">
+    <div class="section-head">
+        <h2 id="cat-heading-{{ loop.index }}"><a href="/retail/category/{{ category }}">{{ category }}</a></h2>
+    </div>
+    <div class="grid">
+        {% for product in products[:4] %}
+        {%- set images = product.images or [] -%}
+        {%- set img_primary = images[0] if images|length > 0 else '/static/assets/products/default.jpg' -%}
+        {%- set img_hover = images[1] if images|length > 1 else none -%}
+        {%- set mrp = product.mrp_price or 0 -%}
+        {%- set rp  = product.retail_price or product.price1 or 0 -%}
+        {%- set disc = ((mrp - rp) / mrp * 100)|round(0)|int if mrp and mrp > rp else 0 -%}
+        <div class="product-card">
+            <button class="share-btn"
+                onclick="shareProduct(
+                    {{ product.name|tojson|forceescape }},
+                    {{ (request.url_root.rstrip('/') ~ '/retail/product/' ~ product.id)|tojson|forceescape }},
+                    {{ img_primary|tojson|forceescape }})">
+                <img src="{{ url_for('static', filename='assets/share.svg') }}" alt="Share" style="width:16px;height:16px;" />
+            </button>
+            <a href="/retail/product/{{ product.id }}" class="card-media">
+                {% if disc > 0 %}<span class="card-badge">{{ disc }}% off</span>{% endif %}
+                <img class="prod-img card-img-primary" src="{{ img_primary }}" alt="{{ product.name }}"
+                     onerror="this.onerror=null;this.src='/static/assets/products/default.jpg';">
+                {% if img_hover %}
+                <img class="prod-img card-img-hover" src="{{ img_hover }}" alt="" aria-hidden="true">
+                {% endif %}
+            </a>
+            <a href="/retail/product/{{ product.id }}" style="text-decoration:none;color:inherit;display:block;">
+                <div class="prod-name">{% if product.brand_name %}{{ product.brand_name }} {% endif %}{{ product.name }}</div>
+                <div class="prod-price-wrap">
+                    {% if mrp and mrp > rp %}<span class="prod-mrp">₹{{ mrp|round(0)|int }}</span>{% endif %}
+                    <span class="prod-price">₹{{ rp|round(0)|int }}</span>
+                    {% if disc > 0 %}<span class="prod-disc">{{ disc }}% off</span>{% endif %}
+                </div>
+            </a>
+            {% set is_bangle = 'bangle' in (product.category|lower if product.category else '') or 'bangle' in (product.sub_category|lower if product.sub_category else '') or 'bangle' in (product.name|lower if product.name else '') %}
+            {% if is_bangle %}
+            <div style="display:flex;align-items:center;gap:4px;margin-bottom:2px;">
+                <label style="font-size:.65rem;font-weight:600;color:#9f9f9f;white-space:nowrap;">Size</label>
+                <select class="input-field size-select" id="size-{{ product.sku }}" style="margin-bottom:0;flex:1;">
+                    {% for bsize in ['2.4', '2.6', '2.8'] %}
+                    {%- set bstock = product.size_stock.get(bsize, 0) if product.size_stock else None -%}
+                    <option value="{{ bsize }}" {% if bstock is not none and bstock <= 0 %}disabled{% endif %}>{{ bsize }}{% if bstock is not none and bstock <= 0 %} (Out of stock){% endif %}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            {% elif product.size %}
+            <div style="display:flex;align-items:center;gap:4px;margin-bottom:2px;">
+                <label style="font-size:.65rem;font-weight:600;color:#9f9f9f;white-space:nowrap;">Size</label>
+                <select class="input-field size-select" id="size-{{ product.sku }}" style="margin-bottom:0;flex:1;">
+                    {% for s in product.size.split(',') %}<option value="{{ s|trim }}">{{ s|trim }}</option>{% endfor %}
+                </select>
+            </div>
+            {% endif %}
+            <div class="cart-container" style="margin-top:auto;" id="cart-action-{{ product.sku }}">
+                {% if product.stock_total and product.stock_total > 0 %}
+                <button class="btn-add-cart add-to-cart-btn"
+                        data-sku="{{ product.sku }}" data-price="{{ product.retail_price or product.price1 }}" data-name="{{ product.name }}">
+                    🛒 Add to Cart
+                </button>
+                <div class="counter-size-label hidden" style="font-size:.65rem;font-weight:700;color:var(--wine);margin:0 0 2px;"></div>
+                <div class="unit-counter hidden">
+                    <button class="decrement-btn">-</button>
+                    <span class="qty-display">1</span>
+                    <button class="increment-btn">+</button>
+                </div>
+                <button class="btn-buy-now buy-now-btn"
+                        data-sku="{{ product.sku }}" data-price="{{ product.retail_price or product.price1 }}" data-name="{{ product.name }}">
+                    ⚡ Buy Now
+                </button>
+                {% else %}
+                <button disabled class="btn-add-cart" style="opacity:.5;cursor:not-allowed;">Out of Stock</button>
+                {% endif %}
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+    {% if products|length > 4 %}
+    <div style="text-align:center;margin-top:1rem;">
+        <a href="/retail/category/{{ category|urlencode }}" class="cta-btn">View All {{ category }}</a>
+    </div>
+    {% endif %}
+</section>
+{% endfor %}
+</div>
+
+<!-- ── Inline incentive signup — no email-capture endpoint exists in this
+       app, so the CTA opens the real sign-in/create-account modal
+       (openAuthModal) instead of posting a form nobody would receive. ── -->
+<section class="signup-band" aria-labelledby="signup-heading">
+    <div>
+        <h2 id="signup-heading">Get 10% off your first order</h2>
+        <p>Create a free account for coupons, Nari Nakhre Credits, and early access to new drops.</p>
+    </div>
+    <button type="button" class="cta-btn" onclick="openAuthModal('signup')">Create Account</button>
+</section>
+
+<script>
+async function shareProduct(name, url, imageUrl) {
+    const shareData = {
+        title: name + ' | Nari Nakhre',
+        text: '✨ ' + name + ' — Premium Ethnic Jewellery by Nari Nakhre',
+        url: url
+    };
+    if (imageUrl && navigator.canShare && window.File) {
+        try {
+            const r = await fetch(imageUrl, { mode: 'cors' });
+            if (r.ok) {
+                const blob = await r.blob();
+                const file = new File([blob], name.replace(/\W+/g,'-').toLowerCase()+'.jpg', { type: blob.type });
+                const sd = { ...shareData, files: [file] };
+                if (navigator.canShare(sd)) { await navigator.share(sd); return; }
+            }
+        } catch(e) {}
+    }
+    if (navigator.share) {
+        navigator.share(shareData).catch(()=>{});
+        return;
+    }
+    const msg = encodeURIComponent(shareData.text + '\n' + url);
+    window.open('https://wa.me/?text=' + msg, '_blank');
+}
+
+function copyOfferCode(code, btn) {
+    navigator.clipboard.writeText(code).then(function () {
+        var original = btn.textContent;
+        btn.textContent = 'Copied!';
+        setTimeout(function () { btn.textContent = original; }, 1500);
+    });
+}
+
+document.addEventListener('DOMContentLoaded', function () {
+
+    /* ── Offers carousel: auto-rotate slides ──
+       Each slide's own focusable element (the coupon-code button, or the
+       whole slide when it's a product link) gets tabindex="-1" while
+       hidden -- otherwise every inactive slide's control would still sit
+       in the Tab order despite being invisible (opacity:0, not
+       display:none). Mirrors setSlideA11y in the hero carousel below. */
+    function setOfferSlideA11y(slide, active) {
+        slide.setAttribute('aria-hidden', active ? 'false' : 'true');
+        var focusable = slide.tagName === 'A' ? slide : slide.querySelector('button, a');
+        if (focusable) {
+            if (active) focusable.removeAttribute('tabindex');
+            else focusable.setAttribute('tabindex', '-1');
+        }
+    }
+    var offersSlides = document.querySelectorAll('#offers-carousel .offers-slide');
+    if (offersSlides.length > 1) {
+        var offersIdx = 0;
+        setInterval(function () {
+            offersSlides[offersIdx].classList.remove('active');
+            setOfferSlideA11y(offersSlides[offersIdx], false);
+            offersIdx = (offersIdx + 1) % offersSlides.length;
+            offersSlides[offersIdx].classList.add('active');
+            setOfferSlideA11y(offersSlides[offersIdx], true);
+        }, 4000);
+    }
+
+    /* ── Hero carousel: arrows, dots, autoplay pause on hover/focus, swipe ── */
+    (function () {
+        var slides = Array.prototype.slice.call(document.querySelectorAll('#heroTrack .slide'));
+        var dots = Array.prototype.slice.call(document.querySelectorAll('#heroDots button'));
+        if (!slides.length) return;
+        var current = 0;
+        var timer;
+        var track = document.getElementById('heroTrack');
+        var reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+        function setSlideA11y(slide, active) {
+            slide.setAttribute('aria-hidden', active ? 'false' : 'true');
+            var link = slide.querySelector('.cta-btn');
+            if (link) {
+                if (active) link.removeAttribute('tabindex');
+                else link.setAttribute('tabindex', '-1');
+            }
+        }
+
+        function show(index) {
+            slides[current].classList.remove('is-active');
+            setSlideA11y(slides[current], false);
+            if (dots.length) dots[current].setAttribute('aria-current', 'false');
+            current = (index + slides.length) % slides.length;
+            slides[current].classList.add('is-active');
+            setSlideA11y(slides[current], true);
+            if (dots.length) dots[current].setAttribute('aria-current', 'true');
+        }
+        function next() { show(current + 1); }
+        function prev() { show(current - 1); }
+
+        var nextBtn = document.getElementById('nextSlide');
+        var prevBtn = document.getElementById('prevSlide');
+        if (nextBtn) nextBtn.addEventListener('click', function () { next(); resetTimer(); });
+        if (prevBtn) prevBtn.addEventListener('click', function () { prev(); resetTimer(); });
+        dots.forEach(function (dot, i) {
+            dot.addEventListener('click', function () { show(i); resetTimer(); });
+        });
+
+        function startTimer() {
+            if (reduceMotion || slides.length <= 1) return;
+            timer = setInterval(next, 5500);
+        }
+        function resetTimer() {
+            clearInterval(timer);
+            startTimer();
+        }
+        if (slides.length > 1) {
+            track.addEventListener('mouseenter', function () { clearInterval(timer); });
+            track.addEventListener('mouseleave', startTimer);
+            track.addEventListener('focusin', function () { clearInterval(timer); });
+            track.addEventListener('focusout', startTimer);
+
+            var touchStartX = 0, touchEndX = 0;
+            track.addEventListener('touchstart', function (e) {
+                touchStartX = e.changedTouches[0].screenX;
+                clearInterval(timer);
+            }, { passive: true });
+            track.addEventListener('touchend', function (e) {
+                touchEndX = e.changedTouches[0].screenX;
+                var delta = touchEndX - touchStartX;
+                if (Math.abs(delta) > 40) { delta < 0 ? next() : prev(); }
+                resetTimer();
+            }, { passive: true });
+        }
+
+        startTimer();
+    })();
+
+    /* ── Trending shelf auto-scroll (same behavior as the default theme) ── */
+    (function initTrendingAutoScroll() {
+        const grid = document.getElementById('trending-grid');
+        if (!grid) return;
+        if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+
+        let timer = null;
+        let paused = false;
+        let snapRestoreTimer = null;
+
+        function step() {
+            if (paused) return;
+            const card = grid.querySelector('.prod-card');
+            if (!card) return;
+            const style = getComputedStyle(grid);
+            const gap = parseFloat(style.columnGap || style.gap || '10') || 10;
+            const advance = card.getBoundingClientRect().width + gap;
+            const atEnd = grid.scrollLeft + grid.clientWidth >= grid.scrollWidth - 4;
+            grid.style.scrollSnapType = 'none';
+            grid.scrollTo({ left: atEnd ? 0 : grid.scrollLeft + advance, behavior: 'smooth' });
+            clearTimeout(snapRestoreTimer);
+            snapRestoreTimer = setTimeout(function () { grid.style.scrollSnapType = ''; }, 500);
+        }
+        function start() { if (!timer) timer = setInterval(step, 3000); }
+        function stop() { clearInterval(timer); timer = null; }
+
+        grid.addEventListener('pointerenter', function () { paused = true; });
+        grid.addEventListener('pointerleave', function () { paused = false; });
+        grid.addEventListener('touchstart', function () { paused = true; }, { passive: true });
+        grid.addEventListener('touchend', function () { setTimeout(function () { paused = false; }, 2000); });
+        grid.addEventListener('focusin', function () { paused = true; });
+        grid.addEventListener('focusout', function () { paused = false; });
+
+        if ('IntersectionObserver' in window) {
+            new IntersectionObserver(function (entries) {
+                entries.forEach(function (entry) {
+                    if (entry.isIntersecting) start(); else stop();
+                });
+            }, { threshold: 0.2 }).observe(grid);
+        } else {
+            start();
+        }
+    })();
+});
+</script>
+{% endblock %}
