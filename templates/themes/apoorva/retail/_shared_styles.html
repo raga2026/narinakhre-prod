@@ -25,7 +25,15 @@
      font-family, and wins the cascade purely by appearing later in the
      document (this <style> renders inside <body>, after retail/base.html's
      <head> styles), not by overriding anything structurally. ── */
-body.retail { background: var(--ivory); font-family:'Work Sans', sans-serif; color: var(--ink); }
+/* A flat single-tone background reads as stark/empty over large sections
+   of mostly-white product cards -- a soft, fixed diagonal gradient between
+   the theme's own ivory tones (plus a faint warm blush) gives the page
+   some depth without introducing new colors or hurting text contrast
+   (still effectively the same near-white lightness everywhere). */
+body.retail {
+  background: linear-gradient(160deg, var(--ivory) 0%, var(--ivory-deep) 55%, #f7e9e4 100%) fixed;
+  font-family:'Work Sans', sans-serif; color: var(--ink);
+}
 h1, h2, h3 { font-family:'Fraunces', serif; }
 .site-header { background: var(--ivory); border-bottom: 1px solid var(--line); box-shadow:none; }
 .site-logo span { font-family:'Fraunces', serif; font-style:italic; color: var(--wine); }

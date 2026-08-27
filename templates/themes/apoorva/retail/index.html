@@ -95,6 +95,8 @@
   .section-head h2{ font-size:1.5rem; color:var(--wine); font-weight:600; margin:0; }
   .section-head h2 a{ color:inherit; text-decoration:none; }
   .section-head h2 a:hover{ text-decoration:underline; }
+  .section-view-all{ font-size:.8rem; font-weight:700; color:var(--marigold-deep); text-decoration:none; white-space:nowrap; padding:.3rem 0; }
+  .section-view-all:hover{ color:var(--wine); text-decoration:underline; }
 
   /* ── Inline incentive signup band ── */
   .signup-band{ background:var(--wine-deep); color:var(--ivory); border-radius:18px; max-width:1200px; margin:1.5rem auto; padding:1.8rem clamp(1.25rem,4vw,2.5rem); display:flex; align-items:center; justify-content:space-between; gap:1.5rem; flex-wrap:wrap; }
@@ -316,9 +318,10 @@
 <section class="section" aria-labelledby="cat-heading-{{ loop.index }}">
     <div class="section-head">
         <h2 id="cat-heading-{{ loop.index }}"><a href="/retail/category/{{ category }}">{{ category }}</a></h2>
+        <a href="/retail/category/{{ category|urlencode }}" class="section-view-all">View All</a>
     </div>
     <div class="coverflow-shelf" id="category-shelf-{{ loop.index }}">
-        {% for product in products[:4] %}
+        {% for product in products %}
         {%- set images = product.images or [] -%}
         {%- set img_primary = images[0] if images|length > 0 else '/static/assets/products/default.jpg' -%}
         {%- set img_hover = images[1] if images|length > 1 else none -%}
@@ -391,11 +394,6 @@
         </div>
         {% endfor %}
     </div>
-    {% if products|length > 4 %}
-    <div style="text-align:center;margin-top:1rem;">
-        <a href="/retail/category/{{ category|urlencode }}" class="cta-btn">View All {{ category }}</a>
-    </div>
-    {% endif %}
 </section>
 {% endfor %}
 </div>
