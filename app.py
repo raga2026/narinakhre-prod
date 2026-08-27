@@ -104,9 +104,68 @@ def _apply_dev_theme_override():
         session.pop('dev_theme_override', None)
 
 
+_SITE_THEME_CACHE = {'value': None, 'fetched_at': 0.0}
+_SITE_THEME_CACHE_TTL_SECONDS = 30
+
+
+def get_live_theme_setting():
+    """The site-wide theme an admin has chosen via /admin/themes (see
+    site_settings.active_theme), or None if it's never been set. Cached
+    in-process for _SITE_THEME_CACHE_TTL_SECONDS since _effective_theme()
+    below reads this on every single template/static lookup -- several
+    times per page load -- and hitting Supabase that often on every request
+    would be wasteful. admin_themes_save() invalidates this cache
+    immediately on save, so the admin who just changed it sees the new
+    theme right away; every other visitor picks it up within the TTL
+    window, no restart/redeploy needed."""
+    now = time.time()
+    if now - _SITE_THEME_CACHE['fetched_at'] < _SITE_THEME_CACHE_TTL_SECONDS:
+        return _SITE_THEME_CACHE['value']
+    value = _SITE_THEME_CACHE['value']
+    try:
+        db = get_db()
+        row = db.execute("SELECT value FROM site_settings WHERE key='active_theme'").fetchone()
+        if row and row.get('value'):
+            value = row['value']
+    except Exception as e:
+        app.logger.warning(f'get_live_theme_setting failed, keeping last known value: {e}')
+    _SITE_THEME_CACHE['value'] = value
+    _SITE_THEME_CACHE['fetched_at'] = now
+    return value
+
+
+def set_live_theme_setting(db, theme_name):
+    """Persists the admin's theme choice (site_settings.active_theme) and
+    updates the in-process cache immediately -- called only from
+    admin_themes_save()."""
+    db.execute(
+        '''INSERT INTO site_settings (key, value, updated_at) VALUES ('active_theme', ?, NOW())
+           ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()''',
+        (theme_name,)
+    )
+    db.commit()
+    _SITE_THEME_CACHE['value'] = theme_name
+    _SITE_THEME_CACHE['fetched_at'] = time.time()
+
+
+def list_available_themes():
+    """Every theme folder under templates/themes/ -- lets /admin/themes
+    show whatever themes actually exist without hardcoding names, so a
+    future theme just needs its folder to show up here."""
+    themes_dir = os.path.join(BASE_DIR, 'templates', 'themes')
+    if not os.path.isdir(themes_dir):
+        return []
+    return sorted(
+        name for name in os.listdir(themes_dir)
+        if os.path.isdir(os.path.join(themes_dir, name))
+    )
+
+
 def _effective_theme():
-    """ACTIVE_THEME, unless ALLOW_DEV_THEME_OVERRIDE is on and this request's
-    session has a valid ?theme= override recorded above -- the single
+    """ACTIVE_THEME, unless (in priority order): (1) ALLOW_DEV_THEME_OVERRIDE
+    is on and this request's session has a valid ?theme= override (dev-only,
+    see _apply_dev_theme_override), or (2) an admin has chosen a site-wide
+    theme via /admin/themes (see get_live_theme_setting) -- the single
     source of truth both the Jinja loader and the static endpoint below
     resolve through, so templates and static assets never disagree about
     which theme is active for a given request."""
@@ -114,6 +173,9 @@ def _effective_theme():
         override = session.get('dev_theme_override')
         if _is_real_theme(override):
             return override
+    live_theme = get_live_theme_setting()
+    if _is_real_theme(live_theme):
+        return live_theme
     return ACTIVE_THEME
 
 
@@ -584,6 +646,14 @@ def initialize_database_if_needed():
             token_expires_at TIMESTAMP,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )''',
+        # Generic site-wide key/value settings -- today just active_theme
+        # (see get_live_theme_setting/admin_themes), reusable for future
+        # admin-configurable settings without another migration.
+        '''CREATE TABLE IF NOT EXISTS site_settings (
+            key TEXT PRIMARY KEY,
+            value TEXT,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )'''
     ]
     client = get_supabase()
@@ -666,6 +736,11 @@ def initialize_database_if_needed():
     seed_sql = [
         "INSERT INTO delivery_partners (name, is_enabled) VALUES ('shiprocket', 0) ON CONFLICT (name) DO NOTHING",
         "INSERT INTO delivery_partners (name, is_enabled) VALUES ('delhivery', 0) ON CONFLICT (name) DO NOTHING",
+        # First-deploy default: makes ApoorvaTheme the live site's theme as
+        # soon as this code ships, without needing an admin to click through
+        # /admin/themes first. ON CONFLICT DO NOTHING so this never
+        # overwrites a theme an admin has since chosen.
+        "INSERT INTO site_settings (key, value) VALUES ('active_theme', 'apoorva') ON CONFLICT (key) DO NOTHING",
     ]
     for sql in seed_sql:
         try:
@@ -6614,6 +6689,32 @@ def admin_coupon_edit(coupon_id):
     db.commit()
     flash('Coupon updated.')
     return redirect(url_for('admin_coupons'))
+
+
+@app.route('/admin/themes', methods=['GET'])
+@admin_required
+def admin_themes():
+    """Lets an admin pick which theme (templates/themes/<name>/ +
+    static/themes/<name>/) the LIVE site serves to every real visitor --
+    see set_live_theme_setting/get_live_theme_setting and _effective_theme's
+    priority order (a dev's own ?theme= override still wins over this for
+    their own session, see ALLOW_DEV_THEME_OVERRIDE)."""
+    themes = list_available_themes()
+    current = get_live_theme_setting() or ACTIVE_THEME
+    return render_template('admin/admin_themes.html', themes=themes, current_theme=current)
+
+
+@app.route('/admin/themes/save', methods=['POST'])
+@admin_required
+def admin_themes_save():
+    theme_name = (request.form.get('theme') or '').strip()
+    if not _is_real_theme(theme_name):
+        flash('Please choose a valid theme.')
+        return redirect(url_for('admin_themes'))
+    db = get_db()
+    set_live_theme_setting(db, theme_name)
+    flash(f'Live site theme set to "{theme_name}". Every visitor sees this now.')
+    return redirect(url_for('admin_themes'))
 
 
 @app.route('/admin/delivery-partners', methods=['GET'])

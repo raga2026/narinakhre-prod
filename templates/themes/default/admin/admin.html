@@ -94,11 +94,20 @@
         }
         .console-upload-title { font-weight: 700; color: #111827; font-size: 0.92rem; margin-bottom: 12px; }
 
+        .mobile-section-select { display: none; }
+
         @media (max-width: 767px) {
             .console-shell { flex-direction: column; }
             .console-sidebar { width: 100%; height: auto; position: static; border-right: none; border-bottom: 1px solid #e5e7eb; }
-            .console-nav { flex-direction: row; overflow-x: auto; padding: 8px 10px; }
-            .console-nav-item { flex-shrink: 0; white-space: nowrap; }
+            /* Replaced by mobile-section-select below -- a horizontally-
+               scrolling button row has no visible cue that more sections
+               exist off-screen, which is exactly the bug this fixes. */
+            .console-nav { display: none; }
+            .mobile-section-select {
+                display: block; width: calc(100% - 20px); margin: 10px;
+                padding: 10px 12px; border: 1px solid #e5e7eb; border-radius: 10px;
+                font-size: 0.9rem; font-weight: 700; color: #374151; background: #fff;
+            }
             .console-sidebar-footer { flex-direction: row; border-top: none; border-bottom: 1px solid #f3f4f6; justify-content: flex-end; }
             .console-main { padding: 16px; }
         }
@@ -136,7 +145,29 @@
                     <span class="console-nav-label">Quotes / Inbox</span>
                     <span class="console-nav-badge">{{ quotes|length }}</span>
                 </button>
+                <button type="button" class="console-nav-item" data-section="themes" onclick="showSection('themes')">
+                    <span class="console-nav-icon" aria-hidden="true">🎨</span>
+                    <span class="console-nav-label">Themes</span>
+                </button>
             </nav>
+            <!-- Mobile-only section switcher: on screens <=767px, .console-nav
+                 above becomes a horizontally-scrolling row of buttons with no
+                 visible cue that there's more to scroll to -- a real user
+                 reported only ever seeing "Products" as a result, never
+                 discovering Orders/Analytics/Reports/Quotes/Themes existed.
+                 A native <select> can't have that problem: every section
+                 name is visible the moment it's opened, no swipe needed, and
+                 it's exactly as screen-reader-friendly as any other select. -->
+            <select id="mobile-section-select" class="mobile-section-select" aria-label="Admin sections"
+                    onchange="if (this.value === '__notifications__') { window.location.href = '{{ url_for('admin_events') }}'; } else { showSection(this.value); }">
+                <option value="__notifications__">🔔 Notifications{% if unread_events and unread_events > 0 %} ({{ unread_events }}){% endif %}</option>
+                <option value="products" selected>📦 Products ({{ products|length }})</option>
+                <option value="orders">🛒 Orders &amp; Marketing</option>
+                <option value="analytics">📊 Analytics</option>
+                <option value="reports">📑 Reports</option>
+                <option value="quotes">💬 Quotes / Inbox ({{ quotes|length }})</option>
+                <option value="themes">🎨 Themes</option>
+            </select>
             <div class="console-sidebar-footer">
                 <a href="/">🌐 View Live Site</a>
                 <a href="{{ url_for('admin_logout') }}" class="logout">⎋ Logout</a>
@@ -334,6 +365,23 @@
                     </a>
                 </div>
             </section>
+
+            <!-- ── Themes ── -->
+            <section id="section-themes" class="console-section" role="region" aria-labelledby="title-themes">
+                <div class="console-section-header">
+                    <h2 class="console-section-title" id="title-themes">🎨 Themes</h2>
+                    <p class="console-section-desc">Choose which theme the live storefront shows every visitor.</p>
+                </div>
+                <div class="console-card-grid">
+                    <a href="{{ url_for('admin_themes') }}" class="console-card">
+                        <span class="console-card-icon" aria-hidden="true">🎨</span>
+                        <div>
+                            <div class="console-card-title">Manage Themes</div>
+                            <div class="console-card-desc">Switch the live retail/wholesale theme site-wide, no redeploy needed.</div>
+                        </div>
+                    </a>
+                </div>
+            </section>
         </main>
     </div>
 
@@ -347,6 +395,8 @@
                 if (isActive) { b.setAttribute('aria-current', 'page'); }
                 else { b.removeAttribute('aria-current'); }
             });
+            var select = document.getElementById('mobile-section-select');
+            if (select) select.value = name;
         }
     </script>
 </body>

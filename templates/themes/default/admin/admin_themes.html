@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Themes - NariNakhre Admin</title>
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+    <style>
+        .bg-rose-600 { background-color:#e11d48 !important; }
+        .bg-rose-600:hover, .hover\:bg-rose-700:hover { background-color:#be123c !important; }
+        .bg-rose-50 { background-color:#fff1f2 !important; }
+        .text-rose-600 { color:#e11d48 !important; }
+        .text-rose-700 { color:#be123c !important; }
+        .border-rose-300 { border-color:#fda4af !important; }
+        .theme-option { border:2px solid #e5e7eb; border-radius:12px; padding:16px; cursor:pointer; transition:border-color .15s, background .15s; }
+        .theme-option:hover { border-color:#fda4af; background:#fff7f8; }
+        .theme-option.is-current { border-color:#e11d48; background:#fff1f2; }
+        .theme-badge { display:inline-block; background:#dcfce7; color:#15803d; font-size:.7rem; font-weight:700; padding:2px 8px; border-radius:999px; }
+    </style>
+</head>
+<body class="bg-gray-100 min-h-screen">
+    <div class="max-w-3xl mx-auto p-6">
+        <div class="flex justify-between items-center mb-6">
+            <div>
+                <h2 class="text-2xl font-extrabold text-gray-900">🎨 Themes</h2>
+                <a href="{{ url_for('admin_dashboard') }}" class="text-sm text-rose-600 hover:underline">← Back to Dashboard</a>
+            </div>
+            <a href="{{ url_for('admin_logout') }}" class="px-4 py-2 rounded-lg font-bold shadow bg-rose-600 text-white hover:bg-rose-700 transition">Logout</a>
+        </div>
+
+        {% with messages = get_flashed_messages() %}
+          {% if messages %}
+            <div class="mb-4">
+              {% for message in messages %}
+                <div class="bg-rose-50 border border-rose-300 text-rose-700 px-4 py-2 rounded mb-2 font-medium">{{ message }}</div>
+              {% endfor %}
+            </div>
+          {% endif %}
+        {% endwith %}
+
+        <p class="text-sm text-gray-500 mb-6">
+            Choose which theme the live storefront (retail and wholesale) shows to every visitor, right now —
+            no restart or redeploy needed. A theme that isn't fully built out yet automatically falls back to
+            ApoorvaTheme's/the default theme's real pages for anything it's still missing, so switching is safe
+            at any point.
+        </p>
+
+        <form method="POST" action="{{ url_for('admin_themes_save') }}">
+            <div class="bg-white rounded-xl shadow p-6 space-y-3">
+                {% for theme in themes %}
+                <label class="theme-option flex items-center gap-4 {{ 'is-current' if theme == current_theme else '' }}">
+                    <input type="radio" name="theme" value="{{ theme }}" {% if theme == current_theme %}checked{% endif %} class="w-4 h-4">
+                    <div class="flex-1">
+                        <div class="font-bold text-gray-900">
+                            {{ theme|replace('_', ' ')|replace('-', ' ')|title }}
+                            {% if theme == 'apoorva' %}Theme{% endif %}
+                        </div>
+                        <div class="text-xs text-gray-500">templates/themes/{{ theme }}/ &middot; static/themes/{{ theme }}/</div>
+                    </div>
+                    {% if theme == current_theme %}
+                    <span class="theme-badge">Live now</span>
+                    {% endif %}
+                </label>
+                {% else %}
+                <p class="text-gray-400 text-center py-6">No themes found under templates/themes/.</p>
+                {% endfor %}
+            </div>
+            <button type="submit" class="mt-4 bg-rose-600 text-white px-6 py-2.5 rounded-lg font-bold hover:bg-rose-700 transition">
+                Make Live for Everyone
+            </button>
+        </form>
+    </div>
+</body>
+</html>
