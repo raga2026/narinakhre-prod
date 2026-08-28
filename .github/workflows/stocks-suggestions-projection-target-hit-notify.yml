@@ -1,0 +1,33 @@
+name: Stocks suggestions projection-target-hit notify
+
+on:
+  schedule:
+    # 02:33 UTC daily = 08:03 IST -- a few minutes after
+    # stocks-suggestions-target-hit-notify.yml (02:26 UTC), well after
+    # price_sync has updated today's stock_daily_data closes. Triggers
+    # POST /stocks/suggestions/notify-projection-target-hits, which checks
+    # every suggestion's mid-period (~6 month) and long-term (~1 year)
+    # PROJECTED price (see price_pattern.compute_projection_targets)
+    # against today's close and emails every current Standard-plan
+    # (Rs 299/mo) subscriber about any checkpoint reached. Minute
+    # deliberately off the :00/:15/:30/:45 marks, and its own minute
+    # rather than sharing stocks-trial-ended-notify.yml's slot -- see
+    # stocks-shortlist-refresh.yml's comment for why.
+    - cron: '33 2 * * *'
+  workflow_dispatch: {}  # lets you trigger it manually from the Actions tab
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: POST to /stocks/suggestions/notify-projection-target-hits
+        run: |
+          status=$(curl -s -o /tmp/response.txt -w "%{http_code}" --max-time 120 -X POST \
+            -H "X-Cron-Secret: ${{ secrets.STOCKS_FUNDAMENTALS_CRON_SECRET }}" \
+            https://narinakhre.com/stocks/suggestions/notify-projection-target-hits)
+          echo "HTTP status: $status"
+          cat /tmp/response.txt
+          if [ "$status" != "200" ]; then
+            echo "Request failed"
+            exit 1
+          fi

@@ -2,14 +2,16 @@ name: Stocks fundamentals rotation sync
 
 on:
   schedule:
-    # 05:30 UTC daily = 11:00 IST -- before market open, after the previous
+    # 05:38 UTC daily = 11:08 IST -- before market open, after the previous
     # day's price sync. Refreshes the ROTATION_BATCH_SIZE stalest
     # scrape-eligible companies each run (~1,067 eligible total, 75/day, so
     # the full set cycles roughly every 15 days) -- this is the only
     # Screener.in scraping this app does, deliberately cron-only (see
     # /stocks/fundamentals/rotation-sync in app.py). Triggers
-    # POST /stocks/fundamentals/rotation-sync.
-    - cron: '30 5 * * *'
+    # POST /stocks/fundamentals/rotation-sync. Minute deliberately off the
+    # :00/:15/:30/:45 marks -- see stocks-shortlist-refresh.yml's comment
+    # for why.
+    - cron: '38 5 * * *'
   workflow_dispatch: {}  # lets you trigger it manually from the Actions tab
 
 jobs:

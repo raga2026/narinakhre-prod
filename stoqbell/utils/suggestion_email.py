@@ -473,6 +473,142 @@ def send_target_achieved_email(to_email, to_name, achievements, currently_subscr
     )
 
 
+def send_projection_target_achieved_email(to_email, to_name, achievements, currently_subscribed=True):
+    """Sent to every Standard-plan viewer who ever had access -- app.py's
+    /stocks/suggestions/notify-projection-target-hits job, one email per
+    recipient per day, bundling every entry from
+    suggestion_engine.find_pending_mid_target_hit_suggestions and
+    find_pending_long_target_hit_suggestions that landed that day (mixing
+    both checkpoints in one email rather than sending two separate ones on
+    a day both happen to fire).
+
+    Unlike send_target_achieved_email above (the near-term target_sell_price
+    -- a concrete price this suggestion was actually priced to reach),
+    this fires when a suggestion's price.compute_projection_targets
+    mid-period or long-term PROJECTED price is reached -- a
+    pattern-research-grounded or sqrt-of-time-extrapolated estimate, not a
+    price the suggestion was itself targeting. The email is written to be
+    honest about that distinction rather than implying it's a second
+    target that was "hit" the same way the first one was.
+
+    achievements: list of dicts with company_name, symbol, exchange,
+    suggestion_date, buy_price, target_sell_price (the checkpoint's own
+    projected price, see find_pending_mid_target_hit_suggestions),
+    latest_price, latest_price_date, checkpoint ('mid_period'/'long_term'),
+    checkpoint_period_label (e.g. '~4 months'), projection_method
+    ('pattern'/'extrapolated'), projection_source."""
+    greeting = to_name or to_email
+    count = len(achievements)
+    if count == 1:
+        name = achievements[0].get('company_name') or achievements[0]['symbol']
+        subject = f'{name} has reached its projected price'
+    else:
+        subject = f'{count} of our picks have reached their projected price'
+
+    cards_text = []
+    cards_html = []
+    for a in achievements:
+        name = a.get('company_name') or a['symbol']
+        suggestion_date = a['suggestion_date']
+        if isinstance(suggestion_date, str):
+            suggestion_date = date.fromisoformat(suggestion_date[:10])
+        achieved_date = a['latest_price_date']
+        if isinstance(achieved_date, str):
+            achieved_date = date.fromisoformat(achieved_date[:10])
+        days_taken = max(0, (achieved_date - suggestion_date).days)
+        buy_price = a['buy_price']
+        latest_price = a['latest_price']
+        profit_pct = round((latest_price - buy_price) / buy_price * 100, 2) if buy_price else None
+        profit_str = f"{'+' if profit_pct is not None and profit_pct >= 0 else ''}{profit_pct}%" if profit_pct is not None else 'n/a'
+        checkpoint_word = 'mid-period (~6 month)' if a.get('checkpoint') == 'mid_period' else 'long-term (~1 year)'
+        period_label = a.get('checkpoint_period_label') or checkpoint_word
+        basis_note = (
+            "based on how similar chart patterns have historically played out"
+            if a.get('projection_method') == 'pattern'
+            else "a projected estimate, not a chart-pattern-backed figure"
+        )
+
+        cards_text.append(
+            f"{name} ({a['symbol']} · {a['exchange']})\n"
+            f"  Recommended: {suggestion_date.strftime('%d %b %Y')} at Rs {buy_price}\n"
+            f"  {checkpoint_word} projected price ({period_label}): Rs {a['target_sell_price']}\n"
+            f"  Reached: {achieved_date.strftime('%d %b %Y')} at Rs {latest_price} "
+            f"({days_taken} days in, {profit_str} from entry) -- {basis_note}"
+        )
+        cards_html.append(
+            '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" '
+            'style="max-width:600px;width:100%;margin:0 0 16px 0;border:1px solid #e2e8f0;border-radius:12px;'
+            'overflow:hidden;font-family:Arial,Helvetica,sans-serif;">'
+            '<tr><td style="background:#1e3a8a;padding:12px 18px;">'
+            f'<div style="color:#f8fafc;font-size:16px;font-weight:bold;">{name}</div>'
+            f'<div style="color:#bfdbfe;font-size:12px;margin-top:2px;">{a["symbol"]} · {a["exchange"]} -- {checkpoint_word} projection reached</div>'
+            '</td></tr>'
+            '<tr><td style="padding:14px 18px;">'
+            '<table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr>'
+            '<td style="width:33%;"><div style="color:#64748b;font-size:11px;text-transform:uppercase;letter-spacing:.03em;">Recommended</div>'
+            f'<div style="font-size:15px;font-weight:bold;color:#0f172a;">Rs {buy_price}</div>'
+            f'<div style="color:#94a3b8;font-size:11px;">{suggestion_date.strftime("%d %b %Y")}</div></td>'
+            f'<td style="width:34%;"><div style="color:#64748b;font-size:11px;text-transform:uppercase;letter-spacing:.03em;">Projected ({period_label})</div>'
+            f'<div style="font-size:15px;font-weight:bold;color:#0f172a;">Rs {a["target_sell_price"]}</div></td>'
+            '<td style="width:33%;"><div style="color:#64748b;font-size:11px;text-transform:uppercase;letter-spacing:.03em;">Reached</div>'
+            f'<div style="font-size:15px;font-weight:bold;color:#1d4ed8;">Rs {latest_price}</div>'
+            f'<div style="color:#94a3b8;font-size:11px;">{achieved_date.strftime("%d %b %Y")}</div></td>'
+            '</tr></table>'
+            f'<div style="margin-top:10px;color:#334155;font-size:13px;">'
+            f'{days_taken} days in — {profit_str} from entry. This projection is {basis_note}.</div>'
+            '</td></tr></table>'
+        )
+
+    intro_line = (
+        'One of our picks just reached its projected price:' if count == 1
+        else f'{count} of our picks just reached their projected price:'
+    )
+    intro_text = f'Hi {greeting},\n\n{intro_line}\n\n'
+    intro_html = (
+        f'<p style="font-family:Arial,Helvetica,sans-serif;font-size:16px;color:#0f172a;">Hi {greeting},</p>'
+        f'<p style="font-family:Arial,Helvetica,sans-serif;font-size:17px;font-weight:bold;color:#0f172a;">{intro_line}</p>'
+    )
+
+    cta_line = (
+        "This is a longer-horizon projection, not the near-term target these picks were originally priced to -- "
+        "worth a look, but treat it as a checkpoint to review rather than a signal to act on by itself."
+    )
+    cta_html = (
+        f'<p style="font-family:Arial,Helvetica,sans-serif;color:#334155;font-size:13px;line-height:1.5;'
+        f'background:#eff6ff;border-left:3px solid #1d4ed8;border-radius:4px;padding:10px 14px;margin-top:8px;">'
+        f'{cta_line}</p>'
+    )
+
+    resubscribe_line = ''
+    resubscribe_html = ''
+    if not currently_subscribed:
+        resubscribe_line = (
+            "This is exactly the kind of call StoqBell sends out -- but you're not currently subscribed, "
+            f"so you won't get the next one. Log in and pick a plan to jump back in: {STOCKS_LOGIN_URL}"
+        )
+        resubscribe_html = (
+            f'<p style="font-family:Arial,Helvetica,sans-serif;color:#0f172a;font-size:14px;line-height:1.5;'
+            f'background:#eff6ff;border-left:3px solid #0ea5e9;border-radius:4px;padding:12px 14px;margin-top:12px;">'
+            f"This is exactly the kind of call StoqBell sends out -- but you're not currently subscribed, "
+            f"so you won't get the next one. "
+            f'<a href="{STOCKS_LOGIN_URL}" style="color:#0ea5e9;font-weight:bold;">Log in and pick a plan to jump back in &rarr;</a></p>'
+        )
+
+    text_body = intro_text + '\n\n'.join(cards_text) + f'\n\n{cta_line}\n\n{resubscribe_line}\n\n{DISCLAIMER}\n'
+    html_inner = (
+        intro_html
+        + ''.join(cards_html)
+        + cta_html
+        + resubscribe_html
+        + f'<p style="color:#64748b;font-size:0.85em;margin-top:16px;font-family:Arial,Helvetica,sans-serif;">{DISCLAIMER}</p>'
+    )
+
+    return send_zeptomail_stocks_email(
+        to_email=to_email, to_name=greeting, subject=subject,
+        textbody=text_body, htmlbody=_wrap_email_html(html_inner), sender_name='StoqBell',
+    )
+
+
 def send_intraday_target_hit_alert_email(to_email, hits):
     """Raghav-only (see utils/admin_alerts.py's
     find_and_notify_intraday_target_hits -- always called with

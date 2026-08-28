@@ -2,11 +2,13 @@ name: Stocks news sync
 
 on:
   schedule:
-    # 00:00 UTC daily = 05:30 IST -- no price/fundamentals dependency, so
+    # 00:04 UTC daily = 05:34 IST -- no price/fundamentals dependency, so
     # this runs independently of price_sync/fundamentals rotation. Fetches
     # Google News RSS headlines for every active stock_watchlist company
-    # (see utils/stock_news.py). Triggers POST /stocks/news/sync.
-    - cron: '0 0 * * *'
+    # (see utils/stock_news.py). Triggers POST /stocks/news/sync. Minute
+    # deliberately off the :00/:15/:30/:45 marks -- see
+    # stocks-shortlist-refresh.yml's comment for why.
+    - cron: '4 0 * * *'
   workflow_dispatch: {}  # lets you trigger it manually from the Actions tab
 
 jobs:

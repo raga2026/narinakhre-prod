@@ -2,14 +2,17 @@ name: Weekly report
 
 on:
   schedule:
-    # 09:00 UTC every Monday -- same schedule the Render Cron Job
-    # (narinakhre-weekly-report) used before this replaced it. Triggers
+    # 09:13 UTC every Monday -- close to the schedule the Render Cron Job
+    # (narinakhre-weekly-report) used before this replaced it, moved off
+    # the exact hour mark since GitHub's free scheduler queues and delays
+    # scheduled runs most at round :00/:15/:30/:45 minutes (see
+    # stocks-shortlist-refresh.yml's comment for the full story). Triggers
     # POST /cron/weekly-report (app.py), which does all the actual report
     # logic (DB queries, email rendering/sending) -- this workflow is only
     # the trigger, same pattern as every stocks-*.yml workflow here, moved
     # off a paid Render Cron Job onto GitHub Actions' free scheduled runs
     # since all it ever did was one HTTP POST.
-    - cron: '0 9 * * 1'
+    - cron: '13 9 * * 1'
   workflow_dispatch: {}  # lets you trigger it manually from the Actions tab
 
 jobs:

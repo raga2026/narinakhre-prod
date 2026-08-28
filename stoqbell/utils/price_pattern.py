@@ -699,6 +699,17 @@ def _pricing_from_rsi_backtest(closes_oldest_first, latest_close):
     }
 
 
+# A pattern-derived or per-stock-backtest-derived target is occasionally
+# smaller than the flat fallback would have given (a real head-and-shoulders/
+# rounding-bottom measured move, or a stock's own RSI-zone historical
+# average, can legitimately come out below 5% -- even below 3% -- for a
+# shallow pattern or a stock with a historically muted bounce). Whatever
+# path computed target_sell_price, compute_suggestion_pricing below floors
+# it to at least this much above buy_price so no suggestion goes out
+# promising a smaller move than this is worth a subscriber's attention.
+MIN_TARGET_GAIN_MULTIPLIER = 1.03  # at least +3%
+
+
 def compute_suggestion_pricing(closes_oldest_first, latest_close, fallback_target_multiplier,
                                 fallback_stop_loss_multiplier, fallback_holding_period_days=10):
     """Tries a confirmed reverse head-and-shoulders first, then a confirmed
@@ -715,6 +726,10 @@ def compute_suggestion_pricing(closes_oldest_first, latest_close, fallback_targe
     _FALLBACK_PROJECTION_BASELINE_DAYS below for the same "kept in sync by
     convention, not imported" reasoning) -- callers pass their own value
     explicitly rather than relying on this default staying in sync forever.
+    Whichever path below actually sets target_sell_price, it's floored to
+    MIN_TARGET_GAIN_MULTIPLIER above buy_price before returning (see that
+    constant's own comment) -- a no-op whenever the computed target already
+    clears the floor on its own, which the flat fallback (+5%) always does.
 
     Returns {'buy_price', 'target_sell_price', 'stop_loss_price',
     'pattern_name': None|str, 'pattern_detail': None|dict,
@@ -727,26 +742,35 @@ def compute_suggestion_pricing(closes_oldest_first, latest_close, fallback_targe
     suggestion_engine._build_pattern_note) and otherwise an actual day
     count: this stock's own backtest window when rsi_backtest_detail is
     set, else fallback_holding_period_days."""
+    result = None
     for finder in (_pattern_pricing_from_head_and_shoulders, _pattern_pricing_from_rounding_bottom):
         result = finder(closes_oldest_first, latest_close)
         if result:
-            return result
+            break
 
-    rsi_result = _pricing_from_rsi_backtest(closes_oldest_first, latest_close)
-    if rsi_result:
-        rsi_result['stop_loss_price'] = round(latest_close * fallback_stop_loss_multiplier, 2)
-        return rsi_result
+    if result is None:
+        rsi_result = _pricing_from_rsi_backtest(closes_oldest_first, latest_close)
+        if rsi_result:
+            rsi_result['stop_loss_price'] = round(latest_close * fallback_stop_loss_multiplier, 2)
+            result = rsi_result
 
-    return {
-        'buy_price': latest_close,
-        'target_sell_price': round(latest_close * fallback_target_multiplier, 2),
-        'stop_loss_price': round(latest_close * fallback_stop_loss_multiplier, 2),
-        'pattern_name': None,
-        'pattern_detail': None,
-        'pattern_research': None,
-        'holding_period_days': fallback_holding_period_days,
-        'rsi_backtest_detail': None,
-    }
+    if result is None:
+        result = {
+            'buy_price': latest_close,
+            'target_sell_price': round(latest_close * fallback_target_multiplier, 2),
+            'stop_loss_price': round(latest_close * fallback_stop_loss_multiplier, 2),
+            'pattern_name': None,
+            'pattern_detail': None,
+            'pattern_research': None,
+            'holding_period_days': fallback_holding_period_days,
+            'rsi_backtest_detail': None,
+        }
+
+    min_target = round(result['buy_price'] * MIN_TARGET_GAIN_MULTIPLIER, 2)
+    if result['target_sell_price'] < min_target:
+        result['target_sell_price'] = min_target
+
+    return result
 
 
 # --- Multi-horizon projected price (mid-period / long-term) -----------------

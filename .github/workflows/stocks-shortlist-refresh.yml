@@ -2,22 +2,27 @@ name: Stocks shortlist refresh
 
 on:
   schedule:
-    # 23:45 UTC = 05:15 IST -- before market open (09:15 IST) and, just as
-    # importantly, before stocks-price-sync.yml (06:00 IST) and
-    # stocks-indicators-calculate.yml (06:45 IST): both of those read
+    # 23:48 UTC = 05:18 IST -- before market open (09:15 IST) and, just as
+    # importantly, before stocks-price-sync.yml (00:37 UTC) and
+    # stocks-indicators-calculate.yml (01:23 UTC): both of those read
     # stock_watchlist, so this needs to update it first, not after, or
-    # they'd be working off yesterday's watchlist all day.
-    - cron: '45 23 * * *'
-    # 06:00 UTC = 11:30 IST -- a SECOND run, 30 minutes after
-    # stocks-fundamentals-rotation-sync.yml (05:30 UTC = 11:00 IST, comfortably
+    # they'd be working off yesterday's watchlist all day. Minute
+    # deliberately off the :00/:15/:30/:45 marks -- GitHub's scheduler
+    # queues and delays scheduled runs most at those popular times (this
+    # whole file's times, and every other stocks-*.yml workflow's, were
+    # staggered off them after every early-morning job ran 2.5-3h late on
+    # 2026-08-28, all piled onto round minutes).
+    - cron: '48 23 * * *'
+    # 06:12 UTC = 11:42 IST -- a SECOND run, after
+    # stocks-fundamentals-rotation-sync.yml (05:38 UTC = 11:08 IST, comfortably
     # enough time for that day's ~75-company batch to finish scraping).
     # Without this, a company whose fundamentals happen to get refreshed
-    # AFTER the 05:15 IST run wouldn't have its watchlist membership
-    # re-evaluated against that fresh data until the FOLLOWING day's 05:15
+    # AFTER the 05:18 IST run wouldn't have its watchlist membership
+    # re-evaluated against that fresh data until the FOLLOWING day's 05:18
     # run -- a real gap this closes same-day, on top of (not instead of)
     # the early run above, which still needs to keep happening before
     # market open for the reason explained there.
-    - cron: '0 6 * * *'
+    - cron: '12 6 * * *'
   workflow_dispatch: {}  # lets you trigger it manually from the Actions tab
 
 jobs:

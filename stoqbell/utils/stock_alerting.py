@@ -109,6 +109,7 @@ JOB_EXPECTATIONS = {
     # completes normally with target_hits=0, which is a genuine success,
     # not a skip).
     'suggestion_target_hit_notify': {'expected_by_ist_hour': 9, 'label': '9 AM IST'},
+    'suggestion_projection_target_hit_notify': {'expected_by_ist_hour': 9, 'label': '9 AM IST'},
     'trial_ended_notify': {'expected_by_ist_hour': 9, 'label': '9 AM IST'},
     'subscription_reminders': {'expected_by_ist_hour': 11, 'label': '11 AM IST'},
     'fundamentals_rotation': {'expected_by_ist_hour': 12, 'label': '12 PM IST'},

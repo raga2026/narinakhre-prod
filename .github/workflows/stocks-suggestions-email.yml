@@ -2,12 +2,16 @@ name: Stocks suggestions email
 
 on:
   schedule:
-    # 02:00 UTC daily = 07:30 IST -- after stocks-indicators-calculate.yml
-    # (01:15 UTC / 06:45 IST), since generate_daily_suggestions() needs
+    # 02:09 UTC daily = 07:39 IST -- after stocks-indicators-calculate.yml
+    # (01:23 UTC / 06:53 IST), since generate_daily_suggestions() needs
     # today's stock_indicators rows (cross_status/volume_trend/rsi_14) to
     # exist first. Triggers POST /stocks/suggestions/send-daily-email, which
     # generates today's suggestions and emails the recipient list in one go.
-    - cron: '0 2 * * *'
+    # Minute deliberately off the :00/:15/:30/:45 marks, and no longer
+    # sharing an exact time slot with stocks-large-cap-bonus-email.yml/
+    # stocks-starters-weekly-email.yml -- see
+    # stocks-shortlist-refresh.yml's comment for why.
+    - cron: '9 2 * * *'
   workflow_dispatch: {}  # lets you trigger it manually from the Actions tab
 
 jobs:

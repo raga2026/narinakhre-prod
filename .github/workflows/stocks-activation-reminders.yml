@@ -2,12 +2,13 @@ name: Stocks activation reminders
 
 on:
   schedule:
-    # 03:00 UTC daily = 08:30 IST -- same "daily cron, self-gates on
+    # 03:12 UTC daily = 08:42 IST -- same "daily cron, self-gates on
     # Monday internally" pattern as stocks-starters-weekly-email.yml (see
     # /stocks/notifications/send-activation-reminders, which always calls
     # record_job_success so the daily missed-job check stays meaningful
-    # for this job too).
-    - cron: '0 3 * * *'
+    # for this job too). Minute deliberately off the :00/:15/:30/:45
+    # marks -- see stocks-shortlist-refresh.yml's comment for why.
+    - cron: '12 3 * * *'
   workflow_dispatch: {}  # lets you trigger it manually from the Actions tab
 
 jobs:

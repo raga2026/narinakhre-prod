@@ -2,13 +2,15 @@ name: Stocks subscription expiry reminders
 
 on:
   schedule:
-    # 04:00 UTC daily = 09:30 IST. Runs every day including weekends/holidays
+    # 04:17 UTC daily = 09:47 IST. Runs every day including weekends/holidays
     # -- billing is a calendar-day thing, not a trading-day thing (unlike
     # stocks-suggestions-email.yml). Triggers POST
     # /stocks/subscriptions/send-expiry-reminders, which emails anyone whose
     # paid access lapses within the next few days (see
-    # utils/stocks_subscription.find_expiring_subscribers).
-    - cron: '0 4 * * *'
+    # utils/stocks_subscription.find_expiring_subscribers). Minute
+    # deliberately off the :00/:15/:30/:45 marks -- see
+    # stocks-shortlist-refresh.yml's comment for why.
+    - cron: '17 4 * * *'
   workflow_dispatch: {}  # lets you trigger it manually from the Actions tab
 
 jobs:

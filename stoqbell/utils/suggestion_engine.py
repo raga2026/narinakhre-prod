@@ -6,7 +6,7 @@ import random
 from datetime import date, timedelta
 
 from stoqbell.utils.fundamental_screen import PEG_HARD_EXCLUSION_MAX
-from stoqbell.utils.price_pattern import compute_suggestion_pricing
+from stoqbell.utils.price_pattern import compute_suggestion_pricing, compute_projection_targets
 from stoqbell.utils.nns_score import NNS_BRONZE_MIN, compute_nns_score, nns_tier
 from stoqbell.utils.stock_shortlist import _compute_industry_benchmarks
 from stoqbell.utils.news_sentiment import compute_company_sentiment
@@ -116,6 +116,20 @@ STOCK_SUGGESTIONS_ALTER_SQL = [
     # reasoning. NULL means "not yet alerted intraday"; once set, this
     # row is never re-checked/re-emailed by the intraday job again.
     'ALTER TABLE stock_suggestions ADD COLUMN IF NOT EXISTS intraday_alert_sent_at TIMESTAMP',
+    # NULL = not yet notified. Set once find_pending_mid_target_hit_suggestions/
+    # find_pending_long_target_hit_suggestions (below) has found this
+    # suggestion's mid-period/long-term PROJECTED price (see
+    # price_pattern.compute_projection_targets -- recomputed fresh from
+    # buy_price/target_sell_price/pattern_name/holding_period_days every
+    # time, not itself a stored column) reached at the latest synced close,
+    # and a customer-facing email has actually gone out about it (see
+    # /stocks/suggestions/notify-projection-target-hits). Independent of
+    # `status`/target_hit_date (the near-term target_sell_price check) --
+    # a suggestion can hit its near-term target, keep climbing, and
+    # separately hit its mid-period and later long-term projected price
+    # too, each notified about exactly once.
+    'ALTER TABLE stock_suggestions ADD COLUMN IF NOT EXISTS mid_target_notified_at TIMESTAMP',
+    'ALTER TABLE stock_suggestions ADD COLUMN IF NOT EXISTS long_target_notified_at TIMESTAMP',
 ]
 
 
@@ -875,6 +889,109 @@ def mark_suggestions_target_hit(db, suggestion_ids):
     placeholders = ','.join('?' * len(suggestion_ids))
     db.execute(
         f"UPDATE stock_suggestions SET status='target_hit' WHERE id IN ({placeholders})",
+        tuple(suggestion_ids)
+    )
+    db.commit()
+
+
+def _find_pending_projection_target_hit_suggestions(db, checkpoint):
+    """Shared implementation for find_pending_mid_target_hit_suggestions/
+    find_pending_long_target_hit_suggestions below -- checkpoint is
+    'mid_period' or 'long_term', matching compute_projection_targets'
+    own result keys.
+
+    Unlike the near-term target_sell_price check (a stored column, so SQL
+    can filter on it directly), the mid-period/long-term projected price
+    is recomputed in Python from each row's own buy_price/
+    target_sell_price/pattern_name/holding_period_days (see
+    price_pattern.compute_projection_targets -- deterministic from those
+    four values, nothing else) since it's never persisted as its own
+    column. So this fetches every not-yet-notified-for-this-checkpoint
+    suggestion together with its latest synced close, then filters in
+    Python rather than in the query itself.
+
+    Returns a list of dicts shaped like find_pending_target_hit_suggestions'
+    own (id, watchlist_id, symbol, exchange, company_name, suggestion_date,
+    buy_price, latest_price, latest_price_date), plus this checkpoint's own
+    projected target under 'target_sell_price' (so send_target_achieved_email
+    can be reused as-is) and 'checkpoint_label' ('mid_period'/'long_term')
+    so the email can say which one this is."""
+    notified_column = 'mid_target_notified_at' if checkpoint == 'mid_period' else 'long_target_notified_at'
+    rows = db.execute(
+        f'''SELECT s.id, w.id AS watchlist_id, w.symbol, w.exchange, w.name AS company_name,
+                  s.suggestion_date, s.buy_price, s.target_sell_price, s.pattern_name,
+                  s.holding_period_days, d.close AS latest_price, d.trade_date AS latest_price_date
+           FROM stock_suggestions s
+           JOIN stock_watchlist w ON w.id = s.watchlist_id
+           JOIN stock_daily_data d ON d.watchlist_id = w.id
+               AND d.trade_date = (
+                   SELECT MAX(d2.trade_date) FROM stock_daily_data d2 WHERE d2.watchlist_id = w.id
+               )
+           WHERE s.{notified_column} IS NULL
+             AND s.buy_price IS NOT NULL AND s.target_sell_price IS NOT NULL
+           ORDER BY s.suggestion_date ASC, s.id ASC'''
+    ).fetchall()
+
+    hits = []
+    for r in rows:
+        projection = compute_projection_targets(
+            r['buy_price'], r['target_sell_price'], r.get('pattern_name'), r.get('holding_period_days')
+        )
+        checkpoint_info = projection.get(checkpoint)
+        target = checkpoint_info.get('price') if checkpoint_info else None
+        if target is None or r['latest_price'] < target:
+            continue
+        hit = dict(r)
+        hit['target_sell_price'] = target
+        hit['checkpoint'] = checkpoint
+        hit['checkpoint_days'] = checkpoint_info.get('days')
+        hit['checkpoint_period_label'] = checkpoint_info.get('label')
+        hit['projection_method'] = projection.get('method')
+        hit['projection_source'] = projection.get('source')
+        hits.append(hit)
+    return hits
+
+
+def find_pending_mid_target_hit_suggestions(db):
+    """Suggestions whose mid-period PROJECTED price (see
+    price_pattern.compute_projection_targets) has been reached at the
+    latest synced close and haven't been notified about it yet -- see
+    _find_pending_projection_target_hit_suggestions for how "reached" is
+    determined without a stored target column."""
+    return _find_pending_projection_target_hit_suggestions(db, 'mid_period')
+
+
+def find_pending_long_target_hit_suggestions(db):
+    """Same as find_pending_mid_target_hit_suggestions but for the
+    longer-term checkpoint."""
+    return _find_pending_projection_target_hit_suggestions(db, 'long_term')
+
+
+def mark_suggestions_mid_target_notified(db, suggestion_ids):
+    """Sets mid_target_notified_at=NOW() for the given ids -- the other
+    half of find_pending_mid_target_hit_suggestions. No-op on an empty
+    list."""
+    suggestion_ids = list(suggestion_ids)
+    if not suggestion_ids:
+        return
+    placeholders = ','.join('?' * len(suggestion_ids))
+    db.execute(
+        f"UPDATE stock_suggestions SET mid_target_notified_at=NOW() WHERE id IN ({placeholders})",
+        tuple(suggestion_ids)
+    )
+    db.commit()
+
+
+def mark_suggestions_long_target_notified(db, suggestion_ids):
+    """Sets long_target_notified_at=NOW() for the given ids -- the other
+    half of find_pending_long_target_hit_suggestions. No-op on an empty
+    list."""
+    suggestion_ids = list(suggestion_ids)
+    if not suggestion_ids:
+        return
+    placeholders = ','.join('?' * len(suggestion_ids))
+    db.execute(
+        f"UPDATE stock_suggestions SET long_target_notified_at=NOW() WHERE id IN ({placeholders})",
         tuple(suggestion_ids)
     )
     db.commit()

@@ -195,6 +195,10 @@ from stoqbell.utils.suggestion_engine import (
     get_suggestion_by_id,
     find_pending_target_hit_suggestions,
     mark_suggestions_target_hit,
+    find_pending_mid_target_hit_suggestions,
+    find_pending_long_target_hit_suggestions,
+    mark_suggestions_mid_target_notified,
+    mark_suggestions_long_target_notified,
     passes_hard_filters,
     HOLDING_PERIOD_DAYS,
     get_recommendation_tracker,
@@ -231,6 +235,7 @@ from stoqbell.utils.suggestion_email import (
     send_admin_subscription_cancelled_email,
     send_target_hit_email,
     send_target_achieved_email,
+    send_projection_target_achieved_email,
     send_trial_ended_email,
     send_trial_started_email,
     send_weekly_starters_email,
@@ -929,6 +934,89 @@ def stocks_suggestions_notify_target_hits():
         return summary
 
     return _dispatch_stocks_job(db, is_cron, 'suggestion_target_hit_notify', _job)
+
+
+@stocks_bp.route('/stocks/suggestions/notify-projection-target-hits', methods=['POST'])
+def stocks_suggestions_notify_projection_target_hits():
+    """Sibling job to notify-target-hits above, but for the mid-period
+    (~6 month) and long-term (~1 year) PROJECTED price a suggestion is
+    expected to reach (see price_pattern.compute_projection_targets),
+    not the near-term target_sell_price itself -- that one already has
+    its own notification via notify-target-hits and is untouched by this
+    job. Checks every suggestion with buy_price/target_sell_price set
+    against the latest synced close (see
+    find_pending_mid_target_hit_suggestions/find_pending_long_target_hit_suggestions,
+    which recompute each checkpoint's projected price fresh every run
+    rather than reading it from a stored column) and, for whichever
+    checkpoints have been reached and not yet notified about
+    (mid_target_notified_at/long_target_notified_at independently -- a
+    suggestion can hit its mid-period checkpoint on one run and its
+    long-term one on a later run, each notified about exactly once),
+    emails every stocks_plan='standard' viewer who ever had access, same
+    reach/resubscribe-nudge logic as notify-target-hits.
+
+    Mid-period and long-term hits found in the same run are bundled into
+    ONE email per recipient rather than two separate ones (see
+    send_projection_target_achieved_email). Same dual cron/session auth,
+    same leave-pending-on-total-send-failure retry semantics, as every
+    other Stocks job route."""
+    is_cron = has_valid_cron_secret(request.headers, STOCKS_FUNDAMENTALS_CRON_SECRET)
+    if not is_cron and not session.get('stocks_admin_id'):
+        return redirect(url_for('stocks.stocks_admin_login'))
+
+    db = get_db()
+
+    def _job(job_db):
+        try:
+            mid_hits = find_pending_mid_target_hit_suggestions(job_db)
+            long_hits = find_pending_long_target_hit_suggestions(job_db)
+            hits = mid_hits + long_hits
+            sent = 0
+            failed = 0
+            if hits:
+                recipients = job_db.execute(
+                    "SELECT id, username AS email, name, is_pro, subscription_status, "
+                    "subscription_current_period_end, trial_ends_at FROM stocks_admin_users "
+                    "WHERE role='viewer' AND is_active=1 AND stocks_plan='standard' AND email_unsubscribed_at IS NULL"
+                ).fetchall()
+                if not recipients:
+                    current_app.logger.warning(
+                        f'{len(hits)} projection target hit(s) found but there are no Standard-plan '
+                        f'subscribers to notify -- marking as notified anyway since there is no one to retry for.'
+                    )
+                for r in recipients:
+                    currently_subscribed = has_stocks_access(
+                        r.get('is_pro'), r.get('subscription_status'), r.get('subscription_current_period_end'),
+                        trial_ends_at=r.get('trial_ends_at'),
+                    )
+                    ok, detail = send_projection_target_achieved_email(
+                        r['email'], r.get('name'), hits, currently_subscribed=currently_subscribed
+                    )
+                    if ok:
+                        sent += 1
+                    else:
+                        failed += 1
+                        current_app.logger.warning(f'Projection-target-achieved email failed for {r["email"]}: {detail}')
+                if sent > 0 or not recipients:
+                    mark_suggestions_mid_target_notified(job_db, [h['id'] for h in mid_hits])
+                    mark_suggestions_long_target_notified(job_db, [h['id'] for h in long_hits])
+                else:
+                    current_app.logger.error(
+                        f'All {len(recipients)} projection-target-achieved emails failed to send; '
+                        f'leaving {len(hits)} suggestion(s) pending for retry tomorrow.'
+                    )
+            summary = {
+                'mid_target_hits': len(mid_hits), 'long_target_hits': len(long_hits),
+                'recipients_sent': sent, 'recipients_failed': failed,
+            }
+        except Exception as e:
+            current_app.logger.error(f'Projection-target-hit notification job failed: {e}')
+            alert_job_error(job_db, 'suggestion_projection_target_hit_notify', str(e))
+            raise
+        record_job_success(job_db, 'suggestion_projection_target_hit_notify')
+        return summary
+
+    return _dispatch_stocks_job(db, is_cron, 'suggestion_projection_target_hit_notify', _job)
 
 
 @stocks_bp.route('/stocks/announcements/send-rebrand', methods=['POST'])

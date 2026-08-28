@@ -2,11 +2,13 @@ name: Stocks check missed jobs
 
 on:
   schedule:
-    # 10:30 UTC = 16:00 IST -- comfortably after every job's expected-by
+    # 10:41 UTC = 16:11 IST -- comfortably after every job's expected-by
     # time (the latest is market_cap_filter at 1 PM IST, see
     # utils/stock_alerting.py's JOB_EXPECTATIONS). Triggers
-    # POST /stocks/alerts/check-missed-jobs.
-    - cron: '30 10 * * *'
+    # POST /stocks/alerts/check-missed-jobs. Minute deliberately off the
+    # :00/:15/:30/:45 marks -- see stocks-shortlist-refresh.yml's comment
+    # for why.
+    - cron: '41 10 * * *'
   workflow_dispatch: {}  # lets you trigger it manually from the Actions tab
 
 jobs:
