@@ -63,7 +63,22 @@
     position: relative; width: 100%; background: var(--ivory-deep);
     border-radius: 20px; overflow: hidden; aspect-ratio: 1 / 1; max-height: 420px;
   }
-  .pd-main-img-wrap img { width: 100%; height: 100%; object-fit: contain; border-radius: 20px; }
+  /* ── Swipeable photo track -- CSS scroll-snap does the actual sliding
+       (native momentum/easing is the "liquid" feel), JS just tells it
+       which slide to land on for button-clicks/thumbnail-clicks and reads
+       back which slide is current after a manual swipe. Falls back to a
+       plain scrollable strip if JS never runs, still fully usable. ── */
+  .pd-main-track {
+    display: flex; width: 100%; height: 100%;
+    overflow-x: auto; scroll-snap-type: x mandatory; -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+  }
+  .pd-main-track::-webkit-scrollbar { display: none; }
+  .pd-main-slide {
+    flex: 0 0 100%; width: 100%; height: 100%;
+    scroll-snap-align: center; object-fit: contain; cursor: zoom-in;
+  }
+  @media (prefers-reduced-motion: reduce) { .pd-main-track { scroll-behavior: auto; } }
   .pd-share-btn {
     position: absolute; top: 10px; right: 10px; background: var(--ivory); border: none;
     border-radius: 50%; width: 36px; height: 36px; display: flex; align-items: center;
@@ -120,7 +135,8 @@
     background: rgba(20,8,10,0.92); align-items: center; justify-content: center;
   }
   #pd-lightbox.open { display: flex; }
-  #pd-lightbox img { max-width: 90vw; max-height: 85vh; object-fit: contain; border-radius: 16px; }
+  #pd-lightbox img { max-width: 90vw; max-height: 85vh; object-fit: contain; border-radius: 16px; transition: opacity .15s ease; }
+  @media (prefers-reduced-motion: reduce) { #pd-lightbox img { transition: none; } }
   .lb-close { position: absolute; top: 16px; right: 20px; font-size: 2rem; color: var(--ivory); background: none; border: none; cursor: pointer; }
   .lb-nav { position: absolute; top: 50%; transform: translateY(-50%); background: rgba(250,246,240,.15); border: none; color: var(--ivory); font-size: 1.8rem; border-radius: 50%; width: 44px; height: 44px; cursor: pointer; }
   #lb-prev { left: 12px; }
@@ -204,10 +220,19 @@
           <img src="{{ url_for('static', filename='assets/share.svg') }}" alt="Share" style="width:18px;height:18px;">
         </button>
         <button class="pd-nav-btn pd-nav-prev" onclick="pdNav(-1)">&#10094;</button>
-        <img id="pd-main" src="{{ image_urls[0] if image_urls else 'https://eopqwvssznmxfxrfzqbx.supabase.co/storage/v1/object/public/products/site/logo.png' }}"
-             alt="{{ product.name }}"
-             onclick="pdOpenLightbox(pdIdx)"
-             onerror="this.onerror=null;this.src='{{ url_for('static', filename='assets/logo.png') }}'">
+        <!-- JS (rebuildGallery, see script below) populates one .pd-main-slide
+             per validated real photo here -- a horizontally swipeable track,
+             not a single <img> whose src gets hard-swapped, so dragging left/
+             right slides smoothly between photos (same liquid feel as the
+             homepage's product shelves) instead of an instant cut. Starts
+             with the one image the server already knows about so there's
+             something to see before JS finishes validating the rest. -->
+        <div class="pd-main-track" id="pd-main-track">
+          <img class="pd-main-slide" src="{{ image_urls[0] if image_urls else 'https://eopqwvssznmxfxrfzqbx.supabase.co/storage/v1/object/public/products/site/logo.png' }}"
+               alt="{{ product.name }}"
+               onclick="pdOpenLightbox(0)"
+               onerror="this.onerror=null;this.src='{{ url_for('static', filename='assets/logo.png') }}'">
+        </div>
         <button class="pd-nav-btn pd-nav-next" onclick="pdNav(1)">&#10095;</button>
       </div>
       <div class="pd-thumbs" id="pd-thumbs">
@@ -404,6 +429,24 @@ document.addEventListener('DOMContentLoaded', function () {
     });
 
     function rebuildGallery() {
+        var track = document.getElementById('pd-main-track');
+        if (track) {
+            track.innerHTML = '';
+            PD_IMGS.forEach(function (url, i) {
+                var slide = document.createElement('img');
+                slide.src = url;
+                slide.alt = PD_IMGS.length > 1
+                    ? {{ product.name|tojson }} + ' — photo ' + (i + 1) + ' of ' + PD_IMGS.length
+                    : {{ product.name|tojson }};
+                slide.className = 'pd-main-slide';
+                slide.addEventListener('click', function () { pdOpenLightbox(i); });
+                slide.addEventListener('error', function () {
+                    this.onerror = null;
+                    this.src = '{{ url_for("static", filename="assets/logo.png") }}';
+                });
+                track.appendChild(slide);
+            });
+        }
         var thumbsWrap = document.getElementById('pd-thumbs');
         if (thumbsWrap) {
             thumbsWrap.innerHTML = '';
@@ -416,22 +459,72 @@ document.addEventListener('DOMContentLoaded', function () {
                 thumbsWrap.appendChild(thumb);
             });
         }
+        pdInitTrackSync();
         pdSetImg(0);
     }
 });
 
+/* Slides between photos by scrolling the track (CSS scroll-snap + the
+   browser's own momentum/easing give the "liquid" feel), not by swapping
+   one <img>'s src -- matches the same drag/swipe-to-move interaction the
+   homepage's product shelves use. Manually swiping the track (rather than
+   clicking prev/next or a thumbnail) is picked up by the scroll listener
+   in pdInitTrackSync below, which keeps pdIdx/the active thumbnail in
+   sync either way. */
+var pdReduceMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
 function pdSetImg(i) {
-    pdIdx = i;
-    const src = PD_IMGS[i] || '';
-    document.getElementById('pd-main').src = src;
-    document.querySelectorAll('.pd-thumb').forEach((t,j) => t.classList.toggle('active', j===i));
+    pdIdx = (i + PD_IMGS.length) % PD_IMGS.length;
+    var track = document.getElementById('pd-main-track');
+    if (track) {
+        track.scrollTo({ left: pdIdx * track.clientWidth, behavior: pdReduceMotion ? 'auto' : 'smooth' });
+    }
+    document.querySelectorAll('.pd-thumb').forEach((t,j) => t.classList.toggle('active', j===pdIdx));
+}
+function pdInitTrackSync() {
+    var track = document.getElementById('pd-main-track');
+    if (!track || track.dataset.synced) return;
+    track.dataset.synced = '1';
+    var ticking = false;
+    track.addEventListener('scroll', function () {
+        if (ticking) return;
+        ticking = true;
+        requestAnimationFrame(function () {
+            ticking = false;
+            if (!track.clientWidth) return;
+            var nearest = Math.round(track.scrollLeft / track.clientWidth);
+            nearest = Math.max(0, Math.min(nearest, PD_IMGS.length - 1));
+            if (nearest !== pdIdx) {
+                pdIdx = nearest;
+                document.querySelectorAll('.pd-thumb').forEach((t,j) => t.classList.toggle('active', j===pdIdx));
+            }
+        });
+    }, { passive: true });
 }
 function pdNav(dir) {
     pdSetImg((pdIdx + dir + PD_IMGS.length) % PD_IMGS.length);
 }
+/* Crossfades rather than hard-cutting lb-img's src -- a physical
+   left/right slide doesn't read well in a fixed zoomed-in overlay the way
+   it does in the inline gallery track, so a brief fade is this view's own
+   version of the same "liquid, not instant" feel. Swipe (touchstart/
+   touchend, same delta-threshold pattern as the hero carousel) works the
+   same as the prev/next arrows. */
+function pdSetLightboxImg(i) {
+    var img = document.getElementById('lb-img');
+    if (!img) return;
+    var applyChange = function () {
+        img.src = PD_IMGS[i] || '';
+        img.style.opacity = '1';
+    };
+    if (pdReduceMotion) { applyChange(); return; }
+    img.style.opacity = '0';
+    setTimeout(applyChange, 150);
+}
 function pdOpenLightbox(i) {
     pdIdx = i;
-    document.getElementById('lb-img').src = PD_IMGS[i] || '';
+    var img = document.getElementById('lb-img');
+    if (img) { img.style.opacity = '1'; img.src = PD_IMGS[i] || ''; }
     document.getElementById('pd-lightbox').classList.add('open');
 }
 function pdCloseLightbox() {
@@ -439,8 +532,20 @@ function pdCloseLightbox() {
 }
 function pdLbNav(dir) {
     pdIdx = (pdIdx + dir + PD_IMGS.length) % PD_IMGS.length;
-    document.getElementById('lb-img').src = PD_IMGS[pdIdx] || '';
+    pdSetLightboxImg(pdIdx);
 }
+(function initLightboxSwipe() {
+    var lb = document.getElementById('pd-lightbox');
+    if (!lb) return;
+    var touchStartX = 0;
+    lb.addEventListener('touchstart', function (e) {
+        touchStartX = e.changedTouches[0].screenX;
+    }, { passive: true });
+    lb.addEventListener('touchend', function (e) {
+        var delta = e.changedTouches[0].screenX - touchStartX;
+        if (Math.abs(delta) > 40) { delta < 0 ? pdLbNav(1) : pdLbNav(-1); }
+    }, { passive: true });
+})();
 
 function pdShare() {
     const name = {{ product.name|tojson }};
