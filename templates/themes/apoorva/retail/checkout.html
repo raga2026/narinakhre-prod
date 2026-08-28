@@ -1,1 +1,1261 @@
-{% extends "default/retail/checkout.html" %}
+{% extends "retail/base.html" %}
+{% block title %}Checkout | Nari Nakhre{% endblock %}
+{% block content %}
+<style>
+/* ─────────────────────────────────────────────────────
+   NARI NAKHRE CHECKOUT — Apoorva theme
+   Mobile-first, graceful desktop upgrade at 768px+
+───────────────────────────────────────────────────── */
+@import url('https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,500;0,9..144,700;1,9..144,600;1,9..144,700&family=Work+Sans:wght@400;500;600;700&display=swap');
+*, *::before, *::after { box-sizing: border-box; }
+
+.ck-page {
+  min-height: 100vh;
+  background: linear-gradient(160deg, #faf6f0 0%, #f2e9dd 55%, #f7e9e4 100%) fixed;
+  padding: 0 0 60px;
+  font-family: 'Work Sans', sans-serif;
+}
+
+/* ── Top bar ── */
+.ck-topbar {
+  background: rgba(250,246,240,0.88);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border-bottom: 1px solid #e6dccb;
+  padding: 14px 24px;
+  text-align: center;
+  position: sticky; top: 0; z-index: 40;
+}
+.ck-topbar-brand {
+  font-family: 'Fraunces', serif; font-style: italic;
+  font-size: 1.1rem; font-weight: 600; color: #6b1e3c; letter-spacing: -0.3px;
+}
+.ck-topbar-secure {
+  font-size: 0.7rem; color: #7a6a5c; margin-top: 2px;
+}
+
+/* ── Main container ── */
+.ck-container {
+  max-width: 860px;
+  margin: 0 auto;
+  padding: 28px 16px 0;
+}
+
+/* ── On desktop: two columns ── */
+@media (min-width: 768px) {
+  .ck-container {
+    display: grid;
+    grid-template-columns: 1fr 420px;
+    gap: 24px;
+    align-items: start;
+    padding: 40px 24px 0;
+  }
+  .ck-left  { grid-column: 1; }
+  .ck-right { grid-column: 2; position: sticky; top: 80px; }
+  /* Payment + Place Order live in their own full-width row below both
+     columns, instead of being squeezed into the 420px right sidebar --
+     keeps the primary action centered under the page rather than pinned
+     to the right edge. */
+  .ck-checkout-footer { grid-column: 1 / -1; display: flex; justify-content: center; }
+  .ck-checkout-footer > .ck-section { width: 100%; max-width: 480px; }
+}
+
+/* ── Section card ── */
+.ck-section {
+  background: white;
+  border-radius: 18px;
+  padding: 22px;
+  margin-bottom: 16px;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.07);
+}
+.ck-section-title {
+  font-family: 'Fraunces', serif;
+  font-size: 1.15rem; font-weight: 600; color: #6b1e3c;
+  margin-bottom: 18px; letter-spacing: -0.2px;
+}
+
+/* ── Cart items ── */
+.ck-item {
+  display: flex; gap: 14px; align-items: center;
+  padding: 12px 0;
+  border-bottom: 1px solid #e6dccb;
+}
+.ck-item:last-child { border-bottom: none; }
+.ck-item-img {
+  width: 64px; height: 64px; object-fit: contain;
+  border-radius: 12px; background: #f2e9dd;
+  border: 1px solid #eee; flex-shrink: 0;
+}
+.ck-item-right { flex: 1; min-width: 0; }
+.ck-item-name {
+  font-size: 0.88rem; font-weight: 600; color: #2b1810;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  margin-bottom: 2px;
+}
+.ck-item-size { font-size: 0.72rem; color: #7a6a5c; margin-bottom: 8px; }
+.ck-item-bottom {
+  display: flex; align-items: center; justify-content: space-between;
+}
+.ck-line-total { font-size: 0.92rem; font-weight: 700; color: #2b1810; }
+.ck-counter { display: flex; align-items: center; gap: 0; }
+.ck-c-btn {
+  width: 28px; height: 28px; border-radius: 50%;
+  border: 1.5px solid #e6dccb; background: white;
+  color: #2b1810; font-size: 1rem; font-weight: 300;
+  cursor: pointer; display: flex; align-items: center;
+  justify-content: center; transition: background 0.15s;
+}
+.ck-c-btn:hover { background: #faf6f0; }
+.ck-qty {
+  font-size: 0.88rem; font-weight: 600; color: #2b1810;
+  width: 28px; text-align: center;
+}
+.ck-clear-btn {
+  font-size: 0.75rem; color: #6b1e3c; background: none;
+  border: none; cursor: pointer; font-weight: 500;
+  padding: 0; letter-spacing: 0;
+}
+
+/* ── Coupon row ── */
+.ck-coupon-row {
+  display: flex; gap: 8px; margin-top: 16px; padding-top: 16px;
+  border-top: 1px solid #e6dccb;
+}
+.ck-coupon-input {
+  flex: 1; padding: 9px 14px;
+  border: 1.5px solid #e6dccb; border-radius: 10px;
+  font-size: 0.85rem; outline: none;
+  transition: border-color 0.15s; background: #f2e9dd;
+  text-transform: uppercase; letter-spacing: 0.05em;
+}
+.ck-coupon-input:focus { border-color: #6b1e3c; background: white; }
+.ck-coupon-btn {
+  padding: 9px 16px; border-radius: 10px; border: none;
+  background: #2b1810; color: white; font-size: 0.82rem;
+  font-weight: 600; cursor: pointer; white-space: nowrap;
+  transition: opacity 0.15s;
+}
+.ck-coupon-btn:hover { opacity: 0.8; }
+.ck-coupon-msg { font-size: 0.75rem; margin-top: 6px; font-weight: 600; }
+.ck-coupon-suggestions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.ck-coupon-chip {
+  font-size: 0.72rem; font-weight: 600; color: #6b1e3c;
+  background: #f2e9dd; border: 1px solid #e6dccb; border-radius: 999px;
+  padding: 5px 10px; cursor: pointer; transition: background 0.15s;
+}
+.ck-coupon-chip:hover { background: #f7e9e4; }
+.ck-view-all-coupons {
+  display: block; margin-top: 8px; background: none; border: none;
+  color: #6b1e3c; font-size: 0.75rem; font-weight: 600;
+  text-decoration: underline; cursor: pointer; padding: 0;
+}
+
+/* ── Coupon nudge ("Add ₹X to avail Y% off") ── */
+.ck-nudge {
+  display: flex; align-items: center; justify-content: space-between;
+  flex-wrap: wrap; gap: 8px 10px;
+  margin-top: 10px; padding: 10px 12px;
+  background: linear-gradient(135deg, #f2e9dd, #f7e9e4);
+  border: 1px dashed #6b1e3c; border-radius: 10px;
+}
+.ck-nudge-text { font-size: 0.8rem; color: #4a1329; font-weight: 500; line-height: 1.4; }
+.ck-nudge-amt, .ck-nudge-pct { font-size: 1.05rem; font-weight: 800; color: #6b1e3c; }
+.ck-nudge-code {
+  font-size: 0.72rem; font-weight: 700; color: #6b1e3c; white-space: nowrap;
+  background: white; border: 1px solid #e8a33d; border-radius: 6px;
+  padding: 4px 9px; letter-spacing: 0.3px;
+}
+
+/* ── Offers modal (opened via "View All Coupons") ── */
+.offers-modal-overlay {
+  display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.5);
+  z-index: 1000; align-items: center; justify-content: center; padding: 16px;
+}
+.offers-modal-overlay.open { display: flex; }
+.offers-modal-box {
+  background: #fff; border-radius: 18px; max-width: 420px; width: 100%;
+  max-height: 80vh; overflow-y: auto; padding: 20px; position: relative;
+}
+.offers-modal-close {
+  position: absolute; top: 12px; right: 12px; background: #faf6f0; border: none;
+  border-radius: 50%; width: 30px; height: 30px; font-size: 1rem; font-weight: 800;
+  color: #6b1e3c; cursor: pointer;
+}
+.offers-modal-title { font-family: 'Fraunces', serif; font-weight: 600; color: #6b1e3c; font-size: 1.15rem; margin-bottom: 14px; }
+.offers-modal-list { display: flex; flex-direction: column; gap: 8px; }
+.offers-modal-row {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  background: #f2e9dd; border: 1px solid #e6dccb; border-radius: 10px; padding: 9px 12px;
+}
+.offers-modal-row .offer-text { font-size: 0.8rem; color: #2b1810; }
+.offers-modal-row .offer-valid { font-size: 0.68rem; color: #8a7a6a; margin-top: 2px; }
+.offers-modal-row .offer-code-inline {
+  background: #fff; border: 1px dashed #6b1e3c; border-radius: 6px; padding: 3px 8px;
+  font-family: monospace; font-weight: 800; font-size: 0.75rem; color: #4a1329;
+  cursor: pointer; flex-shrink: 0;
+}
+
+/* ── Order summary ── */
+.ck-sum-row {
+  display: flex; justify-content: space-between; align-items: center;
+  font-size: 0.88rem; color: #2b1810; padding: 8px 0;
+  border-bottom: 1px solid #e6dccb;
+}
+.ck-sum-row:last-of-type { border-bottom: none; }
+.ck-sum-label { color: #7a6a5c; }
+.ck-sum-value { font-weight: 500; }
+.ck-sum-value.free { color: #16a34a; font-weight: 600; }
+.ck-sum-value.discount { color: #16a34a; }
+.ck-sum-total-row {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 16px 0 0; margin-top: 4px;
+}
+.ck-sum-total-label { font-family: 'Fraunces', serif; font-size: 1.05rem; font-weight: 600; color: #2b1810; }
+.ck-sum-total-value { font-family: 'Fraunces', serif; font-size: 1.3rem; font-weight: 700; color: #6b1e3c; }
+
+/* ── Form ── */
+.ck-form-group { margin-bottom: 14px; }
+.ck-form-label {
+  display: block; font-size: 0.72rem; font-weight: 600;
+  color: #7a6a5c; margin-bottom: 5px; text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.ck-form-input {
+  width: 100%; padding: 11px 14px;
+  border: 1.5px solid #e6dccb; border-radius: 12px;
+  font-size: 0.9rem; outline: none; background: white;
+  transition: border-color 0.2s; color: #2b1810;
+}
+.ck-form-input:focus { border-color: #6b1e3c; }
+.ck-form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.ck-pin-status { font-size: 0.72rem; font-weight: 600; margin-top: 5px; min-height: 16px; }
+.ck-pin-status.ok   { color: #16a34a; }
+.ck-pin-status.err  { color: #dc2626; }
+.ck-pin-status.chk  { color: #7a6a5c; }
+
+/* ── Guest sign-in / create-account card ── */
+.ck-signin-card {
+  position: relative; background: #faf6f0; border: 1.5px solid #d46a8c;
+  border-radius: 14px; padding: 16px 44px 16px 16px; margin-bottom: 16px;
+}
+.ck-signin-close {
+  position: absolute; top: 10px; right: 10px;
+  width: 26px; height: 26px; display: flex; align-items: center; justify-content: center;
+  border: none; background: none; color: #8a7a6a; font-size: 0.95rem; line-height: 1;
+  cursor: pointer; border-radius: 50%; transition: background 0.15s, color 0.15s;
+}
+.ck-signin-close:hover { background: #e6dccb; color: #4a1329; }
+.ck-signin-text { font-size: 0.82rem; color: #4a1329; line-height: 1.4; margin-bottom: 12px; }
+.ck-signin-actions { display: flex; gap: 10px; flex-wrap: wrap; }
+.ck-signin-btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  padding: 9px 16px; border-radius: 10px; font-size: 0.82rem; font-weight: 700;
+  cursor: pointer; text-decoration: none; white-space: nowrap; font-family: inherit;
+  flex: 1 1 auto; min-width: 150px;
+}
+.ck-signin-btn-google { background: #6b1e3c; color: white; border: 1.5px solid #6b1e3c; }
+.ck-signin-btn-google:hover { background: #4a1329; border-color: #4a1329; }
+.ck-signin-btn-create { background: white; color: #6b1e3c; border: 1.5px solid #6b1e3c; }
+.ck-signin-btn-create:hover { background: #f2e9dd; }
+.ck-signin-alt-row { margin-top: 10px; font-size: 0.78rem; color: #7a6a5c; }
+.ck-signin-alt-row button {
+  background: none; border: none; padding: 0; font: inherit; font-size: 0.78rem;
+  font-weight: 700; color: #6b1e3c; cursor: pointer; text-decoration: underline;
+}
+.ck-signin-alt-row button:hover { color: #4a1329; }
+
+/* ── Courier picker ── */
+.ck-courier-block { margin: 6px 0 16px; }
+.ck-courier-hint {
+  font-size: 0.8rem; color: #8a7a6a; padding: 12px 14px;
+  background: #f2e9dd; border-radius: 12px; margin-top: 6px;
+}
+.ck-courier-options { display: flex; flex-direction: column; gap: 10px; margin-top: 6px; }
+.ck-courier-option {
+  display: flex; align-items: center; gap: 12px;
+  border: 1.5px solid #e6dccb; border-radius: 14px;
+  padding: 12px 14px; cursor: pointer;
+  transition: border-color 0.15s, background 0.15s, box-shadow 0.15s;
+}
+.ck-courier-option:hover { border-color: #e6dccb; }
+.ck-courier-option.selected {
+  border-color: #6b1e3c; background: #faf6f0;
+  box-shadow: 0 0 0 1px #6b1e3c;
+}
+.ck-courier-option input { margin: 0; width: 18px; height: 18px; accent-color: #6b1e3c; flex-shrink: 0; }
+.ck-courier-badge {
+  width: 52px; height: 36px; border-radius: 9px; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center;
+  background: white; border: 1px solid #e6dccb; overflow: hidden; padding: 5px;
+}
+.ck-courier-badge img { max-width: 100%; max-height: 100%; object-fit: contain; display: block; }
+.ck-courier-badge.fallback {
+  color: white; font-size: 0.85rem; font-weight: 800; border: none; padding: 0;
+}
+.ck-courier-info { flex: 1; min-width: 0; }
+.ck-courier-name { font-size: 0.87rem; font-weight: 700; color: #2b1810; display: block; }
+.ck-courier-eta { font-size: 0.73rem; color: #7a6a5c; display: block; margin-top: 2px; }
+.ck-courier-price { font-size: 0.82rem; font-weight: 800; color: #16a34a; white-space: nowrap; flex-shrink: 0; }
+.ck-courier-price.upgrade { color: #6b1e3c; }
+
+/* ── Payment toggle ── */
+.ck-payment-options { display: flex; gap: 10px; }
+.ck-payment-option {
+  flex: 1; padding: 12px; border: 1.5px solid #e6dccb;
+  border-radius: 12px; cursor: pointer; text-align: center;
+  transition: border-color 0.15s, background 0.15s;
+}
+.ck-payment-option.selected {
+  border-color: #6b1e3c; background: #faf6f0;
+}
+.ck-payment-option input { display: none; }
+.ck-payment-option-icon { font-size: 1.2rem; display: block; margin-bottom: 4px; }
+.ck-payment-option-label { font-size: 0.78rem; font-weight: 600; color: #2b1810; }
+
+/* ── Submit ── */
+.ck-submit-btn {
+  width: 100%; padding: 16px;
+  border-radius: 999px; border: none;
+  background: #6b1e3c; color: white;
+  font-size: 0.95rem; font-weight: 700;
+  cursor: pointer; margin-top: 18px;
+  letter-spacing: -0.2px;
+  transition: background 0.15s, opacity 0.15s;
+}
+.ck-submit-btn:hover { background: #4a1329; }
+.ck-submit-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.ck-submit-note {
+  text-align: center; font-size: 0.68rem; color: #7a6a5c;
+  margin-top: 10px; line-height: 1.5;
+}
+
+/* ── Order-processing overlay ── */
+.ck-loading-overlay {
+  display: none;
+  position: fixed; inset: 0; z-index: 9999;
+  background: rgba(20, 8, 16, 0.72);
+  backdrop-filter: blur(3px);
+  align-items: center; justify-content: center;
+  flex-direction: column;
+}
+.ck-loading-overlay.active { display: flex; }
+.ck-loading-ring {
+  width: 68px; height: 68px;
+  border-radius: 50%;
+  border: 5px solid rgba(232, 163, 61, 0.25);
+  border-top-color: #e8a33d;
+  border-right-color: #6b1e3c;
+  animation: ck-spin 0.85s linear infinite;
+}
+@keyframes ck-spin { to { transform: rotate(360deg); } }
+.ck-loading-msg {
+  margin-top: 20px; color: #fff; font-family: 'Fraunces', serif;
+  font-weight: 700; font-size: 1.15rem; text-align: center; padding: 0 24px;
+  animation: ck-pulse 1.6s ease-in-out infinite;
+}
+@keyframes ck-pulse { 0%, 100% { opacity: 0.75; } 50% { opacity: 1; } }
+.ck-loading-sub {
+  margin-top: 6px; color: rgba(255,255,255,0.7); font-size: 0.8rem; text-align: center;
+}
+</style>
+
+<div class="ck-loading-overlay" id="ck-loading-overlay">
+  <div class="ck-loading-ring"></div>
+  <div class="ck-loading-msg" id="ck-loading-msg">Placing your order…</div>
+  <div class="ck-loading-sub">Please wait, don't close this page ✨</div>
+</div>
+
+<div class="ck-page">
+  <!-- Top bar -->
+  <div class="ck-topbar">
+    <div class="ck-topbar-brand">Nari Nakhre — Checkout</div>
+    <div class="ck-topbar-secure">🔒 Secured by Razorpay · 256-bit SSL</div>
+  </div>
+
+  <div class="ck-container">
+
+    <!-- ── LEFT: Cart + Coupon ── -->
+    <div class="ck-left">
+
+      <!-- Cart items -->
+      {% if out_of_stock_items %}
+    <div style="background:#fef2f2;border:2px solid #fca5a5;border-radius:16px;padding:14px 16px;margin-bottom:14px;">
+        <div style="font-weight:800;color:#dc2626;font-size:0.9rem;margin-bottom:6px;">
+            ⚠️ Some items in your bag are out of stock
+        </div>
+        <ul style="font-size:0.8rem;color:#7f1d1d;margin:0 0 10px 16px;">
+            {% for name in out_of_stock_items %}
+            <li>{{ name }}</li>
+            {% endfor %}
+        </ul>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;">
+            <form method="POST" action="/clear_oos_items" style="display:inline;">
+                <button type="submit"
+                    style="background:#dc2626;color:white;border:none;padding:8px 14px;border-radius:10px;font-size:0.8rem;font-weight:700;cursor:pointer;">
+                    Remove out-of-stock items &amp; continue
+                </button>
+            </form>
+            <a href="/retail/"
+                style="display:inline-flex;align-items:center;padding:8px 14px;border-radius:10px;font-size:0.8rem;font-weight:700;background:white;border:1.5px solid #dc2626;color:#dc2626;text-decoration:none;">
+                ← Back to shop
+            </a>
+        </div>
+    </div>
+    {% endif %}
+    <div class="ck-section">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
+          <div class="ck-section-title" style="margin-bottom:0;">
+            Your Bag
+            <span style="font-size:0.78rem;font-weight:500;color:#7a6a5c;margin-left:6px;">
+              ({{ display_cart|length }} item{{ 's' if display_cart|length != 1 else '' }})
+            </span>
+          </div>
+          <button class="ck-clear-btn" id="ck-clear-btn">Clear all</button>
+        </div>
+
+        <div id="ck-items">
+        {% for item in display_cart %}
+        {%- set clean_size = item.size if item.size and item.size not in ['Standard','standard','STANDARD','None',''] else '' -%}
+        {%- set img_src = item.image_url if item.image_url and item.image_url.startswith('http') else '' -%}
+        <div class="ck-item" data-sku="{{ item.sku }}" data-size="{{ item.size }}" data-price="{{ item.price }}">
+          <img class="ck-item-img"
+               src="{{ img_src or 'https://eopqwvssznmxfxrfzqbx.supabase.co/storage/v1/object/public/products/site/logo.png' }}"
+               alt="{{ item.name }}"
+               onerror="this.onerror=null;this.src='{{ url_for('static', filename='assets/logo.png') }}'">
+          <div class="ck-item-right">
+            <div class="ck-item-name">{{ item.name }}</div>
+            {% if clean_size %}<div class="ck-item-size">Size: {{ clean_size }}</div>{% endif %}
+            <div class="ck-item-bottom">
+              <div class="ck-line-total">₹{{ (item.price * item.units)|round(0)|int }}</div>
+              <div class="ck-counter">
+                <button class="ck-c-btn" onclick="ckDec(this)">−</button>
+                <span class="ck-qty">{{ item.units }}</span>
+                <button class="ck-c-btn" onclick="ckInc(this)">+</button>
+              </div>
+            </div>
+          </div>
+        </div>
+        {% else %}
+        <div style="text-align:center;color:#7a6a5c;padding:32px 0;font-size:0.88rem;">
+          Your bag is empty.
+        </div>
+        {% endfor %}
+        </div>
+
+        <!-- Coupon -->
+        <div class="ck-coupon-row">
+          <input type="text" id="ck-coupon" class="ck-coupon-input"
+                 placeholder="Coupon code"
+                 value="{{ coupon_code or '' }}">
+          <button onclick="applyCoupon()" class="ck-coupon-btn">Apply</button>
+        </div>
+        <div id="ck-coupon-msg" class="ck-coupon-msg" style="display:none;"></div>
+        {% if coupon_code %}
+        <div style="display:flex;align-items:center;justify-content:space-between;background:#f0fdf4;border:1.5px solid #86efac;border-radius:10px;padding:8px 12px;margin-top:8px;">
+          <span style="font-size:0.8rem;font-weight:600;color:#15803d;">✓ {{ coupon_code }} applied</span>
+          <button onclick="removeCoupon()" style="background:none;border:none;color:#dc2626;font-size:0.75rem;font-weight:600;cursor:pointer;">Remove</button>
+        </div>
+        {% elif public_coupons and public_coupons|length > 0 %}
+        <div class="ck-coupon-suggestions">
+          {% for c in public_coupons[:4] %}
+          <button type="button" class="ck-coupon-chip" onclick="applySuggestedCoupon('{{ c.code }}')">
+            {{ c.code }} — {{ c.discount_percent|int }}% off{% if c.max_discount_amount %} up to ₹{{ c.max_discount_amount|round(0)|int }}{% endif %}
+          </button>
+          {% endfor %}
+        </div>
+        {% endif %}
+        {% if public_coupons and public_coupons|length > 0 %}
+        <button type="button" class="ck-view-all-coupons" onclick="openOffersModal()">View All Coupons</button>
+        {% endif %}
+
+        <!-- Nari Nakhre Credits -->
+        {% if logged_in_user and credit_balance and credit_balance > 0 %}
+        <div class="ck-coupon-row">
+          <input type="number" id="ck-credits" class="ck-coupon-input" style="text-transform:none;"
+                 min="1" max="{{ credit_balance|int }}" step="1"
+                 placeholder="Apply Nari Nakhre Credits (max {{ credit_balance|int }})">
+          <button onclick="applyCredits()" class="ck-coupon-btn">Apply</button>
+        </div>
+        <div id="ck-credits-msg" class="ck-coupon-msg" style="display:none;"></div>
+        {% if credits_applied and credits_applied > 0 %}
+        <div style="display:flex;align-items:center;justify-content:space-between;background:#f2e9dd;border:1.5px solid #e6dccb;border-radius:10px;padding:8px 12px;margin-top:8px;">
+          <span style="font-size:0.8rem;font-weight:600;color:#4a1329;">🎁 ₹{{ credits_applied|round(0)|int }} Nari Nakhre Credits applied</span>
+          <button onclick="removeCredits()" style="background:none;border:none;color:#dc2626;font-size:0.75rem;font-weight:600;cursor:pointer;">Remove</button>
+        </div>
+        {% else %}
+        <div style="font-size:0.72rem;color:#a89a8a;margin-top:4px;">You have ₹{{ credit_balance|round(0)|int }} in Nari Nakhre Credits available.</div>
+        {% endif %}
+        {% endif %}
+      </div>
+
+      <!-- Shipping address form — shown inline on desktop, stays visible -->
+      <div class="ck-section">
+        {% if not logged_in_user %}
+        <div id="ck-signin-card" class="ck-signin-card" style="display:none;">
+          <button type="button" class="ck-signin-close" onclick="ckSkipSignin()" aria-label="Dismiss">✕</button>
+          <div class="ck-signin-text">
+            <strong>Create an account</strong> to autofill your name, phone and address, and track your orders.
+          </div>
+          <div class="ck-signin-actions">
+            <a href="{{ url_for('google_login') }}" class="ck-signin-btn ck-signin-btn-google">
+              Continue with Google
+            </a>
+            <button type="button" class="ck-signin-btn ck-signin-btn-create" onclick="openAuthModal('signup')">
+              Create Account
+            </button>
+          </div>
+          <div class="ck-signin-alt-row">
+            Already have an account? <button type="button" onclick="openAuthModal('signin')">Sign In</button>
+          </div>
+        </div>
+        <script>
+          if (!localStorage.getItem('nn_checkout_signin_skipped')) {
+            document.getElementById('ck-signin-card').style.display = 'block';
+          }
+          function ckSkipSignin() {
+            localStorage.setItem('nn_checkout_signin_skipped', '1');
+            document.getElementById('ck-signin-card').style.display = 'none';
+          }
+        </script>
+        {% endif %}
+        {% if saved_addresses and saved_addresses|length > 0 %}
+        <div class="ck-section-title">Choose a delivery address</div>
+        <div id="ck-addr-list" style="display:grid;gap:10px;margin-bottom:18px;">
+            {% for addr in saved_addresses %}
+            <label style="display:flex;gap:10px;align-items:flex-start;border:1.5px solid #e6dccb;border-radius:12px;padding:12px 14px;cursor:pointer;">
+                <input type="radio" name="saved_address_choice" value="{{ addr.id }}" {{ 'checked' if loop.first }} onchange="selectSavedAddress('{{ addr.id }}')" style="margin-top:3px;">
+                <span>
+                    <span style="font-weight:700;color:#2b1810;">{{ addr.nickname }}</span>
+                    <span style="background:#f2e9dd;color:#6b1e3c;border:1px solid #e6dccb;font-size:0.65rem;font-weight:700;padding:2px 7px;border-radius:999px;text-transform:uppercase;margin-left:6px;">{{ addr.address_type }}</span>
+                    <br>
+                    <span style="font-size:0.78rem;color:#7a6a5c;">{{ addr.recipient_name }}, {{ addr.address_line }}, {{ addr.city }} - {{ addr.pincode }}</span>
+                </span>
+            </label>
+            {% endfor %}
+            <label style="display:flex;gap:10px;align-items:center;border:1.5px solid #e6dccb;border-radius:12px;padding:12px 14px;cursor:pointer;">
+                <input type="radio" name="saved_address_choice" value="new" onchange="selectSavedAddress('new')">
+                <span style="font-weight:700;color:#2b1810;">+ Use a different address</span>
+            </label>
+        </div>
+        {% endif %}
+        <div class="ck-section-title">Shipping Address</div>
+        <form id="ck-form">
+          <div class="ck-form-row">
+            <div class="ck-form-group">
+              <label class="ck-form-label">Full Name *</label>
+              <input type="text" name="name" required class="ck-form-input" placeholder="Ananya Sharma" autocomplete="name" value="{{ saved_address.consignee_name if saved_address else '' }}">
+            </div>
+            <div class="ck-form-group">
+              <label class="ck-form-label">Phone *</label>
+              <input type="tel" name="phone" required class="ck-form-input" placeholder="10-digit mobile" autocomplete="tel" inputmode="numeric" pattern="[0-9]{10}" value="{{ saved_address.consignee_phone if saved_address else '' }}">
+            </div>
+          </div>
+          <div class="ck-form-group">
+            <label class="ck-form-label">Email *</label>
+            <input type="email" name="email" required class="ck-form-input" placeholder="name@example.com" autocomplete="email" value="{{ logged_in_user.email if logged_in_user else '' }}">
+          </div>
+          <div class="ck-form-group">
+            <label class="ck-form-label">Address *</label>
+            <textarea name="address" rows="2" required class="ck-form-input"
+                      placeholder="House No, Street, Area" autocomplete="street-address"
+                      style="resize:vertical;">{{ saved_address.consignee_address if saved_address else '' }}</textarea>
+          </div>
+          <div class="ck-form-row">
+            <div class="ck-form-group">
+              <label class="ck-form-label">Pincode *</label>
+              <input type="text" id="ck-pin" name="pincode" required maxlength="6"
+                     class="ck-form-input" placeholder="6-digit PIN"
+                     autocomplete="postal-code" inputmode="numeric" pattern="[0-9]{6}" oninput="ckCheckPin()"
+                     value="{{ saved_address.consignee_pincode if saved_address else '' }}">
+              <div id="ck-pin-status" class="ck-pin-status"></div>
+              <input type="hidden" id="ck-state" name="state" value="{{ saved_address.consignee_state if saved_address else '' }}">
+            </div>
+            <div class="ck-form-group">
+              <label class="ck-form-label">City / State</label>
+              <input type="text" id="ck-city" readonly class="ck-form-input"
+                     style="background:#f2e9dd;color:#7a6a5c;" placeholder="Auto-detected"
+                     value="{{ saved_address.consignee_city if saved_address else '' }}">
+            </div>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- ── RIGHT: Order Summary ── -->
+    <div class="ck-right">
+      <div class="ck-section">
+        <div class="ck-section-title">Order Summary</div>
+
+        <div class="ck-sum-row">
+          <span class="ck-sum-label">Subtotal</span>
+          <span class="ck-sum-value" id="s-subtotal">₹{{ subtotal|round(0)|int }}</span>
+        </div>
+        <div class="ck-sum-row">
+          <span class="ck-sum-label">GST (included)</span>
+          <span class="ck-sum-value" style="color:#7a6a5c;">₹{{ total_tax|round(2) }}</span>
+        </div>
+        {% if discount and discount > 0 %}
+        <div class="ck-sum-row" id="s-discount-row">
+          <span class="ck-sum-label">Discount{% if coupon_code %} ({{ coupon_code }}){% endif %}</span>
+          <span class="ck-sum-value discount" id="s-discount">−₹{{ discount|round(0)|int }}</span>
+        </div>
+        {% else %}
+        <div class="ck-sum-row" id="s-discount-row" style="display:none;">
+          <span class="ck-sum-label">Discount</span>
+          <span class="ck-sum-value discount" id="s-discount">−₹0</span>
+        </div>
+        {% endif %}
+        <div class="ck-sum-row">
+          <span class="ck-sum-label">Shipping</span>
+          <span class="ck-sum-value free" id="s-ship">FREE</span>
+        </div>
+
+        <!-- Courier picker -->
+        <div class="ck-courier-block">
+          <label class="ck-form-label">Delivery Option</label>
+          <div id="ck-courier-hint" class="ck-courier-hint">Enter your pincode to see delivery options.</div>
+          <div id="ck-courier-options" class="ck-courier-options" style="display:none;"></div>
+        </div>
+
+        <div class="ck-sum-row" id="s-upgrade-row" style="display:none;">
+          <span class="ck-sum-label">Delivery upgrade</span>
+          <span class="ck-sum-value" id="s-upgrade" style="color:#6b1e3c;">₹0</span>
+        </div>
+        <div class="ck-sum-row" id="s-cod-row" style="display:none;">
+          <span class="ck-sum-label">COD Fee</span>
+          <span class="ck-sum-value" id="s-cod">₹0</span>
+        </div>
+
+        <div style="border-top:1px solid #e6dccb;margin-top:4px;"></div>
+        <div class="ck-sum-total-row">
+          <span class="ck-sum-total-label">Total</span>
+          <span class="ck-sum-total-value" id="s-total">₹{{ grand_total|round(0)|int }}</span>
+        </div>
+
+        <div id="coupon-nudge" class="ck-nudge" style="{% if not next_coupon_gap %}display:none;{% endif %}">
+          {% if next_coupon_gap %}
+          <span class="ck-nudge-text">Add <span class="ck-nudge-amt">₹{{ next_coupon_gap.amount_needed|round(0, 'ceil')|int }}</span> to avail <span class="ck-nudge-pct">{{ next_coupon_gap.discount_percent|int }}% off</span></span>
+          <span class="ck-nudge-code">{{ next_coupon_gap.code }}</span>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+
+    <!-- ── Checkout action bar: payment method + Place Order — its own
+         full-width row below both columns on desktop (see .ck-checkout-footer
+         in the 768px+ media query), last element on mobile. ── -->
+    <div class="ck-checkout-footer">
+      <div class="ck-section">
+        <!-- Payment method — large tap-friendly toggle buttons -->
+        <div class="ck-form-group">
+          <label class="ck-form-label">Payment Method</label>
+          <input type="hidden" id="payment_mode_input" value="Prepaid">
+          <div style="display:flex;gap:10px;margin-top:6px;">
+            <button type="button" id="btn-prepaid" onclick="setPayment('Prepaid')"
+              style="flex:1;padding:16px 8px;border-radius:16px;border:2.5px solid #6b1e3c;
+                     background:#6b1e3c;color:white;font-size:0.88rem;font-weight:800;
+                     cursor:pointer;line-height:1.4;text-align:center;">
+              💳<br>Prepaid<br>
+              <span style="font-size:0.68rem;font-weight:500;opacity:0.9;">Pay online now</span>
+            </button>
+            <button type="button" id="btn-cod" onclick="setPayment('COD')"
+              style="flex:1;padding:16px 8px;border-radius:16px;border:2.5px solid #8a7a6a;
+                     background:#f2e9dd;color:#374151;font-size:0.88rem;font-weight:800;
+                     cursor:pointer;line-height:1.4;text-align:center;">
+              💵<br>Cash on Delivery<br>
+              <span style="font-size:0.68rem;font-weight:500;color:#6b7280;">Pay when delivered</span>
+            </button>
+          </div>
+        </div>
+
+        <button type="submit" form="ck-form" class="ck-submit-btn" id="ck-submit-btn">
+          Place Order
+        </button>
+        <div class="ck-submit-note">
+          By placing your order you agree to our terms.<br>
+          🔒 Payments processed securely by Razorpay.
+        </div>
+
+        <div style="margin-top:18px;padding:14px;background:#f2e9dd;border-radius:12px;font-size:0.75rem;color:#7a6a5c;line-height:1.6;">
+          🚚 <strong>Free shipping</strong> on our cheapest courier<br>
+          🔒 Secure payment via Razorpay
+        </div>
+      </div>
+    </div>
+
+  </div><!-- end .ck-container -->
+</div><!-- end .ck-page -->
+
+{% if public_coupons and public_coupons|length > 0 %}
+<div class="offers-modal-overlay" id="offers-modal-overlay" role="dialog" aria-modal="true" aria-labelledby="offers-modal-title">
+  <div class="offers-modal-box">
+    <button type="button" class="offers-modal-close" onclick="closeOffersModal()" aria-label="Close offers list">✕</button>
+    <h3 class="offers-modal-title" id="offers-modal-title">All Coupons</h3>
+    <div class="offers-modal-list">
+      {% for c in public_coupons %}
+      <div class="offers-modal-row">
+        <div class="offer-text">
+          {{ c.discount_percent|int }}% off{% if c.max_discount_amount %} up to ₹{{ c.max_discount_amount|round(0)|int }}{% endif %}
+          <div class="offer-valid">{% if c.expiry_date %}Valid till {{ c.expiry_date }}{% else %}No expiry{% endif %}</div>
+        </div>
+        <button type="button" class="offer-code-inline" onclick="applyCouponFromModal('{{ c.code }}')"
+                aria-label="Apply coupon code {{ c.code }}">{{ c.code }}</button>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+</div>
+{% endif %}
+
+<script src="https://checkout.razorpay.com/v1/checkout.js"></script>
+<!-- RECAPTCHA_SITE_KEY and getRecaptchaToken() now come from retail/base.html's
+     extra_scripts block, which loads on every page (needed for the sign-in modal). -->
+<script>
+const RZP_KEY = {{ config.get('RAZORPAY_KEY_ID', '')|tojson }};
+let ckServiceable = false, ckShip = 0, ckCodFee = 0;
+let ckCourierOptions = [], ckSelectedCourier = null, ckExtraCharge = 0;
+const CK_COURIER_META = {
+    delhivery:  { label: 'Delhivery',  logo: {{ url_for('static', filename='assets/delhivery-logo.png')|tojson }},  color: '#eb1e2c', initial: 'D' },
+    shiprocket: { label: 'Shiprocket', logo: {{ url_for('static', filename='assets/shiprocket-logo.png')|tojson }}, color: '#5b21b6', initial: 'S' },
+};
+function ckCourierMeta(name) {
+    const key = (name || '').toLowerCase();
+    if (CK_COURIER_META[key]) return CK_COURIER_META[key];
+    const label = key ? key.charAt(0).toUpperCase() + key.slice(1) : 'Courier';
+    return { label: label, color: '#7a6a5c', initial: label.charAt(0).toUpperCase() };
+}
+let appliedCoupon = null;
+let currentDiscount = {{ discount|default(0)|round(2) }};
+const subtotalBase = {{ subtotal|round(2) }};
+const gstBase = {{ total_tax|round(2) }};
+const discountBase = {{ discount|default(0)|round(2) }};
+const creditsApplied = {{ credits_applied|default(0)|round(2) }};
+const savedAddresses = {{ (saved_addresses or [])|tojson }};
+const fallbackEmail = {{ (logged_in_user.email if logged_in_user else '')|tojson }};
+const IS_LOGGED_IN = {{ 'true' if logged_in_user else 'false' }};
+const publicCouponsForNudge = {{ (public_coupons or [])|tojson }};
+
+/* ── Saved address picker ── */
+function selectSavedAddress(choice) {
+    const form = document.getElementById('ck-form');
+    if (choice === 'new') {
+        form.name.value = '';
+        form.phone.value = '';
+        form.email.value = fallbackEmail;
+        form.address.value = '';
+        document.getElementById('ck-pin').value = '';
+        document.getElementById('ck-city').value = '';
+        document.getElementById('ck-state').value = '';
+        ckServiceable = false;
+        ckSetPinStatus('', '');
+        return;
+    }
+    const addr = savedAddresses.find(function (a) { return String(a.id) === String(choice); });
+    if (!addr) return;
+    form.name.value = addr.recipient_name;
+    form.phone.value = addr.phone;
+    form.email.value = addr.email || fallbackEmail;
+    form.address.value = addr.address_line;
+    document.getElementById('ck-pin').value = addr.pincode;
+    document.getElementById('ck-city').value = addr.city;
+    document.getElementById('ck-state').value = addr.state;
+    ckCheckPin();
+}
+
+/* ── Payment method toggle ── */
+function setPayment(mode) {
+    document.getElementById('payment_mode_input').value = mode;
+    var prepaid = document.getElementById('btn-prepaid');
+    var cod = document.getElementById('btn-cod');
+    if (mode === 'Prepaid') {
+        prepaid.style.background = '#6b1e3c';
+        prepaid.style.color = 'white';
+        prepaid.style.borderColor = '#6b1e3c';
+        cod.style.background = 'white';
+        cod.style.color = '#6b7280';
+        cod.style.borderColor = '#d1d5db';
+    } else {
+        cod.style.background = '#6b1e3c';
+        cod.style.color = 'white';
+        cod.style.borderColor = '#6b1e3c';
+        prepaid.style.background = 'white';
+        prepaid.style.color = '#6b7280';
+        prepaid.style.borderColor = '#d1d5db';
+    }
+    ckPayMode();
+}
+// Keep backward compat
+function selectPayment(mode) { setPayment(mode); }
+
+/* ── Cart controls ── */
+function ckDec(btn) {
+    const row = btn.closest('.ck-item');
+    const sku = row.dataset.sku, size = row.dataset.size, price = +row.dataset.price;
+    const qEl = row.querySelector('.ck-qty');
+    let qty = +qEl.textContent - 1;
+    if (qty <= 0) {
+        fetch('/update-cart', {method:'POST', headers:{'Content-Type':'application/json'},
+            body: JSON.stringify({product_id:sku, qty:0, price, size})})
+        .then(r=>r.json()).then(d=>{
+            row.remove();
+            if(typeof syncCartCount==='function') syncCartCount(d.new_total||0);
+            if(!document.querySelector('.ck-item')) location.reload();
+            else ckRecalc();
+        });
+        return;
+    }
+    fetch('/update-cart', {method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({product_id:sku, qty, price, size})})
+    .then(r=>r.json()).then(d=>{
+        qEl.textContent = qty;
+        row.querySelector('.ck-line-total').textContent = '₹'+(qty*price).toFixed(0);
+        if(typeof syncCartCount==='function') syncCartCount(d.new_total||0);
+        ckRecalc();
+    });
+}
+function ckInc(btn) {
+    const row = btn.closest('.ck-item');
+    const sku = row.dataset.sku, size = row.dataset.size, price = +row.dataset.price;
+    const qEl = row.querySelector('.ck-qty');
+    const qty = +qEl.textContent + 1;
+    fetch('/update-cart', {method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({product_id:sku, qty, price, size})})
+    .then(r=>r.json()).then(d=>{
+        qEl.textContent = qty;
+        row.querySelector('.ck-line-total').textContent = '₹'+(qty*price).toFixed(0);
+        if(typeof syncCartCount==='function') syncCartCount(d.new_total||0);
+        ckRecalc();
+    });
+}
+function ckRecalc() {
+    let sub = 0;
+    document.querySelectorAll('.ck-item').forEach(r=>{
+        sub += +r.dataset.price * +r.querySelector('.ck-qty').textContent;
+    });
+    document.getElementById('s-subtotal').textContent = '₹'+sub.toFixed(0);
+    let disc = appliedCoupon ? Math.min(sub*(appliedCoupon.pct/100), appliedCoupon.max_discount>0?appliedCoupon.max_discount:Infinity) : discountBase;
+    if (appliedCoupon && sub < appliedCoupon.min_order) { disc = 0; }
+    currentDiscount = disc;
+    document.getElementById('s-total').textContent = '₹'+Math.max(sub-disc-creditsApplied+ckExtraCharge,0).toFixed(0);
+    updateCouponNudge(sub);
+}
+function updateCouponNudge(sub) {
+    const el = document.getElementById('coupon-nudge');
+    if (!el) return;
+    if (appliedCoupon) { el.style.display = 'none'; return; }
+    let best = null;
+    publicCouponsForNudge.forEach(function(c) {
+        const minOrder = parseFloat(c.min_order_amount || 0);
+        if (minOrder > sub) {
+            const gap = minOrder - sub;
+            if (!best || gap < best.gap) best = { gap: gap, code: c.code, pct: c.discount_percent };
+        }
+    });
+    if (best) {
+        el.style.display = 'flex';
+        el.innerHTML = '<span class="ck-nudge-text">Add <span class="ck-nudge-amt">₹' + Math.ceil(best.gap) + '</span> to avail <span class="ck-nudge-pct">' + Math.round(best.pct) + '% off</span></span>' +
+            '<span class="ck-nudge-code">' + best.code + '</span>';
+    } else {
+        el.style.display = 'none';
+    }
+}
+
+/* ── Coupon ── */
+function applyCoupon() {
+    const code = document.getElementById('ck-coupon').value.trim().toUpperCase();
+    const msgEl = document.getElementById('ck-coupon-msg');
+    if (!code) return;
+    fetch('/apply_coupon', {method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({coupon: code})})
+    .then(r=>r.json()).then(d=>{
+        msgEl.style.display = 'block';
+        if (d.status === 'success') {
+            msgEl.style.color = '#15803d';
+            msgEl.textContent = d.message;
+            setTimeout(()=>location.reload(), 600);
+        } else {
+            msgEl.style.color = '#dc2626';
+            msgEl.textContent = d.message || 'Invalid coupon code';
+        }
+    }).catch(()=>{
+        msgEl.style.display='block'; msgEl.style.color='#dc2626';
+        msgEl.textContent='Could not apply coupon. Please try again.';
+    });
+}
+function removeCoupon() {
+    fetch('/remove_coupon', {method:'POST'}).then(()=>location.reload());
+}
+function applySuggestedCoupon(code) {
+    document.getElementById('ck-coupon').value = code;
+    applyCoupon();
+}
+function openOffersModal() {
+    const overlay = document.getElementById('offers-modal-overlay');
+    if (!overlay) return;
+    overlay.classList.add('open');
+    const closeBtn = overlay.querySelector('.offers-modal-close');
+    if (closeBtn) closeBtn.focus();
+}
+function closeOffersModal() {
+    const overlay = document.getElementById('offers-modal-overlay');
+    if (overlay) overlay.classList.remove('open');
+}
+function applyCouponFromModal(code) {
+    closeOffersModal();
+    applySuggestedCoupon(code);
+}
+document.addEventListener('DOMContentLoaded', function () {
+    const offersOverlay = document.getElementById('offers-modal-overlay');
+    if (offersOverlay) {
+        offersOverlay.addEventListener('click', function (e) {
+            if (e.target === offersOverlay) closeOffersModal();
+        });
+        document.addEventListener('keydown', function (e) {
+            if (e.key === 'Escape' && offersOverlay.classList.contains('open')) closeOffersModal();
+        });
+    }
+});
+
+/* ── Nari Nakhre Credits ── */
+function applyCredits() {
+    const input = document.getElementById('ck-credits');
+    const amount = parseFloat(input.value);
+    const msgEl = document.getElementById('ck-credits-msg');
+    if (!amount || amount <= 0) return;
+    fetch('/apply_credits', {method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({amount: amount})})
+    .then(r=>r.json()).then(d=>{
+        msgEl.style.display = 'block';
+        if (d.status === 'success') {
+            msgEl.style.color = '#15803d';
+            msgEl.textContent = d.message;
+            setTimeout(()=>location.reload(), 600);
+        } else {
+            msgEl.style.color = '#dc2626';
+            msgEl.textContent = d.message || 'Could not apply credits';
+        }
+    }).catch(()=>{
+        msgEl.style.display='block'; msgEl.style.color='#dc2626';
+        msgEl.textContent='Could not apply credits. Please try again.';
+    });
+}
+function removeCredits() {
+    fetch('/remove_credits', {method:'POST'}).then(()=>location.reload());
+}
+
+/* ── Clear cart ── */
+document.getElementById('ck-clear-btn').addEventListener('click', function(){
+    if(!confirm('Clear your entire bag?')) return;
+    fetch('/clear_quote',{method:'POST',headers:{'X-Requested-With':'XMLHttpRequest'}})
+    .then(r=>{ if(r.ok) location.reload(); });
+});
+
+/* ── Pincode check ── */
+let ckPinTimer = null;
+function ckSetPinStatus(type, msg) {
+    const el = document.getElementById('ck-pin-status');
+    el.className = 'ck-pin-status ' + (type||'');
+    el.textContent = msg || '';
+}
+function ckCheckPin() {
+    const pin = document.getElementById('ck-pin').value.trim();
+    if (pin.length < 6) {
+        ckSetPinStatus('', '');
+        // Don't reset ckServiceable while still typing
+        return;
+    }
+    clearTimeout(ckPinTimer);
+    ckPinTimer = setTimeout(()=>{
+        if (!/^\d{6}$/.test(pin)) { ckSetPinStatus('err','Invalid pincode'); return; }
+        // Reset serviceability only right before we fire the API call
+        ckServiceable = false;
+        ckSetPinStatus('chk','Checking availability…');
+        document.getElementById('ck-city').value = '';
+        document.getElementById('ck-state').value = '';
+        fetch('/api/delhivery/check/'+pin)
+        .then(r=>r.json())
+        .then(d=>{
+            if (d.serviceable || d.status) {
+                ckServiceable = true;
+                ckSetPinStatus('ok', '✓ Delivery available in ' + (d.city||pin));
+                document.getElementById('ck-city').value = d.city || '';
+                document.getElementById('ck-state').value = d.state || '';
+                ckFetchShipping(pin);
+            } else {
+                ckServiceable = false;
+                // Show a softer message — "not serviceable" could be an API hiccup
+                ckSetPinStatus('err','Delivery not available at this pincode');
+            }
+        })
+        .catch(()=>{
+            // API failed — don't show "not serviceable", show a neutral retry message
+            ckServiceable = false;
+            ckSetPinStatus('chk','Could not verify — please check your pincode');
+        });
+    }, 500);
+}
+function ckFetchShipping(pin) {
+    const mode = document.getElementById('payment_mode_input').value || 'Prepaid';
+    fetch('/api/delhivery/shipping',{method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({pincode:pin,mode})})
+    .then(r=>r.json()).then(d=>{
+        ckShip=d.shipping_charge||0; ckCodFee=d.cod_fee||0;
+        ckRenderCourierOptions(d.options || []);
+    }).catch(()=>{ ckShip=0; ckCodFee=0; ckRenderCourierOptions([]); });
+}
+function ckRenderCourierOptions(options) {
+    ckCourierOptions = options || [];
+    const hint = document.getElementById('ck-courier-hint');
+    const list = document.getElementById('ck-courier-options');
+    if (!ckCourierOptions.length) {
+        hint.textContent = 'Delivery options unavailable — please recheck your pincode.';
+        hint.style.display = 'block';
+        list.style.display = 'none';
+        list.innerHTML = '';
+        ckSelectedCourier = null;
+        ckExtraCharge = 0;
+        ckUpdateUpgradeRow();
+        ckRecalc();
+        return;
+    }
+    // Keep the customer's previous pick if it's still on offer (e.g. after a
+    // payment-mode switch re-fetches quotes), otherwise default to cheapest.
+    const stillValid = ckCourierOptions.some(o => o.courier_partner === ckSelectedCourier);
+    if (!stillValid) ckSelectedCourier = ckCourierOptions[0].courier_partner;
+
+    hint.style.display = 'none';
+    list.style.display = 'flex';
+    list.innerHTML = ckCourierOptions.map(function (opt) {
+        const meta = ckCourierMeta(opt.courier_partner);
+        const selected = opt.courier_partner === ckSelectedCourier;
+        const priceHtml = opt.extra_charge > 0
+            ? '<span class="ck-courier-price upgrade">+₹' + Math.round(opt.extra_charge) + '</span>'
+            : '<span class="ck-courier-price">FREE</span>';
+        const etaHtml = opt.eta ? ('Est. delivery: ' + opt.eta) : 'Standard delivery';
+        // alt="" -- the logo is decorative here; the visible courier-name text
+        // right next to it already says "Delhivery"/"Shiprocket", so a
+        // non-empty alt would make screen readers announce the name twice.
+        const badgeHtml = meta.logo
+            ? '<span class="ck-courier-badge"><img src="' + meta.logo + '" alt=""></span>'
+            : '<span class="ck-courier-badge fallback" aria-hidden="true" style="background:' + meta.color + ';">' + meta.initial + '</span>';
+        return '<label class="ck-courier-option' + (selected ? ' selected' : '') + '" data-partner="' + opt.courier_partner + '">'
+            + '<input type="radio" name="ck_courier_choice" value="' + opt.courier_partner + '"' + (selected ? ' checked' : '') + ' onchange="ckSelectCourier(\'' + opt.courier_partner + '\')">'
+            + badgeHtml
+            + '<span class="ck-courier-info"><span class="ck-courier-name">' + meta.label + '</span><span class="ck-courier-eta">' + etaHtml + '</span></span>'
+            + priceHtml
+            + '</label>';
+    }).join('');
+
+    ckApplySelectedCourier();
+}
+function ckSelectCourier(partner) {
+    ckSelectedCourier = partner;
+    document.querySelectorAll('#ck-courier-options .ck-courier-option').forEach(function (el) {
+        el.classList.toggle('selected', el.dataset.partner === partner);
+    });
+    ckApplySelectedCourier();
+}
+function ckApplySelectedCourier() {
+    const opt = ckCourierOptions.find(o => o.courier_partner === ckSelectedCourier);
+    ckExtraCharge = opt ? (opt.extra_charge || 0) : 0;
+    ckUpdateUpgradeRow();
+    ckRecalc();
+}
+function ckUpdateUpgradeRow() {
+    const row = document.getElementById('s-upgrade-row');
+    const val = document.getElementById('s-upgrade');
+    if (ckExtraCharge > 0) {
+        val.textContent = '+₹' + Math.round(ckExtraCharge);
+        row.style.display = 'flex';
+    } else {
+        row.style.display = 'none';
+    }
+}
+function ckPayMode() {
+    const pin = document.getElementById('ck-pin').value.trim();
+    if (ckServiceable && /^\d{6}$/.test(pin)) ckFetchShipping(pin);
+}
+
+// Prefilled pincode — verify it immediately instead of waiting for the user
+// to touch the field. If the address book has entries, the first (default)
+// one drives the prefill; selectSavedAddress() calls ckCheckPin() itself.
+// Otherwise fall back to the old last-order prefill.
+if (savedAddresses.length > 0) {
+    selectSavedAddress(savedAddresses[0].id);
+} else if (document.getElementById('ck-pin').value.trim()) {
+    ckCheckPin();
+}
+
+/* ── Loading overlay ── */
+const ckLoadingMessages = ['Placing your order…', 'Talking to our courier partner…', 'Almost there…'];
+let ckLoadingInterval = null;
+function ckShowLoading(msg) {
+    const overlay = document.getElementById('ck-loading-overlay');
+    const msgEl = document.getElementById('ck-loading-msg');
+    msgEl.textContent = msg;
+    overlay.classList.add('active');
+    if (msg === 'Placing your order…') {
+        let i = 0;
+        clearInterval(ckLoadingInterval);
+        ckLoadingInterval = setInterval(() => {
+            i = (i + 1) % ckLoadingMessages.length;
+            msgEl.textContent = ckLoadingMessages[i];
+        }, 2200);
+    }
+}
+function ckHideLoading() {
+    clearInterval(ckLoadingInterval);
+    document.getElementById('ck-loading-overlay').classList.remove('active');
+}
+
+/* ── Sign-in required before placing an order ── */
+function ckSaveAddressDraft() {
+    const form = document.getElementById('ck-form');
+    try {
+        sessionStorage.setItem('nn_checkout_draft', JSON.stringify({
+            name: form.name.value, phone: form.phone.value, email: form.email.value,
+            address: form.address.value, pincode: form.pincode.value
+        }));
+    } catch (e) {}
+}
+(function restoreAddressDraft() {
+    let raw;
+    try { raw = sessionStorage.getItem('nn_checkout_draft'); sessionStorage.removeItem('nn_checkout_draft'); } catch (e) { return; }
+    if (!raw) return;
+    try {
+        const draft = JSON.parse(raw);
+        const form = document.getElementById('ck-form');
+        if (draft.name) form.name.value = draft.name;
+        if (draft.phone) form.phone.value = draft.phone;
+        if (draft.email) form.email.value = draft.email;
+        if (draft.address) form.address.value = draft.address;
+        if (draft.pincode) { form.pincode.value = draft.pincode; ckCheckPin(); }
+    } catch (e) {}
+})();
+
+/* ── Form submit ── */
+document.getElementById('ck-form').addEventListener('submit', async function(e){
+    e.preventDefault();
+    const form = e.target;
+    const submitBtn = document.getElementById('ck-submit-btn');
+
+    if (!IS_LOGGED_IN) {
+        ckSaveAddressDraft();
+        const card = document.getElementById('ck-signin-card');
+        if (card) { card.style.display = 'block'; card.scrollIntoView({behavior:'smooth', block:'center'}); }
+        if (typeof openAuthModal === 'function') openAuthModal('signup');
+        return;
+    }
+
+    const name  = form.name.value.trim();
+    const phone = form.phone.value.trim();
+    const email = form.email.value.trim();
+    const addr  = form.address.value.trim();
+    const pin   = form.pincode.value.trim();
+    const mode  = document.getElementById('payment_mode_input').value || 'Prepaid';
+    const city  = document.getElementById('ck-city').value;
+
+    if (!/^\d{6}$/.test(pin)) {
+        ckSetPinStatus('err','Please enter a valid 6-digit pincode');
+        document.getElementById('ck-pin').focus();
+        return;
+    }
+    if (!ckServiceable) {
+        ckSetPinStatus('err','Please wait — verifying delivery to this pincode…');
+        document.getElementById('ck-pin').focus();
+        return;
+    }
+    if (!ckSelectedCourier) {
+        alert('Please choose a delivery option before placing your order.');
+        return;
+    }
+
+    submitBtn.disabled = true;
+    submitBtn.textContent = 'Processing…';
+    ckShowLoading('Placing your order…');
+
+    let sub = 0;
+    document.querySelectorAll('.ck-item').forEach(r=>{
+        sub += +r.dataset.price * +r.querySelector('.ck-qty').textContent;
+    });
+    // Informational only -- the server derives the actual charge (including
+    // any delivery-upgrade surcharge for the chosen courier) from the
+    // order's stored total_amount, never trusting this value directly.
+    const totalRupees = Math.max(sub - currentDiscount - creditsApplied + ckExtraCharge, 0);
+
+    const fd = new FormData();
+    fd.append('consignee_name', name);
+    fd.append('consignee_phone', phone);
+    fd.append('consignee_address', addr);
+    fd.append('consignee_city', city);
+    fd.append('consignee_state', document.getElementById('ck-state').value || '');
+    fd.append('consignee_pincode', pin);
+    fd.append('payment_mode', mode);
+    fd.append('email', email);
+    fd.append('courier_partner', ckSelectedCourier);
+
+    try {
+        const r1 = await fetch('/retail/checkout/process', {method:'POST', body:fd});
+        const d1 = await r1.json().catch(()=>({}));
+        if (d1.require_login) {
+            ckHideLoading();
+            ckSaveAddressDraft();
+            const card = document.getElementById('ck-signin-card');
+            if (card) { card.style.display = 'block'; card.scrollIntoView({behavior:'smooth', block:'center'}); }
+            if (typeof openAuthModal === 'function') openAuthModal('signup');
+            submitBtn.disabled = false; submitBtn.textContent = 'Place Order';
+            return;
+        }
+        if (!r1.ok || d1.status === 'error') throw new Error(d1.message || 'Could not create order');
+
+        if (mode === 'COD') {
+            const codToken = await getRecaptchaToken('confirm_cod');
+            const r2 = await fetch('/api/confirm-cod',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({recaptcha_token: codToken})});
+            const d2 = await r2.json();
+            if (d2.status === 'success') { window.location.href = '/thank_you?ref=' + encodeURIComponent(d2.internal_order_id || ''); return; }
+            throw new Error(d2.message || 'Could not confirm COD order');
+        }
+
+        const r3 = await fetch('/api/create-order',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({amount:totalRupees})});
+        const orderData = await r3.json();
+        if (orderData.status !== 'success' || !orderData.order_id) throw new Error(orderData.message || 'Payment initiation failed');
+
+        ckHideLoading(); // Razorpay shows its own modal next
+        const rzp = new Razorpay({
+            key: orderData.key_id || RZP_KEY,
+            amount: orderData.amount,
+            currency: orderData.currency || 'INR',
+            name: 'Nari Nakhre',
+            description: 'Jewellery Order',
+            image: 'https://eopqwvssznmxfxrfzqbx.supabase.co/storage/v1/object/public/products/site/logo.png',
+            order_id: orderData.order_id,
+            prefill: {name, email, contact:phone},
+            theme: {color:'#6b1e3c'},
+            handler: async function(resp){
+                ckShowLoading('Verifying your payment…');
+                const r4 = await fetch('/api/verify-payment',{method:'POST',headers:{'Content-Type':'application/json'},
+                    body:JSON.stringify({razorpay_order_id:resp.razorpay_order_id,razorpay_payment_id:resp.razorpay_payment_id,razorpay_signature:resp.razorpay_signature})});
+                const d4 = await r4.json();
+                if (d4.status==='success') window.location.href='/thank_you?ref=' + encodeURIComponent(d4.internal_order_id || '');
+                else { ckHideLoading(); alert(d4.message||'Payment verification failed'); }
+            },
+            modal:{ondismiss:()=>{
+                submitBtn.disabled=false; submitBtn.textContent='Place Order';
+                ckHideLoading();
+                // Don't redirect on dismiss — user may want to retry
+            }}
+        });
+        rzp.open();
+        // Razorpay fires this on payment failure
+        rzp.on('payment.failed', function(resp) {
+            window.location.href = '/payment-failed?order_id=' + encodeURIComponent(orderData.order_id)
+                + '&reason=' + encodeURIComponent(resp.error.description || 'Payment failed');
+        });
+    } catch(err) {
+        ckHideLoading();
+        alert(err.message||'Something went wrong. Please try again.');
+        submitBtn.disabled=false; submitBtn.textContent='Place Order';
+    }
+});
+</script>
+{% endblock %}

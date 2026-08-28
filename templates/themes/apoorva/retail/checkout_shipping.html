@@ -1,1 +1,76 @@
-{% extends "default/retail/checkout_shipping.html" %}
+{% extends "retail/base.html" %}
+{% block title %}Shipping Address | Nari Nakhre{% endblock %}
+{% block content %}
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,500;0,9..144,700;1,9..144,600;1,9..144,700&family=Work+Sans:wght@400;500;600;700&display=swap');
+.cs-page{ min-height:70vh; background:linear-gradient(160deg,#faf6f0 0%,#f2e9dd 55%,#f7e9e4 100%) fixed; padding:40px 16px 56px; font-family:'Work Sans', sans-serif; }
+.cs-card{ max-width:640px; margin:0 auto; background:#fff; border:1px solid #e6dccb; border-radius:20px; padding:28px 24px; box-shadow:0 6px 20px rgba(107,30,60,0.06); }
+.cs-title{ font-family:'Fraunces', serif; font-style:italic; font-weight:600; font-size:1.5rem; color:#6b1e3c; margin-bottom:6px; }
+.cs-sub{ font-size:0.86rem; color:#7a6a5c; margin-bottom:22px; }
+.cs-form{ display:grid; grid-template-columns:1fr; gap:16px; }
+@media (min-width:640px){ .cs-form{ grid-template-columns:1fr 1fr; } .cs-span-2{ grid-column:1 / -1; } }
+.cs-label{ display:block; font-size:0.78rem; font-weight:600; color:#6b1e3c; margin-bottom:6px; }
+.cs-input{
+  width:100%; padding:12px 14px; border-radius:12px; border:1.5px solid #e6dccb;
+  background:#f2e9dd; color:#2b1810; font-size:0.9rem; font-family:inherit;
+  outline:none; transition:border-color 0.15s, background 0.15s; box-sizing:border-box;
+}
+.cs-input:focus{ border-color:#6b1e3c; background:#fff; }
+.cs-input::placeholder{ color:#a89a8a; }
+.cs-submit-btn{
+  width:100%; padding:15px; border-radius:999px; border:none;
+  background:#6b1e3c; color:#faf6f0; font-size:0.95rem; font-weight:700;
+  cursor:pointer; transition:background 0.15s;
+}
+.cs-submit-btn:hover{ background:#4a1329; }
+</style>
+
+<div class="cs-page">
+  <div class="cs-card">
+    <div class="cs-title">Shipping Address</div>
+    <div class="cs-sub">Enter delivery details to continue with checkout.</div>
+
+    <form method="POST" action="/checkout/process" class="cs-form">
+      <div class="cs-span-2">
+        <label for="consignee_name" class="cs-label">Full Name</label>
+        <input id="consignee_name" name="consignee_name" type="text" required autocomplete="name"
+               class="cs-input" placeholder="Enter full name">
+      </div>
+
+      <div class="cs-span-2">
+        <label for="consignee_phone" class="cs-label">Phone / WhatsApp Number</label>
+        <input id="consignee_phone" name="consignee_phone" type="tel" required inputmode="numeric" autocomplete="tel"
+               class="cs-input" placeholder="Enter phone number">
+      </div>
+
+      <div class="cs-span-2">
+        <label for="consignee_address" class="cs-label">Shipping Address (Flat, Street, Building)</label>
+        <textarea id="consignee_address" name="consignee_address" rows="3" required autocomplete="street-address"
+                  class="cs-input" style="resize:vertical;" placeholder="Enter complete shipping address"></textarea>
+      </div>
+
+      <div>
+        <label for="consignee_city" class="cs-label">City</label>
+        <input id="consignee_city" name="consignee_city" type="text" required autocomplete="address-level2"
+               class="cs-input" placeholder="Enter city">
+      </div>
+
+      <div>
+        <label for="consignee_state" class="cs-label">State</label>
+        <input id="consignee_state" name="consignee_state" type="text" required autocomplete="address-level1"
+               class="cs-input" placeholder="Enter state">
+      </div>
+
+      <div class="cs-span-2">
+        <label for="consignee_pincode" class="cs-label">Pin Code</label>
+        <input id="consignee_pincode" name="consignee_pincode" type="text" required inputmode="numeric"
+               value="{{ session.get('verified_pincode', '') }}" class="cs-input" placeholder="Enter pin code">
+      </div>
+
+      <div class="cs-span-2" style="padding-top:4px;">
+        <button type="submit" class="cs-submit-btn">Proceed to Payment</button>
+      </div>
+    </form>
+  </div>
+</div>
+{% endblock %}

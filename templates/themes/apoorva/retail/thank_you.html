@@ -1,1 +1,211 @@
-{% extends "default/retail/thank_you.html" %}
+{% extends "retail/base.html" %}
+{% block title %}Order Confirmed | Nari Nakhre{% endblock %}
+{% block seo_tags %}<meta name="robots" content="noindex">{% endblock %}
+
+{% block extra_styles %}
+{{ super() }}
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,500;0,9..144,700;1,9..144,600;1,9..144,700&family=Work+Sans:wght@400;500;600;700&display=swap');
+
+.ty-page {
+    background: linear-gradient(160deg, #faf6f0 0%, #f2e9dd 55%, #f7e9e4 100%) fixed;
+    padding: 40px 0 56px; min-height: 70vh;
+}
+.ty-wrap {
+    max-width: 480px; margin: 0 auto; padding: 0 16px; text-align: center;
+    font-family: 'Work Sans', sans-serif;
+}
+.ty-logo { height: 42px; margin-bottom: 22px; opacity: 0; animation: ty-fade-down .6s ease .05s forwards; }
+
+/* ── Animated success mark: glow pulse + drawn ring + drawn check ── */
+.ty-mark-wrap {
+    position: relative; width: 84px; height: 84px; margin: 0 auto 22px;
+    opacity: 0; animation: ty-pop-in .55s cubic-bezier(.2,.9,.3,1.3) .15s forwards;
+}
+.ty-mark-glow {
+    position: absolute; inset: -14px; border-radius: 50%;
+    background: radial-gradient(circle, rgba(22,163,74,0.28) 0%, rgba(232,163,61,0.12) 55%, transparent 75%);
+    animation: ty-glow-pulse 2.2s ease-in-out .7s infinite;
+}
+.ty-mark-circle-bg { fill: none; stroke: #e6dccb; stroke-width: 4; }
+.ty-mark-circle {
+    fill: none; stroke: #16a34a; stroke-width: 4; stroke-linecap: round;
+    stroke-dasharray: 220; stroke-dashoffset: 220;
+    animation: ty-draw-ring .6s ease .25s forwards;
+}
+.ty-mark-check {
+    fill: none; stroke: #16a34a; stroke-width: 4.5; stroke-linecap: round; stroke-linejoin: round;
+    stroke-dasharray: 40; stroke-dashoffset: 40;
+    animation: ty-draw-check .35s ease .8s forwards;
+}
+@keyframes ty-pop-in { from { opacity: 0; transform: scale(.7); } to { opacity: 1; transform: scale(1); } }
+@keyframes ty-glow-pulse { 0%, 100% { opacity: .5; transform: scale(1); } 50% { opacity: .9; transform: scale(1.08); } }
+@keyframes ty-draw-ring { to { stroke-dashoffset: 0; } }
+@keyframes ty-draw-check { to { stroke-dashoffset: 0; } }
+@keyframes ty-fade-down { from { opacity: 0; transform: translateY(-8px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes ty-fade-up { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: translateY(0); } }
+@media (prefers-reduced-motion: reduce) {
+    .ty-logo, .ty-mark-wrap, .ty-title, .ty-sub, .ty-card, .ty-track-btn, .ty-continue-btn, .ty-contact { animation: none !important; opacity: 1 !important; transform: none !important; }
+    .ty-mark-circle, .ty-mark-check { stroke-dashoffset: 0 !important; }
+}
+
+.ty-title {
+    font-family: 'Fraunces', serif; font-style: italic; font-weight: 600;
+    font-size: 1.55rem; color: #16a34a; margin-bottom: 6px;
+    opacity: 0; animation: ty-fade-up .5s ease .35s forwards;
+}
+.ty-title.ty-title-plain { color: #6b1e3c; }
+.ty-sub {
+    font-size: 0.88rem; color: #7a6a5c; margin-bottom: 24px; line-height: 1.55;
+    opacity: 0; animation: ty-fade-up .5s ease .42s forwards;
+}
+.ty-card {
+    background: #fff; border: 1px solid #e6dccb; border-radius: 20px;
+    padding: 18px 20px; margin-bottom: 16px; text-align: left;
+    box-shadow: 0 6px 20px rgba(107,30,60,0.06);
+    opacity: 0; animation: ty-fade-up .5s ease .5s forwards;
+}
+.ty-row { display: flex; justify-content: space-between; gap: 12px; font-size: 0.85rem; padding: 9px 0; border-bottom: 1px solid #f2e9dd; }
+.ty-row:last-child { border-bottom: none; }
+.ty-label { color: #8a7a6a; }
+.ty-value { font-weight: 700; color: #6b1e3c; text-align: right; }
+.ty-track-btn {
+    display: block; width: 100%; padding: 15px; border-radius: 999px; border: none;
+    background: linear-gradient(135deg, #6b1e3c, #8a2a52); color: #faf6f0;
+    font-weight: 700; font-size: 0.95rem; text-decoration: none; margin-top: 6px;
+    box-shadow: 0 6px 18px rgba(107,30,60,0.28); box-sizing: border-box;
+    text-align: center; transition: transform 0.15s, box-shadow 0.15s;
+    opacity: 0; animation: ty-fade-up .5s ease .58s forwards;
+}
+.ty-track-btn:hover { transform: translateY(-1px); box-shadow: 0 8px 22px rgba(107,30,60,0.34); }
+.ty-invoice-link {
+    display: block; text-align: center; margin-top: 12px; color: #c8842a; font-weight: 700;
+    font-size: 0.85rem; text-decoration: none;
+    opacity: 0; animation: ty-fade-up .5s ease .64s forwards;
+}
+.ty-invoice-link:hover { text-decoration: underline; }
+.ty-hint {
+    font-size: 0.75rem; color: #8a7a6a; margin-top: 16px;
+    opacity: 0; animation: ty-fade-up .5s ease .6s forwards;
+}
+.ty-continue-btn {
+    display: block; width: 100%; padding: 15px; border-radius: 999px;
+    border: 2px solid #6b1e3c; background: transparent; color: #6b1e3c;
+    font-weight: 700; font-size: 0.95rem; text-decoration: none;
+    margin-top: 24px; text-align: center; box-sizing: border-box;
+    transition: background 0.15s, color 0.15s;
+    opacity: 0; animation: ty-fade-up .5s ease .72s forwards;
+}
+.ty-continue-btn:hover { background: #6b1e3c; color: #faf6f0; }
+.ty-contact {
+    font-size: 0.78rem; color: #7a6a5c; margin-top: 18px;
+    opacity: 0; animation: ty-fade-up .5s ease .78s forwards;
+}
+.ty-contact a { color: #6b1e3c; font-weight: 700; text-decoration: none; }
+.ty-contact a:hover { text-decoration: underline; }
+
+.ty-credit-card {
+    background: linear-gradient(135deg, #f2e9dd, #f7e9e4); border: 1px solid #e8a33d;
+    opacity: 0; animation: ty-fade-up .5s ease .5s forwards;
+}
+.ty-credit-title { color: #6b1e3c; font-size: 0.9rem; font-weight: 700; font-family: 'Fraunces', serif; }
+.ty-credit-body { font-size: 0.78rem; color: #7a6a5c; margin-top: 6px; line-height: 1.55; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="ty-page">
+    <div class="ty-wrap">
+        <img src="https://eopqwvssznmxfxrfzqbx.supabase.co/storage/v1/object/public/products/site/logo.png" alt="Nari Nakhre" class="ty-logo">
+
+        <div class="ty-mark-wrap">
+            <div class="ty-mark-glow"></div>
+            <svg width="84" height="84" viewBox="0 0 84 84">
+                <circle class="ty-mark-circle-bg" cx="42" cy="42" r="35"></circle>
+                <circle class="ty-mark-circle" cx="42" cy="42" r="35" transform="rotate(-90 42 42)"></circle>
+                <path class="ty-mark-check" d="M26 43 L37 54 L59 30"></path>
+            </svg>
+        </div>
+
+        {% if order_id %}
+        <div class="ty-title">Order Placed Successfully!</div>
+        <div class="ty-sub">Thank you for shopping with Nari Nakhre.<br>We'll have your order on its way soon.</div>
+
+        <div class="ty-card">
+            <div class="ty-row"><span class="ty-label">Order ID</span><span class="ty-value">{{ order_id }}</span></div>
+            {% if waybill %}
+            <div class="ty-row"><span class="ty-label">Tracking ID (AWB)</span><span class="ty-value">{{ waybill }}</span></div>
+            {% endif %}
+            {% if amount_paid and amount_paid > 0 %}
+            <div class="ty-row">
+                <span class="ty-label">{{ 'Amount to be Paid on Delivery' if payment_mode == 'COD' else 'Amount Paid' }}</span>
+                <span class="ty-value">₹{{ '%.2f'|format(amount_paid) }}</span>
+            </div>
+            {% endif %}
+        </div>
+
+        {% if cod_credit_awarded and cod_credit_awarded > 0 %}
+        <div class="ty-card ty-credit-card">
+            <div class="ty-credit-title">🎁 {{ cod_credit_awarded|int }} Nari Nakhre Credits added!</div>
+            <div class="ty-credit-body">
+                Our delivery partner requires Cash on Delivery amounts to be a whole number, so this order
+                was rounded up. Instead of collecting exact change, we've credited the rounding difference
+                plus a bonus to your account as Nari Nakhre Credits — usable on your next order.
+            </div>
+        </div>
+        {% endif %}
+
+        {% if cart_items %}
+        <div class="ty-card">
+            {% for item in cart_items %}
+            <div class="ty-row">
+                <span class="ty-label">
+                    {{ item.name }}{% if item.size %} ({{ item.size }}){% endif %} × {{ item.units }}
+                </span>
+                <span class="ty-value">₹{{ '%.2f'|format((item.price|float) * (item.units|int)) }}</span>
+            </div>
+            {% endfor %}
+        </div>
+        {% endif %}
+
+        {% if waybill %}
+        <a href="{{ tracking_url }}" class="ty-track-btn">📦 Track Your Order — AWB {{ waybill }}</a>
+        {% if order_id %}
+        <a href="/invoice/{{ order_id }}" target="_blank" class="ty-invoice-link">🧾 Download GST Invoice</a>
+        {% endif %}
+        <div class="ty-hint">Save this link — you can share it via WhatsApp or email.</div>
+        {% else %}
+        <div class="ty-hint">Tracking will be available once your order is dispatched. We'll email you the tracking link.</div>
+        {% if order_id %}
+        <a href="/invoice/{{ order_id }}" target="_blank" class="ty-invoice-link">🧾 Download GST Invoice</a>
+        {% endif %}
+        {% endif %}
+
+        <div class="ty-contact">Need help? Contact <a href="mailto:info@narinakhre.com">info@narinakhre.com</a></div>
+        {% else %}
+        <div class="ty-title ty-title-plain">Thank you!</div>
+        <div class="ty-sub">Your request has been received.<br>For assistance, contact <a href="mailto:info@narinakhre.com" style="color:#6b1e3c;">info@narinakhre.com</a>.</div>
+        {% endif %}
+
+        <a href="/retail" class="ty-continue-btn">🛍️ Continue Shopping</a>
+    </div>
+</div>
+<script>
+    localStorage.removeItem('quoteCart');
+    localStorage.removeItem('retail_cart');
+    {% if order_id %}
+    // Hand the order off to the homepage as a one-line notification, then
+    // auto-return there -- this page is only meant to be seen briefly right
+    // after checkout, not lingered on.
+    try {
+        sessionStorage.setItem('nn_order_notice', JSON.stringify({
+            orderId: {{ order_id|tojson }},
+            orderUrl: {{ ('/order/' ~ order_id)|tojson }}
+        }));
+    } catch (e) {}
+    setTimeout(function () {
+        window.location.href = '/retail';
+    }, 5000);
+    {% endif %}
+</script>
+{% endblock %}
