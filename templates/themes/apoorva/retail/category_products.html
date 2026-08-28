@@ -1,1 +1,219 @@
-{% extends "default/retail/category_products.html" %}
+{% extends "retail/base.html" %}
+
+{% block theme_notice %}{% endblock %}
+
+{% block header %}
+{{ super() }}
+{% include "retail/_mobile_cat_strip.html" %}
+{% endblock %}
+
+{% block content %}
+<style>
+  {% include "retail/_shared_styles.html" %}
+
+  .cat-wrap { max-width: 1200px; margin: 0 auto; padding: 1.5rem 1.5rem 3rem; }
+  .cat-heading { font-family:'Fraunces', serif; font-size: 1.8rem; font-weight: 600; color: var(--wine); text-align: center; margin: 0 0 1.25rem; }
+
+  /* ── Compact offers carousel -- same shared .offers-carousel base as
+       product_detail.html, just its own size modifier here. ── */
+  .offers-carousel--compact { min-height:56px; border-radius:12px; margin-bottom:20px; }
+  .offers-carousel--compact .offer-discount-big { font-size:1rem; }
+  .offers-carousel--compact .offer-product-card { padding:6px 12px; gap:10px; max-width:100%; }
+  .offers-carousel--compact .offer-product-img-wrap { width:36px; height:36px; }
+  .offers-carousel--compact .offer-product-title { max-width:130px; }
+  @media (min-width:768px) {
+    .offers-carousel--compact { min-height:68px; }
+    .offers-carousel--compact .offer-discount-big { font-size:1.3rem; }
+    .offers-carousel--compact .offer-product-title { max-width:220px; }
+  }
+
+  /* ── Sort/filter bar ── */
+  .sort-filter-bar {
+    display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
+    background: #fff; border: 1px solid var(--line); border-radius: 14px;
+    padding: 12px 18px; margin: 0 0 24px;
+  }
+  .sf-group { display: flex; align-items: center; gap: 6px; }
+  .sf-group label { font-size: 0.78rem; font-weight: 700; color: var(--wine); white-space: nowrap; }
+  .sf-group select {
+    border: 1.5px solid var(--line); border-radius: 8px; padding: 6px 10px;
+    font-size: 0.85rem; color: var(--ink); background: #fff; cursor: pointer;
+  }
+  .sf-checkbox { display: flex; align-items: center; gap: 6px; font-size: 0.82rem; font-weight: 600; color: var(--wine); cursor: pointer; }
+  .sf-checkbox input { width: 16px; height: 16px; accent-color: var(--wine); cursor: pointer; }
+  .sf-count { font-size: 0.78rem; color: #9ca3af; margin-left: auto; }
+
+  /* ── Product grid -- a category can hold many more products than a
+       coverflow shelf reasonably shows at once, so this reuses the same
+       card component (image-forward, floating mini "+ Add" button, same
+       palette) as Trending/category shelves elsewhere, just laid out as a
+       normal vertically-scrolling grid instead of a horizontal carousel --
+       easier to browse/scan a full category than swiping through one. ── */
+  .category-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 1rem; }
+  @media (min-width: 640px) { .category-grid { grid-template-columns: repeat(3, 1fr); gap: 1.25rem; } }
+  @media (min-width: 1024px) { .category-grid { grid-template-columns: repeat(4, 1fr); gap: 1.5rem; } }
+
+  .cat-empty { text-align: center; padding: 48px 16px; color: #9ca3af; }
+  .cat-empty-title { font-weight: 600; margin-bottom: 6px; color: var(--ink); }
+</style>
+
+<div class="cat-wrap">
+  <h1 class="cat-heading">{{ category }}</h1>
+
+  {% set has_coupons_mini = public_coupons and public_coupons|length > 0 %}
+  {% set has_products_mini = carousel_products and carousel_products|length > 0 %}
+  {% if has_coupons_mini or has_products_mini %}
+  {% set ns_mini = namespace(first=true) %}
+  <div class="offers-carousel offers-carousel--compact" id="offers-carousel">
+      {% for c in public_coupons[:4] %}
+      <div class="offers-slide{% if ns_mini.first %} active{% endif %}" aria-hidden="{{ 'false' if ns_mini.first else 'true' }}">
+          <div class="offer-discount-line">
+              <span class="offer-discount-big">{{ c.discount_percent|int }}% OFF</span>
+              {% if c.max_discount_amount %}<span class="offer-discount-cap">up to ₹{{ c.max_discount_amount|round(0)|int }}</span>{% endif %}
+          </div>
+          <div class="offer-code-row">
+              <span class="offer-code-label">Use code</span>
+              <button type="button" class="offer-code-inline" {% if not ns_mini.first %}tabindex="-1"{% endif %}
+                      onclick="copyOfferCode('{{ c.code }}', this)"
+                      aria-label="Coupon code {{ c.code }}, tap to copy">{{ c.code }}</button>
+          </div>
+      </div>
+      {% set ns_mini.first = false %}
+      {% endfor %}
+      {% for p in carousel_products %}
+      <a href="{{ url_for('product_detail_retail', product_id=p.id) }}"
+         class="offers-slide offer-product-slide{% if ns_mini.first %} active{% endif %}"
+         aria-hidden="{{ 'false' if ns_mini.first else 'true' }}" {% if not ns_mini.first %}tabindex="-1"{% endif %}
+         aria-label="{{ p.name }} — {{ p.disc_pct }}% off, now ₹{{ p.current_price|round(0)|int }}, view product">
+          <div class="offer-product-card">
+              <div class="offer-product-img-wrap">
+                  <img src="{{ p.thumb }}" alt="" class="offer-product-img" loading="lazy"
+                       onerror="this.onerror=null;this.src='/static/assets/products/default.jpg';">
+                  <span class="offer-product-badge">{{ p.disc_pct }}% OFF</span>
+              </div>
+              <div class="offer-product-price">
+                  <span class="offer-product-mrp">₹{{ p.mrp_price|round(0)|int }}</span>
+                  <span class="offer-product-current">₹{{ p.current_price|round(0)|int }}</span>
+              </div>
+              <div class="offer-product-title">{{ p.name }}</div>
+          </div>
+      </a>
+      {% set ns_mini.first = false %}
+      {% endfor %}
+  </div>
+  {% endif %}
+
+  <form method="GET" class="sort-filter-bar" aria-label="Sort and filter products">
+      <div class="sf-group">
+          <label for="sf-sort">Sort by</label>
+          <select id="sf-sort" name="sort" onchange="this.form.submit()">
+              <option value="" {% if not sort %}selected{% endif %}>Featured</option>
+              <option value="name_asc" {% if sort == 'name_asc' %}selected{% endif %}>Alphabetical (A–Z)</option>
+              <option value="price_asc" {% if sort == 'price_asc' %}selected{% endif %}>Price: Low to High</option>
+              <option value="price_desc" {% if sort == 'price_desc' %}selected{% endif %}>Price: High to Low</option>
+          </select>
+      </div>
+      {% if available_sizes and available_sizes|length > 0 %}
+      <div class="sf-group">
+          <label for="sf-size">Size</label>
+          <select id="sf-size" name="size" onchange="this.form.submit()">
+              <option value="">All Sizes</option>
+              {% for s in available_sizes %}
+              <option value="{{ s }}" {% if size_filter == s %}selected{% endif %}>{{ s }}</option>
+              {% endfor %}
+          </select>
+      </div>
+      {% endif %}
+      <label class="sf-checkbox">
+          <input type="checkbox" name="in_stock" value="1" {% if in_stock_only %}checked{% endif %} onchange="this.form.submit()">
+          In Stock Only
+      </label>
+      <noscript><button type="submit" class="cta-btn">Apply</button></noscript>
+      <span class="sf-count">{{ products|length }} item{{ 's' if products|length != 1 }}</span>
+  </form>
+
+  {% if not products %}
+  <div class="cat-empty">
+      <div class="cat-empty-title">No products match these filters</div>
+      <div style="font-size:0.85rem;">Try clearing the size or in-stock filter</div>
+  </div>
+  {% else %}
+  <div class="category-grid">
+      {% for product in products %}
+      {%- set images = product.images or [] -%}
+      {%- set img_primary = images[0] if images|length > 0 else '/static/assets/products/default.jpg' -%}
+      {%- set img_hover = images[1] if images|length > 1 else none -%}
+      {%- set mrp = product.mrp_price or 0 -%}
+      {%- set rp  = product.retail_price or product.price1 or 0 -%}
+      {%- set disc = ((mrp - rp) / mrp * 100)|round(0)|int if mrp and mrp > rp else 0 -%}
+      <div class="product-card">
+          <div class="card-image-wrap">
+              <a href="/retail/product/{{ product.id }}" class="card-media" {% if images|length > 1 %}data-images='{{ images|tojson }}'{% endif %}>
+                  {% if disc > 0 %}<span class="card-badge">{{ disc }}% off</span>{% endif %}
+                  <img class="prod-img card-img-layer is-front" loading="lazy" src="{{ img_primary }}" alt="{{ product.name }}"
+                       onerror="this.onerror=null;this.src='/static/assets/products/default.jpg';">
+                  {% if img_hover %}
+                  <img class="prod-img card-img-layer" loading="lazy" src="{{ img_hover }}" alt="" aria-hidden="true">
+                  {% endif %}
+              </a>
+              <button class="share-btn"
+                  onclick="shareProduct(
+                      {{ product.name|tojson|forceescape }},
+                      {{ (request.url_root.rstrip('/') ~ '/retail/product/' ~ product.id)|tojson|forceescape }},
+                      {{ img_primary|tojson|forceescape }})">
+                  <img src="{{ url_for('static', filename='assets/share.svg') }}" alt="Share" style="width:16px;height:16px;" />
+              </button>
+              {% if product.stock_total and product.stock_total > 0 %}
+              <div class="cart-container mini" id="cart-action-{{ product.sku }}">
+                  <button class="add-to-cart-btn mini-add-btn"
+                          data-sku="{{ product.sku }}" data-price="{{ product.retail_price or product.price1 }}" data-name="{{ product.name }}">
+                      <span aria-hidden="true">+</span> Add
+                  </button>
+                  <div class="counter-size-label hidden" style="font-size:.6rem;font-weight:700;color:var(--wine);"></div>
+                  <div class="unit-counter hidden">
+                      <button class="decrement-btn">-</button>
+                      <span class="qty-display">1</span>
+                      <button class="increment-btn">+</button>
+                  </div>
+              </div>
+              {% else %}
+              <div class="cart-container mini" id="cart-action-{{ product.sku }}"><span class="mini-oos-badge">Out of Stock</span></div>
+              {% endif %}
+          </div>
+          <a href="/retail/product/{{ product.id }}" style="text-decoration:none;color:inherit;display:block;">
+              <div class="prod-name">{% if product.brand_name %}{{ product.brand_name }} {% endif %}{{ product.name }}{% if product.pack_unit and product.pack_count %} <span style="font-size:0.85em;color:#9f9f9f;font-weight:700;">&#8211; {{ product.pack_unit }} Of {{ product.pack_count }}</span>{% endif %}{% if product.model_number %} <span style="font-size:0.85em;color:#9ca3af;font-weight:600;">({{ product.model_number }})</span>{% endif %}</div>
+              <div class="prod-price-wrap">
+                  {% if mrp and mrp > rp %}<span class="prod-mrp">₹{{ mrp|round(0)|int }}</span>{% endif %}
+                  <span class="prod-price">₹{{ rp|round(0)|int }}</span>
+                  {% if disc > 0 %}<span class="prod-disc">{{ disc }}% off</span>{% endif %}
+              </div>
+          </a>
+          {% set is_bangle = 'bangle' in (product.category|lower if product.category else '') or 'bangle' in (product.sub_category|lower if product.sub_category else '') or 'bangle' in (product.name|lower if product.name else '') %}
+          {% if is_bangle %}
+          <div style="display:flex;align-items:center;gap:4px;margin-bottom:2px;">
+              <label style="font-size:.65rem;font-weight:600;color:#9f9f9f;white-space:nowrap;">Size</label>
+              <select class="input-field size-select" id="size-{{ product.sku }}" style="margin-bottom:0;flex:1;">
+                  {% for bsize in ['2.4', '2.6', '2.8'] %}
+                  {%- set bstock = product.size_stock.get(bsize, 0) if product.size_stock else None -%}
+                  <option value="{{ bsize }}" {% if loop.first %}selected{% endif %} {% if bstock is not none and bstock <= 0 %}disabled{% endif %}>{{ bsize }}{% if bstock is not none and bstock <= 0 %} (Out of stock){% endif %}</option>
+                  {% endfor %}
+              </select>
+          </div>
+          {% elif product.size %}
+          <div style="display:flex;align-items:center;gap:4px;margin-bottom:2px;">
+              <label style="font-size:.65rem;font-weight:600;color:#9f9f9f;white-space:nowrap;">Size</label>
+              <select class="input-field size-select" id="size-{{ product.sku }}" style="margin-bottom:0;flex:1;">
+                  {% for s in product.size.split(',') %}<option value="{{ s|trim }}">{{ s|trim }}</option>{% endfor %}
+              </select>
+          </div>
+          {% endif %}
+      </div>
+      {% endfor %}
+  </div>
+  {% endif %}
+</div>
+
+<script>
+{% include "retail/_shared_scripts.html" %}
+</script>
+{% endblock %}

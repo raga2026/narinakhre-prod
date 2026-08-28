@@ -78,6 +78,41 @@ h1, h2, h3 { font-family:'Fraunces', serif; }
 .cta-btn{ display:inline-block; background:var(--marigold); color:var(--ink); font-weight:700; text-decoration:none; padding:.75rem 1.5rem; border-radius:999px; font-size:.88rem; letter-spacing:.02em; border:none; cursor:pointer; }
 .cta-btn:hover, .cta-btn:focus-visible{ background:var(--ivory); }
 
+/* ── Offers / announcement carousel -- SAME public_coupons/carousel_products
+     markup and JS on every page that uses it (the homepage's full-size one,
+     product_detail's compact one -- see .offers-carousel--compact there),
+     only restyled to the reference's slimmer top-bar look. This is the base
+     structural CSS (position/opacity stacking, colors, typography) --
+     without it a page's offers carousel renders as unstyled stacked HTML
+     (every slide visible at once, no absolute positioning) instead of a
+     rotating banner, which is exactly what was broken on the product detail
+     page until this moved out of home.html's own <style> and in here. ── */
+.offers-carousel { position:relative; overflow:hidden; min-height:88px; background: var(--wine); }
+.offers-carousel::before { content:""; position:absolute; inset:0; pointer-events:none; background-image: repeating-linear-gradient(135deg, rgba(255,255,255,0.06) 0 3px, transparent 3px 14px); }
+.offers-slide { position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:2px; padding:10px 16px; opacity:0; transition:opacity .5s ease; pointer-events:none; }
+.offers-slide.active { opacity:1; pointer-events:auto; }
+.offer-discount-line { display:flex; align-items:baseline; gap:6px; }
+.offer-discount-big { font-family:'Fraunces', serif; font-weight:700; font-size:1.4rem; color:var(--ivory); line-height:1.1; }
+.offer-discount-cap { font-size:.68rem; color:var(--ivory); opacity:.85; font-weight:700; }
+.offer-code-row { display:flex; align-items:center; gap:6px; margin-top:4px; }
+.offer-code-label { font-size:.6rem; color:var(--ivory); opacity:.85; font-weight:700; letter-spacing:.08em; text-transform:uppercase; }
+.offer-code-inline { background:var(--marigold); border:none; border-radius:6px; padding:2px 10px; font-family:monospace; font-weight:800; font-size:.72rem; color:var(--ink); letter-spacing:.4px; cursor:pointer; }
+.offer-product-slide { text-decoration:none; }
+.offer-product-card { display:flex; align-items:center; gap:12px; background:var(--ivory); border:1px solid rgba(255,255,255,.4); border-radius:16px; padding:8px 14px; box-shadow:0 4px 16px rgba(0,0,0,.25); width:calc(100% - 32px); max-width:460px; }
+.offer-product-img-wrap { position:relative; width:44px; height:44px; flex-shrink:0; border-radius:10px; background:var(--ivory-deep); display:flex; align-items:center; justify-content:center; }
+.offer-product-img { max-width:100%; max-height:100%; object-fit:contain; }
+.offer-product-badge { position:absolute; top:-8px; left:-8px; background:var(--wine); color:var(--ivory); font-weight:800; font-size:.58rem; padding:2px 6px; border-radius:8px; white-space:nowrap; }
+.offer-product-price { display:flex; flex-direction:column; align-items:flex-start; flex-shrink:0; padding-right:10px; border-right:1.5px solid var(--line); }
+.offer-product-mrp { font-size:.6rem; color:#9a8f80; text-decoration:line-through; }
+.offer-product-current { font-size:.9rem; font-weight:800; color:var(--wine); line-height:1.2; }
+.offer-product-title { flex:1; min-width:0; text-align:left; font-size:.72rem; font-weight:700; color:var(--ink); line-height:1.3; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
+@media (min-width:768px) {
+  .offers-carousel { min-height:104px; }
+  .offer-discount-big { font-size:1.9rem; }
+  .offer-product-card { max-width:600px; padding:12px 20px; gap:16px; }
+  .offer-product-img-wrap { width:64px; height:64px; }
+}
+
 /* ── Product shelf: "coverflow" carousel -- the card nearest the shelf's
      center scales up to full size/opacity, neighbors shrink and dim, and
      CSS scroll-snap centers whichever card you drag/swipe to nearest.
