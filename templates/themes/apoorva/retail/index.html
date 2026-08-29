@@ -372,7 +372,10 @@
 
 <!-- ── Inline incentive signup — no email-capture endpoint exists in this
        app, so the CTA opens the real sign-in/create-account modal
-       (openAuthModal) instead of posting a form nobody would receive. ── -->
+       (openAuthModal) instead of posting a form nobody would receive.
+       Guarded behind logged_in_user, same as the default theme's own
+       equivalent -- someone already signed in has nothing to sign up for. ── -->
+{% if not logged_in_user %}
 <section class="signup-band" aria-labelledby="signup-heading">
     <div>
         <h2 id="signup-heading">Get 15% off your first order</h2>
@@ -380,6 +383,7 @@
     </div>
     <button type="button" class="cta-btn" onclick="openAuthModal('signup')">Create Account</button>
 </section>
+{% endif %}
 
 <script>
 {% include "retail/_shared_scripts.html" %}
@@ -472,10 +476,30 @@ document.addEventListener('DOMContentLoaded', function () {
             const gap = parseFloat(style.columnGap || style.gap || '10') || 10;
             const advance = card.getBoundingClientRect().width + gap;
             const atEnd = grid.scrollLeft + grid.clientWidth >= grid.scrollWidth - 4;
+            const target = atEnd ? 0 : grid.scrollLeft + advance;
+            const distance = Math.abs(target - grid.scrollLeft);
+
             grid.style.scrollSnapType = 'none';
-            grid.scrollTo({ left: atEnd ? 0 : grid.scrollLeft + advance, behavior: 'smooth' });
             clearTimeout(snapRestoreTimer);
-            snapRestoreTimer = setTimeout(function () { grid.style.scrollSnapType = ''; }, 500);
+            let restored = false;
+            function restoreSnap() {
+                if (restored) return;
+                restored = true;
+                grid.removeEventListener('scrollend', restoreSnap);
+                grid.style.scrollSnapType = '';
+            }
+            grid.addEventListener('scrollend', restoreSnap, { once: true });
+            // Fallback for browsers without `scrollend` support (or if it
+            // never fires) -- scaled to how far this particular step is
+            // scrolling. A fixed 500ms was long enough for a single-card
+            // advance but not for the far longer last-card-to-start reset,
+            // so scroll-snap was re-enabling itself WHILE that reset was
+            // still mid-flight and fighting the browser's own smooth
+            // scroll -- that's what made the shelf look stuck specifically
+            // on the trip back to the beginning.
+            snapRestoreTimer = setTimeout(restoreSnap, Math.max(500, distance * 1.2));
+
+            grid.scrollTo({ left: target, behavior: 'smooth' });
         }
         function start() { if (!timer) timer = setInterval(step, 3000); }
         function stop() { clearInterval(timer); timer = null; }
