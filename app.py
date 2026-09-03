@@ -374,8 +374,6 @@ STOCKS_REFERRAL_PRICE_DISPLAY = 'Rs 199'
 # object, same one-time-setup nature as the two above -- no discount
 # variant exists for this tier (the referral discount stays Standard-only,
 # see /stocks/signup).
-RAZORPAY_STOCKS_STARTERS_PLAN_ID = os.environ.get('RAZORPAY_STOCKS_STARTERS_PLAN_ID', '')
-STOCKS_STARTERS_PRICE_DISPLAY = 'Rs 99'
 
 # Auth providers are pluggable -- see auth_providers/base.py. Adding another
 # login option later (e.g. Facebook) means adding auth_providers/facebook.py

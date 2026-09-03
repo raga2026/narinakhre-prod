@@ -150,30 +150,24 @@ def hash_password(password):
 
 # --- DB orchestration ------------------------------------------------------
 
-def create_pending_subscriber(db, email, name, password, referred_by_id=None, stocks_plan='standard'):
+def create_pending_subscriber(db, email, name, password, referred_by_id=None, stocks_plan='regular'):
     """Creates a role='viewer' row for a self-serve signup. referred_by_id
     (see utils/stocks_referrals.py), when given, is stamped once here and
-    never changes after -- app.py's /stocks/signup resolves a submitted
-    referral code into this id before calling in. stocks_plan ('standard'
-    or 'starters', see STOCKS_AUTH_ALTER_SQL) is likewise stamped once here
-    from the signup form's plan selector. Returns (row, error_message).
+    never changes after. Returns (row, error_message).
 
-    stocks_plan == 'standard' grants an immediate 7-day free trial
-    (is_active=1, subscription_status='trialing', trial_ends_at=NOW()+7d --
-    see subscription_is_current above) -- the account can log in right
-    away, no payment step at all. 'starters' keeps the original
-    pending/unpaid shape (is_active=0, subscription_status='pending'), so
-    authenticate_stocks_admin still refuses login (is_active check) until
-    checkout completes, exactly as before the trial existed. must_change_password
-    is 0 (not 1, unlike create_viewer_account's admin-created viewers) since
-    this password was chosen by the person themselves, not auto-generated
-    and emailed in plaintext -- there's nothing to force a change away from.
+    stocks_plan == 'regular' (the default, free) -- active immediately, no
+    payment and no trial: subscription_status='none' (which
+    subscription_is_current already passes) and is_pro=0. It just gets the
+    free daily Pick of the Day.
 
-    An 'existing' row (same email already signed up before, whether still
-    mid-trial, expired, pending Starters checkout, or a lapsed paid
-    account) is returned as-is with no changes -- deliberately does NOT
-    grant a fresh trial on resubmission; see the caller (/stocks/signup)
-    for why that's already safe with no extra code."""
+    stocks_plan == 'pro' -- grants an immediate 7-day trial (is_active=1,
+    subscription_status='trialing', trial_ends_at=NOW()+7d, is_pro=0); the
+    Razorpay checkout that follows converts it to a paid Rs 299/mo
+    subscription.
+
+    must_change_password is 0 (this password was chosen by the person, not
+    auto-generated). An 'existing' row (same email) is returned as-is with
+    no changes."""
     email = (email or '').strip().lower()
     if not email:
         return None, 'Email is required.'
@@ -190,21 +184,21 @@ def create_pending_subscriber(db, email, name, password, referred_by_id=None, st
         return existing, 'existing'
 
     password_hash = hash_password(password)
-    if stocks_plan == 'standard':
+    if stocks_plan == 'pro':
         db.execute(
             '''INSERT INTO stocks_admin_users
                    (username, password_hash, role, name, is_active, must_change_password,
-                    subscription_status, trial_ends_at, referred_by_id, stocks_plan)
-               VALUES (?, ?, 'viewer', ?, 1, 0, 'trialing', NOW() + INTERVAL '7 days', ?, ?)''',
-            (email, password_hash, (name or '').strip() or None, referred_by_id, stocks_plan)
+                    subscription_status, trial_ends_at, is_pro, referred_by_id, stocks_plan)
+               VALUES (?, ?, 'viewer', ?, 1, 0, 'trialing', NOW() + INTERVAL '7 days', 0, ?, 'pro')''',
+            (email, password_hash, (name or '').strip() or None, referred_by_id)
         )
-    else:
+    else:  # 'regular' -- free, active immediately, no payment, no trial
         db.execute(
             '''INSERT INTO stocks_admin_users
-                   (username, password_hash, role, name, is_active, must_change_password, subscription_status,
-                    referred_by_id, stocks_plan)
-               VALUES (?, ?, 'viewer', ?, 0, 0, 'pending', ?, ?)''',
-            (email, password_hash, (name or '').strip() or None, referred_by_id, stocks_plan)
+                   (username, password_hash, role, name, is_active, must_change_password,
+                    subscription_status, is_pro, referred_by_id, stocks_plan)
+               VALUES (?, ?, 'viewer', ?, 1, 0, 'none', 0, ?, 'regular')''',
+            (email, password_hash, (name or '').strip() or None, referred_by_id)
         )
     db.commit()
 

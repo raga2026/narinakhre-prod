@@ -50,27 +50,29 @@ class FakeSubscriberDB:
 
         if normalized.startswith(
             "INSERT INTO stocks_admin_users (username, password_hash, role, name, is_active, must_change_password, "
-            "subscription_status, trial_ends_at, referred_by_id, stocks_plan)"
+            "subscription_status, trial_ends_at, is_pro, referred_by_id, stocks_plan)"
         ):
-            email, password_hash, name, referred_by_id, stocks_plan = params
+            # Pro signup -- 7-day trial, plan literal 'pro' in the SQL.
+            email, password_hash, name, referred_by_id = params
             self.rows.append({
                 'id': self._next_id, 'username': email, 'password_hash': password_hash, 'name': name,
                 'role': 'viewer', 'is_active': 1, 'must_change_password': 0, 'is_pro': 0,
                 'subscription_status': 'trialing', 'subscription_current_period_end': None,
                 'trial_ends_at': 'fake-trial-end', 'trial_ended_email_sent_at': None,
-                'razorpay_subscription_id': None, 'referred_by_id': referred_by_id, 'stocks_plan': stocks_plan,
+                'razorpay_subscription_id': None, 'referred_by_id': referred_by_id, 'stocks_plan': 'pro',
             })
             self._next_id += 1
             return FakeCursor([])
 
         if normalized.startswith('INSERT INTO stocks_admin_users'):
-            email, password_hash, name, referred_by_id, stocks_plan = params
+            # Regular signup -- free, active immediately, no trial.
+            email, password_hash, name, referred_by_id = params
             self.rows.append({
                 'id': self._next_id, 'username': email, 'password_hash': password_hash, 'name': name,
-                'role': 'viewer', 'is_active': 0, 'must_change_password': 0, 'is_pro': 0,
-                'subscription_status': 'pending', 'subscription_current_period_end': None,
+                'role': 'viewer', 'is_active': 1, 'must_change_password': 0, 'is_pro': 0,
+                'subscription_status': 'none', 'subscription_current_period_end': None,
                 'trial_ends_at': None, 'trial_ended_email_sent_at': None,
-                'razorpay_subscription_id': None, 'referred_by_id': referred_by_id, 'stocks_plan': stocks_plan,
+                'razorpay_subscription_id': None, 'referred_by_id': referred_by_id, 'stocks_plan': 'regular',
             })
             self._next_id += 1
             return FakeCursor([])
@@ -192,28 +194,29 @@ class FakeSubscriberDB:
         pass
 
 
-def test_create_pending_subscriber_grants_an_immediate_trial_for_standard():
-    # Standard is the default plan, and now grants a 7-day trial straight
-    # away -- no more pending/inactive row waiting on Razorpay checkout.
+def test_create_pending_subscriber_creates_an_active_free_regular_account_by_default():
+    # 'regular' is the default: active immediately, no payment, no trial.
     db = FakeSubscriberDB()
     row, error = create_pending_subscriber(db, 'a@example.com', 'A', 'password123')
 
     assert error is None
+    assert db.rows[0]['stocks_plan'] == 'regular'
+    assert db.rows[0]['subscription_status'] == 'none'
+    assert db.rows[0]['is_active'] == 1
+    assert db.rows[0]['trial_ends_at'] is None
+    assert db.rows[0]['is_pro'] == 0
+
+
+def test_create_pending_subscriber_pro_gets_a_seven_day_trial():
+    db = FakeSubscriberDB()
+    row, error = create_pending_subscriber(db, 'a@example.com', 'A', 'password123', stocks_plan='pro')
+
+    assert error is None
+    assert db.rows[0]['stocks_plan'] == 'pro'
     assert db.rows[0]['subscription_status'] == 'trialing'
     assert db.rows[0]['is_active'] == 1
     assert db.rows[0]['trial_ends_at'] is not None
     assert db.rows[0]['is_pro'] == 0
-
-
-def test_create_pending_subscriber_keeps_starters_pending_until_checkout():
-    # Starters never gets a trial -- unchanged pending/inactive shape.
-    db = FakeSubscriberDB()
-    row, error = create_pending_subscriber(db, 'a@example.com', 'A', 'password123', stocks_plan='starters')
-
-    assert error is None
-    assert db.rows[0]['subscription_status'] == 'pending'
-    assert db.rows[0]['is_active'] == 0
-    assert db.rows[0]['trial_ends_at'] is None
 
 
 def test_create_pending_subscriber_rejects_short_password():

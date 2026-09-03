@@ -280,15 +280,18 @@ STOCKS_AUTH_ALTER_SQL = [
     'ALTER TABLE stocks_admin_users ADD COLUMN IF NOT EXISTS location TEXT',
     'ALTER TABLE stocks_admin_users ADD COLUMN IF NOT EXISTS pincode TEXT',
     # Value migration, idempotent (re-runs as no-ops once every row is
-    # regular/pro): only an actively-PAYING standard subscriber keeps 'pro'
-    # through their paid period; everyone else -- starters, trialing,
-    # cancelled, admin-created viewers, past signups -- becomes 'regular'.
+    # regular/pro). ORDER MATTERS: the CHECK is dropped BEFORE the UPDATEs
+    # -- the old constraint only allows ('standard','starters'), so
+    # SET stocks_plan='pro' would violate it while it's still in place.
+    # Only an actively-PAYING standard subscriber keeps 'pro' through their
+    # paid period; everyone else -- starters, trialing, cancelled,
+    # admin-created viewers, past signups -- becomes 'regular'.
+    'ALTER TABLE stocks_admin_users DROP CONSTRAINT IF EXISTS stocks_admin_users_stocks_plan_check',
     "UPDATE stocks_admin_users SET stocks_plan='pro' WHERE stocks_plan='standard' "
     "AND subscription_status='active' "
     "AND (subscription_current_period_end IS NULL OR subscription_current_period_end > NOW())",
-    "UPDATE stocks_admin_users SET stocks_plan='regular' WHERE stocks_plan IN ('standard', 'starters')",
+    "UPDATE stocks_admin_users SET stocks_plan='regular' WHERE stocks_plan NOT IN ('regular', 'pro')",
     "ALTER TABLE stocks_admin_users ALTER COLUMN stocks_plan SET DEFAULT 'regular'",
-    'ALTER TABLE stocks_admin_users DROP CONSTRAINT IF EXISTS stocks_admin_users_stocks_plan_check',
     "ALTER TABLE stocks_admin_users ADD CONSTRAINT stocks_admin_users_stocks_plan_check "
     "CHECK (stocks_plan IN ('regular', 'pro'))",
 ]
@@ -759,7 +762,7 @@ def set_viewer_plan(db, admin_id, plan):
     keeps billing at whatever price they originally checked out at until it
     next renews or is cancelled. Returns True if a viewer row was updated,
     False if not found, not a viewer, or plan isn't a recognized value."""
-    if plan not in ('standard', 'starters'):
+    if plan not in ('regular', 'pro'):
         return False
     row = db.execute('SELECT id, role FROM stocks_admin_users WHERE id=?', (admin_id,)).fetchone()
     if not row or row['role'] != 'viewer':
@@ -804,7 +807,7 @@ def link_google_sub(db, admin_id, google_sub):
     db.commit()
 
 
-def create_pending_google_subscriber(db, email, name, google_sub, referred_by_id=None, stocks_plan='standard'):
+def create_pending_google_subscriber(db, email, name, google_sub, referred_by_id=None, stocks_plan='regular'):
     """Brand-new self-serve signup via 'Sign up with Google' -- no password
     at all (password_hash stays NULL; see the relaxed NOT NULL constraint
     in STOCKS_AUTH_ALTER_SQL and authenticate_stocks_admin's check for a
@@ -825,21 +828,21 @@ def create_pending_google_subscriber(db, email, name, google_sub, referred_by_id
     through Razorpay checkout before it can log in, exactly as before the
     trial existed."""
     email = (email or '').strip().lower()
-    if stocks_plan == 'standard':
+    if stocks_plan == 'pro':
         db.execute(
             '''INSERT INTO stocks_admin_users
                    (username, password_hash, role, name, is_active, must_change_password,
                     subscription_status, trial_ends_at, is_pro, google_sub, referred_by_id, stocks_plan)
-               VALUES (?, NULL, 'viewer', ?, 1, 0, 'trialing', NOW() + INTERVAL '7 days', 0, ?, ?, ?)''',
-            (email, (name or '').strip() or None, google_sub, referred_by_id, stocks_plan)
+               VALUES (?, NULL, 'viewer', ?, 1, 0, 'trialing', NOW() + INTERVAL '7 days', 0, ?, ?, 'pro')''',
+            (email, (name or '').strip() or None, google_sub, referred_by_id)
         )
-    else:
+    else:  # 'regular' -- free, active immediately, no payment, no trial
         db.execute(
             '''INSERT INTO stocks_admin_users
                    (username, password_hash, role, name, is_active, must_change_password,
                     subscription_status, is_pro, google_sub, referred_by_id, stocks_plan)
-               VALUES (?, NULL, 'viewer', ?, 0, 0, 'pending', 0, ?, ?, ?)''',
-            (email, (name or '').strip() or None, google_sub, referred_by_id, stocks_plan)
+               VALUES (?, NULL, 'viewer', ?, 1, 0, 'none', 0, ?, ?, 'regular')''',
+            (email, (name or '').strip() or None, google_sub, referred_by_id)
         )
     db.commit()
     return find_stocks_account_by_google_sub(db, google_sub)
