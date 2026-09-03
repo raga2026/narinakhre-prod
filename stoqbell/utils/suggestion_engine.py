@@ -436,7 +436,7 @@ def _fetch_candidates(db, market_cap_tier=None):
     return db.execute(
         f'''SELECT w.id AS watchlist_id, w.symbol, w.exchange, w.name AS company_name,
                   w.fundamental_tier, w.market_cap_tier,
-                  u.id AS universe_id, u.industry,
+                  u.id AS universe_id, u.industry, u.isin,
                   i.rsi_14, i.cross_status, i.volume_trend,
                   f.pe_ratio, f.peg_ratio, f.opm_pct, f.roce_pct, f.roa_pct,
                   f.quarterly_profit_growth_pct, f.quarterly_revenue_growth_pct,
@@ -484,7 +484,7 @@ def _fetch_universe_candidates(db):
     return db.execute(
         '''SELECT u.id AS universe_id, u.symbol, u.exchange, u.company_name,
                   w.id AS watchlist_id, w.fundamental_tier, w.market_cap_tier,
-                  u.industry,
+                  u.industry, u.isin,
                   i.rsi_14, i.cross_status, i.volume_trend,
                   f.pe_ratio, f.peg_ratio, f.opm_pct, f.roce_pct, f.roa_pct,
                   f.quarterly_profit_growth_pct, f.quarterly_revenue_growth_pct,
@@ -1079,6 +1079,46 @@ def generate_daily_suggestions(db):
     }
 
 
+def _recent_suggestion_for_company(db, candidate, repeat_window_cutoff, today):
+    """The most recent stock_suggestions row inside the repeat window for
+    this candidate's COMPANY -- matched by ISIN across EVERY stock_watchlist
+    row for that company, not just the single watchlist_id passed in.
+
+    A company is listed on both NSE and BSE with a separate stock_watchlist
+    row (and separate id) per exchange, and run_fundamental_shortlist's
+    _pick_canonical_listing can flip which of the two is the active row
+    between refreshes. Keying the 15-day repeat cooldown on one watchlist_id
+    then goes blind: a company just recommended on its now-inactive other
+    listing has no history on its current row and sails straight through
+    (confirmed 2026-09 for Jayaswal Neco, Kajaria, Kingfa, Supreme
+    Petrochem). Matching on ISIN closes that gap without needing the two
+    rows physically merged. Falls back to the plain watchlist_id match when
+    the candidate has no ISIN on record.
+
+    Returns a row with 'score' and 'pattern_name' (what _is_genuine_change
+    reads) or None."""
+    isin = (candidate.get('isin') or '').strip()
+    if isin:
+        return db.execute(
+            '''SELECT s.score, s.pattern_name
+               FROM stock_suggestions s
+               JOIN stock_watchlist w ON w.id = s.watchlist_id
+               JOIN stock_universe u ON u.symbol = w.symbol AND u.exchange = w.exchange
+               WHERE u.isin = ? AND s.suggestion_date >= ? AND s.suggestion_date < ?
+               ORDER BY s.suggestion_date DESC LIMIT 1''',
+            (isin, repeat_window_cutoff, today)
+        ).fetchone()
+    # No ISIN on record -- fall back to the plain single-row match. Query
+    # text kept identical to the pre-ISIN version so nothing downstream has
+    # to relearn it.
+    return db.execute(
+        '''SELECT score, target_sell_price, pattern_name, nns_tier FROM stock_suggestions
+           WHERE watchlist_id=? AND suggestion_date >= ? AND suggestion_date < ?
+           ORDER BY suggestion_date DESC LIMIT 1''',
+        (candidate['watchlist_id'], repeat_window_cutoff, today)
+    ).fetchone()
+
+
 def _create_or_update_suggestion(db, candidate, nns_score, today, repeat_window_cutoff):
     """Shared per-candidate row-creation logic, extracted from
     generate_daily_suggestions's loop so get_candidates_for_manual_pick/
@@ -1109,12 +1149,7 @@ def _create_or_update_suggestion(db, candidate, nns_score, today, repeat_window_
 
     tier = nns_tier(nns_score)
 
-    existing_recent = db.execute(
-        '''SELECT score, target_sell_price, pattern_name, nns_tier FROM stock_suggestions
-           WHERE watchlist_id=? AND suggestion_date >= ? AND suggestion_date < ?
-           ORDER BY suggestion_date DESC LIMIT 1''',
-        (watchlist_id, repeat_window_cutoff, today)
-    ).fetchone()
+    existing_recent = _recent_suggestion_for_company(db, candidate, repeat_window_cutoff, today)
     if existing_recent and not _is_genuine_change(existing_recent, nns_score, pattern_name):
         return None, {
             'watchlist_id': watchlist_id, 'symbol': candidate['symbol'], 'exchange': candidate['exchange'],
@@ -1179,12 +1214,7 @@ def _todays_eligible_candidates_off_cooldown(db):
     off_cooldown = []
     for candidate, nns_score in ranked:
         watchlist_id = candidate['watchlist_id']
-        existing_recent = db.execute(
-            '''SELECT score, target_sell_price, pattern_name, nns_tier FROM stock_suggestions
-               WHERE watchlist_id=? AND suggestion_date >= ? AND suggestion_date < ?
-               ORDER BY suggestion_date DESC LIMIT 1''',
-            (watchlist_id, repeat_window_cutoff, today)
-        ).fetchone()
+        existing_recent = _recent_suggestion_for_company(db, candidate, repeat_window_cutoff, today)
         # _is_genuine_change needs this candidate's current pattern_name,
         # which means a price-history fetch + compute_suggestion_pricing
         # per candidate just to filter -- cheap enough given the candidate
