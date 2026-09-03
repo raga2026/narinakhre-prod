@@ -1502,8 +1502,10 @@ def _referral_footer_text(referral_code):
     code shared by mistake can't be attributed to the right referrer."""
     link = f'{STOCKS_BASE_URL}/stocks/signup?ref={referral_code}'
     return (
-        f'Refer {REFERRALS_PER_FREE_MONTH} people who subscribe and get a month free -- they get their first '
-        f'month for Rs 199 + GST (Rs 234.82) instead of Rs 299 + GST (Rs 352.82) with your link: {link} (or share code {referral_code}).'
+        f'The daily Pick of the Day is free -- share StoqBell with anyone using your link: {link} '
+        f'(or share code {referral_code}). Refer {REFERRALS_PER_FREE_MONTH} people who subscribe to StoqBell Pro '
+        f'and you get a month of Pro free; they get their first Pro month for Rs 199 + GST (Rs 234.82) '
+        f'instead of Rs 299 + GST (Rs 352.82).'
     )
 
 
@@ -1512,9 +1514,10 @@ def _referral_footer_html(referral_code):
     return (
         '<p style="color:#64748b;font-size:0.8em;margin-top:16px;font-family:Arial,Helvetica,sans-serif;'
         'border-top:1px solid #e2e8f0;padding-top:12px;">'
-        f'Refer {REFERRALS_PER_FREE_MONTH} people who subscribe and get a month free -- they get their first month '
-        f'for Rs 199 + GST (Rs 234.82) instead of Rs 299 + GST (Rs 352.82) with <a href="{link}" style="color:#0ea5e9;">your referral link</a> '
-        f'(or share code <strong>{referral_code}</strong>).</p>'
+        f'The daily Pick of the Day is free -- share StoqBell with anyone using '
+        f'<a href="{link}" style="color:#0ea5e9;">your referral link</a> (or share code <strong>{referral_code}</strong>). '
+        f'Refer {REFERRALS_PER_FREE_MONTH} people who subscribe to StoqBell Pro and you get a month of Pro free; '
+        f'they get their first Pro month for Rs 199 + GST (Rs 234.82) instead of Rs 299 + GST (Rs 352.82).</p>'
     )
 
 
