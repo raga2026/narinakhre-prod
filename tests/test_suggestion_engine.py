@@ -485,10 +485,13 @@ def test_is_genuine_change_pure_function():
     assert _is_genuine_change(existing, 7.0 - NNS_SCORE_CHANGE_THRESHOLD) is True
     # Score barely moved, but a confirmed chart pattern appeared -> genuine.
     assert _is_genuine_change(existing, 7.1, 'rounding_bottom') is True
-    # Had a pattern, now gone -> genuine. Swapped for a different one -> genuine.
     had_pattern = {'score': 7.0, 'pattern_name': 'rounding_bottom'}
-    assert _is_genuine_change(had_pattern, 7.1, None) is True
+    # Swapped for a DIFFERENT pattern -> genuine (a new measured move).
     assert _is_genuine_change(had_pattern, 7.1, 'head_and_shoulders_bottom') is True
+    # Had a pattern, none now -> NOT genuine: the old reason went away, no
+    # new one appeared (and a wobbling rounding-bottom fit must not re-open
+    # the cooldown for free).
+    assert _is_genuine_change(had_pattern, 7.1, None) is False
     # Same pattern as before, score flat -> not genuine.
     assert _is_genuine_change(had_pattern, 7.1, 'rounding_bottom') is False
 

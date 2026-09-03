@@ -210,6 +210,15 @@ ROUNDING_MIN_DAYS = 40
 # it's called a genuine rounding shape rather than just noise that happens
 # to have a slight curve.
 ROUNDING_FIT_THRESHOLD = 0.5
+# For a rounding bottom to drive a BUY suggestion (see
+# _pattern_pricing_from_rounding_bottom), price must have crossed back above
+# the neckline within this many trading days -- a fresh breakout, not an
+# old uptrend. Without this, any stock trading above where it sat ~2.5
+# years ago (the start of PATTERN_LOOKBACK_DAYS) that fits a rough U keeps
+# reading as a "confirmed rounding bottom" indefinitely, and its flicker
+# in and out of the fit thresholds repeatedly re-opens the 15-day repeat
+# cooldown (Shipping Corp of India, Kajaria, Sep 2026).
+ROUNDING_BREAKOUT_MAX_AGE_DAYS = 30
 
 
 def _det3(m):
@@ -329,6 +338,17 @@ def detect_rounding_pattern(closes_oldest_first):
 
     vertex_price = a * vertex_x * vertex_x + b * vertex_x + c
 
+    # Trading days since price was last on the far side of the neckline --
+    # i.e. how fresh the current break past it is. For a bottom: the last
+    # time close sat BELOW neckline_price. None means it never did within
+    # this window (price has been above the neckline the whole time -- an
+    # established uptrend, not a recent breakout). Mirror for a top.
+    if shape == 'rounding_bottom':
+        last_far_side = next((i for i in range(last_x, -1, -1) if points[i] < neckline_price), None)
+    else:
+        last_far_side = next((i for i in range(last_x, -1, -1) if points[i] > neckline_price), None)
+    days_since_neckline_cross = None if last_far_side is None else last_x - last_far_side
+
     return {
         'shape': shape,
         'fit_quality': round(r2, 2),
@@ -338,6 +358,7 @@ def detect_rounding_pattern(closes_oldest_first):
         'vertex_price': round(vertex_price, 2),
         'current_price': current_price,
         'above_neckline': above_neckline,
+        'days_since_neckline_cross': days_since_neckline_cross,
     }
 
 
@@ -616,6 +637,12 @@ def _pattern_pricing_from_head_and_shoulders(closes_oldest_first, latest_close):
 def _pattern_pricing_from_rounding_bottom(closes_oldest_first, latest_close):
     rounding = detect_rounding_pattern(closes_oldest_first)
     if not rounding or rounding['shape'] != 'rounding_bottom' or not rounding['above_neckline']:
+        return None
+    # Only a RECENT break above the neckline is a fresh reason to buy. A
+    # stock that's been above it for months (or the whole lookback) is just
+    # in an uptrend -- see ROUNDING_BREAKOUT_MAX_AGE_DAYS.
+    days_since_cross = rounding.get('days_since_neckline_cross')
+    if days_since_cross is None or days_since_cross > ROUNDING_BREAKOUT_MAX_AGE_DAYS:
         return None
     cup_depth = rounding['neckline_price'] - rounding['vertex_price']
     if cup_depth <= 0:

@@ -35,8 +35,12 @@ SUGGESTION_REPEAT_WINDOW_DAYS = 15
 # genuine change worth resending within the repeat window. A target-sell-
 # price move is deliberately NOT a resend trigger anymore -- see
 # _is_genuine_change for the Shipping Corp / Jayaswal Neco history behind
-# dropping it.
-NNS_SCORE_CHANGE_THRESHOLD = 1.0
+# dropping it. 1.5 (was 1.0): on the current score distribution a 1.0 move
+# is ordinary week-to-week drift, and a one-off recalibration (e.g. the
+# free_cash_flow / reserves_to_debt fix, commit 38f8c9e) shifts many
+# scores ~1 point at once, which at 1.0 would re-open every recent pick's
+# cooldown for a fortnight. 1.5 asks for a genuinely decisive move.
+NNS_SCORE_CHANGE_THRESHOLD = 1.5
 
 # How far back to pull daily closes for pattern detection (see
 # utils.price_pattern.detect_head_and_shoulders/detect_rounding_pattern) --
@@ -310,11 +314,14 @@ def _is_genuine_change(existing, new_score, new_pattern_name=None):
     enough from that one to be worth resending despite the cooldown:
     either the NNS Score moved by at least NNS_SCORE_CHANGE_THRESHOLD (in
     either direction -- a meaningful move is worth telling the customer
-    about whether the pick got stronger or weaker), or the confirmed
-    chart-pattern basis changed (gaining a pattern, losing one, or
-    swapping to a different one is a genuinely different reason to buy --
-    a measured-move target instead of the flat-percentage fallback, or a
-    different measured move -- even at a near-identical score). False means
+    about whether the pick got stronger or weaker), or there is now a NEW
+    (or different) confirmed chart pattern behind the pick -- a fresh
+    measured-move target instead of the flat-percentage fallback, or a
+    different pattern's measured move, is a genuinely new reason to buy
+    even at a near-identical score. LOSING a pattern (a confirmed pattern
+    last time, none now) does NOT count -- that's the old reason going
+    away, not a new one, and a rounding-bottom fit flickering in and out
+    of its thresholds otherwise re-opens the cooldown for free. False means
     "same pick as last time, nothing meaningfully new to say" --
     generate_daily_suggestions skips it and tries the next-best candidate
     instead.
@@ -339,7 +346,8 @@ def _is_genuine_change(existing, new_score, new_pattern_name=None):
     old_score = existing.get('score')
     if old_score is not None and abs(new_score - old_score) >= NNS_SCORE_CHANGE_THRESHOLD:
         return True
-    if (existing.get('pattern_name') or None) != (new_pattern_name or None):
+    new_pattern = new_pattern_name or None
+    if new_pattern is not None and new_pattern != (existing.get('pattern_name') or None):
         return True
     return False
 
