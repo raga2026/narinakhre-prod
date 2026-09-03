@@ -56,27 +56,13 @@
         {% endif %}
         {% endwith %}
 
-        <div class="space-y-3 mb-6" role="radiogroup" aria-label="Choose a plan">
-            <label class="plan-option">
-                <input type="radio" name="plan-selector" value="standard" id="stocks-plan-standard"
-                       {% if plan_prefill != 'starters' %}checked{% endif %}>
-                <div class="plan-option-card">
-                    <p class="text-slate-100 font-semibold">Standard -- Rs 299 + GST (Rs 352.82)/month</p>
-                    <p class="text-slate-400 text-sm mt-1">One Pick of the Day, every trading day.</p>
-                    <p class="text-sm mt-1" style="color:#4ade80;font-weight:600;">Free for your first 7 days -- no card required.</p>
-                </div>
-            </label>
-            <label class="plan-option">
-                <input type="radio" name="plan-selector" value="starters" id="stocks-plan-starters"
-                       {% if plan_prefill == 'starters' %}checked{% endif %}>
-                <div class="plan-option-card">
-                    <p class="text-slate-100 font-semibold">Starters -- Rs 99 + GST (Rs 116.82)/month</p>
-                    <p class="text-slate-400 text-sm mt-1">Up to two separately-curated, top-quality picks a week, every Monday.</p>
-                </div>
-            </label>
+        <div class="mb-6 rounded-xl border border-sky-500/20 bg-sky-900/20 p-4">
+            <p class="text-slate-100 font-semibold">Free account -- the daily Pick of the Day</p>
+            <p class="text-slate-400 text-sm mt-1">One screened stock every trading day, with buy price, target and the reasoning. No card required.</p>
+            <p class="text-slate-400 text-sm mt-1">Upgrade to StoqBell Pro (Rs 299 + GST/month) any time for the full Highly Recommended list, real-time alerts and target-hit notifications.</p>
         </div>
 
-        <a id="stocks-google-signup-link" href="{{ url_for('stocks.stocks_google_login', plan=('starters' if plan_prefill == 'starters' else 'standard')) }}" class="google-btn w-full py-3 rounded-2xl font-bold text-base shadow flex items-center justify-center gap-2 transition hover:opacity-90">
+        <a id="stocks-google-signup-link" href="{{ url_for('stocks.stocks_google_login') }}" class="google-btn w-full py-3 rounded-2xl font-bold text-base shadow flex items-center justify-center gap-2 transition hover:opacity-90">
             <svg width="18" height="18" viewBox="0 0 48 48" aria-hidden="true"><path fill="#FFC107" d="M43.6 20.5H42V20H24v8h11.3C33.7 32.7 29.3 36 24 36c-6.6 0-12-5.4-12-12s5.4-12 12-12c3.1 0 5.9 1.1 8 3l5.7-5.7C34.6 6.1 29.6 4 24 4 12.9 4 4 12.9 4 24s8.9 20 20 20 20-8.9 20-20c0-1.3-.1-2.7-.4-3.5z"/><path fill="#FF3D00" d="M6.3 14.7l6.6 4.8C14.6 15.9 18.9 13 24 13c3.1 0 5.9 1.1 8 3l5.7-5.7C34.6 6.1 29.6 4 24 4c-7.7 0-14.3 4.4-17.7 10.7z"/><path fill="#4CAF50" d="M24 44c5.5 0 10.4-1.9 14.3-5.1l-6.6-5.6C29.6 35.1 26.9 36 24 36c-5.3 0-9.6-3.3-11.3-8l-6.6 5.1C9.6 39.6 16.2 44 24 44z"/><path fill="#1976D2" d="M43.6 20.5H42V20H24v8h11.3c-.8 2.3-2.3 4.3-4.3 5.7l6.6 5.6C39.9 36.9 44 31.1 44 24c0-1.3-.1-2.7-.4-3.5z"/></svg>
             Sign up with Google
         </a>
@@ -90,7 +76,7 @@
         <form method="POST" action="{{ url_for('stocks.stocks_signup') }}" class="space-y-5" id="stocks-signup-form">
             <input type="hidden" name="form_rendered_at" value="{{ form_rendered_at }}">
             <input type="hidden" name="recaptcha_token" id="stocks-recaptcha-token">
-            <input type="hidden" name="plan" id="stocks-plan-hidden" value="{{ 'starters' if plan_prefill == 'starters' else 'standard' }}">
+            <input type="hidden" name="plan" id="stocks-plan-hidden" value="regular">
             <div style="display:none !important;" aria-hidden="true">
                 <label for="system_verification_token">Leave blank</label>
                 <input type="text" id="system_verification_token" name="system_verification_token" tabindex="-1" autocomplete="off">
@@ -126,7 +112,7 @@
             </div>
 
             <button type="submit" id="stocks-signup-submit" class="stocks-btn w-full py-3 rounded-2xl font-bold text-lg shadow-lg mt-2 transition hover:opacity-90">
-                {{ 'Continue to payment' if plan_prefill == 'starters' else 'Start my free trial' }}
+                Create my free account
             </button>
         </form>
 
@@ -136,23 +122,6 @@
         <p class="text-center text-slate-600 text-xs mt-8">StoqBell &copy; 2026.</p>
     </div>
 
-    <script>
-    (function() {
-        var radios = document.querySelectorAll('input[name="plan-selector"]');
-        var hiddenField = document.getElementById('stocks-plan-hidden');
-        var googleLink = document.getElementById('stocks-google-signup-link');
-        var googleBaseHref = googleLink.href.split('?')[0];
-        var submitBtn = document.getElementById('stocks-signup-submit');
-        radios.forEach(function(radio) {
-            radio.addEventListener('change', function() {
-                if (!radio.checked) return;
-                hiddenField.value = radio.value;
-                googleLink.href = googleBaseHref + '?plan=' + radio.value;
-                submitBtn.textContent = radio.value === 'starters' ? 'Continue to payment' : 'Start my free trial';
-            });
-        });
-    })();
-    </script>
 
     {% if recaptcha_site_key %}
     <script src="https://www.google.com/recaptcha/api.js?render={{ recaptcha_site_key }}"></script>

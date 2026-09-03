@@ -5,7 +5,6 @@ from supabase_storage import public_url as _supabase_public_url
 from stoqbell.utils.stock_alerting import send_zeptomail_stocks_email
 from stoqbell.utils.suggestion_chart import build_prediction_chart_image_url
 from stoqbell.utils.suggestion_engine import get_suggestions
-from stoqbell.utils.starters_engine import get_starters_suggestions
 from stoqbell.utils.large_cap_engine import get_large_cap_bonus_suggestions
 from stoqbell.utils.price_pattern import compute_projection_targets
 from stoqbell.utils.stocks_referrals import REFERRALS_PER_FREE_MONTH, get_or_create_referral_code
@@ -687,7 +686,7 @@ def send_intraday_target_hit_alert_email(to_email, hits):
 
 
 def send_subscription_welcome_email(email, name, current_period_end_label, suggestions=None, db=None, admin_id=None,
-                                     plan='standard'):
+                                     plan='pro'):
     """Sent right after a self-serve StoqBell signup's first
     Razorpay payment is verified (see app.py's /stocks/subscribe/verify) --
     unlike send_viewer_welcome_email above, there's no password to disclose
@@ -718,28 +717,19 @@ def send_subscription_welcome_email(email, name, current_period_end_label, sugge
     subscriber's own referral footer (see _referral_footer_text/_html) --
     introducing referrals right at the moment they've just paid is when
     it's most likely to land."""
-    is_starters = plan == 'starters'
     greeting = name or email
     has_suggestions = bool(suggestions)
-    recommendation_noun = "this week's pick" if is_starters else "today's recommendation"
     subject = (
-        f'Welcome to StoqBell -- {recommendation_noun} inside'
-        if has_suggestions else 'Welcome to StoqBell -- payment confirmed'
+        'Welcome to StoqBell Pro -- your first Highly Recommended list inside'
+        if has_suggestions else 'Welcome to StoqBell Pro -- payment confirmed'
     )
-    if is_starters:
-        price_cadence_text = (
-            "Your Rs 99 + GST (Rs 116.82)/month Starters subscription is active. Up to twice a week (Mondays), we send a "
-            "separately-curated stock that clears our strictest, golden-tier quality bar -- buy price, "
-            "target sell price, and the reasoning behind it. Some weeks nothing clears that bar, so there's "
-            "no email that week."
-        )
-    else:
-        price_cadence_text = (
-            "Your Rs 299 + GST (Rs 352.82)/month subscription is active. Each day we pick a single stock that clears our "
-            "screening bar and email it to you -- buy price, target sell price, and the reasoning "
-            "behind it, marked Highly Recommended or Recommended so you know at a glance how strong the pick "
-            "is. Some days nothing clears the bar, so there's no email that day."
-        )
+    price_cadence_text = (
+        "Your Rs 299 + GST (Rs 352.82)/month StoqBell Pro subscription is active. Each day we email you the "
+        "full Highly Recommended list -- every stock currently clearing our top quality bar, with buy price, "
+        "target sell price and the reasoning behind each -- plus real-time intraday alerts and target-hit "
+        "notifications. Some days nothing clears the bar, so there's no list that day. The free daily Pick of "
+        "the Day still comes to you as well."
+    )
     intro_text = (
         f'Hi {greeting},\n\n'
         f'{price_cadence_text}\n\n'
@@ -756,10 +746,7 @@ def send_subscription_welcome_email(email, name, current_period_end_label, sugge
     )
 
     if has_suggestions:
-        if is_starters:
-            heading = "This Week's Pick" if len(suggestions) == 1 else "This Week's Picks"
-        else:
-            heading = "Today's Recommendation" if len(suggestions) == 1 else "Today's Recommendations"
+        heading = "Today's Highly Recommended list"
         intro_text += f'{heading}:\n\n'
         for s in suggestions:
             intro_text += _render_stock_card_text(s) + '\n\n'
@@ -778,10 +765,7 @@ def send_subscription_welcome_email(email, name, current_period_end_label, sugge
             intro_html += f'<p style="color:#64748b;font-size:0.8em;line-height:1.5;font-family:Arial,Helvetica,sans-serif;">{HORIZON_DISCLAIMER}</p>'
     else:
         no_pick_text = (
-            "Nothing has cleared our screening bar yet, so there's no pick to show yet -- log in anytime to see "
-            "the latest."
-        ) if is_starters else (
-            "Nothing cleared our screening bar today, so there's no pick to show yet -- log in anytime to see "
+            "Nothing cleared our top quality bar today, so there's no list to show yet -- log in anytime to see "
             "the latest."
         )
         intro_text += f'{no_pick_text}\n\n'
@@ -859,37 +843,25 @@ def send_trial_ended_email(email, name):
     plans (not just the Standard one they trialed) since resubscribing is a
     fresh choice, not a lock-in to what they started with."""
     greeting = name or email
-    subject = 'Your StoqBell free trial has ended'
+    subject = 'Your StoqBell Pro free trial has ended'
     headline = (
-        "Your 7-day free trial of StoqBell's Standard plan has ended, and your "
-        "access has been paused. Log in and pick a plan below to keep it going -- "
-        "no trial reset, this is a real subscription from here."
+        "Your 7-day free trial of StoqBell Pro has ended. The free daily Pick of the Day "
+        "still comes to you -- but the Highly Recommended list, real-time intraday alerts and "
+        "target-hit notifications have paused. Log in and subscribe to keep them going."
     )
-    plans_text = (
-        'Standard -- Rs 299 + GST (Rs 352.82)/month: Pick of the Day with full reasoning, buy/target '
-        'prices, StoqBell Score breakdown, target-hit alerts, bonus large-cap pick '
-        'twice a week.\n'
-        'Starters -- Rs 99 + GST (Rs 116.82)/month: up to two golden-tier picks a week, every Monday, '
-        'with buy/target prices.'
+    plan_text = (
+        'StoqBell Pro -- Rs 299 + GST (Rs 352.82)/month: the full Highly Recommended list every day, '
+        'real-time intraday alerts, and target-hit notifications, on top of the free daily Pick of the Day.'
     )
-    text_body = f'Hi {greeting},\n\n{headline}\n\n{plans_text}\n\nLog in to subscribe: {STOCKS_LOGIN_URL}\n\n{DISCLAIMER}\n'
+    text_body = f'Hi {greeting},\n\n{headline}\n\n{plan_text}\n\nLog in to subscribe: {STOCKS_LOGIN_URL}\n\n{DISCLAIMER}\n'
     html_inner = (
         f'{_stoqbell_logo_header_html()}'
         f'<p>Hi {greeting},</p><p>{headline}</p>'
-        '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" '
-        'style="max-width:600px;width:100%;margin:12px 0;border-collapse:collapse;">'
-        '<tr>'
-        '<td style="width:50%;vertical-align:top;padding:12px;border:1px solid #e2e8f0;border-radius:8px;">'
-        '<div style="font-weight:bold;color:#0f172a;">Standard -- Rs 299 + GST (Rs 352.82)/month</div>'
-        '<div style="color:#475569;font-size:13px;margin-top:6px;">Pick of the Day with full reasoning, '
-        'buy/target prices, StoqBell Score breakdown, target-hit alerts, bonus large-cap pick twice a week.</div>'
-        '</td>'
-        '<td style="width:50%;vertical-align:top;padding:12px;border:1px solid #e2e8f0;border-radius:8px;">'
-        '<div style="font-weight:bold;color:#0f172a;">Starters -- Rs 99 + GST (Rs 116.82)/month</div>'
-        '<div style="color:#475569;font-size:13px;margin-top:6px;">Up to two golden-tier picks a week, '
-        'every Monday, with buy/target prices.</div>'
-        '</td>'
-        '</tr></table>'
+        '<div style="max-width:600px;margin:12px 0;padding:12px;border:1px solid #e2e8f0;border-radius:8px;">'
+        '<div style="font-weight:bold;color:#0f172a;">StoqBell Pro -- Rs 299 + GST (Rs 352.82)/month</div>'
+        '<div style="color:#475569;font-size:13px;margin-top:6px;">The full Highly Recommended list every day, '
+        'real-time intraday alerts, and target-hit notifications, on top of the free daily Pick of the Day.</div>'
+        '</div>'
         f'<p><a href="{STOCKS_LOGIN_URL}" style="color:#0ea5e9;font-weight:bold;">Log in to subscribe &rarr;</a></p>'
         f'<p style="color:#64748b;font-size:0.85em;margin-top:16px;">{DISCLAIMER}</p>'
     )
@@ -910,7 +882,7 @@ def send_trial_started_email(email, name, trial_end_label):
     greeting = name or email
     subject = 'Your StoqBell 7-day free trial has started'
     headline = (
-        f"Your password is set and your 7-day free trial is now active -- full Standard-plan access "
+        f"Your password is set and your 7-day free trial is now active -- full StoqBell Pro access "
         f"through {trial_end_label}, no card required. You'll get a Pick of the Day each trading day, "
         f"plus a bonus large-cap pick twice a week."
     )
@@ -1664,141 +1636,6 @@ def send_daily_suggestions_email(db, target_date=None, recipient_ids=None, custo
     }
 
 
-def _build_starters_email_content(suggestions, week_label):
-    """Same rendering as _build_email_content's non-empty branch (stock
-    card, horizon disclaimer, DISCLAIMER footer) but Starters-flavored
-    copy -- "This Week's Pick" rather than "Today's Recommendation". Only
-    ever called with a non-empty suggestions list (see
-    send_weekly_starters_email, which sends nothing at all on a week with
-    no pick, unlike the daily email's always-send-something behavior --
-    so there's no empty-suggestions branch here to mirror)."""
-    if len(suggestions) == 1:
-        subject = f"StoqBell Starters — This Week's Pick: {_company_display_name(suggestions[0])} ({week_label})"
-    else:
-        subject = f"StoqBell Starters — {len(suggestions)} Picks for the Week of {week_label}"
-
-    heading = "This Week's Pick" if len(suggestions) == 1 else "This Week's Picks"
-    any_horizon_targets = any(
-        compute_projection_targets(
-            s.get('buy_price'), s.get('target_sell_price'), s.get('pattern_name'), s.get('holding_period_days')
-        )
-        for s in suggestions
-    )
-
-    text_lines = [f'{heading} (week of {week_label}):', '']
-    for s in suggestions:
-        text_lines.append(_render_stock_card_text(s))
-        text_lines.append('')
-    if any_horizon_targets:
-        text_lines.append(HORIZON_DISCLAIMER)
-        text_lines.append('')
-    text_lines.append(DISCLAIMER)
-    text_body = '\n'.join(text_lines)
-
-    horizon_note_html = (
-        f'<p style="color:#64748b;font-size:0.8em;line-height:1.5;font-family:Arial,Helvetica,sans-serif;">{HORIZON_DISCLAIMER}</p>'
-        if any_horizon_targets else ''
-    )
-    html_inner = (
-        f'<p style="font-family:Arial,Helvetica,sans-serif;font-size:16px;color:#0f172a;">{heading}:</p>'
-        + ''.join(_render_stock_card_html(s) for s in suggestions)
-        + horizon_note_html
-        + f'<p style="color:#64748b;font-size:0.85em;margin-top:16px;font-family:Arial,Helvetica,sans-serif;">{DISCLAIMER}</p>'
-    )
-    return subject, text_body, html_inner
-
-
-def send_weekly_starters_email(db, target_date=None, recipient_ids=None):
-    """The Starters-tier (Rs 99/mo) equivalent of send_daily_suggestions_email
-    -- fetches target_date's week via utils.starters_engine.get_starters_suggestions
-    (a genuinely separate, stricter-bar pick, see that module) and emails
-    every active stocks_admin_users row with stocks_plan='starters'.
-
-    Diverges from the daily email on purpose: when there's nothing to send
-    (no golden-tier candidate cleared the bar that week -- the normal case
-    most weeks), this sends NOTHING at all and returns early, rather than
-    the daily email's always-send-something "nothing cleared the bar"
-    notice. A low-frequency, low-price tier shouldn't get a "sorry,
-    nothing this week" email on top of already getting only ~4 a month.
-
-    target_date/recipient_ids have the exact same meaning as
-    send_daily_suggestions_email's own params (target_date defaults to
-    today -- pass the Monday being generated for; recipient_ids restricts
-    to specific accounts, for a future resend feature, same
-    empty-list-means-nobody semantics)."""
-    if target_date is None:
-        target_date = date.today()
-    elif isinstance(target_date, str):
-        target_date = date.fromisoformat(target_date[:10])
-    date_iso = target_date.isoformat()
-    date_label = target_date.strftime('%d %b %Y')
-
-    suggestions = get_starters_suggestions(db, start_date=date_iso, end_date=date_iso)
-    if not suggestions:
-        return {'suggestion_count': 0, 'recipient_count': 0, 'sent': 0, 'failed': 0, 'failures': []}
-
-    subject, text_body_base, html_inner_base = _build_starters_email_content(suggestions, date_label)
-
-    if recipient_ids is not None:
-        recipient_ids = list(recipient_ids)
-        if recipient_ids:
-            placeholders = ','.join('?' * len(recipient_ids))
-            recipients = db.execute(
-                f"SELECT id, username AS email, name FROM stocks_admin_users "
-                f"WHERE role='viewer' AND is_active=1 AND stocks_plan='starters' "
-                f"AND email_unsubscribed_at IS NULL "
-                f"AND (trial_pending_password_change IS NULL OR trial_pending_password_change=0) "
-                f"AND id IN ({placeholders})",
-                tuple(recipient_ids)
-            ).fetchall()
-        else:
-            recipients = []
-    else:
-        recipients = db.execute(
-            "SELECT id, username AS email, name FROM stocks_admin_users "
-            "WHERE role='viewer' AND is_active=1 AND stocks_plan='starters' AND email_unsubscribed_at IS NULL "
-            "AND (trial_pending_password_change IS NULL OR trial_pending_password_change=0)"
-        ).fetchall()
-
-    sent = 0
-    failed = 0
-    failures = []
-    for r in recipients:
-        try:
-            referral_code = get_or_create_referral_code(db, r['id'])
-        except Exception:
-            referral_code = None
-        if referral_code:
-            text_body = f'{text_body_base}\n\n{_referral_footer_text(referral_code)}\n'
-            html_body = _wrap_email_html(html_inner_base + _referral_footer_html(referral_code))
-        else:
-            text_body = text_body_base
-            html_body = _wrap_email_html(html_inner_base)
-
-        ok, detail = send_zeptomail_stocks_email(
-            to_email=r['email'],
-            to_name=r.get('name') or r['email'],
-            subject=subject,
-            textbody=text_body,
-            htmlbody=html_body,
-            sender_name='StoqBell',
-        )
-        record_delivery(db, 'starters', date_iso, r.get('id'), r['email'], 'sent' if ok else 'failed', None if ok else detail)
-        if ok:
-            sent += 1
-        else:
-            failed += 1
-            failures.append({'email': r['email'], 'error': detail})
-
-    return {
-        'suggestion_count': len(suggestions),
-        'recipient_count': len(recipients),
-        'sent': sent,
-        'failed': failed,
-        'failures': failures,
-    }
-
-
 def _build_large_cap_bonus_email_content(suggestions, date_label):
     """Same rendering as _build_email_content's non-empty branch, with
     copy that makes clear this is a BONUS pick on top of the day's regular
@@ -1811,7 +1648,7 @@ def _build_large_cap_bonus_email_content(suggestions, date_label):
     subject = f"StoqBell — Bonus Large-Cap Pick: {company} ({date_label})"
 
     intro_text = (
-        'A bonus pick, exclusive to Standard-plan subscribers, on top of your regular Pick of the Day -- '
+        'A bonus pick, exclusive to StoqBell Pro subscribers, on top of your regular Pick of the Day -- '
         'drawn only from large, established companies (market cap above Rs 30,000 crore).'
     )
     any_horizon_targets = any(
@@ -1880,7 +1717,7 @@ def send_large_cap_bonus_email(db, target_date=None, recipient_ids=None):
             placeholders = ','.join('?' * len(recipient_ids))
             recipients = db.execute(
                 f"SELECT id, username AS email, name FROM stocks_admin_users "
-                f"WHERE role='viewer' AND is_active=1 AND stocks_plan='standard' "
+                f"WHERE role='viewer' AND is_active=1 AND stocks_plan='pro' "
                 f"AND email_unsubscribed_at IS NULL "
                 f"AND (trial_pending_password_change IS NULL OR trial_pending_password_change=0) "
                 f"AND id IN ({placeholders})",
@@ -1891,7 +1728,7 @@ def send_large_cap_bonus_email(db, target_date=None, recipient_ids=None):
     else:
         recipients = db.execute(
             "SELECT id, username AS email, name FROM stocks_admin_users "
-            "WHERE role='viewer' AND is_active=1 AND stocks_plan='standard' AND email_unsubscribed_at IS NULL "
+            "WHERE role='viewer' AND is_active=1 AND stocks_plan='pro' AND email_unsubscribed_at IS NULL "
             "AND (trial_pending_password_change IS NULL OR trial_pending_password_change=0)"
         ).fetchall()
 

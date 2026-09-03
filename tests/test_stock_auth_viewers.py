@@ -295,16 +295,16 @@ def test_toggle_viewer_pro_never_touches_a_non_viewer_role():
     assert db.rows[0]['is_pro'] == 0
 
 
-def test_set_viewer_plan_switches_to_starters():
+def test_set_viewer_plan_switches_to_pro():
     db = FakeViewerDB()
     create_viewer_account(db, 'a@example.com', 'A', created_by_id=1)
     admin_id = db.rows[0]['id']
 
-    assert set_viewer_plan(db, admin_id, 'starters') is True
-    assert db.rows[0]['stocks_plan'] == 'starters'
+    assert set_viewer_plan(db, admin_id, 'pro') is True
+    assert db.rows[0]['stocks_plan'] == 'pro'
 
-    assert set_viewer_plan(db, admin_id, 'standard') is True
-    assert db.rows[0]['stocks_plan'] == 'standard'
+    assert set_viewer_plan(db, admin_id, 'regular') is True
+    assert db.rows[0]['stocks_plan'] == 'regular'
 
 
 def test_set_viewer_plan_rejects_an_unrecognized_plan():
@@ -316,17 +316,17 @@ def test_set_viewer_plan_rejects_an_unrecognized_plan():
 
 def test_set_viewer_plan_returns_false_for_nonexistent_id():
     db = FakeViewerDB()
-    assert set_viewer_plan(db, 999, 'starters') is False
+    assert set_viewer_plan(db, 999, 'pro') is False
 
 
 def test_set_viewer_plan_never_touches_a_non_viewer_role():
     db = FakeViewerDB(rows=[{
         'id': 1, 'username': 'boss', 'password_hash': 'x', 'role': 'super_admin',
         'name': None, 'created_by': None, 'is_active': 1, 'can_view_watchlist': 0,
-        'is_pro': 0, 'stocks_plan': 'standard', 'created_at': '2026-01-01',
+        'is_pro': 0, 'stocks_plan': 'regular', 'created_at': '2026-01-01',
     }])
-    assert set_viewer_plan(db, 1, 'starters') is False
-    assert db.rows[0]['stocks_plan'] == 'standard'
+    assert set_viewer_plan(db, 1, 'pro') is False
+    assert db.rows[0]['stocks_plan'] == 'regular'
 
 
 def test_delete_viewer_account_removes_the_row():

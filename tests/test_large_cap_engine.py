@@ -7,7 +7,21 @@ Starters has)."""
 from datetime import date, timedelta
 
 from tests.test_suggestion_engine import _candidate
-from tests.test_starters_engine import _golden_candidate
+
+
+def _golden_candidate(watchlist_id, symbol, **overrides):
+    """A candidate strong enough to clear NNS_GOLDEN_MIN (8.0) -- the plain
+    _candidate() fixture only scores ~silver. (Was in the now-removed
+    tests/test_starters_engine.py; inlined here since large_cap tests still
+    need a golden-tier fixture.)"""
+    return _candidate(
+        watchlist_id, symbol,
+        peg_ratio=0.1, quarterly_profit_growth_pct=35, quarterly_revenue_growth_pct=30,
+        opm_pct=45, roce_pct=30, roa_pct=20, rsi_14=52.5, pe_ratio=12, price_to_book=2,
+        **overrides
+    )
+
+
 from stoqbell.utils.large_cap_engine import (
     LARGE_CAP_BONUS_REPEAT_WINDOW_DAYS,
     TOP_N_LARGE_CAP_BONUS,

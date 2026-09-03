@@ -81,13 +81,6 @@ from stoqbell.utils.stocks_referrals import (
     find_referrer_by_code,
     get_or_create_referral_code,
 )
-from stoqbell.utils.starters_engine import (
-    STARTERS_REPEAT_WINDOW_DAYS,
-    generate_weekly_starters_pick,
-    get_starters_suggestions,
-    get_starters_suggestion_by_id,
-    initialize_starters_suggestions_table_if_needed,
-)
 from stoqbell.utils.large_cap_engine import (
     LARGE_CAP_BONUS_REPEAT_WINDOW_DAYS,
     generate_large_cap_bonus_pick,
@@ -238,7 +231,6 @@ from stoqbell.utils.suggestion_email import (
     send_projection_target_achieved_email,
     send_trial_ended_email,
     send_trial_started_email,
-    send_weekly_starters_email,
     send_large_cap_bonus_email,
     send_rebrand_announcement_to_all_viewers,
     send_activation_reminder_email,
@@ -312,8 +304,6 @@ STOCKS_REFERRAL_PRICE_DISPLAY = 'Rs 199 + GST (Rs 234.82)'
 # object, same one-time-setup nature as the two above -- no discount
 # variant exists for this tier (the referral discount stays Standard-only,
 # see /stocks/signup).
-RAZORPAY_STOCKS_STARTERS_PLAN_ID = os.environ.get('RAZORPAY_STOCKS_STARTERS_PLAN_ID', '')
-STOCKS_STARTERS_PRICE_DISPLAY = 'Rs 99 + GST (Rs 116.82)'
 # Shared secret for every Stocks cron-triggered route (price sync, indicator
 # calc, fundamentals rotation scrape, etc.) -- the caller is always a
 # GitHub Actions workflow (.github/workflows/stocks-*.yml), not a Render
@@ -342,7 +332,6 @@ def init_stocks_tables():
     initialize_stocks_email_recipients_table_if_needed(client)
     initialize_saved_filters_table_if_needed(client)
     initialize_auto_trade_tables_if_needed(client)
-    initialize_starters_suggestions_table_if_needed(client)
     initialize_large_cap_bonus_suggestions_table_if_needed(client)
     initialize_admin_alerts_table_if_needed(client)
     initialize_stock_news_table_if_needed(client)
@@ -761,41 +750,6 @@ def stocks_suggestions_send_daily_email():
 
     return _dispatch_stocks_job(db, is_cron, 'suggestion_email', _job)
 
-
-@stocks_bp.route('/stocks/starters/send-weekly-email', methods=['POST'])
-def stocks_starters_send_weekly_email():
-    """Starters-tier (Rs 99/mo) equivalent of /stocks/suggestions/send-daily-email
-    -- generates this week's separately-curated golden-tier-only pick (see
-    utils/starters_engine.py) and emails every active stocks_plan='starters'
-    viewer. Same dual cron/session auth as every other Stocks job route.
-
-    Triggered by a DAILY cron (same 02:00 UTC slot as the daily suggestion
-    email), not a Monday-only one -- this job body itself checks the
-    weekday and is_trading_day() and always calls record_job_success
-    either way, exactly mirroring how the daily job already handles
-    non-trading-days (see JOB_EXPECTATIONS in utils/stock_alerting.py for
-    why this needs no day-of-week awareness there)."""
-    is_cron = has_valid_cron_secret(request.headers, STOCKS_FUNDAMENTALS_CRON_SECRET)
-    if not is_cron and not session.get('stocks_admin_id'):
-        return redirect(url_for('stocks.stocks_admin_login'))
-
-    db = get_db()
-
-    def _job(job_db):
-        if date.today().weekday() != 0 or not is_trading_day():
-            record_job_success(job_db, 'starters_weekly_email')
-            return {'status': 'skipped', 'reason': 'not a Monday trading day'}
-        try:
-            generate_weekly_starters_pick(job_db)
-            summary = send_weekly_starters_email(job_db)
-        except Exception as e:
-            current_app.logger.error(f'Weekly Starters email failed: {e}')
-            alert_job_error(job_db, 'starters_weekly_email', str(e))
-            raise
-        record_job_success(job_db, 'starters_weekly_email')
-        return summary
-
-    return _dispatch_stocks_job(db, is_cron, 'starters_weekly_email', _job)
 
 
 # Tuesday and Friday -- the two runs a week that produce a bonus large-cap
@@ -2332,7 +2286,7 @@ def stocks_home():
 
     suggestion_summary = None
     if is_viewer:
-        is_starters = session.get('stocks_plan') == 'starters'
+        is_starters = False
         if is_starters:
             start_date = (date.today() - timedelta(days=63)).isoformat()
             recent_suggestions = [dict(r, source='starters') for r in get_starters_suggestions(db, start_date=start_date)]
@@ -2396,7 +2350,6 @@ def _pct_increase(buy_price, price):
 # table on the company/universe detail page.
 _ANALYSIS_SOURCE_LABELS = {
     'daily': 'Pick of the Day',
-    'starters': 'Starters Weekly Pick',
     'large_cap': 'Bonus Large-Cap Pick',
 }
 
@@ -2434,8 +2387,6 @@ def stocks_suggestion_analysis(source, suggestion_id):
     db = get_db()
     if source == 'daily':
         suggestion = get_suggestion_by_id(db, suggestion_id)
-    elif source == 'starters':
-        suggestion = get_starters_suggestion_by_id(db, suggestion_id)
     else:
         suggestion = get_large_cap_bonus_suggestion_by_id(db, suggestion_id)
 
@@ -2623,7 +2574,7 @@ def stocks_my_suggestions():
     this changed, so they keep seeing the daily view regardless."""
     db = get_db()
     admin_id = session.get('stocks_admin_id')
-    is_starters = session.get('stocks_plan') == 'starters'
+    is_starters = False
     if is_starters:
         # ~9 weeks -- enough recent weekly picks to be worth showing on the
         # landing page without becoming the full all-time list (that's
@@ -2655,7 +2606,7 @@ def stocks_my_history():
     Branches to the Starters weekly-pick history the same way
     stocks_my_suggestions does -- see that route's docstring."""
     db = get_db()
-    is_starters = session.get('stocks_plan') == 'starters'
+    is_starters = False
     if is_starters:
         suggestions = _annotate_suggestions_with_projection(get_starters_suggestions(db))
     else:
@@ -3064,7 +3015,7 @@ def stocks_landing():
     return render_template('admin/stocks_landing.html')
 
 
-def _render_stocks_checkout(admin_id, email, name, plan='standard', referral_plan=False):
+def _render_stocks_checkout(admin_id, email, name, plan='pro', referral_plan=False):
     """Creates a fresh Razorpay subscription for admin_id and renders the
     Checkout page for it -- shared by /stocks/signup (password path) and
     /stocks/auth/google/callback (Google path), and also re-run any time a
@@ -3096,9 +3047,6 @@ def _render_stocks_checkout(admin_id, email, name, plan='standard', referral_pla
     if referral_plan:
         plan_id, price_display = RAZORPAY_STOCKS_REFERRAL_PLAN_ID, STOCKS_REFERRAL_PRICE_DISPLAY
         missing_var = 'RAZORPAY_STOCKS_REFERRAL_PLAN_ID'
-    elif plan == 'starters':
-        plan_id, price_display = RAZORPAY_STOCKS_STARTERS_PLAN_ID, STOCKS_STARTERS_PRICE_DISPLAY
-        missing_var = 'RAZORPAY_STOCKS_STARTERS_PLAN_ID'
     else:
         plan_id, price_display = RAZORPAY_STOCKS_PLAN_ID, STOCKS_SUBSCRIPTION_PRICE_DISPLAY
         missing_var = 'RAZORPAY_STOCKS_PLAN_ID'
@@ -3159,7 +3107,7 @@ def _finish_stocks_signup(row, email, name, plan):
         return redirect(url_for('stocks.stocks_my_suggestions'))
     return _render_stocks_checkout(
         row['id'], email, name, plan=plan,
-        referral_plan=bool(row.get('referred_by_id')) and plan == 'standard',
+        referral_plan=bool(row.get('referred_by_id')) and plan == 'pro',
     )
 
 
@@ -3196,11 +3144,11 @@ def stocks_signup():
         return render_template(
             'admin/stocks_signup.html', recaptcha_site_key=STOCKS_RECAPTCHA_SITE_KEY, form_rendered_at=time.time(),
             referral_code_prefill=(request.args.get('ref') or '').strip(),
-            plan_prefill='starters' if request.args.get('plan') == 'starters' else 'standard',
+            plan_prefill='regular',
         )
 
     referral_code_prefill = (request.form.get('referral_code') or '').strip()
-    plan = 'starters' if request.form.get('plan') == 'starters' else 'standard'
+    plan = 'regular'  # self-serve signup always creates a free Regular account
 
     if (request.form.get('system_verification_token') or '').strip():
         current_app.logger.warning(f'Bot caught on stocks signup (honeypot): {request.form.get("email")}')
@@ -3269,7 +3217,7 @@ def stocks_signup():
     # signup again still gets the plan and discount it originally
     # qualified for, as long as it's still on its first, never-completed
     # payment attempt).
-    account_plan = row.get('stocks_plan', 'standard')
+    account_plan = row.get('stocks_plan', 'regular')
     return _finish_stocks_signup(row, email, name, account_plan)
 
 
@@ -3328,7 +3276,7 @@ def stocks_subscribe_verify():
     activate_subscription(db, admin_id, current_period_end)
     session.pop('stocks_pending_signup_id', None)
 
-    if row.get('referred_by_id') and row.get('stocks_plan', 'standard') == 'standard' and RAZORPAY_STOCKS_PLAN_ID:
+    if row.get('referred_by_id') and row.get('stocks_plan', 'regular') == 'pro' and RAZORPAY_STOCKS_PLAN_ID:
         # This account's first cycle just billed at the discounted
         # referral rate (Rs 199 -- see _render_stocks_checkout's
         # referral_plan param) -- schedule the swap back to the regular
@@ -3357,12 +3305,12 @@ def stocks_subscribe_verify():
     session['stocks_admin_role'] = 'viewer'
     session['stocks_can_view_watchlist'] = bool(row.get('can_view_watchlist'))
     session['stocks_must_change_password'] = bool(row.get('must_change_password'))
-    session['stocks_plan'] = row.get('stocks_plan', 'standard')
+    session['stocks_plan'] = row.get('stocks_plan', 'regular')
     session.modified = True
 
     try:
         period_end_label = current_period_end.strftime('%d %b %Y')
-        subscriber_plan = row.get('stocks_plan', 'standard')
+        subscriber_plan = row.get('stocks_plan', 'regular')
         if subscriber_plan == 'starters':
             # The most recent pick(s) still within the rotation window --
             # not "today's", since Starters only generates on Mondays; a
@@ -3410,7 +3358,7 @@ def stocks_google_login():
     if next_url:
         session['stocks_pending_next_url'] = next_url
     plan_param = request.args.get('plan')
-    if plan_param in ('standard', 'starters'):
+    if plan_param in ('regular', 'pro'):
         session['stocks_pending_plan'] = plan_param
     session.modified = True
     provider = auth_providers.get_auth_provider('google')
@@ -3489,7 +3437,7 @@ def stocks_google_callback():
         session['stocks_admin_role'] = 'viewer'
         session['stocks_can_view_watchlist'] = bool(row.get('can_view_watchlist'))
         session['stocks_must_change_password'] = bool(row.get('must_change_password'))
-        session['stocks_plan'] = row.get('stocks_plan', 'standard')
+        session['stocks_plan'] = row.get('stocks_plan', 'regular')
         session.modified = True
         if session['stocks_must_change_password']:
             return redirect(url_for('stocks.stocks_change_password'))
@@ -3513,8 +3461,8 @@ def stocks_google_callback():
     # matching comment in /stocks/signup) so a retried checkout still gets
     # the same plan and discount it originally qualified for.
     return _render_stocks_checkout(
-        row['id'], email, name, plan=row.get('stocks_plan', 'standard'),
-        referral_plan=bool(row.get('referred_by_id')) and row.get('stocks_plan', 'standard') == 'standard',
+        row['id'], email, name, plan=row.get('stocks_plan', 'regular'),
+        referral_plan=bool(row.get('referred_by_id')) and row.get('stocks_plan', 'regular') == 'pro',
     )
 
 
@@ -3549,7 +3497,7 @@ def stocks_plans_continue():
         which plan is picked. Lets them switch Standard<->Starters from
         what they originally trialed, since nothing's been paid for yet."""
     plan = request.args.get('plan')
-    if plan not in ('standard', 'starters'):
+    if plan not in ('regular', 'pro'):
         flash('Please choose a plan to continue.', 'error')
         return redirect(url_for('stocks.stocks_plans'))
 
@@ -3848,7 +3796,7 @@ def stocks_admin_login():
     # super_admin/child_admin, who always have watchlist access regardless.
     session['stocks_can_view_watchlist'] = bool(admin_row.get('can_view_watchlist'))
     session['stocks_must_change_password'] = bool(admin_row.get('must_change_password'))
-    session['stocks_plan'] = admin_row.get('stocks_plan', 'standard')
+    session['stocks_plan'] = admin_row.get('stocks_plan', 'regular')
     session.modified = True
     # A forced password change wins over every other redirect below -- see
     # stock_auth.py's access decorators, which enforce this on every
