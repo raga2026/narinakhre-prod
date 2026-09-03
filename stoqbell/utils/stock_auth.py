@@ -265,6 +265,32 @@ STOCKS_AUTH_ALTER_SQL = [
     # (set_viewer_plan) -- no self-serve upgrade/downgrade flow exists.
     "ALTER TABLE stocks_admin_users ADD COLUMN IF NOT EXISTS stocks_plan TEXT NOT NULL DEFAULT 'standard' "
     "CHECK (stocks_plan IN ('standard', 'starters'))",
+    # --- 2026-09 free/pro restructuring -------------------------------------
+    # The daily Pick of the Day is now free for every account ('regular').
+    # 'pro' (Rs 299/mo) is a pure notification tier: the uncapped Highly
+    # Recommended list (what raga2020@gmail.com gets), intraday alerts, and
+    # target-hit notifications. Starters (Rs 99/mo, weekly pick) is retired.
+    #
+    # Profile fields collected at Regular signup (format-validated only, no
+    # OTP / no pincode or location lookup). Nullable -- accounts that
+    # predate this are prompted once on next login and may skip.
+    'ALTER TABLE stocks_admin_users ADD COLUMN IF NOT EXISTS phone_country_code TEXT',
+    'ALTER TABLE stocks_admin_users ADD COLUMN IF NOT EXISTS phone TEXT',
+    'ALTER TABLE stocks_admin_users ADD COLUMN IF NOT EXISTS date_of_birth DATE',
+    'ALTER TABLE stocks_admin_users ADD COLUMN IF NOT EXISTS location TEXT',
+    'ALTER TABLE stocks_admin_users ADD COLUMN IF NOT EXISTS pincode TEXT',
+    # Value migration, idempotent (re-runs as no-ops once every row is
+    # regular/pro): only an actively-PAYING standard subscriber keeps 'pro'
+    # through their paid period; everyone else -- starters, trialing,
+    # cancelled, admin-created viewers, past signups -- becomes 'regular'.
+    "UPDATE stocks_admin_users SET stocks_plan='pro' WHERE stocks_plan='standard' "
+    "AND subscription_status='active' "
+    "AND (subscription_current_period_end IS NULL OR subscription_current_period_end > NOW())",
+    "UPDATE stocks_admin_users SET stocks_plan='regular' WHERE stocks_plan IN ('standard', 'starters')",
+    "ALTER TABLE stocks_admin_users ALTER COLUMN stocks_plan SET DEFAULT 'regular'",
+    'ALTER TABLE stocks_admin_users DROP CONSTRAINT IF EXISTS stocks_admin_users_stocks_plan_check',
+    "ALTER TABLE stocks_admin_users ADD CONSTRAINT stocks_admin_users_stocks_plan_check "
+    "CHECK (stocks_plan IN ('regular', 'pro'))",
 ]
 
 
