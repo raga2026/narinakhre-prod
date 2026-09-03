@@ -440,7 +440,8 @@ def _fetch_candidates(db, market_cap_tier=None):
                   i.rsi_14, i.cross_status, i.volume_trend,
                   f.pe_ratio, f.peg_ratio, f.opm_pct, f.roce_pct, f.roa_pct,
                   f.quarterly_profit_growth_pct, f.quarterly_revenue_growth_pct,
-                  f.price_to_book, f.promoter_holding_pct, f.fii_holding_pct, f.snapshot_date,
+                  f.price_to_book, f.promoter_holding_pct, f.fii_holding_pct,
+                  f.free_cash_flow, f.reserves_to_debt_ratio, f.snapshot_date,
                   d.close AS latest_close
            FROM stock_watchlist w
            LEFT JOIN stock_universe u ON u.symbol = w.symbol AND u.exchange = w.exchange
@@ -488,7 +489,8 @@ def _fetch_universe_candidates(db):
                   i.rsi_14, i.cross_status, i.volume_trend,
                   f.pe_ratio, f.peg_ratio, f.opm_pct, f.roce_pct, f.roa_pct,
                   f.quarterly_profit_growth_pct, f.quarterly_revenue_growth_pct,
-                  f.price_to_book, f.promoter_holding_pct, f.fii_holding_pct, f.snapshot_date,
+                  f.price_to_book, f.promoter_holding_pct, f.fii_holding_pct,
+                  f.free_cash_flow, f.reserves_to_debt_ratio, f.snapshot_date,
                   d.close AS latest_close
            FROM stock_universe u
            LEFT JOIN stock_watchlist w ON w.symbol = u.symbol AND w.exchange = u.exchange AND w.is_active = 1

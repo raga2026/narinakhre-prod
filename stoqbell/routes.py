@@ -1701,7 +1701,8 @@ def stocks_watchlist():
                   w.id AS watchlist_id, w.fundamental_tier,
                   f.pe_ratio, f.peg_ratio, f.eps, f.opm_pct, f.roce_pct, f.roa_pct,
                   f.quarterly_profit_growth_pct, f.quarterly_revenue_growth_pct, f.price_to_book,
-                  f.promoter_holding_pct, f.fii_holding_pct, f.snapshot_date,
+                  f.promoter_holding_pct, f.fii_holding_pct,
+                  f.free_cash_flow, f.reserves_to_debt_ratio, f.snapshot_date,
                   i.rsi_14, i.cross_status, i.volume_trend, i.calc_date,
                   d.close AS latest_price, d.trade_date AS price_date,
                   u.live_price, u.live_price_updated_at
