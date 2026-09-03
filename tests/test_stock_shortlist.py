@@ -1,13 +1,21 @@
 import re
+from datetime import date, timedelta
 
 from stoqbell.utils.stock_shortlist import (
     LARGE_CAP_SHORTLIST_SOURCE,
+    MAX_SNAPSHOT_AGE_DAYS,
     SHORTLIST_SOURCE,
     _compute_industry_benchmarks,
     get_golden_cross_not_qualified,
     run_fundamental_shortlist,
     run_large_cap_shortlist,
 )
+
+# run_fundamental_shortlist ignores fundamentals older than
+# MAX_SNAPSHOT_AGE_DAYS, so the fixture snapshot date has to stay recent
+# relative to whenever the suite runs -- a hardcoded date silently makes
+# every candidate "too stale" once the clock moves past the window.
+RECENT_SNAPSHOT = (date.today() - timedelta(days=max(1, MAX_SNAPSHOT_AGE_DAYS // 4))).isoformat()
 
 
 class FakeCursor:
@@ -167,9 +175,9 @@ def test_shortlist_deactivates_no_longer_passing_and_protects_manual_rows():
         {'id': 3, 'symbol': 'MANUALCO', 'exchange': 'NSE', 'company_name': 'Manual Co Ltd', 'is_scrape_eligible': True},
     ]
     fundamentals = [
-        {'universe_id': 1, 'snapshot_date': '2026-08-10', **PASSING_FUNDAMENTALS},
-        {'universe_id': 2, 'snapshot_date': '2026-08-10', **FAILING_FUNDAMENTALS},
-        {'universe_id': 3, 'snapshot_date': '2026-08-10', **PASSING_FUNDAMENTALS},
+        {'universe_id': 1, 'snapshot_date': RECENT_SNAPSHOT, **PASSING_FUNDAMENTALS},
+        {'universe_id': 2, 'snapshot_date': RECENT_SNAPSHOT, **FAILING_FUNDAMENTALS},
+        {'universe_id': 3, 'snapshot_date': RECENT_SNAPSHOT, **PASSING_FUNDAMENTALS},
     ]
     watchlist = [
         {'symbol': 'STILLGOOD', 'exchange': 'NSE', 'name': 'Still Good Ltd', 'is_active': 1, 'source': SHORTLIST_SOURCE},
@@ -208,7 +216,7 @@ def test_shortlist_deactivates_no_longer_passing_and_protects_manual_rows():
 
 def test_bronze_only_candidate_gets_watchlisted_not_excluded():
     universe = [{'id': 1, 'symbol': 'BRONZECO', 'exchange': 'NSE', 'company_name': 'Bronze Co Ltd', 'is_scrape_eligible': True}]
-    fundamentals = [{'universe_id': 1, 'snapshot_date': '2026-08-10', **BRONZE_FUNDAMENTALS}]
+    fundamentals = [{'universe_id': 1, 'snapshot_date': RECENT_SNAPSHOT, **BRONZE_FUNDAMENTALS}]
     db = FakeShortlistDB(universe, fundamentals, watchlist_rows=[])
 
     summary = run_fundamental_shortlist(db)
@@ -230,7 +238,7 @@ def test_watchlist_is_not_blanked_when_nothing_qualifies_this_run():
     # existing, previously-qualified rows must stay exactly as they were
     # until a run actually produces a fresh qualifying set.
     universe = [{'id': 1, 'symbol': 'NOWFAILING', 'exchange': 'NSE', 'company_name': 'Now Failing Ltd', 'is_scrape_eligible': True}]
-    fundamentals = [{'universe_id': 1, 'snapshot_date': '2026-08-10', **FAILING_FUNDAMENTALS}]
+    fundamentals = [{'universe_id': 1, 'snapshot_date': RECENT_SNAPSHOT, **FAILING_FUNDAMENTALS}]
     watchlist = [
         {'symbol': 'NOWFAILING', 'exchange': 'NSE', 'name': 'Now Failing Ltd', 'is_active': 1, 'source': SHORTLIST_SOURCE},
     ]
@@ -255,7 +263,7 @@ def test_previous_snapshot_lookup_is_batched_not_one_query_per_candidate():
         for i in range(1, 11)
     ]
     fundamentals = [
-        {'universe_id': i, 'snapshot_date': '2026-08-10', **PASSING_FUNDAMENTALS}
+        {'universe_id': i, 'snapshot_date': RECENT_SNAPSHOT, **PASSING_FUNDAMENTALS}
         for i in range(1, 11)
     ]
     db = FakeShortlistDB(universe, fundamentals, watchlist_rows=[])
@@ -270,7 +278,7 @@ def test_passing_company_not_previously_in_watchlist_gets_inserted():
         {'id': 1, 'symbol': 'NEWCO', 'exchange': 'NSE', 'company_name': 'New Co Ltd', 'is_scrape_eligible': True},
     ]
     fundamentals = [
-        {'universe_id': 1, 'snapshot_date': '2026-08-10', **PASSING_FUNDAMENTALS},
+        {'universe_id': 1, 'snapshot_date': RECENT_SNAPSHOT, **PASSING_FUNDAMENTALS},
     ]
     db = FakeShortlistDB(universe, fundamentals, watchlist_rows=[])
 
@@ -292,7 +300,7 @@ def test_pe_only_failure_gets_included_as_silver_not_excluded():
         {'id': 1, 'symbol': 'SILVERCO', 'exchange': 'NSE', 'company_name': 'Silver Co Ltd', 'is_scrape_eligible': True},
     ]
     fundamentals = [
-        {'universe_id': 1, 'snapshot_date': '2026-08-10', **SILVER_FUNDAMENTALS},
+        {'universe_id': 1, 'snapshot_date': RECENT_SNAPSHOT, **SILVER_FUNDAMENTALS},
     ]
     db = FakeShortlistDB(universe, fundamentals, watchlist_rows=[])
 
@@ -317,7 +325,7 @@ def test_opm_below_silver_floor_stays_excluded_not_silver():
         {'id': 1, 'symbol': 'TOOLOWOPM', 'exchange': 'NSE', 'company_name': 'Too Low OPM Ltd', 'is_scrape_eligible': True},
     ]
     fundamentals = [
-        {'universe_id': 1, 'snapshot_date': '2026-08-10', **{**PASSING_FUNDAMENTALS, 'opm_pct': 10}},
+        {'universe_id': 1, 'snapshot_date': RECENT_SNAPSHOT, **{**PASSING_FUNDAMENTALS, 'opm_pct': 10}},
     ]
     db = FakeShortlistDB(universe, fundamentals, watchlist_rows=[])
 
@@ -340,8 +348,8 @@ def test_same_company_on_nse_and_bse_only_watchlists_one_listing():
         {'id': 2, 'symbol': '500001', 'exchange': 'BSE', 'company_name': 'Acme Limited', 'is_scrape_eligible': True, 'isin': 'INE000000001'},
     ]
     fundamentals = [
-        {'universe_id': 1, 'snapshot_date': '2026-08-10', **PASSING_FUNDAMENTALS},
-        {'universe_id': 2, 'snapshot_date': '2026-08-10', **PASSING_FUNDAMENTALS},
+        {'universe_id': 1, 'snapshot_date': RECENT_SNAPSHOT, **PASSING_FUNDAMENTALS},
+        {'universe_id': 2, 'snapshot_date': RECENT_SNAPSHOT, **PASSING_FUNDAMENTALS},
     ]
     db = FakeShortlistDB(universe, fundamentals, watchlist_rows=[])
 
@@ -361,8 +369,8 @@ def test_dedup_prefers_the_listing_with_a_resolved_kite_token():
         {'id': 2, 'symbol': '500001', 'exchange': 'BSE', 'company_name': 'Acme Limited', 'is_scrape_eligible': True, 'isin': 'INE000000001'},
     ]
     fundamentals = [
-        {'universe_id': 1, 'snapshot_date': '2026-08-10', **PASSING_FUNDAMENTALS},
-        {'universe_id': 2, 'snapshot_date': '2026-08-10', **PASSING_FUNDAMENTALS},
+        {'universe_id': 1, 'snapshot_date': RECENT_SNAPSHOT, **PASSING_FUNDAMENTALS},
+        {'universe_id': 2, 'snapshot_date': RECENT_SNAPSHOT, **PASSING_FUNDAMENTALS},
     ]
     # Only the BSE listing has a working Kite price link -- it should win
     # even though NSE would otherwise be the default tiebreak.
@@ -380,8 +388,8 @@ def test_dedup_defaults_to_nse_when_neither_or_both_have_a_kite_token():
         {'id': 2, 'symbol': '500001', 'exchange': 'BSE', 'company_name': 'Acme Limited', 'is_scrape_eligible': True, 'isin': 'INE000000001'},
     ]
     fundamentals = [
-        {'universe_id': 1, 'snapshot_date': '2026-08-10', **PASSING_FUNDAMENTALS},
-        {'universe_id': 2, 'snapshot_date': '2026-08-10', **PASSING_FUNDAMENTALS},
+        {'universe_id': 1, 'snapshot_date': RECENT_SNAPSHOT, **PASSING_FUNDAMENTALS},
+        {'universe_id': 2, 'snapshot_date': RECENT_SNAPSHOT, **PASSING_FUNDAMENTALS},
     ]
     db = FakeShortlistDB(universe, fundamentals, watchlist_rows=[])  # no kite_map entries at all
 
@@ -399,8 +407,8 @@ def test_companies_without_an_isin_are_never_grouped_together():
         {'id': 2, 'symbol': 'TWO', 'exchange': 'NSE', 'company_name': 'Two Ltd', 'is_scrape_eligible': True, 'isin': ''},
     ]
     fundamentals = [
-        {'universe_id': 1, 'snapshot_date': '2026-08-10', **PASSING_FUNDAMENTALS},
-        {'universe_id': 2, 'snapshot_date': '2026-08-10', **PASSING_FUNDAMENTALS},
+        {'universe_id': 1, 'snapshot_date': RECENT_SNAPSHOT, **PASSING_FUNDAMENTALS},
+        {'universe_id': 2, 'snapshot_date': RECENT_SNAPSHOT, **PASSING_FUNDAMENTALS},
     ]
     db = FakeShortlistDB(universe, fundamentals, watchlist_rows=[])
 
@@ -422,8 +430,8 @@ def test_existing_duplicate_pair_self_heals_on_rerun():
         {'id': 2, 'symbol': '500001', 'exchange': 'BSE', 'company_name': 'Acme Limited', 'is_scrape_eligible': True, 'isin': 'INE000000001'},
     ]
     fundamentals = [
-        {'universe_id': 1, 'snapshot_date': '2026-08-10', **PASSING_FUNDAMENTALS},
-        {'universe_id': 2, 'snapshot_date': '2026-08-10', **PASSING_FUNDAMENTALS},
+        {'universe_id': 1, 'snapshot_date': RECENT_SNAPSHOT, **PASSING_FUNDAMENTALS},
+        {'universe_id': 2, 'snapshot_date': RECENT_SNAPSHOT, **PASSING_FUNDAMENTALS},
     ]
     watchlist = [
         {'symbol': 'ACME', 'exchange': 'NSE', 'name': 'Acme Ltd', 'is_active': 1, 'source': SHORTLIST_SOURCE},
@@ -457,7 +465,7 @@ def test_large_cap_shortlist_only_sources_from_large_cap_eligible_universe_rows(
         {'id': 1, 'symbol': 'MIDCAPCO', 'exchange': 'NSE', 'company_name': 'Mid Cap Co Ltd',
          'is_scrape_eligible': True, 'is_large_cap_eligible': False},
     ]
-    fundamentals = [{'universe_id': 1, 'snapshot_date': '2026-08-10', **PASSING_FUNDAMENTALS}]
+    fundamentals = [{'universe_id': 1, 'snapshot_date': RECENT_SNAPSHOT, **PASSING_FUNDAMENTALS}]
     db = FakeShortlistDB(universe, fundamentals, watchlist_rows=[])
 
     summary = run_large_cap_shortlist(db)
@@ -477,7 +485,7 @@ def test_six_percent_growth_passes_large_cap_but_would_fail_mid_cap_floor():
         {'id': 1, 'symbol': 'BIGCO', 'exchange': 'NSE', 'company_name': 'Big Co Ltd',
          'is_scrape_eligible': False, 'is_large_cap_eligible': True},
     ]
-    fundamentals = [{'universe_id': 1, 'snapshot_date': '2026-08-10', **LARGE_CAP_PASSING_FUNDAMENTALS}]
+    fundamentals = [{'universe_id': 1, 'snapshot_date': RECENT_SNAPSHOT, **LARGE_CAP_PASSING_FUNDAMENTALS}]
     db = FakeShortlistDB(universe, fundamentals, watchlist_rows=[])
 
     large_cap_summary = run_large_cap_shortlist(db)
@@ -512,7 +520,7 @@ def test_large_cap_shortlist_never_touches_mid_cap_sourced_rows():
         {'id': 1, 'symbol': 'BIGCO', 'exchange': 'NSE', 'company_name': 'Big Co Ltd',
          'is_scrape_eligible': False, 'is_large_cap_eligible': True},
     ]
-    fundamentals = [{'universe_id': 1, 'snapshot_date': '2026-08-10', **LARGE_CAP_PASSING_FUNDAMENTALS}]
+    fundamentals = [{'universe_id': 1, 'snapshot_date': RECENT_SNAPSHOT, **LARGE_CAP_PASSING_FUNDAMENTALS}]
     watchlist = [
         {'symbol': 'OLDMIDCAP', 'exchange': 'NSE', 'name': 'Old Mid Cap Ltd', 'is_active': 1, 'source': SHORTLIST_SOURCE},
     ]
@@ -534,8 +542,8 @@ def test_large_cap_shortlist_bronze_and_silver_tiers_work_the_same_as_mid_cap():
          'is_large_cap_eligible': True},
     ]
     fundamentals = [
-        {'universe_id': 1, 'snapshot_date': '2026-08-10', **{**LARGE_CAP_PASSING_FUNDAMENTALS, 'pe_ratio': 45}},
-        {'universe_id': 2, 'snapshot_date': '2026-08-10', **{**LARGE_CAP_PASSING_FUNDAMENTALS, 'roce_pct': -1}},
+        {'universe_id': 1, 'snapshot_date': RECENT_SNAPSHOT, **{**LARGE_CAP_PASSING_FUNDAMENTALS, 'pe_ratio': 45}},
+        {'universe_id': 2, 'snapshot_date': RECENT_SNAPSHOT, **{**LARGE_CAP_PASSING_FUNDAMENTALS, 'roce_pct': -1}},
     ]
     db = FakeShortlistDB(universe, fundamentals, watchlist_rows=[])
 
@@ -556,8 +564,8 @@ def test_dedup_winner_display_name_comes_from_kite_not_the_source_list():
         {'id': 2, 'symbol': '500001', 'exchange': 'BSE', 'company_name': 'Acme Limited', 'is_scrape_eligible': True, 'isin': 'INE000000001'},
     ]
     fundamentals = [
-        {'universe_id': 1, 'snapshot_date': '2026-08-10', **PASSING_FUNDAMENTALS},
-        {'universe_id': 2, 'snapshot_date': '2026-08-10', **PASSING_FUNDAMENTALS},
+        {'universe_id': 1, 'snapshot_date': RECENT_SNAPSHOT, **PASSING_FUNDAMENTALS},
+        {'universe_id': 2, 'snapshot_date': RECENT_SNAPSHOT, **PASSING_FUNDAMENTALS},
     ]
     db = FakeShortlistDB(
         universe, fundamentals, watchlist_rows=[],
@@ -576,7 +584,7 @@ def test_single_listing_name_also_uses_kite_name_when_available():
         {'id': 1, 'symbol': 'SOLO', 'exchange': 'NSE', 'company_name': 'Solo Co Ltd', 'is_scrape_eligible': True, 'isin': None},
     ]
     fundamentals = [
-        {'universe_id': 1, 'snapshot_date': '2026-08-10', **PASSING_FUNDAMENTALS},
+        {'universe_id': 1, 'snapshot_date': RECENT_SNAPSHOT, **PASSING_FUNDAMENTALS},
     ]
     db = FakeShortlistDB(
         universe, fundamentals, watchlist_rows=[],
@@ -593,7 +601,7 @@ def test_name_falls_back_to_universe_name_without_a_kite_match():
         {'id': 1, 'symbol': 'UNMATCHED', 'exchange': 'NSE', 'company_name': 'Unmatched Co Ltd', 'is_scrape_eligible': True, 'isin': None},
     ]
     fundamentals = [
-        {'universe_id': 1, 'snapshot_date': '2026-08-10', **PASSING_FUNDAMENTALS},
+        {'universe_id': 1, 'snapshot_date': RECENT_SNAPSHOT, **PASSING_FUNDAMENTALS},
     ]
     db = FakeShortlistDB(universe, fundamentals, watchlist_rows=[])  # no kite_names at all
 
@@ -678,10 +686,10 @@ def test_industry_benchmark_computed_from_this_runs_own_candidates_lets_a_compan
          'is_scrape_eligible': True, 'isin': None, 'industry': 'Software Services'},
     ]
     fundamentals = [
-        {'universe_id': 1, 'snapshot_date': '2026-08-10', **{**PASSING_FUNDAMENTALS, 'pe_ratio': 35}},
-        {'universe_id': 2, 'snapshot_date': '2026-08-10', **{**PASSING_FUNDAMENTALS, 'pe_ratio': 30}},
-        {'universe_id': 3, 'snapshot_date': '2026-08-10', **{**PASSING_FUNDAMENTALS, 'pe_ratio': 30}},
-        {'universe_id': 4, 'snapshot_date': '2026-08-10', **{**PASSING_FUNDAMENTALS, 'pe_ratio': 30}},
+        {'universe_id': 1, 'snapshot_date': RECENT_SNAPSHOT, **{**PASSING_FUNDAMENTALS, 'pe_ratio': 35}},
+        {'universe_id': 2, 'snapshot_date': RECENT_SNAPSHOT, **{**PASSING_FUNDAMENTALS, 'pe_ratio': 30}},
+        {'universe_id': 3, 'snapshot_date': RECENT_SNAPSHOT, **{**PASSING_FUNDAMENTALS, 'pe_ratio': 30}},
+        {'universe_id': 4, 'snapshot_date': RECENT_SNAPSHOT, **{**PASSING_FUNDAMENTALS, 'pe_ratio': 30}},
     ]
     db = FakeShortlistDB(universe, fundamentals, watchlist_rows=[])
 
@@ -704,8 +712,8 @@ def test_industry_with_too_few_companies_falls_back_to_flat_pe_band():
          'is_scrape_eligible': True, 'isin': None, 'industry': 'Niche Industry'},
     ]
     fundamentals = [
-        {'universe_id': 1, 'snapshot_date': '2026-08-10', **{**PASSING_FUNDAMENTALS, 'pe_ratio': 35}},
-        {'universe_id': 2, 'snapshot_date': '2026-08-10', **PASSING_FUNDAMENTALS},  # pe_ratio 20, within flat fallback
+        {'universe_id': 1, 'snapshot_date': RECENT_SNAPSHOT, **{**PASSING_FUNDAMENTALS, 'pe_ratio': 35}},
+        {'universe_id': 2, 'snapshot_date': RECENT_SNAPSHOT, **PASSING_FUNDAMENTALS},  # pe_ratio 20, within flat fallback
     ]
     db = FakeShortlistDB(universe, fundamentals, watchlist_rows=[])
 
@@ -725,7 +733,7 @@ def test_company_with_no_industry_on_record_uses_flat_fallback_band():
          'is_scrape_eligible': True, 'isin': None},  # no 'industry' key at all -- never scraped
     ]
     fundamentals = [
-        {'universe_id': 1, 'snapshot_date': '2026-08-10', **PASSING_FUNDAMENTALS},  # pe_ratio 20, within flat band
+        {'universe_id': 1, 'snapshot_date': RECENT_SNAPSHOT, **PASSING_FUNDAMENTALS},  # pe_ratio 20, within flat band
     ]
     db = FakeShortlistDB(universe, fundamentals, watchlist_rows=[])
 
