@@ -10,7 +10,8 @@ utils/stock_auth.py's STOCKS_AUTH_ALTER_SQL for the subscription_* columns
 this module reads and writes."""
 import hashlib
 import hmac
-from datetime import datetime, timedelta, timezone
+import re
+from datetime import date as _dt_date, datetime, timedelta, timezone
 
 from werkzeug.security import generate_password_hash
 
@@ -75,6 +76,94 @@ def has_stocks_access(is_pro, subscription_status, subscription_current_period_e
     if is_pro:
         return True
     return subscription_is_current(subscription_status, subscription_current_period_end, now, trial_ends_at)
+
+
+_PHONE_CC_RE = re.compile(r'^\+\d{1,4}$')
+_PHONE_RE = re.compile(r'^\d{6,14}$')
+_PINCODE_RE = re.compile(r'^\d{6}$')
+
+
+def validate_stocks_profile(phone_country_code, phone, date_of_birth, location, pincode):
+    """Format-only validation for the Regular-signup profile fields -- no
+    OTP, no pincode/location lookup, nothing checked against an external
+    source. Returns (cleaned_dict, None) or (None, error_message).
+
+    cleaned_dict has phone_country_code / phone / date_of_birth (ISO
+    string) / location / pincode, ready to hand to set_stocks_profile."""
+    cc = (phone_country_code or '').strip()
+    ph = re.sub(r'[\s\-()]', '', (phone or '').strip())
+    loc = ' '.join((location or '').split())
+    pin = (pincode or '').strip()
+    dob_raw = (date_of_birth or '').strip()[:10]
+
+    if not _PHONE_CC_RE.match(cc):
+        return None, 'Enter a valid country code, e.g. +91.'
+    if not _PHONE_RE.match(ph):
+        return None, 'Enter a valid phone number -- digits only, 6 to 14 long.'
+    if not loc:
+        return None, 'Location is required.'
+    if len(loc) > 120:
+        return None, 'Location is too long.'
+    if not _PINCODE_RE.match(pin):
+        return None, 'Enter a valid 6-digit pincode.'
+    try:
+        dob = _dt_date.fromisoformat(dob_raw)
+    except ValueError:
+        return None, 'Enter a valid date of birth.'
+    today = _dt_date.today()
+    if dob >= today:
+        return None, 'Date of birth must be in the past.'
+    if (today - dob).days > 120 * 366:
+        return None, 'Enter a valid date of birth.'
+
+    return {
+        'phone_country_code': cc, 'phone': ph, 'date_of_birth': dob.isoformat(),
+        'location': loc, 'pincode': pin,
+    }, None
+
+
+def set_stocks_profile(db, admin_id, cleaned):
+    """Writes the validated profile fields onto an account. cleaned is
+    validate_stocks_profile's first return value."""
+    db.execute(
+        "UPDATE stocks_admin_users SET phone_country_code=?, phone=?, date_of_birth=?, "
+        "location=?, pincode=?, updated_at=NOW() WHERE id=?",
+        (cleaned['phone_country_code'], cleaned['phone'], cleaned['date_of_birth'],
+         cleaned['location'], cleaned['pincode'], admin_id),
+    )
+    db.commit()
+
+
+def stocks_profile_is_complete(row):
+    """True when every profile field on this stocks_admin_users row is
+    filled -- gates the one-time 'complete your profile' prompt for Google
+    signups and grandfathered accounts."""
+    return all(
+        (row.get(k) or '').strip() if isinstance(row.get(k), str) else row.get(k)
+        for k in ('phone_country_code', 'phone', 'date_of_birth', 'location', 'pincode')
+    )
+
+
+def active_pro_subscriber_rows(db):
+    """Every account that should receive the Pro-tier emails -- the Highly
+    Recommended list, real-time intraday alerts, and target-hit
+    notifications. stocks_plan='pro', active or in-trial (has_stocks_access),
+    not email-unsubscribed, past any forced first-password-change. Returns
+    rows with id / email / name. Empty list until someone actually
+    subscribes to Pro."""
+    rows = db.execute(
+        "SELECT id, username AS email, name, is_pro, subscription_status, "
+        "subscription_current_period_end, trial_ends_at FROM stocks_admin_users "
+        "WHERE role='viewer' AND is_active=1 AND stocks_plan='pro' AND email_unsubscribed_at IS NULL "
+        "AND (trial_pending_password_change IS NULL OR trial_pending_password_change=0)"
+    ).fetchall()
+    return [
+        r for r in rows
+        if has_stocks_access(
+            r.get('is_pro'), r.get('subscription_status'),
+            r.get('subscription_current_period_end'), trial_ends_at=r.get('trial_ends_at'),
+        )
+    ]
 
 
 def subscription_is_current(subscription_status, subscription_current_period_end, now=None, trial_ends_at=None):

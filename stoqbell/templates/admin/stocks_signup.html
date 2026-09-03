@@ -97,6 +97,43 @@
             </div>
 
             <div>
+                <label class="block text-sm font-semibold text-slate-300 mb-1">Phone number</label>
+                <div class="flex gap-2">
+                    <input type="text" name="phone_country_code" required value="+91" pattern="\+\d{1,4}" inputmode="tel"
+                           aria-label="Country code" placeholder="+91"
+                           style="color:#ffffff;-webkit-text-fill-color:#ffffff;background-color:#0f172a;"
+                           class="w-20 bg-slate-900 border border-sky-500/30 rounded-xl p-3 text-center focus:outline-none focus:border-sky-500 transition">
+                    <input id="stocks-signup-phone" type="tel" name="phone" required pattern="\d{6,14}" inputmode="numeric"
+                           autocomplete="tel-national" placeholder="Digits only"
+                           style="color:#ffffff;-webkit-text-fill-color:#ffffff;background-color:#0f172a;"
+                           class="flex-1 bg-slate-900 border border-sky-500/30 rounded-xl p-3 placeholder-slate-500 focus:outline-none focus:border-sky-500 transition">
+                </div>
+            </div>
+
+            <div>
+                <label for="stocks-signup-dob" class="block text-sm font-semibold text-slate-300 mb-1">Date of birth</label>
+                <input id="stocks-signup-dob" type="date" name="date_of_birth" required
+                       style="color:#ffffff;-webkit-text-fill-color:#ffffff;background-color:#0f172a;color-scheme:dark;"
+                       class="w-full bg-slate-900 border border-sky-500/30 rounded-xl p-3 focus:outline-none focus:border-sky-500 transition">
+            </div>
+
+            <div>
+                <label for="stocks-signup-location" class="block text-sm font-semibold text-slate-300 mb-1">Location</label>
+                <input id="stocks-signup-location" type="text" name="location" required maxlength="120" autocomplete="address-level2"
+                       placeholder="City / town"
+                       style="color:#ffffff;-webkit-text-fill-color:#ffffff;background-color:#0f172a;"
+                       class="w-full bg-slate-900 border border-sky-500/30 rounded-xl p-3 placeholder-slate-500 focus:outline-none focus:border-sky-500 transition">
+            </div>
+
+            <div>
+                <label for="stocks-signup-pincode" class="block text-sm font-semibold text-slate-300 mb-1">Pincode</label>
+                <input id="stocks-signup-pincode" type="text" name="pincode" required pattern="\d{6}" inputmode="numeric"
+                       maxlength="6" autocomplete="postal-code" placeholder="6 digits"
+                       style="color:#ffffff;-webkit-text-fill-color:#ffffff;background-color:#0f172a;"
+                       class="w-full bg-slate-900 border border-sky-500/30 rounded-xl p-3 placeholder-slate-500 focus:outline-none focus:border-sky-500 transition">
+            </div>
+
+            <div>
                 <label for="stocks-signup-password" class="block text-sm font-semibold text-slate-300 mb-1">Password</label>
                 <input id="stocks-signup-password" type="password" name="password" required minlength="8" autocomplete="new-password"
                        style="color:#ffffff;-webkit-text-fill-color:#ffffff;background-color:#0f172a;"

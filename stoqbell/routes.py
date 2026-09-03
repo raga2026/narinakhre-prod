@@ -56,6 +56,9 @@ from stoqbell.utils.stock_auth import (
 )
 from stoqbell.utils.stocks_subscription import (
     SUBSCRIPTION_TOTAL_COUNT_MONTHS,
+    validate_stocks_profile,
+    set_stocks_profile,
+    stocks_profile_is_complete,
     create_pending_subscriber,
     attach_razorpay_subscription,
     activate_subscription,
@@ -846,7 +849,7 @@ def stocks_suggestions_notify_target_hits():
                 recipients = job_db.execute(
                     "SELECT id, username AS email, name, is_pro, subscription_status, "
                     "subscription_current_period_end, trial_ends_at FROM stocks_admin_users "
-                    "WHERE role='viewer' AND is_active=1 AND stocks_plan='standard' AND email_unsubscribed_at IS NULL"
+                    "WHERE role='viewer' AND is_active=1 AND stocks_plan='pro' AND email_unsubscribed_at IS NULL"
                 ).fetchall()
                 if not recipients:
                     current_app.logger.warning(
@@ -931,7 +934,7 @@ def stocks_suggestions_notify_projection_target_hits():
                 recipients = job_db.execute(
                     "SELECT id, username AS email, name, is_pro, subscription_status, "
                     "subscription_current_period_end, trial_ends_at FROM stocks_admin_users "
-                    "WHERE role='viewer' AND is_active=1 AND stocks_plan='standard' AND email_unsubscribed_at IS NULL"
+                    "WHERE role='viewer' AND is_active=1 AND stocks_plan='pro' AND email_unsubscribed_at IS NULL"
                 ).fetchall()
                 if not recipients:
                     current_app.logger.warning(
@@ -3182,6 +3185,14 @@ def stocks_signup():
         flash('Passwords do not match.', 'error')
         return render_template('admin/stocks_signup.html', recaptcha_site_key=STOCKS_RECAPTCHA_SITE_KEY, form_rendered_at=time.time(), referral_code_prefill=referral_code_prefill, plan_prefill=plan), 400
 
+    profile, profile_error = validate_stocks_profile(
+        request.form.get('phone_country_code'), request.form.get('phone'),
+        request.form.get('date_of_birth'), request.form.get('location'), request.form.get('pincode'),
+    )
+    if profile_error:
+        flash(profile_error, 'error')
+        return render_template('admin/stocks_signup.html', recaptcha_site_key=STOCKS_RECAPTCHA_SITE_KEY, form_rendered_at=time.time(), referral_code_prefill=referral_code_prefill, plan_prefill=plan), 400
+
     db = get_db()
     referrer = find_referrer_by_code(db, referral_code_prefill)
     if referrer and referrer['username'] == email:
@@ -3193,6 +3204,9 @@ def stocks_signup():
     if error and error != 'existing':
         flash(error, 'error')
         return render_template('admin/stocks_signup.html', recaptcha_site_key=STOCKS_RECAPTCHA_SITE_KEY, form_rendered_at=time.time(), referral_code_prefill=referral_code_prefill, plan_prefill=plan), 400
+
+    if error != 'existing':  # a row this call just created -- stamp its profile
+        set_stocks_profile(db, row['id'], profile)
 
     if error == 'existing':
         if has_stocks_access(
@@ -3404,29 +3418,26 @@ def stocks_google_callback():
         if existing:
             link_google_sub(db, existing['id'], google_sub)
             row = existing
-        elif pending_plan is None:
-            # Reached here without ever going through /stocks/signup's plan
-            # radio buttons or a landing-page pricing card's explicit
-            # ?plan= link -- most commonly, hitting "Sign in with Google" on
-            # the LOGIN page directly. Rather than silently defaulting to
-            # Standard, stash what Google gave us and send them to a plan
-            # picker first; stocks_plans_continue re-enters this same
-            # create-account-then-trial/checkout path once they've chosen.
-            session['stocks_plans_context'] = {
-                'mode': 'new_google', 'google_sub': google_sub, 'email': email, 'name': name,
-                'referral_code': referral_code,
-            }
-            session.modified = True
-            return redirect(url_for('stocks.stocks_plans'))
         else:
+            # Brand-new Google signup -- always a free 'regular' account.
+            # Pro is a separate upgrade (see /stocks/plans), never chosen
+            # at signup. Google gives us name + email; the rest of the
+            # profile is collected on /stocks/complete-profile next.
             referrer = find_referrer_by_code(db, referral_code)
             if referrer and referrer['username'] == email:
                 referrer = None  # self-referral -- silently ignored
             row = create_pending_google_subscriber(
                 db, email, name, google_sub, referred_by_id=referrer['id'] if referrer else None,
-                stocks_plan=pending_plan,
+                stocks_plan='regular',
             )
-            return _finish_stocks_signup(row, email, name, pending_plan)
+            session['stocks_admin_id'] = row['id']
+            session['stocks_admin_username'] = row['username']
+            session['stocks_admin_role'] = 'viewer'
+            session['stocks_can_view_watchlist'] = bool(row.get('can_view_watchlist'))
+            session['stocks_must_change_password'] = False
+            session['stocks_plan'] = 'regular'
+            session.modified = True
+            return redirect(url_for('stocks.stocks_complete_profile'))
 
     if row.get('is_active') and has_stocks_access(
         row.get('is_pro'), row.get('subscription_status'), row.get('subscription_current_period_end'),
@@ -3464,6 +3475,37 @@ def stocks_google_callback():
         row['id'], email, name, plan=row.get('stocks_plan', 'regular'),
         referral_plan=bool(row.get('referred_by_id')) and row.get('stocks_plan', 'regular') == 'pro',
     )
+
+
+@stocks_bp.route('/stocks/complete-profile', methods=['GET', 'POST'])
+@stocks_login_required
+def stocks_complete_profile():
+    """Collects the phone / date-of-birth / location / pincode profile
+    fields after a Google signup (Google only gives us name + email), and
+    the one-time prompt for grandfathered accounts that predate these
+    fields. Format-validated only (see validate_stocks_profile) -- no OTP,
+    no lookups. Skippable: grandfathered and Google users may 'Skip for
+    now' and are not blocked from the rest of the app."""
+    db = get_db()
+    admin_id = session.get('stocks_admin_id')
+
+    if request.method == 'POST':
+        if request.form.get('action') == 'skip':
+            session['stocks_profile_prompt_skipped'] = True
+            session.modified = True
+            return redirect(url_for('stocks.stocks_my_suggestions'))
+        profile, error = validate_stocks_profile(
+            request.form.get('phone_country_code'), request.form.get('phone'),
+            request.form.get('date_of_birth'), request.form.get('location'), request.form.get('pincode'),
+        )
+        if error:
+            flash(error, 'error')
+            return render_template('admin/stocks_complete_profile.html', form=request.form), 400
+        set_stocks_profile(db, admin_id, profile)
+        flash('Profile saved.', 'info')
+        return redirect(url_for('stocks.stocks_my_suggestions'))
+
+    return render_template('admin/stocks_complete_profile.html', form={})
 
 
 @stocks_bp.route('/stocks/plans', methods=['GET'])

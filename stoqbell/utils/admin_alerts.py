@@ -37,7 +37,7 @@ from datetime import date
 
 from stoqbell.utils.auto_trader import STOP_LOSS_ALERT_EMAIL
 from stoqbell.utils.kite_client import KiteClient
-from stoqbell.utils.stocks_subscription import has_stocks_access
+from stoqbell.utils.stocks_subscription import active_pro_subscriber_rows, has_stocks_access
 from stoqbell.utils.suggestion_email import (
     send_highly_recommended_alert_email,
     send_intraday_target_hit_alert_email,
@@ -86,6 +86,12 @@ def record_and_send_highly_recommended_alerts(db):
     candidates = get_all_highly_recommended_today(db)
     today = date.today().isoformat()
 
+    # Pro subscribers now get the same per-candidate Highly Recommended
+    # emails Raghav gets -- "all the messages that raga2020@gmail.com
+    # receives". Fetched once, before the loop. Empty until someone
+    # actually subscribes to Pro.
+    pro_recipients = active_pro_subscriber_rows(db)
+
     alerted = []
     for c in candidates:
         db.execute(
@@ -105,9 +111,11 @@ def record_and_send_highly_recommended_alerts(db):
         )
         db.commit()
         send_highly_recommended_alert_email(STOP_LOSS_ALERT_EMAIL, c)
+        for r in pro_recipients:
+            send_highly_recommended_alert_email(r['email'], c)
         alerted.append(c)
 
-    return {'alerted': alerted}
+    return {'alerted': alerted, 'pro_recipient_count': len(pro_recipients)}
 
 
 def _instrument_key(exchange, symbol):
@@ -208,10 +216,19 @@ def find_and_notify_intraday_target_hits(db, kite_client=None):
     if suggestion_hit_rows:
         customers_notified = _notify_customers_of_suggestion_hits(db, suggestion_hit_rows)
 
+    pro_alerted = 0
     if hits:
         send_intraday_target_hit_alert_email(STOP_LOSS_ALERT_EMAIL, hits)
+        # Real-time intraday alerts are a Pro perk -- send Pro subscribers
+        # the same bundle Raghav gets. Empty until someone subscribes.
+        for r in active_pro_subscriber_rows(db):
+            send_intraday_target_hit_alert_email(r['email'], hits)
+            pro_alerted += 1
 
-    return {'checked': len(pending_suggestions) + len(pending_admin_alerts), 'hits': hits, 'customers_notified': customers_notified}
+    return {
+        'checked': len(pending_suggestions) + len(pending_admin_alerts),
+        'hits': hits, 'customers_notified': customers_notified, 'pro_alerted': pro_alerted,
+    }
 
 
 def _notify_customers_of_suggestion_hits(db, suggestion_hit_rows):
@@ -247,7 +264,7 @@ def _notify_customers_of_suggestion_hits(db, suggestion_hit_rows):
     recipients = db.execute(
         "SELECT id, username AS email, name, is_pro, subscription_status, "
         "subscription_current_period_end, trial_ends_at FROM stocks_admin_users "
-        "WHERE role='viewer' AND is_active=1 AND stocks_plan='standard' AND email_unsubscribed_at IS NULL"
+        "WHERE role='viewer' AND is_active=1 AND stocks_plan='pro' AND email_unsubscribed_at IS NULL"
     ).fetchall()
 
     sent = 0

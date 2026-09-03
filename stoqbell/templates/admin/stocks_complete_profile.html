@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <link rel="icon" type="image/png" href="{{ url_for('stocks.static', filename='assets/stoqbell-icon.png') }}">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Complete your profile - StoqBell</title>
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+    <style>
+        .brand-stoq { color: #f8fafc; }
+        .brand-bell { color: #39FF14; }
+        body { background: #0f172a; color: #f8fafc; }
+        .stocks-btn { background: linear-gradient(90deg, #0891b2 0%, #0ea5e9 100%); color: white; }
+        .stocks-accent { color: #0ea5e9; }
+        .fld { color:#ffffff; -webkit-text-fill-color:#ffffff; background-color:#0f172a; }
+    </style>
+</head>
+<body class="flex items-center justify-center min-h-screen p-4">
+    <div class="w-full max-w-md mx-auto bg-slate-800 rounded-2xl shadow-2xl p-8 border border-sky-500/20">
+        <div class="text-center mb-6">
+            <h1 class="text-3xl font-extrabold font-serif"><span class="brand-stoq">Stoq</span><span class="brand-bell">Bell</span></h1>
+            <h2 class="text-xl font-bold mt-4">Complete your profile</h2>
+            <p class="text-slate-400 text-sm mt-1">A few details to finish setting up your account.</p>
+        </div>
+
+        {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+            <div class="mb-6" role="alert" aria-live="assertive">
+            {% for category, msg in messages %}
+                <div class="bg-sky-900/40 text-sky-200 border border-sky-500/30 rounded-xl p-3 mb-2 text-sm">{{ msg }}</div>
+            {% endfor %}
+            </div>
+        {% endif %}
+        {% endwith %}
+
+        <form method="POST" action="{{ url_for('stocks.stocks_complete_profile') }}" class="space-y-5">
+            <div>
+                <label class="block text-sm font-semibold text-slate-300 mb-1">Phone number</label>
+                <div class="flex gap-2">
+                    <input type="text" name="phone_country_code" required value="{{ form.get('phone_country_code') or '+91' }}"
+                           pattern="\+\d{1,4}" inputmode="tel" aria-label="Country code"
+                           class="fld w-20 border border-sky-500/30 rounded-xl p-3 text-center focus:outline-none focus:border-sky-500">
+                    <input type="tel" name="phone" required value="{{ form.get('phone') or '' }}" pattern="\d{6,14}"
+                           inputmode="numeric" autocomplete="tel-national" placeholder="Digits only"
+                           class="fld flex-1 border border-sky-500/30 rounded-xl p-3 placeholder-slate-500 focus:outline-none focus:border-sky-500">
+                </div>
+            </div>
+            <div>
+                <label for="cp-dob" class="block text-sm font-semibold text-slate-300 mb-1">Date of birth</label>
+                <input id="cp-dob" type="date" name="date_of_birth" required value="{{ form.get('date_of_birth') or '' }}"
+                       style="color-scheme:dark;" class="fld w-full border border-sky-500/30 rounded-xl p-3 focus:outline-none focus:border-sky-500">
+            </div>
+            <div>
+                <label for="cp-loc" class="block text-sm font-semibold text-slate-300 mb-1">Location</label>
+                <input id="cp-loc" type="text" name="location" required maxlength="120" value="{{ form.get('location') or '' }}"
+                       autocomplete="address-level2" placeholder="City / town"
+                       class="fld w-full border border-sky-500/30 rounded-xl p-3 placeholder-slate-500 focus:outline-none focus:border-sky-500">
+            </div>
+            <div>
+                <label for="cp-pin" class="block text-sm font-semibold text-slate-300 mb-1">Pincode</label>
+                <input id="cp-pin" type="text" name="pincode" required pattern="\d{6}" inputmode="numeric" maxlength="6"
+                       value="{{ form.get('pincode') or '' }}" autocomplete="postal-code" placeholder="6 digits"
+                       class="fld w-full border border-sky-500/30 rounded-xl p-3 placeholder-slate-500 focus:outline-none focus:border-sky-500">
+            </div>
+
+            <button type="submit" class="stocks-btn w-full py-3 rounded-2xl font-bold text-lg shadow-lg mt-2 transition hover:opacity-90">Save and continue</button>
+            <button type="submit" name="action" value="skip" class="w-full py-2 text-slate-400 text-sm underline">Skip for now</button>
+        </form>
+
+        <p class="text-center text-slate-600 text-xs mt-8">StoqBell &copy; 2026.</p>
+    </div>
+</body>
+</html>
