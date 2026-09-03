@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <link rel="icon" type="image/png" href="{{ url_for('stocks.static', filename='assets/stoqbell-icon.png') }}">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Announcements - StoqBell</title>
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+    <style>
+        body { background: #0f172a; color: #f8fafc; }
+        .brand-stoq { color: #f8fafc; } .brand-bell { color: #39FF14; }
+        .stocks-btn { background: linear-gradient(90deg, #0891b2 0%, #0ea5e9 100%); color: #fff; }
+        .card { background: #1e293b; border: 1px solid rgba(14,165,233,0.2); }
+        .fld { width: 100%; background: #0f172a; color: #fff; border: 1px solid rgba(14,165,233,0.3);
+               border-radius: 0.75rem; padding: 0.6rem 0.75rem; }
+        summary { cursor: pointer; }
+    </style>
+</head>
+<body class="min-h-screen p-4">
+    <div class="max-w-4xl mx-auto py-8">
+        <div class="flex items-center justify-between mb-6">
+            <h1 class="text-2xl font-extrabold font-serif"><span class="brand-stoq">Stoq</span><span class="brand-bell">Bell</span> &mdash; Announcements</h1>
+            <a href="{{ url_for('stocks.stocks_dashboard') }}" class="text-sm text-slate-400 hover:text-sky-400 underline">Back to dashboard</a>
+        </div>
+
+        {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+            <div class="mb-6" role="alert" aria-live="assertive">
+            {% for category, msg in messages %}
+                <div class="bg-sky-900/40 text-sky-200 border border-sky-500/30 rounded-xl p-3 mb-2 text-sm">{{ msg }}</div>
+            {% endfor %}
+            </div>
+        {% endif %}
+        {% endwith %}
+
+        <p class="text-slate-400 text-sm mb-6">Each announcement is emailed to every active viewer. A per-recipient referral link is appended when "Include referral pitch" is on.</p>
+
+        {% for a in announcements %}
+        <div class="card rounded-2xl p-5 mb-4">
+            <div class="flex items-start justify-between gap-4">
+                <div>
+                    <p class="font-bold text-slate-100">{{ a.name }}</p>
+                    <p class="text-slate-300 text-sm mt-1"><span class="text-slate-500">Subject:</span> {{ a.subject }}</p>
+                    <p class="text-slate-500 text-xs mt-2">
+                        {% if a.last_sent_at %}Last sent {{ a.last_sent_at }} to {{ a.last_sent_count }} recipient(s).{% else %}Never sent.{% endif %}
+                        {% if a.include_referral %} &middot; referral pitch on{% endif %}
+                    </p>
+                </div>
+                <form method="POST" action="{{ url_for('stocks.stocks_announcements_send', announcement_id=a.id) }}"
+                      onsubmit="return confirm('Email this announcement to every active viewer?');">
+                    <button type="submit" class="stocks-btn px-4 py-2 rounded-xl font-bold text-sm shadow">Send now</button>
+                </form>
+            </div>
+
+            <details class="mt-3">
+                <summary class="text-sky-400 text-sm">View / edit body</summary>
+                <form method="POST" action="{{ url_for('stocks.stocks_announcements_update', announcement_id=a.id) }}" class="mt-3 space-y-3">
+                    <label class="block text-xs text-slate-400">Name
+                        <input class="fld mt-1" type="text" name="name" value="{{ a.name }}" required>
+                    </label>
+                    <label class="block text-xs text-slate-400">Subject
+                        <input class="fld mt-1" type="text" name="subject" value="{{ a.subject }}" required>
+                    </label>
+                    <label class="block text-xs text-slate-400">Body (blank line = new paragraph; a line starting with "- " becomes a bullet)
+                        <textarea class="fld mt-1" name="body" rows="10" required>{{ a.body }}</textarea>
+                    </label>
+                    <label class="flex items-center gap-2 text-xs text-slate-300">
+                        <input type="checkbox" name="include_referral" {% if a.include_referral %}checked{% endif %}> Include each recipient's referral pitch
+                    </label>
+                    <div class="flex gap-3">
+                        <button type="submit" class="stocks-btn px-4 py-2 rounded-xl font-bold text-sm">Save changes</button>
+                        <button type="submit" formaction="{{ url_for('stocks.stocks_announcements_delete', announcement_id=a.id) }}"
+                                formnovalidate onclick="return confirm('Delete this announcement?');"
+                                class="px-4 py-2 rounded-xl text-sm text-red-300 border border-red-500/40">Delete</button>
+                    </div>
+                </form>
+            </details>
+        </div>
+        {% else %}
+        <p class="text-slate-400 text-sm mb-4">No announcements yet.</p>
+        {% endfor %}
+
+        <div class="card rounded-2xl p-5 mt-8">
+            <h2 class="font-bold text-slate-100 mb-3">New announcement</h2>
+            <form method="POST" action="{{ url_for('stocks.stocks_announcements_create') }}" class="space-y-3">
+                <label class="block text-xs text-slate-400">Name (internal label)
+                    <input class="fld mt-1" type="text" name="name" required>
+                </label>
+                <label class="block text-xs text-slate-400">Subject
+                    <input class="fld mt-1" type="text" name="subject" required>
+                </label>
+                <label class="block text-xs text-slate-400">Body
+                    <textarea class="fld mt-1" name="body" rows="10" required></textarea>
+                </label>
+                <label class="flex items-center gap-2 text-xs text-slate-300">
+                    <input type="checkbox" name="include_referral" checked> Include each recipient's referral pitch
+                </label>
+                <button type="submit" class="stocks-btn px-4 py-2 rounded-xl font-bold text-sm">Create</button>
+            </form>
+        </div>
+    </div>
+</body>
+</html>

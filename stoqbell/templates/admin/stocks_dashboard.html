@@ -120,18 +120,14 @@
         <section class="bg-slate-800 rounded-2xl p-6 border border-amber-500/40 mb-6" aria-labelledby="announcements-heading">
             <h2 id="announcements-heading" class="text-lg font-bold text-slate-200 mb-2">Announcements</h2>
             <p class="text-slate-400 text-sm mb-3">
-                One-time email to every active viewer: Nari Nakhre Stocks has been renamed StoqBell, with its own
-                domain and its own sending address. This is meant to be sent ONCE -- re-running it emails everyone
-                again, so only use this if the first send genuinely failed for most recipients.
+                Write a one-time announcement (name, subject, body) and email it to every active viewer, with each
+                person's own referral link appended. The Free / Pro launch announcement is already there, ready to send.
             </p>
-            <form method="POST" action="{{ url_for('stocks.stocks_announcements_send_rebrand') }}"
-                  data-job-form data-job-name="rebrand_announcement" data-job-label="Send rebrand announcement"
-                  onsubmit="return confirm('Send the StoqBell rebrand announcement to every active viewer? This should only be done once.');">
-                <button type="submit" class="py-3 px-6 rounded-2xl font-bold transition hover:opacity-90"
-                        style="background:linear-gradient(90deg,#b45309 0%,#d97706 100%);color:white;">
-                    Send rebrand announcement to all viewers
-                </button>
-            </form>
+            <a href="{{ url_for('stocks.stocks_announcements') }}"
+               class="inline-block py-3 px-6 rounded-2xl font-bold transition hover:opacity-90"
+               style="background:linear-gradient(90deg,#b45309 0%,#d97706 100%);color:white;">
+                Manage announcements &rarr;
+            </a>
         </section>
 
         <details class="bg-slate-800 rounded-2xl p-6 border border-sky-500/20 mb-6">

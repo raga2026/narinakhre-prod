@@ -235,8 +235,7 @@ from stoqbell.utils.suggestion_email import (
     send_trial_ended_email,
     send_trial_started_email,
     send_large_cap_bonus_email,
-    send_rebrand_announcement_to_all_viewers,
-    send_free_pro_announcement_to_all_viewers,
+    send_announcement_to_all_viewers,
     send_activation_reminder_email,
 )
 from stoqbell.utils.trading_calendar import is_trading_day, is_within_trading_hours
@@ -244,6 +243,14 @@ from stoqbell.utils.admin_alerts import (
     initialize_admin_alerts_table_if_needed,
     record_and_send_highly_recommended_alerts,
     find_and_notify_intraday_target_hits,
+)
+from stoqbell.utils.announcements import (
+    initialize_announcements_table_if_needed,
+    list_announcements,
+    get_announcement,
+    create_announcement,
+    update_announcement,
+    delete_announcement,
 )
 
 
@@ -338,6 +345,7 @@ def init_stocks_tables():
     initialize_auto_trade_tables_if_needed(client)
     initialize_large_cap_bonus_suggestions_table_if_needed(client)
     initialize_admin_alerts_table_if_needed(client)
+    initialize_announcements_table_if_needed(client)
     initialize_stock_news_table_if_needed(client)
     initialize_email_delivery_log_table_if_needed(client)
 
@@ -977,39 +985,71 @@ def stocks_suggestions_notify_projection_target_hits():
     return _dispatch_stocks_job(db, is_cron, 'suggestion_projection_target_hit_notify', _job)
 
 
-@stocks_bp.route('/stocks/announcements/send-rebrand', methods=['POST'])
+@stocks_bp.route('/stocks/announcements', methods=['GET'])
 @stocks_role_required('super_admin')
-def stocks_announcements_send_rebrand():
-    """One-time manual trigger: emails every active viewer that Nari Nakhre
-    Stocks has been renamed StoqBell, with its own domain and its own
-    sending address (see utils/suggestion_email.py's
-    send_rebrand_announcement_to_all_viewers/send_rebrand_announcement_email).
-    super_admin-only, no cron path -- unlike the daily/weekly/bonus
-    suggestion emails, this isn't meant to ever run again on a schedule.
-    Runs on a background thread like the dashboard's other job buttons
-    (see _dispatch_stocks_job) since it may be emailing a large recipient
-    list; poll /stocks/jobs/rebrand_announcement/status for the result."""
+def stocks_announcements():
+    """super_admin-only: the announcements table (name, subject, body) with
+    a Send button per row. Each send emails every active viewer that row's
+    subject/body plus their own referral link (when the row asks for it).
+    See utils/announcements.py + suggestion_email.send_announcement_to_all_viewers."""
     db = get_db()
-    return _dispatch_stocks_job(
-        db, is_cron=False, job_name='rebrand_announcement',
-        job_fn=send_rebrand_announcement_to_all_viewers,
-    )
+    return render_template('admin/stocks_announcements.html', announcements=list_announcements(db))
 
 
-@stocks_bp.route('/stocks/announcements/send-free-pro', methods=['POST'])
+@stocks_bp.route('/stocks/announcements/create', methods=['POST'])
 @stocks_role_required('super_admin')
-def stocks_announcements_send_free_pro():
-    """One-time manual trigger: emails every active viewer that the daily
-    Pick of the Day is now free, that StoqBell Pro (Rs 299/mo) is the new
-    paid tier, that Starters is retired, and includes each recipient's own
-    referral link (see utils/suggestion_email.py's
-    send_free_pro_announcement_to_all_viewers). super_admin-only, no cron
-    path. Runs on a background thread like the other announcement job;
-    poll /stocks/jobs/free_pro_announcement/status for the result."""
+def stocks_announcements_create():
     db = get_db()
+    name = (request.form.get('name') or '').strip()
+    subject = (request.form.get('subject') or '').strip()
+    body = (request.form.get('body') or '').strip()
+    if not name or not subject or not body:
+        flash('Name, subject and body are all required.', 'error')
+        return redirect(url_for('stocks.stocks_announcements'))
+    create_announcement(db, name, subject, body,
+                        include_referral=bool(request.form.get('include_referral')),
+                        created_by=session.get('stocks_admin_id'))
+    flash('Announcement saved.', 'info')
+    return redirect(url_for('stocks.stocks_announcements'))
+
+
+@stocks_bp.route('/stocks/announcements/<int:announcement_id>/update', methods=['POST'])
+@stocks_role_required('super_admin')
+def stocks_announcements_update(announcement_id):
+    db = get_db()
+    name = (request.form.get('name') or '').strip()
+    subject = (request.form.get('subject') or '').strip()
+    body = (request.form.get('body') or '').strip()
+    if not name or not subject or not body:
+        flash('Name, subject and body are all required.', 'error')
+        return redirect(url_for('stocks.stocks_announcements'))
+    update_announcement(db, announcement_id, name, subject, body,
+                        include_referral=bool(request.form.get('include_referral')))
+    flash('Announcement updated.', 'info')
+    return redirect(url_for('stocks.stocks_announcements'))
+
+
+@stocks_bp.route('/stocks/announcements/<int:announcement_id>/delete', methods=['POST'])
+@stocks_role_required('super_admin')
+def stocks_announcements_delete(announcement_id):
+    db = get_db()
+    delete_announcement(db, announcement_id)
+    flash('Announcement deleted.', 'info')
+    return redirect(url_for('stocks.stocks_announcements'))
+
+
+@stocks_bp.route('/stocks/announcements/<int:announcement_id>/send', methods=['POST'])
+@stocks_role_required('super_admin')
+def stocks_announcements_send(announcement_id):
+    """Emails this announcement to every active viewer. Background job (may
+    be a large list); poll /stocks/jobs/announcement_send/status."""
+    db = get_db()
+    if not get_announcement(db, announcement_id):
+        flash('Announcement not found.', 'error')
+        return redirect(url_for('stocks.stocks_announcements'))
     return _dispatch_stocks_job(
-        db, is_cron=False, job_name='free_pro_announcement',
-        job_fn=send_free_pro_announcement_to_all_viewers,
+        db, is_cron=False, job_name='announcement_send',
+        job_fn=lambda job_db: send_announcement_to_all_viewers(job_db, announcement_id),
     )
 
 
