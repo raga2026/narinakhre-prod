@@ -4,7 +4,6 @@ from stoqbell.utils.suggestion_engine import (
     HOLDING_PERIOD_DAYS,
     NNS_SCORE_CHANGE_THRESHOLD,
     SUGGESTION_REPEAT_WINDOW_DAYS,
-    TARGET_PRICE_CHANGE_THRESHOLD_PCT,
     TOP_N_SUGGESTIONS,
     _build_rationale,
     _fetch_candidates,
@@ -475,38 +474,43 @@ def test_top_candidate_on_cooldown_falls_through_to_the_next_best():
 
 
 def test_is_genuine_change_pure_function():
-    existing = {'score': 7.0, 'target_sell_price': 100.0, 'pattern_name': None}
-    assert _is_genuine_change(existing, 7.0, 100.0) is False
-    assert _is_genuine_change(existing, 7.0 + NNS_SCORE_CHANGE_THRESHOLD, 100.0) is True
-    moved_target = 100.0 * (1 + TARGET_PRICE_CHANGE_THRESHOLD_PCT / 100 + 0.01)
-    assert _is_genuine_change(existing, 7.0, moved_target) is True
+    existing = {'score': 7.0, 'pattern_name': None}
+    # Same score, same (absence of) chart pattern -> not a genuine change.
+    assert _is_genuine_change(existing, 7.0) is False
+    assert _is_genuine_change(existing, 7.0, None) is False
+    # A sub-threshold score wobble is still not a genuine change.
+    assert _is_genuine_change(existing, 7.0 + NNS_SCORE_CHANGE_THRESHOLD - 0.01) is False
+    # A full score move (either direction) is.
+    assert _is_genuine_change(existing, 7.0 + NNS_SCORE_CHANGE_THRESHOLD) is True
+    assert _is_genuine_change(existing, 7.0 - NNS_SCORE_CHANGE_THRESHOLD) is True
+    # Score barely moved, but a confirmed chart pattern appeared -> genuine.
+    assert _is_genuine_change(existing, 7.1, 'rounding_bottom') is True
+    # Had a pattern, now gone -> genuine. Swapped for a different one -> genuine.
+    had_pattern = {'score': 7.0, 'pattern_name': 'rounding_bottom'}
+    assert _is_genuine_change(had_pattern, 7.1, None) is True
+    assert _is_genuine_change(had_pattern, 7.1, 'head_and_shoulders_bottom') is True
+    # Same pattern as before, score flat -> not genuine.
+    assert _is_genuine_change(had_pattern, 7.1, 'rounding_bottom') is False
 
 
-def test_target_price_move_does_not_count_as_genuine_change_if_tier_got_worse():
-    # Live incident, 2026-08-24 (Jayaswal Neco Industries): a stock whose
-    # previous suggestion had already hit target got resent the next
-    # trading day purely because its target price drifted >3% with the
-    # stock's own price action, even though its NNS tier had dropped from
-    # Silver to Bronze in the meantime -- a target-price move alone should
-    # never justify a resend when the pick is trending WEAKER, not stronger.
-    existing_silver = {'score': 6.3, 'target_sell_price': 97.57, 'pattern_name': None, 'nns_tier': 'silver'}
-    moved_target = 97.57 * (1 + TARGET_PRICE_CHANGE_THRESHOLD_PCT / 100 + 0.01)  # >3% move, score barely moves
-
-    # Tier dropped silver -> bronze: the target-price move alone must NOT
-    # count as genuine, even though the score-threshold criterion (a full
-    # 1.0+ point move) also doesn't fire here.
-    assert _is_genuine_change(existing_silver, 5.8, moved_target, 'bronze') is False
-
-    # Tier held steady (silver -> silver) or improved (silver -> golden):
-    # the same target-price move DOES still count as genuine.
-    assert _is_genuine_change(existing_silver, 6.3, moved_target, 'silver') is True
-    assert _is_genuine_change(existing_silver, 8.5, moved_target, 'golden') is True
-
-    # No previous tier on record (a pre-NNS-Score row) is treated as the
-    # worst possible tier -- any new tier at or above "no tier" (i.e. any
-    # tier at all, or still none) still passes.
-    existing_no_tier = {'score': 6.3, 'target_sell_price': 97.57, 'pattern_name': None}
-    assert _is_genuine_change(existing_no_tier, 5.8, moved_target, 'bronze') is True
+def test_target_price_move_alone_never_counts_as_a_genuine_change():
+    # An earlier version re-sent a stock inside the 15-day cooldown
+    # whenever its target sell price drifted >=3% with the NNS tier holding
+    # steady or improving. On lower-priced stocks that fires on ordinary
+    # day-to-day volatility -- confirmed live for Shipping Corp of India
+    # (three sends in five days, 28 Aug - 1 Sep 2026) and first flagged by
+    # the 2026-08-24 Jayaswal Neco incident. Target price is no longer a
+    # resend reason at all; only a real NNS-score move or a change in the
+    # confirmed chart-pattern basis is. _is_genuine_change no longer even
+    # takes a target price or a tier.
+    existing = {'score': 6.3, 'pattern_name': None, 'nns_tier': 'silver'}
+    # Score essentially unchanged, no pattern change -> NOT genuine, no
+    # matter which way the (now-ignored) price/tier went.
+    assert _is_genuine_change(existing, 6.3) is False   # tier would have held
+    assert _is_genuine_change(existing, 5.8) is False   # tier would have dropped
+    assert _is_genuine_change(existing, 6.9) is False   # tier would have improved
+    # A full score move still re-sends.
+    assert _is_genuine_change(existing, 6.3 + NNS_SCORE_CHANGE_THRESHOLD) is True
 
 
 def test_new_suggestion_created_when_no_open_one_exists():

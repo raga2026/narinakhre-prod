@@ -129,7 +129,7 @@ def generate_large_cap_bonus_pick(db, pick_date=None):
                ORDER BY suggestion_date DESC LIMIT 1''',
             (watchlist_id, repeat_window_cutoff, date_iso)
         ).fetchone()
-        if existing_recent and not _is_genuine_change(existing_recent, nns_score, target_sell_price, tier):
+        if existing_recent and not _is_genuine_change(existing_recent, nns_score, pattern_name):
             skipped_duplicates.append({
                 'watchlist_id': watchlist_id, 'symbol': candidate['symbol'], 'exchange': candidate['exchange'],
             })

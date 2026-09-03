@@ -140,7 +140,7 @@ def generate_weekly_starters_pick(db, week_start_date=None):
                ORDER BY week_start_date DESC LIMIT 1''',
             (watchlist_id, repeat_window_cutoff, week_start_iso)
         ).fetchone()
-        if existing_recent and not _is_genuine_change(existing_recent, nns_score, target_sell_price, tier):
+        if existing_recent and not _is_genuine_change(existing_recent, nns_score, pattern_name):
             skipped_duplicates.append({
                 'watchlist_id': watchlist_id, 'symbol': candidate['symbol'], 'exchange': candidate['exchange'],
             })
