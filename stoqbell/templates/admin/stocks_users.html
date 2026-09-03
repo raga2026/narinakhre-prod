@@ -99,7 +99,7 @@
                         {% else %}--{% endif %}
                     </p>
                     <p class="text-slate-400 text-sm">
-                        Plan: <span class="{{ 'text-sky-400' if viewer.stocks_plan == 'starters' else 'text-slate-300' }} font-semibold">{{ (viewer.stocks_plan or 'standard') | title }}</span>
+                        Plan: <span class="{{ 'text-sky-400' if viewer.stocks_plan == 'pro' else 'text-slate-300' }} font-semibold">{{ (viewer.stocks_plan or 'regular') | title }}</span>
                     </p>
                     <div class="mt-3 flex items-center gap-4 flex-wrap">
                         <form method="POST" action="{{ url_for('stocks.stocks_users_toggle', viewer_id=viewer.id) }}">
@@ -120,8 +120,8 @@
                             <label class="sr-only" for="plan-select-{{ viewer.id }}">Plan for {{ viewer.username }}</label>
                             <select name="plan" id="plan-select-{{ viewer.id }}"
                                     style="color:#ffffff;background-color:#0f172a;" class="text-sm border border-sky-500/30 rounded-md px-2 py-1">
-                                <option value="standard" {% if (viewer.stocks_plan or 'standard') == 'standard' %}selected{% endif %}>Standard</option>
-                                <option value="starters" {% if viewer.stocks_plan == 'starters' %}selected{% endif %}>Starters</option>
+                                <option value="regular" {% if (viewer.stocks_plan or 'regular') == 'regular' %}selected{% endif %}>Regular (free)</option>
+                                <option value="pro" {% if viewer.stocks_plan == 'pro' %}selected{% endif %}>Pro</option>
                             </select>
                             <button type="submit" class="text-sm underline text-sky-400 hover:text-sky-300">Update plan</button>
                         </form>

@@ -266,7 +266,7 @@ def send_trading_alert_email(to_email, suggestion, buy_link):
     )
 
 
-def send_highly_recommended_alert_email(to_email, suggestion):
+def send_highly_recommended_alert_email(to_email, suggestion, include_unsubscribe=False):
     """Raghav-only (see utils/admin_alerts.py's
     record_and_send_highly_recommended_alerts, always called with
     to_email=STOP_LOSS_ALERT_EMAIL): one email per golden/silver-tier
@@ -296,7 +296,7 @@ def send_highly_recommended_alert_email(to_email, suggestion):
     return send_zeptomail_stocks_email(
         to_email=to_email, to_name=to_email, subject=subject,
         textbody=text_body, htmlbody=_wrap_email_html(html_inner), sender_name='StoqBell',
-        include_unsubscribe=False,  # Raghav-only, not a customer send
+        include_unsubscribe=include_unsubscribe,  # True for Pro subscribers, False for Raghav's copy
     )
 
 
@@ -608,7 +608,7 @@ def send_projection_target_achieved_email(to_email, to_name, achievements, curre
     )
 
 
-def send_intraday_target_hit_alert_email(to_email, hits):
+def send_intraday_target_hit_alert_email(to_email, hits, include_unsubscribe=False):
     """Raghav-only (see utils/admin_alerts.py's
     find_and_notify_intraday_target_hits -- always called with
     to_email=STOP_LOSS_ALERT_EMAIL, raga2020@gmail.com): sent by the
@@ -681,7 +681,7 @@ def send_intraday_target_hit_alert_email(to_email, hits):
     return send_zeptomail_stocks_email(
         to_email=to_email, to_name=to_email, subject=subject,
         textbody=text_body, htmlbody=html_inner, sender_name='StoqBell',
-        include_unsubscribe=False,  # Raghav-only, not a customer send
+        include_unsubscribe=include_unsubscribe,  # True for Pro subscribers, False for Raghav's copy
     )
 
 
@@ -1027,6 +1027,100 @@ def send_rebrand_announcement_to_all_viewers(db, recipient_ids=None):
     failures = []
     for r in recipients:
         ok, detail = send_rebrand_announcement_email(r['email'], r.get('name') or r['email'])
+        if ok:
+            sent += 1
+        else:
+            failed += 1
+            failures.append({'email': r['email'], 'error': detail})
+
+    return {'recipient_count': len(recipients), 'sent': sent, 'failed': failed, 'failures': failures}
+
+
+def send_free_pro_announcement_email(to_email, to_name, referral_code=None):
+    """One-time announcement (2026-09) that the daily Pick of the Day is now
+    FREE for everyone, that the new paid tier -- StoqBell Pro, Rs 299 +
+    GST/month -- adds the full Highly Recommended list every day plus
+    real-time intraday alerts and target-hit notifications, and that the
+    Rs 99 Starters plan has been retired. Existing accounts have been moved
+    to the free tier automatically. Ends with this recipient's own referral
+    pitch. See send_free_pro_announcement_to_all_viewers for the batch send."""
+    greeting = to_name or to_email
+    subject = 'StoqBell is now free -- the daily pick, for everyone'
+    body_lines = [
+        f'Hi {greeting},',
+        '',
+        'Big change to how StoqBell works:',
+        '',
+        '- The daily Pick of the Day is now FREE for every account. Your login and '
+        'your daily email carry on exactly as before -- no payment, nothing to do.',
+        '- The Rs 99/month Starters plan has been retired.',
+        '- There is a new paid tier: StoqBell Pro, Rs 299 + GST (Rs 352.82)/month. '
+        'Pro adds the full Highly Recommended list every trading day (every stock '
+        'clearing our top quality bar, not just the one daily pick), real-time '
+        'intraday alerts, and target-hit notifications. There is a 7-day free trial.',
+        '',
+        f'Log in any time: {STOCKS_LOGIN_URL}',
+        '',
+    ]
+    if referral_code:
+        body_lines.append(_referral_footer_text(referral_code))
+        body_lines.append('')
+    body_lines.append(DISCLAIMER)
+    text_body = '\n'.join(body_lines)
+
+    html_body = (
+        f'{_stoqbell_logo_header_html()}'
+        f'<p>Hi {greeting},</p>'
+        '<p>Big change to how StoqBell works:</p>'
+        '<ul style="padding-left:20px;color:#334155;line-height:1.7;">'
+        '<li>The <strong>daily Pick of the Day is now free</strong> for every account. Your login '
+        'and your daily email carry on exactly as before -- no payment, nothing to do.</li>'
+        '<li>The Rs 99/month Starters plan has been retired.</li>'
+        '<li>New paid tier: <strong>StoqBell Pro, Rs 299 + GST (Rs 352.82)/month</strong> -- the full '
+        'Highly Recommended list every trading day, real-time intraday alerts, and target-hit '
+        'notifications. 7-day free trial.</li>'
+        '</ul>'
+        f'<p><a href="{STOCKS_LOGIN_URL}" style="color:#0ea5e9;font-weight:bold;">Log in &rarr;</a></p>'
+        + (_referral_footer_html(referral_code) if referral_code else '')
+        + f'<p style="color:#64748b;font-size:0.85em;margin-top:16px;">{DISCLAIMER}</p>'
+    )
+    return send_zeptomail_stocks_email(
+        to_email=to_email, to_name=greeting, subject=subject,
+        textbody=text_body, htmlbody=html_body, sender_name='StoqBell',
+    )
+
+
+def send_free_pro_announcement_to_all_viewers(db, recipient_ids=None):
+    """Batch-sends send_free_pro_announcement_email to every active viewer
+    (or a subset via recipient_ids). Meant to run ONCE, manually triggered
+    (see /stocks/announcements/send-free-pro, super_admin-only). Each
+    recipient gets their own referral link."""
+    if recipient_ids is not None:
+        recipient_ids = list(recipient_ids)
+        if recipient_ids:
+            placeholders = ','.join('?' * len(recipient_ids))
+            recipients = db.execute(
+                f"SELECT id, username AS email, name FROM stocks_admin_users "
+                f"WHERE role='viewer' AND is_active=1 AND email_unsubscribed_at IS NULL AND id IN ({placeholders})",
+                tuple(recipient_ids)
+            ).fetchall()
+        else:
+            recipients = []
+    else:
+        recipients = db.execute(
+            "SELECT id, username AS email, name FROM stocks_admin_users "
+            "WHERE role='viewer' AND is_active=1 AND email_unsubscribed_at IS NULL"
+        ).fetchall()
+
+    sent = 0
+    failed = 0
+    failures = []
+    for r in recipients:
+        try:
+            referral_code = get_or_create_referral_code(db, r['id'])
+        except Exception:
+            referral_code = None
+        ok, detail = send_free_pro_announcement_email(r['email'], r.get('name') or r['email'], referral_code)
         if ok:
             sent += 1
         else:

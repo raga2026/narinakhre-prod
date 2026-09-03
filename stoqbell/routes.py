@@ -236,6 +236,7 @@ from stoqbell.utils.suggestion_email import (
     send_trial_started_email,
     send_large_cap_bonus_email,
     send_rebrand_announcement_to_all_viewers,
+    send_free_pro_announcement_to_all_viewers,
     send_activation_reminder_email,
 )
 from stoqbell.utils.trading_calendar import is_trading_day, is_within_trading_hours
@@ -992,6 +993,23 @@ def stocks_announcements_send_rebrand():
     return _dispatch_stocks_job(
         db, is_cron=False, job_name='rebrand_announcement',
         job_fn=send_rebrand_announcement_to_all_viewers,
+    )
+
+
+@stocks_bp.route('/stocks/announcements/send-free-pro', methods=['POST'])
+@stocks_role_required('super_admin')
+def stocks_announcements_send_free_pro():
+    """One-time manual trigger: emails every active viewer that the daily
+    Pick of the Day is now free, that StoqBell Pro (Rs 299/mo) is the new
+    paid tier, that Starters is retired, and includes each recipient's own
+    referral link (see utils/suggestion_email.py's
+    send_free_pro_announcement_to_all_viewers). super_admin-only, no cron
+    path. Runs on a background thread like the other announcement job;
+    poll /stocks/jobs/free_pro_announcement/status for the result."""
+    db = get_db()
+    return _dispatch_stocks_job(
+        db, is_cron=False, job_name='free_pro_announcement',
+        job_fn=send_free_pro_announcement_to_all_viewers,
     )
 
 
@@ -2577,16 +2595,21 @@ def stocks_my_suggestions():
     this changed, so they keep seeing the daily view regardless."""
     db = get_db()
     admin_id = session.get('stocks_admin_id')
+
+    # One-time nudge for accounts missing the profile fields (Google
+    # signups, and everyone who predates them) -- skippable, not a hard
+    # gate. session flag set by /stocks/complete-profile's "Skip for now".
+    if admin_id and not session.get('stocks_profile_prompt_skipped'):
+        prof = db.execute(
+            "SELECT phone_country_code, phone, date_of_birth, location, pincode "
+            "FROM stocks_admin_users WHERE id=?", (admin_id,)
+        ).fetchone()
+        if prof and not stocks_profile_is_complete(prof):
+            return redirect(url_for('stocks.stocks_complete_profile'))
+
+    start_date = (date.today() - timedelta(days=HOLDING_PERIOD_DAYS)).isoformat()
+    suggestions = _annotate_suggestions_with_projection(get_suggestions(db, start_date=start_date))
     is_starters = False
-    if is_starters:
-        # ~9 weeks -- enough recent weekly picks to be worth showing on the
-        # landing page without becoming the full all-time list (that's
-        # stocks_my_history's job below).
-        start_date = (date.today() - timedelta(days=63)).isoformat()
-        suggestions = _annotate_suggestions_with_projection(get_starters_suggestions(db, start_date=start_date))
-    else:
-        start_date = (date.today() - timedelta(days=HOLDING_PERIOD_DAYS)).isoformat()
-        suggestions = _annotate_suggestions_with_projection(get_suggestions(db, start_date=start_date))
 
     account_summary = _stocks_viewer_account_summary(db, admin_id)
 

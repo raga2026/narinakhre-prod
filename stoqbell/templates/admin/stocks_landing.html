@@ -87,11 +87,11 @@
                 </p>
                 <div class="flex flex-wrap items-center gap-4 mt-8">
                     <a href="{{ url_for('stocks.stocks_signup') }}" class="stocks-btn px-7 py-3.5 rounded-2xl font-bold text-lg shadow-lg transition hover:opacity-90">
-                        Start your free 7-day trial
+                        Get the free daily pick
                     </a>
                     <a href="#how-it-works" class="text-slate-300 hover:text-sky-400 font-semibold underline underline-offset-4">See how it works</a>
                 </div>
-                <p class="text-slate-500 text-sm mt-4">Then Rs 299 + GST (Rs 352.82)/month for Standard, no card needed to start. Cancel anytime.</p>
+                <p class="text-slate-500 text-sm mt-4">Free -- no card. Upgrade to StoqBell Pro (Rs 299 + GST/month) any time for the full Highly Recommended list, real-time alerts and target-hit notifications.</p>
             </div>
 
             <!-- Illustrative "pick" card with an inline sparkline -->
@@ -270,70 +270,36 @@
 
             <div class="grid sm:grid-cols-2 gap-6 mt-10 max-w-3xl mx-auto text-left">
                 <div class="card p-8">
-                    <p class="text-slate-400 text-sm font-semibold uppercase tracking-wide">Standard</p>
-                    <p class="mt-2"><span class="text-4xl font-extrabold">Rs 299</span><span class="text-slate-400">/month</span></p>
-                    <p class="text-slate-400 text-sm mt-1">+ GST (Rs 352.82 total)</p>
+                    <p class="text-slate-400 text-sm font-semibold uppercase tracking-wide">Free</p>
+                    <p class="mt-2"><span class="text-4xl font-extrabold">Rs 0</span></p>
+                    <p class="text-slate-400 text-sm mt-1">The daily Pick of the Day</p>
                     <ul class="mt-6 space-y-3 text-sm text-slate-300">
-                        <li class="flex gap-2"><span class="stocks-accent">✓</span> Pick of the Day, with full reasoning</li>
-                        <li class="flex gap-2"><span class="stocks-accent">✓</span> Buy price and target on every pick</li>
-                        <li class="flex gap-2"><span class="stocks-accent">✓</span> StoqBell Score breakdown for every pick</li>
-                        <li class="flex gap-2"><span class="stocks-accent">✓</span> Alert email the moment a pick hits its target</li>
-                        <li class="flex gap-2"><span class="stocks-accent">✓</span> Bonus large-cap pick, twice a week</li>
-                        <li class="flex gap-2"><span class="stocks-accent">✓</span> Browse and search our full research universe</li>
-                        <li class="flex gap-2"><span class="stocks-accent">✓</span> Delivered straight to your inbox, only on trading days</li>
+                        <li class="flex gap-2"><span class="stocks-accent">&#10003;</span> One screened Pick of the Day, every trading day</li>
+                        <li class="flex gap-2"><span class="stocks-accent">&#10003;</span> Buy price, target and full reasoning on every pick</li>
+                        <li class="flex gap-2"><span class="stocks-accent">&#10003;</span> StoqBell Score breakdown</li>
+                        <li class="flex gap-2"><span class="stocks-accent">&#10003;</span> Browse and search our full research universe</li>
+                        <li class="flex gap-2"><span class="stocks-accent">&#10003;</span> Delivered to your inbox, only on trading days</li>
                     </ul>
-                    <p class="text-sm mt-4" style="color:#4ade80;font-weight:600;">Free for your first 7 days -- no card required.</p>
-                    <a href="{{ url_for('stocks.stocks_signup') }}" class="stocks-btn block text-center w-full py-3.5 rounded-2xl font-bold text-lg shadow-lg mt-4 transition hover:opacity-90">
-                        Start free trial
+                    <a href="{{ url_for('stocks.stocks_signup') }}" class="stocks-btn block text-center w-full py-3.5 rounded-2xl font-bold text-lg shadow-lg mt-8 transition hover:opacity-90">
+                        Create a free account
                     </a>
                 </div>
                 <div class="card p-8">
-                    <p class="text-slate-400 text-sm font-semibold uppercase tracking-wide">Starters</p>
-                    <p class="mt-2"><span class="text-4xl font-extrabold">Rs 99</span><span class="text-slate-400">/month</span></p>
-                    <p class="text-slate-400 text-sm mt-1">+ GST (Rs 116.82 total)</p>
+                    <p class="text-slate-400 text-sm font-semibold uppercase tracking-wide">StoqBell Pro</p>
+                    <p class="mt-2"><span class="text-4xl font-extrabold">Rs 299</span><span class="text-slate-400">/month</span></p>
+                    <p class="text-slate-400 text-sm mt-1">+ GST (Rs 352.82 total)</p>
                     <ul class="mt-6 space-y-3 text-sm text-slate-300">
-                        <li class="flex gap-2"><span class="stocks-accent">✓</span> Up to two separately-curated picks a week, every Monday</li>
-                        <li class="flex gap-2"><span class="stocks-accent">✓</span> Only our strictest, top-quality (golden-tier) picks</li>
-                        <li class="flex gap-2"><span class="stocks-accent">✓</span> Buy price and target included</li>
-                        <li class="flex gap-2"><span class="stocks-accent">✓</span> Browse and search our full research universe</li>
-                        <li class="flex gap-2"><span class="stocks-accent">✓</span> A handful of high-conviction ideas a month, not a daily stream</li>
+                        <li class="flex gap-2"><span class="stocks-accent">&#10003;</span> Everything in Free</li>
+                        <li class="flex gap-2"><span class="stocks-accent">&#10003;</span> The full Highly Recommended list every trading day</li>
+                        <li class="flex gap-2"><span class="stocks-accent">&#10003;</span> Real-time intraday alerts</li>
+                        <li class="flex gap-2"><span class="stocks-accent">&#10003;</span> Target-hit notifications</li>
+                        <li class="flex gap-2"><span class="stocks-accent">&#10003;</span> Bonus large-cap pick, twice a week</li>
                     </ul>
-                    <a href="{{ url_for('stocks.stocks_signup', plan='starters') }}" class="stocks-btn block text-center w-full py-3.5 rounded-2xl font-bold text-lg shadow-lg mt-8 transition hover:opacity-90">
-                        Get Started
+                    <p class="text-sm mt-4" style="color:#4ade80;font-weight:600;">Free for your first 7 days -- no card required.</p>
+                    <a href="{{ url_for('stocks.stocks_signup') }}" class="stocks-btn block text-center w-full py-3.5 rounded-2xl font-bold text-lg shadow-lg mt-4 transition hover:opacity-90">
+                        Start Pro trial
                     </a>
                 </div>
-            </div>
-
-            <div class="max-w-3xl mx-auto mt-10 overflow-x-auto">
-                <table class="w-full text-left text-sm border-collapse">
-                    <caption class="text-slate-400 text-sm mb-3 text-left">
-                        What Standard includes that Starters doesn't.
-                    </caption>
-                    <thead>
-                        <tr class="border-b border-sky-500/20">
-                            <th scope="col" class="py-3 pr-4 text-slate-300 font-semibold">Feature</th>
-                            <th scope="col" class="py-3 px-4 text-slate-300 font-semibold text-center">Standard -- Rs 299 + GST (Rs 352.82)/mo</th>
-                            <th scope="col" class="py-3 pl-4 text-slate-300 font-semibold text-center">Starters -- Rs 99 + GST (Rs 116.82)/mo</th>
-                        </tr>
-                    </thead>
-                    <tbody class="text-slate-300">
-                        <tr class="border-b border-sky-500/10">
-                            <th scope="row" class="py-3 pr-4 font-normal text-left">Daily Pick of the Day</th>
-                            <td class="py-3 px-4 text-center"><span class="stocks-accent" aria-hidden="true">✓</span><span class="sr-only">Included</span></td>
-                            <td class="py-3 pl-4 text-center text-slate-600"><span aria-hidden="true">✗</span><span class="sr-only">Not included</span></td>
-                        </tr>
-                        <tr class="border-b border-sky-500/10">
-                            <th scope="row" class="py-3 pr-4 font-normal text-left">Alert email when a pick reaches its target</th>
-                            <td class="py-3 px-4 text-center"><span class="stocks-accent" aria-hidden="true">✓</span><span class="sr-only">Included</span></td>
-                            <td class="py-3 pl-4 text-center text-slate-600"><span aria-hidden="true">✗</span><span class="sr-only">Not included</span></td>
-                        </tr>
-                        <tr class="border-b border-sky-500/10">
-                            <th scope="row" class="py-3 pr-4 font-normal text-left">Bonus large-cap pick, twice a week</th>
-                            <td class="py-3 px-4 text-center"><span class="stocks-accent" aria-hidden="true">✓</span><span class="sr-only">Included</span></td>
-                            <td class="py-3 pl-4 text-center text-slate-600"><span aria-hidden="true">✗</span><span class="sr-only">Not included</span></td>
-                        </tr>
-                    </tbody>
-                </table>
             </div>
         </div>
     </div>

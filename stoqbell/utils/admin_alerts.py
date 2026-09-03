@@ -112,7 +112,7 @@ def record_and_send_highly_recommended_alerts(db):
         db.commit()
         send_highly_recommended_alert_email(STOP_LOSS_ALERT_EMAIL, c)
         for r in pro_recipients:
-            send_highly_recommended_alert_email(r['email'], c)
+            send_highly_recommended_alert_email(r['email'], c, include_unsubscribe=True)
         alerted.append(c)
 
     return {'alerted': alerted, 'pro_recipient_count': len(pro_recipients)}
@@ -222,7 +222,7 @@ def find_and_notify_intraday_target_hits(db, kite_client=None):
         # Real-time intraday alerts are a Pro perk -- send Pro subscribers
         # the same bundle Raghav gets. Empty until someone subscribes.
         for r in active_pro_subscriber_rows(db):
-            send_intraday_target_hit_alert_email(r['email'], hits)
+            send_intraday_target_hit_alert_email(r['email'], hits, include_unsubscribe=True)
             pro_alerted += 1
 
     return {
