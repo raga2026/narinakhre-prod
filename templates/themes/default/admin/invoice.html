@@ -93,9 +93,8 @@
         <!-- Header -->
         <div class="inv-header">
             <div>
-                <div class="inv-logo">Nari Nakhre™</div>
-                <div style="font-size:11px;color:#6b7280;margin-top:1px;">by Mohini Cosmetics</div>
-                <div class="inv-logo-sub">A brand by Mohini Cosmetics</div>
+                <img src="{{ url_for('static', filename='assets/mohini-logo.png') }}" alt="Mohini Cosmetics" style="height:34px;margin-bottom:4px;">
+                <div class="inv-logo-sub">Trading as: Nari Nakhre</div>
                 {% if seller_gst %}
                 <div class="inv-gstin">GSTIN: {{ seller_gst }}</div>
                 {% endif %}

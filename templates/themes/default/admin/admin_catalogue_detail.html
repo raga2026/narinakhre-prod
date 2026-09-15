@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ catalogue.title }} — Catalogue — Nari Nakhre Admin</title>
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+    <style>
+        .bg-rose-600  { background-color:#e11d48!important; }
+        .text-rose-600{ color:#e11d48!important; }
+        .hover\:bg-rose-700:hover{ background-color:#be123c!important; }
+        .badge { display:inline-flex; align-items:center; padding:2px 10px; border-radius:999px; font-size:0.72rem; font-weight:700; white-space:nowrap; }
+        .badge-active   { background:#dcfce7; color:#15803d; }
+        .badge-inactive { background:#f3f4f6; color:#6b7280; }
+        .card { background:white; border:1px solid #f3f4f6; border-radius:16px; padding:20px; }
+        .product-row { border:1px solid #f3f4f6; border-radius:14px; padding:16px; margin-bottom:14px; }
+        .thumb-strip { display:flex; gap:8px; flex-wrap:wrap; margin-top:10px; }
+        .thumb { position:relative; width:72px; }
+        .thumb img { width:72px; height:72px; object-fit:cover; border-radius:10px; border:1px solid #e5e7eb; }
+        .thumb-actions { display:flex; justify-content:space-between; margin-top:3px; }
+        .thumb-actions button { font-size:0.62rem; padding:1px 4px; border-radius:4px; border:none; cursor:pointer; background:#f3f4f6; color:#374151; }
+        .icon-btn { padding:5px 10px; border-radius:8px; font-size:0.72rem; font-weight:700; cursor:pointer; border:none; color:#fff; }
+    </style>
+</head>
+<body class="bg-gray-50 min-h-screen">
+<div class="max-w-screen-xl mx-auto p-4">
+
+    <div class="flex justify-between items-center mb-6">
+        <div>
+            <h1 class="text-2xl font-extrabold text-gray-900">{{ catalogue.title }}</h1>
+            <a href="{{ url_for('admin_catalogues') }}" class="text-sm text-rose-600 hover:underline">← Back to Catalogues</a>
+        </div>
+        <span class="badge {{ 'badge-active' if catalogue.is_active else 'badge-inactive' }}">{{ 'Active' if catalogue.is_active else 'Inactive' }}</span>
+    </div>
+
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% if messages %}
+        {% for cat, msg in messages %}
+        <div class="mb-4 px-4 py-3 rounded-lg font-medium text-sm {% if cat == 'error' %}bg-red-50 text-red-700 border border-red-200{% else %}bg-green-50 text-green-700 border border-green-200{% endif %}">
+            {{ msg }}
+        </div>
+        {% endfor %}
+      {% endif %}
+    {% endwith %}
+
+    <div class="card mb-4">
+        <div class="text-xs text-gray-400 font-bold mb-2">PUBLIC LINK</div>
+        <a href="{{ url_for('public_catalogue', slug=catalogue.slug) }}" target="_blank" class="text-blue-600 hover:underline font-mono text-sm">
+            {{ request.url_root.rstrip('/') }}{{ url_for('public_catalogue', slug=catalogue.slug) }}
+        </a>
+    </div>
+
+    <!-- Edit catalogue title/description -->
+    <div class="card mb-4">
+        <div class="text-xs text-gray-400 font-bold mb-3">CATALOGUE DETAILS</div>
+        <form method="POST" action="{{ url_for('admin_catalogue_edit', catalogue_id=catalogue.id) }}" class="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div>
+                <label for="edit-cat-title" class="block text-xs font-semibold text-gray-500 mb-1">Title</label>
+                <input id="edit-cat-title" type="text" name="title" value="{{ catalogue.title }}" required class="w-full px-3 py-2 border rounded-lg text-sm">
+            </div>
+            <div class="md:col-span-2">
+                <label for="edit-cat-desc" class="block text-xs font-semibold text-gray-500 mb-1">Description</label>
+                <input id="edit-cat-desc" type="text" name="description" value="{{ catalogue.description or '' }}" class="w-full px-3 py-2 border rounded-lg text-sm">
+            </div>
+            <div class="md:col-span-3">
+                <button type="submit" class="px-5 py-2 rounded-lg font-bold bg-rose-600 text-white text-sm hover:bg-rose-700">Save Details</button>
+            </div>
+        </form>
+    </div>
+
+    <!-- Add product -->
+    <div class="card mb-4">
+        <div class="text-xs text-gray-400 font-bold mb-3">ADD PRODUCT</div>
+        <form method="POST" action="{{ url_for('admin_catalogue_product_add', catalogue_id=catalogue.id) }}"
+              enctype="multipart/form-data" class="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div>
+                <label for="new-prod-category" class="block text-xs font-semibold text-gray-500 mb-1">Category</label>
+                <input id="new-prod-category" type="text" name="category" list="category-options"
+                       placeholder="e.g. Bangles" class="w-full px-3 py-2 border rounded-lg text-sm">
+                <datalist id="category-options">
+                    {% for c in categories %}<option value="{{ c.category }}">{% endfor %}
+                </datalist>
+            </div>
+            <div>
+                <label for="new-prod-name" class="block text-xs font-semibold text-gray-500 mb-1">Model Number / Name</label>
+                <input id="new-prod-name" type="text" name="model_number_or_name" required class="w-full px-3 py-2 border rounded-lg text-sm">
+            </div>
+            <div>
+                <label for="new-prod-images" class="block text-xs font-semibold text-gray-500 mb-1">Images</label>
+                <input id="new-prod-images" type="file" name="images" accept="image/*" multiple class="w-full text-sm">
+            </div>
+            <div class="md:col-span-3">
+                <button type="submit" class="px-5 py-2 rounded-lg font-bold bg-rose-600 text-white text-sm hover:bg-rose-700">Add Product</button>
+                <span class="text-xs text-gray-400 ml-2">Images are converted to WebP and compressed automatically on upload.</span>
+            </div>
+        </form>
+    </div>
+
+    <!-- Products -->
+    <div class="card">
+        <div class="text-xs text-gray-400 font-bold mb-3">PRODUCTS ({{ products|length }})</div>
+        {% if not products %}
+        <div class="text-sm text-gray-400">No products in this catalogue yet — add one above.</div>
+        {% endif %}
+        {% for p in products %}
+        <div class="product-row">
+            <div class="flex justify-between items-start flex-wrap gap-3">
+                <form method="POST" action="{{ url_for('admin_catalogue_product_edit', catalogue_id=catalogue.id, product_id=p.id) }}"
+                      class="flex gap-3 flex-wrap items-end flex-1">
+                    <div>
+                        <label for="prod-category-{{ p.id }}" class="block text-xs font-semibold text-gray-500 mb-1">Category</label>
+                        <input id="prod-category-{{ p.id }}" type="text" name="category" value="{{ p.category or '' }}"
+                               list="category-options" class="px-3 py-1.5 border rounded-lg text-sm">
+                    </div>
+                    <div>
+                        <label for="prod-name-{{ p.id }}" class="block text-xs font-semibold text-gray-500 mb-1">Model Number / Name</label>
+                        <input id="prod-name-{{ p.id }}" type="text" name="model_number_or_name" value="{{ p.model_number_or_name }}"
+                               required class="px-3 py-1.5 border rounded-lg text-sm">
+                    </div>
+                    <button type="submit" class="icon-btn" style="background:#374151;">Save</button>
+                </form>
+                <div class="flex gap-1">
+                    <form method="POST" action="{{ url_for('admin_catalogue_product_move', catalogue_id=catalogue.id, product_id=p.id, direction='up') }}">
+                        <button class="icon-btn" style="background:#6b7280;" title="Move up" aria-label="Move {{ p.model_number_or_name }} up">↑</button>
+                    </form>
+                    <form method="POST" action="{{ url_for('admin_catalogue_product_move', catalogue_id=catalogue.id, product_id=p.id, direction='down') }}">
+                        <button class="icon-btn" style="background:#6b7280;" title="Move down" aria-label="Move {{ p.model_number_or_name }} down">↓</button>
+                    </form>
+                    <form method="POST" action="{{ url_for('admin_catalogue_product_delete', catalogue_id=catalogue.id, product_id=p.id) }}"
+                          onsubmit="return confirm('Remove {{ p.model_number_or_name }} from this catalogue?')">
+                        <button class="icon-btn" style="background:#dc2626;">Remove</button>
+                    </form>
+                </div>
+            </div>
+
+            <!-- Images -->
+            <div class="thumb-strip">
+                {% for img in p.images %}
+                <div class="thumb">
+                    <img src="{{ img.image_url }}" alt="{{ p.model_number_or_name }} — image {{ loop.index }}">
+                    <div class="thumb-actions">
+                        <form method="POST" action="{{ url_for('admin_catalogue_product_image_move', catalogue_id=catalogue.id, product_id=p.id, image_id=img.id, direction='up') }}">
+                            <button title="Move image earlier" aria-label="Move image {{ loop.index }} of {{ p.model_number_or_name }} earlier">↑</button>
+                        </form>
+                        <form method="POST" action="{{ url_for('admin_catalogue_product_image_move', catalogue_id=catalogue.id, product_id=p.id, image_id=img.id, direction='down') }}">
+                            <button title="Move image later" aria-label="Move image {{ loop.index }} of {{ p.model_number_or_name }} later">↓</button>
+                        </form>
+                        <form method="POST" action="{{ url_for('admin_catalogue_product_image_delete', catalogue_id=catalogue.id, product_id=p.id, image_id=img.id) }}"
+                              onsubmit="return confirm('Remove this image?')">
+                            <button style="background:#fee2e2;color:#b91c1c;" aria-label="Delete image {{ loop.index }} of {{ p.model_number_or_name }}">✕</button>
+                        </form>
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+
+            <!-- Add more images -->
+            <form method="POST" action="{{ url_for('admin_catalogue_product_images_add', catalogue_id=catalogue.id, product_id=p.id) }}"
+                  enctype="multipart/form-data" class="flex gap-2 items-center mt-3 flex-wrap">
+                <label for="add-img-{{ p.id }}" class="text-xs font-semibold text-gray-500">Add images:</label>
+                <input id="add-img-{{ p.id }}" type="file" name="images" accept="image/*" multiple class="text-xs">
+                <button type="submit" class="icon-btn" style="background:#374151;">Upload</button>
+            </form>
+        </div>
+        {% endfor %}
+    </div>
+</div>
+</body>
+</html>

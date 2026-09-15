@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Export Order #{{ order.id }} — Nari Nakhre Admin</title>
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+    <style>
+        .bg-rose-600  { background-color:#e11d48!important; }
+        .text-rose-600{ color:#e11d48!important; }
+        .hover\:bg-rose-700:hover{ background-color:#be123c!important; }
+        .badge { display:inline-flex; align-items:center; padding:2px 10px; border-radius:999px; font-size:0.72rem; font-weight:700; white-space:nowrap; }
+        .badge-design_shared    { background:#f3f4f6; color:#374151; }
+        .badge-advance_pending  { background:#fef3c7; color:#92400e; }
+        .badge-advance_received { background:#dbeafe; color:#1e40af; }
+        .badge-invoiced         { background:#ede9fe; color:#5b21b6; }
+        .badge-shipped          { background:#e0f2fe; color:#0369a1; }
+        .badge-balance_pending  { background:#fee2e2; color:#b91c1c; }
+        .badge-completed        { background:#dcfce7; color:#15803d; }
+        .card { background:white; border:1px solid #f3f4f6; border-radius:16px; padding:20px; }
+
+        /* ── Status timeline ── */
+        .timeline { display:flex; overflow-x:auto; gap:0; }
+        .timeline-step { flex:1; min-width:110px; text-align:center; position:relative; padding-top:22px; }
+        .timeline-step::before {
+            content:''; position:absolute; top:9px; left:-50%; width:100%; height:3px; background:#e5e7eb; z-index:0;
+        }
+        .timeline-step:first-child::before { display:none; }
+        .timeline-step.done::before, .timeline-step.current::before { background:#e11d48; }
+        .timeline-dot {
+            width:20px; height:20px; border-radius:999px; background:#e5e7eb; border:3px solid #fff;
+            margin:0 auto 6px; position:relative; z-index:1;
+        }
+        .timeline-step.done .timeline-dot { background:#e11d48; }
+        .timeline-step.current .timeline-dot { background:#e11d48; box-shadow:0 0 0 4px #fecdd3; }
+        .timeline-label { font-size:0.7rem; font-weight:700; color:#9ca3af; }
+        .timeline-step.done .timeline-label, .timeline-step.current .timeline-label { color:#111827; }
+    </style>
+</head>
+<body class="bg-gray-50 min-h-screen">
+<div class="max-w-screen-xl mx-auto p-4">
+
+    <div class="flex justify-between items-center mb-6">
+        <div>
+            <h1 class="text-2xl font-extrabold text-gray-900">Export Order #{{ order.id }}</h1>
+            <a href="{{ url_for('admin_export_orders') }}" class="text-sm text-rose-600 hover:underline">← Back to Export Orders</a>
+        </div>
+        <span class="badge badge-{{ order.status }} text-sm">{{ order.status|replace('_',' ')|title }}</span>
+    </div>
+
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% if messages %}
+        {% for cat, msg in messages %}
+        <div class="mb-4 px-4 py-3 rounded-lg font-medium text-sm {% if cat == 'error' %}bg-red-50 text-red-700 border border-red-200{% else %}bg-green-50 text-green-700 border border-green-200{% endif %}">
+            {{ msg }}
+        </div>
+        {% endfor %}
+      {% endif %}
+    {% endwith %}
+
+    <!-- Status timeline -->
+    <div class="card mb-6">
+        {% set current_index = statuses.index(order.status) if order.status in statuses else -1 %}
+        <div class="timeline">
+            {% for s in statuses %}
+            <div class="timeline-step {% if loop.index0 < current_index %}done{% elif loop.index0 == current_index %}current{% endif %}">
+                <div class="timeline-dot"></div>
+                <div class="timeline-label">{{ status_labels.get(s, s) }}</div>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-4">
+        <!-- Buyer info -->
+        <div class="card">
+            <div class="text-xs text-gray-400 font-bold mb-2">BUYER</div>
+            <div class="font-semibold text-gray-800">{{ order.buyer_name }}</div>
+            {% if order.buyer_email %}<div class="text-sm text-gray-600">✉ {{ order.buyer_email }}</div>{% endif %}
+            <div class="text-sm text-gray-600 mt-1">{{ order.buyer_address }}</div>
+            <div class="text-sm text-gray-600">{{ order.buyer_country }}</div>
+            {% if order.order_shipping_id %}
+            <div class="text-xs text-gray-400 mt-2">Linked storefront order #{{ order.order_shipping_id }}</div>
+            {% endif %}
+        </div>
+
+        <!-- Financials -->
+        <div class="card">
+            <div class="text-xs text-gray-400 font-bold mb-2">INVOICE VALUE</div>
+            {% if order.invoice_value_foreign %}
+            <div class="font-bold text-gray-800">{{ order.currency }} {{ "%.2f"|format(order.invoice_value_foreign) }}</div>
+            {% endif %}
+            {% if order.invoice_value_inr %}
+            <div class="text-sm text-gray-600">₹{{ "%.2f"|format(order.invoice_value_inr) }} {% if order.exchange_rate %}(@ {{ order.exchange_rate }}){% endif %}</div>
+            {% endif %}
+            <div class="text-sm text-gray-600 mt-2">Advance: {{ order.advance_percent }}%</div>
+            <div class="text-xs text-gray-500">Advance received: {{ order.advance_received_at|string|truncate(10,true,'') if order.advance_received_at else '—' }}</div>
+            <div class="text-xs text-gray-500">Balance received: {{ order.balance_received_at|string|truncate(10,true,'') if order.balance_received_at else '—' }}</div>
+        </div>
+
+        <!-- Compliance -->
+        <div class="card">
+            <div class="text-xs text-gray-400 font-bold mb-2">COMPLIANCE</div>
+            <div class="text-sm text-gray-600">FIRC: {{ order.firc_reference or '—' }}</div>
+            <div class="text-sm text-gray-600">AD Code: {{ order.ad_code_reference or '—' }}</div>
+            <div class="text-sm text-gray-600">LUT: {{ order.lut_reference or '—' }}</div>
+        </div>
+    </div>
+
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-4">
+        <!-- Invoices -->
+        <div class="card">
+            <div class="text-xs text-gray-400 font-bold mb-3">INVOICES</div>
+            {% if invoices %}
+            {% for inv in invoices %}
+            <div class="flex justify-between items-center py-2 border-b border-gray-50 last:border-0">
+                <div>
+                    <div class="font-mono text-sm font-semibold text-gray-800">{{ inv.invoice_number }}</div>
+                    <div class="text-xs text-gray-500">{{ inv.invoice_type|title }} · {{ inv.invoice_date|string|truncate(10,true,'') if inv.invoice_date else '' }}</div>
+                </div>
+                <div class="text-right">
+                    <div class="font-bold text-gray-800">{{ order.currency }} {{ "%.2f"|format(inv.total or 0) }}</div>
+                    {% if inv.pdf_url %}
+                    <a href="{{ inv.pdf_url }}" target="_blank" class="text-xs text-blue-600 hover:underline">Download Invoice →</a>
+                    {% else %}
+                    <div class="text-xs text-gray-400">PDF unavailable</div>
+                    {% endif %}
+                </div>
+            </div>
+            {% endfor %}
+            {% else %}
+            <div class="text-sm text-gray-400">No invoices generated yet.</div>
+            {% endif %}
+        </div>
+
+        <!-- Shipments -->
+        <div class="card">
+            <div class="text-xs text-gray-400 font-bold mb-3">SHIPMENT</div>
+            {% if shipments %}
+            {% for sh in shipments %}
+            <div class="py-2 border-b border-gray-50 last:border-0">
+                <div class="font-semibold text-gray-800">{{ sh.courier or 'Courier TBD' }}</div>
+                <div class="text-xs text-gray-500">AWB: {{ sh.awb_number or '—' }} · Shipping Bill: {{ sh.shipping_bill_number or '—' }}</div>
+                <div class="text-xs text-gray-500">
+                    Shipped: {{ sh.shipped_at|string|truncate(10,true,'') if sh.shipped_at else '—' }} ·
+                    ETA: {{ sh.estimated_delivery|string|truncate(10,true,'') if sh.estimated_delivery else '—' }} ·
+                    Delivered: {{ sh.delivered_at|string|truncate(10,true,'') if sh.delivered_at else '—' }}
+                </div>
+                {% if sh.tracking_url %}<a href="{{ sh.tracking_url }}" target="_blank" class="text-xs text-blue-600 hover:underline">Track shipment →</a>{% endif %}
+            </div>
+            {% endfor %}
+            {% else %}
+            <div class="text-sm text-gray-400">No shipment recorded yet.</div>
+            {% endif %}
+        </div>
+    </div>
+
+    {% macro invoice_line_item_table(currency, row_count=6) %}
+    <table class="w-full text-xs mb-3" style="border-collapse:collapse;">
+        <thead>
+            <tr class="text-left text-gray-500">
+                <th class="pb-1 pr-2">Product Name</th>
+                <th class="pb-1 pr-2">Model / SKU</th>
+                <th class="pb-1 pr-2" style="width:70px;">Qty</th>
+                <th class="pb-1 pr-2" style="width:120px;">Unit Price ({{ currency }})</th>
+            </tr>
+        </thead>
+        <tbody>
+        {% for i in range(1, row_count + 1) %}
+            <tr>
+                <td class="pr-2 py-1">
+                    <input type="text" name="item_name[]" aria-label="Line {{ i }} product name"
+                           class="w-full px-2 py-1 border rounded">
+                </td>
+                <td class="pr-2 py-1">
+                    <input type="text" name="item_sku[]" aria-label="Line {{ i }} model or SKU"
+                           class="w-full px-2 py-1 border rounded">
+                </td>
+                <td class="pr-2 py-1">
+                    <input type="number" name="item_qty[]" min="0" step="1" aria-label="Line {{ i }} quantity"
+                           class="w-full px-2 py-1 border rounded">
+                </td>
+                <td class="py-1">
+                    <input type="number" name="item_unit_price[]" min="0" step="0.01"
+                           aria-label="Line {{ i }} unit price in {{ currency }}" class="w-full px-2 py-1 border rounded">
+                </td>
+            </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    <p class="text-xs text-gray-400 mb-3">Rows with no product name are ignored, so it's fine to leave extra rows blank.</p>
+    {% endmacro %}
+
+    <!-- Invoice generation -->
+    <div class="card mb-4">
+        <div class="text-xs text-gray-400 font-bold mb-3">GENERATE INVOICE</div>
+
+        <details class="mb-3">
+            <summary class="cursor-pointer font-bold text-sm text-gray-800 py-2">📄 Generate Proforma Invoice</summary>
+            <form method="POST" action="{{ url_for('admin_export_order_generate_invoice', export_order_id=order.id) }}" class="mt-3">
+                <input type="hidden" name="invoice_type" value="proforma">
+                <div class="text-xs text-gray-500 mb-3">
+                    Bill to <b>{{ order.buyer_name }}</b>, {{ order.buyer_country }} — currency {{ order.currency }}.
+                </div>
+                {{ invoice_line_item_table(order.currency, 6) }}
+                <button type="submit" class="px-5 py-2 rounded-lg font-bold bg-rose-600 text-white text-sm hover:bg-rose-700">Generate Proforma Invoice</button>
+            </form>
+        </details>
+
+        <details>
+            <summary class="cursor-pointer font-bold text-sm text-gray-800 py-2">🧾 Generate Commercial Invoice</summary>
+            <form method="POST" action="{{ url_for('admin_export_order_generate_invoice', export_order_id=order.id) }}" class="mt-3">
+                <input type="hidden" name="invoice_type" value="commercial">
+                <div class="text-xs text-gray-500 mb-3">
+                    Bill to <b>{{ order.buyer_name }}</b>, {{ order.buyer_country }} — currency {{ order.currency }}.
+                    {% if order.lut_reference %}Zero-rated export under LUT {{ order.lut_reference }}.
+                    {% else %}<span class="text-amber-600 font-semibold">No LUT reference set on this order yet — add one below first.</span>
+                    {% endif %}
+                </div>
+                {{ invoice_line_item_table(order.currency, 6) }}
+                <button type="submit" class="px-5 py-2 rounded-lg font-bold bg-rose-600 text-white text-sm hover:bg-rose-700">Generate Commercial Invoice</button>
+            </form>
+        </details>
+    </div>
+
+    <!-- Manual update form -->
+    <div class="card">
+        <div class="text-xs text-gray-400 font-bold mb-3">UPDATE ORDER</div>
+        <form method="POST" action="{{ url_for('admin_export_order_update', export_order_id=order.id) }}" class="grid grid-cols-1 md:grid-cols-4 gap-4">
+            <div>
+                <label class="block text-xs font-semibold text-gray-500 mb-1">Status</label>
+                <select name="status" class="w-full px-3 py-2 border rounded-lg text-sm">
+                    {% for s in statuses %}
+                    <option value="{{ s }}" {% if s == order.status %}selected{% endif %}>{{ status_labels.get(s, s) }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div>
+                <label class="block text-xs font-semibold text-gray-500 mb-1">Advance Received On</label>
+                <input type="date" name="advance_received_at" class="w-full px-3 py-2 border rounded-lg text-sm">
+            </div>
+            <div>
+                <label class="block text-xs font-semibold text-gray-500 mb-1">FIRC Reference</label>
+                <input type="text" name="firc_reference" placeholder="{{ order.firc_reference or 'Not set' }}" class="w-full px-3 py-2 border rounded-lg text-sm">
+            </div>
+            <div>
+                <label class="block text-xs font-semibold text-gray-500 mb-1">AD Code Reference</label>
+                <input type="text" name="ad_code_reference" placeholder="{{ order.ad_code_reference or 'Not set' }}" class="w-full px-3 py-2 border rounded-lg text-sm">
+            </div>
+            <div class="md:col-span-4">
+                <button type="submit" class="px-6 py-2 rounded-lg font-bold bg-rose-600 text-white text-sm hover:bg-rose-700">Save Changes</button>
+                <span class="text-xs text-gray-400 ml-2">Leave a field blank to keep its current value.</span>
+            </div>
+        </form>
+    </div>
+</div>
+</body>
+</html>

@@ -8,6 +8,7 @@ pyotp
 pandas
 openpyxl
 reportlab
+xhtml2pdf
 Pillow
 python-dotenv
 Authlib>=1.3

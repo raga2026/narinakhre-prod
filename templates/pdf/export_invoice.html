@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<style>
+    @page { size: A4; margin: 1.6cm; }
+    body { font-family: Helvetica, Arial, sans-serif; font-size: 9.5pt; color: #1f2937; }
+    .letterhead { width: 100%; border-bottom: 2px solid #be185d; padding-bottom: 10px; margin-bottom: 14px; }
+    .letterhead td { vertical-align: top; }
+    .company-name { font-size: 15pt; font-weight: bold; color: #111827; }
+    .company-trading { font-size: 9pt; color: #6b7280; }
+    .meta { font-size: 8.5pt; color: #4b5563; line-height: 1.5; }
+    .doc-title { font-size: 16pt; font-weight: bold; color: #be185d; text-align: right; }
+    .doc-meta { text-align: right; font-size: 9pt; color: #374151; line-height: 1.6; }
+
+    .parties { width: 100%; margin-bottom: 14px; }
+    .parties td { vertical-align: top; width: 50%; }
+    .party-label { font-size: 8pt; font-weight: bold; color: #9ca3af; letter-spacing: 0.5px; margin-bottom: 3px; }
+    .party-body { font-size: 9.5pt; line-height: 1.5; color: #1f2937; }
+
+    table.items { width: 100%; border-collapse: collapse; margin-bottom: 10px; }
+    table.items th { background: #fdf2f8; color: #881337; font-size: 8pt; text-align: left; padding: 6px 6px; border: 0.5pt solid #e5e7eb; }
+    table.items td { font-size: 9pt; padding: 6px 6px; border: 0.5pt solid #e5e7eb; }
+    table.items td.num, table.items th.num { text-align: right; }
+
+    .totals { width: 100%; margin-top: 4px; }
+    .totals td { padding: 3px 6px; font-size: 9.5pt; }
+    .totals .label { text-align: right; color: #4b5563; }
+    .totals .value { text-align: right; width: 110px; }
+    .totals .grand .label, .totals .grand .value { font-size: 12pt; font-weight: bold; color: #be185d; border-top: 1pt solid #be185d; padding-top: 6px; }
+
+    .gst-note { margin-top: 10px; padding: 8px 10px; background: #f0fdf4; border: 0.5pt solid #86efac; color: #166534; font-size: 9pt; font-weight: bold; }
+    .proforma-note { margin-top: 10px; padding: 8px 10px; background: #fffbeb; border: 0.5pt solid #fde68a; color: #92400e; font-size: 8.5pt; }
+
+    .bank-box { margin-top: 18px; padding: 10px; border: 0.5pt solid #e5e7eb; background: #f9fafb; }
+    .bank-title { font-size: 8pt; font-weight: bold; color: #9ca3af; letter-spacing: 0.5px; margin-bottom: 5px; }
+    .bank-row { font-size: 9pt; line-height: 1.6; }
+
+    .footer { margin-top: 20px; font-size: 7.5pt; color: #9ca3af; text-align: center; }
+</style>
+</head>
+<body>
+
+    <table class="letterhead">
+        <tr>
+            <td style="width:55%;">
+                {% if seller.logo_url %}<img src="{{ seller.logo_url }}" style="height:38px;margin-bottom:6px;"><br>{% endif %}
+                <div class="company-name">{{ seller.name }}</div>
+                <div class="company-trading">Trading as: {{ seller.trading_as }}</div>
+                <div class="meta">
+                    {{ seller.address }}<br>
+                    {% if seller.gstin %}GSTIN: {{ seller.gstin }}<br>{% endif %}
+                    {% if seller.email %}Email: {{ seller.email }}{% endif %}
+                    {% if seller.phone %} &nbsp;|&nbsp; Phone: {{ seller.phone }}{% endif %}
+                </div>
+            </td>
+            <td style="width:45%;">
+                <div class="doc-title">{{ 'COMMERCIAL INVOICE' if invoice.invoice_type == 'commercial' else 'PROFORMA INVOICE' }}</div>
+                <div class="doc-meta">
+                    Invoice No: {{ invoice.invoice_number }}<br>
+                    Date: {{ invoice.invoice_date }}<br>
+                    Currency: {{ order.currency }}
+                </div>
+            </td>
+        </tr>
+    </table>
+
+    <table class="parties">
+        <tr>
+            <td>
+                <div class="party-label">BILL TO</div>
+                <div class="party-body">
+                    <b>{{ order.buyer_name }}</b><br>
+                    {{ order.buyer_address }}<br>
+                    {{ order.buyer_country }}
+                    {% if order.buyer_email %}<br>Email: {{ order.buyer_email }}{% endif %}
+                </div>
+            </td>
+            <td>
+                <div class="party-label">EXPORT REFERENCE</div>
+                <div class="party-body">
+                    {% if order.lut_reference %}LUT: {{ order.lut_reference }}<br>{% endif %}
+                    {% if order.ad_code_reference %}AD Code: {{ order.ad_code_reference }}<br>{% endif %}
+                    {% if order.firc_reference %}FIRC: {{ order.firc_reference }}{% endif %}
+                </div>
+            </td>
+        </tr>
+    </table>
+
+    <table class="items">
+        <thead>
+            <tr>
+                <th style="width:6%;">#</th>
+                <th style="width:40%;">Product</th>
+                <th style="width:18%;">Model / SKU</th>
+                <th class="num" style="width:10%;">Qty</th>
+                <th class="num" style="width:13%;">Unit Price</th>
+                <th class="num" style="width:13%;">Amount</th>
+            </tr>
+        </thead>
+        <tbody>
+        {% for item in line_items %}
+            <tr>
+                <td>{{ loop.index }}</td>
+                <td>{{ item.name }}</td>
+                <td>{{ item.sku or '-' }}</td>
+                <td class="num">{{ "%g"|format(item.qty) }}</td>
+                <td class="num">{{ order.currency }} {{ "%.2f"|format(item.unit_price) }}</td>
+                <td class="num">{{ order.currency }} {{ "%.2f"|format(item.line_total) }}</td>
+            </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+
+    <table class="totals">
+        <tr>
+            <td class="label">Subtotal</td>
+            <td class="value">{{ order.currency }} {{ "%.2f"|format(invoice.subtotal) }}</td>
+        </tr>
+        <tr class="grand">
+            <td class="label">Total</td>
+            <td class="value">{{ order.currency }} {{ "%.2f"|format(invoice.total) }}</td>
+        </tr>
+    </table>
+
+    {% if invoice.invoice_type == 'commercial' %}
+    <div class="gst-note">
+        GST: Zero-rated export under LUT{% if order.lut_reference %} — {{ order.lut_reference }}{% endif %}. No GST charged on this supply.
+    </div>
+    {% else %}
+    <div class="proforma-note">
+        This is a Proforma Invoice for reference only. It is not a demand for payment and carries no GST liability.
+    </div>
+    {% endif %}
+
+    {% if bank.account_number %}
+    <div class="bank-box">
+        <div class="bank-title">BANK DETAILS FOR WIRE TRANSFER (USD)</div>
+        <div class="bank-row">
+            {% if bank.account_name %}Account Name: {{ bank.account_name }}<br>{% endif %}
+            {% if bank.bank_name %}Bank: {{ bank.bank_name }}<br>{% endif %}
+            Account Number: {{ bank.account_number }}<br>
+            {% if bank.ifsc %}IFSC: {{ bank.ifsc }}<br>{% endif %}
+            {% if bank.swift %}SWIFT: {{ bank.swift }}<br>{% endif %}
+            {% if bank.bank_address %}Bank Address: {{ bank.bank_address }}{% endif %}
+        </div>
+    </div>
+    {% endif %}
+
+    <div class="footer">{{ seller.name }} ({{ seller.trading_as }}) — this document was generated electronically.</div>
+
+</body>
+</html>

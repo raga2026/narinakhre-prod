@@ -24,6 +24,21 @@ from supabase import create_client, Client as SupabaseClient
 from db import get_db, get_supabase, SupabaseDB, close_db as _db_close_db
 from utils.shipping_manager import get_shipping_provider, ShiprocketProvider
 from utils.credential_crypto import encrypt_credentials, decrypt_credentials
+from export_orders import (
+    initialize_export_tables_if_needed, EXPORT_ORDER_STATUSES, EXPORT_ORDER_STATUS_LABELS,
+    list_export_orders, get_export_order, list_export_invoices, list_export_shipments,
+    admin_update_export_order, create_export_invoice, update_export_invoice_pdf_url,
+)
+from export_invoice_pdf import generate_and_upload_export_invoice_pdf
+from catalogues import (
+    initialize_catalogue_tables_if_needed, create_catalogue, get_catalogue, get_catalogue_by_slug,
+    list_catalogues, update_catalogue, toggle_catalogue_active, delete_catalogue,
+    add_catalogue_product, get_catalogue_product, list_catalogue_products, update_catalogue_product,
+    delete_catalogue_product, move_catalogue_product, add_catalogue_product_image,
+    list_catalogue_product_images, delete_catalogue_product_image, move_catalogue_product_image,
+    get_catalogue_products_with_images,
+)
+from catalogue_image_upload import compress_and_upload_catalogue_image
 import auth_providers
 import io
 from PIL import Image as PILImage
@@ -314,6 +329,16 @@ WAREHOUSE_CITY = os.environ.get('WAREHOUSE_CITY', 'Jabalpur')
 WAREHOUSE_STATE = os.environ.get('WAREHOUSE_STATE', 'Madhya Pradesh')
 WAREHOUSE_ADDRESS = os.environ.get('WAREHOUSE_ADDRESS', '')
 WAREHOUSE_PHONE = os.environ.get('WAREHOUSE_PHONE', '')
+# Bank details printed on export invoices for the buyer's USD wire transfer.
+# All blank until set in Render -- the invoice template only prints the
+# ones that are actually configured (SWIFT is the one most likely unset
+# until the export current account exists).
+EXPORT_BANK_ACCOUNT_NAME = os.environ.get('EXPORT_BANK_ACCOUNT_NAME', '')
+EXPORT_BANK_NAME = os.environ.get('EXPORT_BANK_NAME', '')
+EXPORT_BANK_ACCOUNT_NUMBER = os.environ.get('EXPORT_BANK_ACCOUNT_NUMBER', '')
+EXPORT_BANK_IFSC = os.environ.get('EXPORT_BANK_IFSC', '')
+EXPORT_BANK_SWIFT = os.environ.get('EXPORT_BANK_SWIFT', '')
+EXPORT_BANK_ADDRESS = os.environ.get('EXPORT_BANK_ADDRESS', '')
 ADMIN_EMAIL = os.environ.get('ADMIN_EMAIL', 'mohinicosmetics.india@gmail.com')
 # Order-related emails (confirmation, tracking updates) and general/support
 # emails (welcome, campaigns, contact-form replies) each go out through
@@ -820,6 +845,13 @@ def ensure_checkout_tables_exist():
 
 initialize_database_if_needed()
 ensure_checkout_tables_exist()
+# Export order tracking/invoicing -- additive, own tables (export_orders,
+# export_invoices, export_shipments), does not touch order_shipping.
+# See export_orders.py; no routes/UI wired to it yet.
+initialize_export_tables_if_needed(get_supabase())
+# Catalogues -- additive, own tables (catalogues, catalogue_products,
+# catalogue_product_images). See catalogues.py.
+initialize_catalogue_tables_if_needed(get_supabase())
 # Nari Nakhre Stocks -- separate feature, own tables, kept out of the
 # e-commerce schema above. Same Supabase project only -- it has its own
 # admin login (see stoqbell/utils/stock_auth.py), not the storefront's.
@@ -5519,7 +5551,7 @@ def admin_gst_invoices_pdf():
         from reportlab.lib.units import mm
         from reportlab.lib import colors
         from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-        from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, PageBreak
+        from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, PageBreak, Image
 
         buf = io.BytesIO()
         doc = SimpleDocTemplate(buf, pagesize=A4, topMargin=15 * mm, bottomMargin=15 * mm,
@@ -5530,14 +5562,28 @@ def admin_gst_invoices_pdf():
         normal_style = ParagraphStyle('Normal2', parent=styles['Normal'], fontSize=9, leading=13)
         small_style = ParagraphStyle('Small', parent=styles['Normal'], fontSize=8, textColor=gray, leading=11)
 
+        # Logo image (aspect ratio 498:170) -- Mohini Cosmetics is the legal
+        # entity/proprietorship on the invoice; Nari Nakhre is its brand
+        # name only, so the logo and bold company name are Mohini's.
+        _mohini_logo_path = os.path.join(BASE_DIR, 'static', 'themes', 'default', 'assets', 'mohini-logo.png')
+
+        def _fresh_mohini_logo():
+            # A fresh Image() instance per invoice -- reportlab flowables
+            # carry layout state once placed, so the same instance can't be
+            # reused across every order in this loop (up to MAX_INVOICES).
+            if os.path.exists(_mohini_logo_path):
+                return Image(_mohini_logo_path, width=42 * mm, height=42 * mm * 170 / 498)
+            return Paragraph('<b>Mohini Cosmetics</b>', normal_style)
+
         elements = []
         for idx, order in enumerate(orders):
             lines, is_interstate = _compute_order_gst_lines(db, order)
 
             header_data = [[
-                Paragraph('<b>Nari Nakhre&trade;</b><br/>by Mohini Cosmetics' +
-                          (f'<br/><font color="#1d4ed8">GSTIN: {DELHIVERY_SELLER_GST}</font>' if DELHIVERY_SELLER_GST else ''),
-                          normal_style),
+                [_fresh_mohini_logo(),
+                 Paragraph('Trading as: Nari Nakhre' +
+                           (f'<br/><font color="#1d4ed8">GSTIN: {DELHIVERY_SELLER_GST}</font>' if DELHIVERY_SELLER_GST else ''),
+                           normal_style)],
                 Paragraph(f'<para align="right"><b><font color="#be185d" size=15>TAX INVOICE</font></b><br/>'
                           f'Invoice No: {order["internal_order_id"]}<br/>'
                           f'Date: {str(order["created_at"])[:10] if order["created_at"] else "N/A"}</para>', normal_style),
@@ -6687,6 +6733,359 @@ def admin_coupon_edit(coupon_id):
     db.commit()
     flash('Coupon updated.')
     return redirect(url_for('admin_coupons'))
+
+
+@app.route('/admin/export-orders', methods=['GET'])
+@admin_required
+def admin_export_orders():
+    db = get_db()
+    current_status = request.args.get('status', 'all')
+    if current_status == 'all':
+        orders = list_export_orders(db)
+    else:
+        orders = list_export_orders(db, status=current_status)
+    status_counts = db.execute(
+        "SELECT status, COUNT(*) as count FROM export_orders GROUP BY status"
+    ).fetchall()
+    count_map = {r['status']: r['count'] for r in status_counts}
+    return render_template('admin/admin_export_orders.html',
+                            orders=orders, current_status=current_status,
+                            count_map=count_map, total_count=sum(count_map.values()))
+
+
+@app.route('/admin/export-orders/<int:export_order_id>', methods=['GET'])
+@admin_required
+def admin_export_order_detail(export_order_id):
+    db = get_db()
+    order = get_export_order(db, export_order_id)
+    if not order:
+        flash('Export order not found.', 'error')
+        return redirect(url_for('admin_export_orders'))
+    invoices = list_export_invoices(db, export_order_id)
+    shipments = list_export_shipments(db, export_order_id)
+    return render_template('admin/admin_export_order_detail.html',
+                            order=order, invoices=invoices, shipments=shipments,
+                            statuses=EXPORT_ORDER_STATUSES, status_labels=EXPORT_ORDER_STATUS_LABELS)
+
+
+@app.route('/admin/export-orders/<int:export_order_id>/update', methods=['POST'])
+@admin_required
+def admin_export_order_update(export_order_id):
+    db = get_db()
+    order = get_export_order(db, export_order_id)
+    if not order:
+        flash('Export order not found.', 'error')
+        return redirect(url_for('admin_export_orders'))
+
+    status = (request.form.get('status') or '').strip()
+    if status and status not in EXPORT_ORDER_STATUSES:
+        flash('Invalid status.', 'error')
+        return redirect(url_for('admin_export_order_detail', export_order_id=export_order_id))
+
+    advance_received_at = (request.form.get('advance_received_at') or '').strip() or None
+    firc_reference = (request.form.get('firc_reference') or '').strip() or None
+    ad_code_reference = (request.form.get('ad_code_reference') or '').strip() or None
+
+    admin_update_export_order(
+        db, export_order_id,
+        status=status or None,
+        advance_received_at=advance_received_at,
+        firc_reference=firc_reference,
+        ad_code_reference=ad_code_reference,
+    )
+    flash('Export order updated.')
+    return redirect(url_for('admin_export_order_detail', export_order_id=export_order_id))
+
+
+@app.route('/admin/export-orders/<int:export_order_id>/invoices/generate', methods=['POST'])
+@admin_required
+def admin_export_order_generate_invoice(export_order_id):
+    db = get_db()
+    order = get_export_order(db, export_order_id)
+    if not order:
+        flash('Export order not found.', 'error')
+        return redirect(url_for('admin_export_orders'))
+
+    invoice_type = (request.form.get('invoice_type') or '').strip()
+    if invoice_type not in ('proforma', 'commercial'):
+        flash('Invalid invoice type.', 'error')
+        return redirect(url_for('admin_export_order_detail', export_order_id=export_order_id))
+
+    names = request.form.getlist('item_name[]')
+    skus = request.form.getlist('item_sku[]')
+    qtys = request.form.getlist('item_qty[]')
+    prices = request.form.getlist('item_unit_price[]')
+
+    line_items = []
+    for name, sku, qty, price in zip(names, skus, qtys, prices):
+        name = (name or '').strip()
+        if not name:
+            continue
+        try:
+            qty_val = float(qty) if qty else 0
+            price_val = float(price) if price else 0
+        except ValueError:
+            continue
+        if qty_val <= 0 or price_val < 0:
+            continue
+        line_items.append({
+            'name': name,
+            'sku': (sku or '').strip(),
+            'qty': qty_val,
+            'unit_price': price_val,
+            'line_total': round(qty_val * price_val, 2),
+        })
+
+    if not line_items:
+        flash('Add at least one line item with a product name, quantity, and unit price.', 'error')
+        return redirect(url_for('admin_export_order_detail', export_order_id=export_order_id))
+
+    subtotal = round(sum(item['line_total'] for item in line_items), 2)
+    total = subtotal  # zero-rated export -- no GST added
+
+    invoice = create_export_invoice(db, export_order_id, invoice_type, line_items, subtotal, total)
+
+    seller = {
+        'name': 'Mohini Cosmetics',
+        'trading_as': 'Nari Nakhre',
+        'address': WAREHOUSE_ADDRESS or f'{WAREHOUSE_CITY}, {WAREHOUSE_STATE}',
+        'gstin': DELHIVERY_SELLER_GST,
+        'email': 'info@narinakhre.com',
+        'phone': WAREHOUSE_PHONE,
+        'logo_url': 'https://narinakhre.com/static/assets/mohini-logo.png',
+    }
+    bank = {
+        'account_name': EXPORT_BANK_ACCOUNT_NAME,
+        'bank_name': EXPORT_BANK_NAME,
+        'account_number': EXPORT_BANK_ACCOUNT_NUMBER,
+        'ifsc': EXPORT_BANK_IFSC,
+        'swift': EXPORT_BANK_SWIFT,
+        'bank_address': EXPORT_BANK_ADDRESS,
+    }
+
+    try:
+        pdf_url = generate_and_upload_export_invoice_pdf(invoice, order, line_items, seller, bank)
+    except Exception as e:
+        app.logger.error(f'Export invoice PDF generation failed: {e}')
+        pdf_url = None
+
+    if pdf_url:
+        update_export_invoice_pdf_url(db, invoice['id'], pdf_url)
+        flash(f'{invoice_type.title()} invoice {invoice["invoice_number"]} generated.')
+    else:
+        flash(f'{invoice_type.title()} invoice {invoice["invoice_number"]} saved, but the PDF could not be '
+              f'generated or uploaded -- check Supabase storage configuration.', 'error')
+
+    return redirect(url_for('admin_export_order_detail', export_order_id=export_order_id))
+
+
+# ---------------------------------------------------------------------------
+# Catalogues -- curated, shareable product sets. Admin CRUD below; the
+# public /catalogue/<slug> view lives further down, outside @admin_required.
+# ---------------------------------------------------------------------------
+
+@app.route('/admin/catalogues', methods=['GET'])
+@admin_required
+def admin_catalogues():
+    db = get_db()
+    catalogues = list_catalogues(db)
+    return render_template('admin/admin_catalogues.html', catalogues=catalogues)
+
+
+@app.route('/admin/catalogues/create', methods=['POST'])
+@admin_required
+def admin_catalogue_create():
+    db = get_db()
+    title = (request.form.get('title') or '').strip()
+    description = (request.form.get('description') or '').strip()
+    if not title:
+        flash('Title is required.', 'error')
+        return redirect(url_for('admin_catalogues'))
+    catalogue = create_catalogue(db, title, description)
+    flash(f'Catalogue "{title}" created.')
+    return redirect(url_for('admin_catalogue_detail', catalogue_id=catalogue['id']))
+
+
+@app.route('/admin/catalogues/<int:catalogue_id>', methods=['GET'])
+@admin_required
+def admin_catalogue_detail(catalogue_id):
+    db = get_db()
+    catalogue = get_catalogue(db, catalogue_id)
+    if not catalogue:
+        flash('Catalogue not found.', 'error')
+        return redirect(url_for('admin_catalogues'))
+    products = get_catalogue_products_with_images(db, catalogue_id)
+    categories = db.execute(
+        "SELECT DISTINCT category FROM products WHERE category IS NOT NULL AND category != '' ORDER BY category"
+    ).fetchall()
+    return render_template('admin/admin_catalogue_detail.html',
+                            catalogue=catalogue, products=products, categories=categories)
+
+
+@app.route('/admin/catalogues/<int:catalogue_id>/edit', methods=['POST'])
+@admin_required
+def admin_catalogue_edit(catalogue_id):
+    db = get_db()
+    title = (request.form.get('title') or '').strip() or None
+    description = request.form.get('description')
+    description = description.strip() if description is not None else None
+    update_catalogue(db, catalogue_id, title=title, description=description)
+    flash('Catalogue updated.')
+    return redirect(url_for('admin_catalogue_detail', catalogue_id=catalogue_id))
+
+
+@app.route('/admin/catalogues/<int:catalogue_id>/toggle', methods=['POST'])
+@admin_required
+def admin_catalogue_toggle(catalogue_id):
+    db = get_db()
+    toggle_catalogue_active(db, catalogue_id)
+    flash('Catalogue status updated.')
+    return redirect(url_for('admin_catalogues'))
+
+
+@app.route('/admin/catalogues/<int:catalogue_id>/delete', methods=['POST'])
+@admin_required
+def admin_catalogue_delete(catalogue_id):
+    db = get_db()
+    delete_catalogue(db, catalogue_id)
+    flash('Catalogue deleted.')
+    return redirect(url_for('admin_catalogues'))
+
+
+def _flash_compression_notes(action_label, compression_notes):
+    msg = action_label
+    if compression_notes:
+        msg += ' ' + ' | '.join(compression_notes)
+    flash(msg)
+
+
+@app.route('/admin/catalogues/<int:catalogue_id>/products/add', methods=['POST'])
+@admin_required
+def admin_catalogue_product_add(catalogue_id):
+    db = get_db()
+    catalogue = get_catalogue(db, catalogue_id)
+    if not catalogue:
+        flash('Catalogue not found.', 'error')
+        return redirect(url_for('admin_catalogues'))
+
+    category = (request.form.get('category') or '').strip()
+    model_number_or_name = (request.form.get('model_number_or_name') or '').strip()
+    if not model_number_or_name:
+        flash('Model number / name is required.', 'error')
+        return redirect(url_for('admin_catalogue_detail', catalogue_id=catalogue_id))
+
+    product = add_catalogue_product(db, catalogue_id, category, model_number_or_name)
+
+    uploaded_files = [f for f in request.files.getlist('images') if f and f.filename]
+    compression_notes = []
+    for idx, file in enumerate(uploaded_files, start=1):
+        result = compress_and_upload_catalogue_image(file, catalogue_id, model_number_or_name, idx)
+        if result:
+            add_catalogue_product_image(db, product['id'], result['url'])
+            compression_notes.append(
+                f"Image {idx}: {result['original_size'] // 1024}KB -> {result['compressed_size'] // 1024}KB"
+            )
+        else:
+            compression_notes.append(f'Image {idx}: upload failed, skipped.')
+
+    _flash_compression_notes('Product added.', compression_notes)
+    return redirect(url_for('admin_catalogue_detail', catalogue_id=catalogue_id))
+
+
+@app.route('/admin/catalogues/<int:catalogue_id>/products/<int:product_id>/edit', methods=['POST'])
+@admin_required
+def admin_catalogue_product_edit(catalogue_id, product_id):
+    db = get_db()
+    category = request.form.get('category')
+    model_number_or_name = (request.form.get('model_number_or_name') or '').strip() or None
+    update_catalogue_product(
+        db, product_id,
+        category=(category.strip() if category is not None else None),
+        model_number_or_name=model_number_or_name
+    )
+    flash('Product updated.')
+    return redirect(url_for('admin_catalogue_detail', catalogue_id=catalogue_id))
+
+
+@app.route('/admin/catalogues/<int:catalogue_id>/products/<int:product_id>/delete', methods=['POST'])
+@admin_required
+def admin_catalogue_product_delete(catalogue_id, product_id):
+    db = get_db()
+    delete_catalogue_product(db, product_id)
+    flash('Product removed from catalogue.')
+    return redirect(url_for('admin_catalogue_detail', catalogue_id=catalogue_id))
+
+
+@app.route('/admin/catalogues/<int:catalogue_id>/products/<int:product_id>/move/<direction>', methods=['POST'])
+@admin_required
+def admin_catalogue_product_move(catalogue_id, product_id, direction):
+    if direction in ('up', 'down'):
+        db = get_db()
+        move_catalogue_product(db, catalogue_id, product_id, direction)
+    return redirect(url_for('admin_catalogue_detail', catalogue_id=catalogue_id))
+
+
+@app.route('/admin/catalogues/<int:catalogue_id>/products/<int:product_id>/images/add', methods=['POST'])
+@admin_required
+def admin_catalogue_product_images_add(catalogue_id, product_id):
+    db = get_db()
+    product = get_catalogue_product(db, product_id)
+    if not product:
+        flash('Product not found.', 'error')
+        return redirect(url_for('admin_catalogue_detail', catalogue_id=catalogue_id))
+
+    uploaded_files = [f for f in request.files.getlist('images') if f and f.filename]
+    existing_count = len(list_catalogue_product_images(db, product_id))
+    compression_notes = []
+    for offset, file in enumerate(uploaded_files, start=1):
+        idx = existing_count + offset
+        result = compress_and_upload_catalogue_image(file, catalogue_id, product['model_number_or_name'], idx)
+        if result:
+            add_catalogue_product_image(db, product_id, result['url'])
+            compression_notes.append(
+                f"Image {idx}: {result['original_size'] // 1024}KB -> {result['compressed_size'] // 1024}KB"
+            )
+        else:
+            compression_notes.append(f'Image {idx}: upload failed, skipped.')
+
+    _flash_compression_notes('Images added.', compression_notes)
+    return redirect(url_for('admin_catalogue_detail', catalogue_id=catalogue_id))
+
+
+@app.route('/admin/catalogues/<int:catalogue_id>/products/<int:product_id>/images/<int:image_id>/delete',
+           methods=['POST'])
+@admin_required
+def admin_catalogue_product_image_delete(catalogue_id, product_id, image_id):
+    db = get_db()
+    delete_catalogue_product_image(db, image_id)
+    flash('Image removed.')
+    return redirect(url_for('admin_catalogue_detail', catalogue_id=catalogue_id))
+
+
+@app.route('/admin/catalogues/<int:catalogue_id>/products/<int:product_id>/images/<int:image_id>/move/<direction>',
+           methods=['POST'])
+@admin_required
+def admin_catalogue_product_image_move(catalogue_id, product_id, image_id, direction):
+    if direction in ('up', 'down'):
+        db = get_db()
+        move_catalogue_product_image(db, product_id, image_id, direction)
+    return redirect(url_for('admin_catalogue_detail', catalogue_id=catalogue_id))
+
+
+@app.route('/catalogue/<slug>', methods=['GET'])
+def public_catalogue(slug):
+    db = get_db()
+    catalogue = get_catalogue_by_slug(db, slug)
+    if not catalogue or not catalogue.get('is_active'):
+        return render_template('retail/catalogue_unavailable.html'), 404
+
+    products = get_catalogue_products_with_images(db, catalogue['id'])
+    grouped_products = {}
+    for p in products:
+        cat = p.get('category') or 'Other'
+        grouped_products.setdefault(cat, []).append(p)
+
+    return render_template('retail/catalogue.html', catalogue=catalogue, grouped_products=grouped_products)
 
 
 @app.route('/admin/themes', methods=['GET'])

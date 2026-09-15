@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Export Orders — Nari Nakhre Admin</title>
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+    <style>
+        .bg-rose-600  { background-color:#e11d48!important; }
+        .bg-rose-50   { background-color:#fff1f2!important; }
+        .text-rose-600{ color:#e11d48!important; }
+        .text-rose-700{ color:#be123c!important; }
+        .text-rose-800{ color:#9f1239!important; }
+        .border-rose-200{ border-color:#fecdd3!important; }
+        .hover\:bg-rose-700:hover{ background-color:#be123c!important; }
+        .badge { display:inline-flex; align-items:center; padding:2px 10px; border-radius:999px; font-size:0.72rem; font-weight:700; white-space:nowrap; }
+        .badge-design_shared    { background:#f3f4f6; color:#374151; }
+        .badge-advance_pending  { background:#fef3c7; color:#92400e; }
+        .badge-advance_received { background:#dbeafe; color:#1e40af; }
+        .badge-invoiced         { background:#ede9fe; color:#5b21b6; }
+        .badge-shipped          { background:#e0f2fe; color:#0369a1; }
+        .badge-balance_pending  { background:#fee2e2; color:#b91c1c; }
+        .badge-completed        { background:#dcfce7; color:#15803d; }
+        .tab { cursor:pointer; padding:8px 16px; border-bottom:3px solid transparent; font-weight:700; font-size:0.85rem; color:#6b7280; text-decoration:none; }
+        .tab.active { border-color:#e11d48; color:#e11d48; }
+        .order-table tr:hover { background:#fafafa; }
+        .stat-card { background:white; border:1px solid #f3f4f6; border-radius:16px; padding:16px 20px; }
+    </style>
+</head>
+<body class="bg-gray-50 min-h-screen">
+<div class="max-w-screen-xl mx-auto p-4">
+
+    <!-- Header -->
+    <div class="flex justify-between items-center mb-6">
+        <div>
+            <h1 class="text-2xl font-extrabold text-gray-900">🌍 Export Orders</h1>
+            <a href="{{ url_for('admin_dashboard') }}" class="text-sm text-rose-600 hover:underline">← Back to Dashboard</a>
+        </div>
+        <div class="flex items-center gap-3">
+            <a href="{{ url_for('admin_logout') }}" class="px-4 py-2 rounded-lg font-bold bg-rose-600 text-white text-sm hover:bg-rose-700">Logout</a>
+        </div>
+    </div>
+
+    <!-- Flash messages -->
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% if messages %}
+        {% for cat, msg in messages %}
+        <div class="mb-4 px-4 py-3 rounded-lg font-medium text-sm {% if cat == 'error' %}bg-red-50 text-red-700 border border-red-200{% else %}bg-green-50 text-green-700 border border-green-200{% endif %}">
+            {{ msg }}
+        </div>
+        {% endfor %}
+      {% endif %}
+    {% endwith %}
+
+    <!-- Stats row -->
+    <div class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-3 mb-6">
+        <div class="stat-card text-center">
+            <div class="text-2xl font-black text-gray-800">{{ total_count }}</div>
+            <div class="text-xs font-bold mt-1 uppercase tracking-wide" style="color:#374151">All</div>
+        </div>
+        {% for s, label, color in [
+            ('design_shared','Design Shared','#374151'),
+            ('advance_pending','Advance Pending','#92400e'),
+            ('advance_received','Advance Rcvd','#1e40af'),
+            ('invoiced','Invoiced','#5b21b6'),
+            ('shipped','Shipped','#0369a1'),
+            ('balance_pending','Balance Pending','#b91c1c'),
+            ('completed','Completed','#15803d')
+        ] %}
+        <div class="stat-card text-center">
+            <div class="text-2xl font-black text-gray-800">{{ count_map.get(s, 0) }}</div>
+            <div class="text-xs font-bold mt-1 uppercase tracking-wide" style="color:{{ color }}">{{ label }}</div>
+        </div>
+        {% endfor %}
+    </div>
+
+    <!-- Tabs -->
+    <div class="flex border-b border-gray-200 mb-4 overflow-x-auto">
+        {% for tab_status, tab_label in [
+            ('all','All'),('design_shared','Design Shared'),('advance_pending','Advance Pending'),
+            ('advance_received','Advance Received'),('invoiced','Invoiced'),('shipped','Shipped'),
+            ('balance_pending','Balance Pending'),('completed','Completed')
+        ] %}
+        <a href="?status={{ tab_status }}"
+           class="tab {% if current_status == tab_status %}active{% endif %} whitespace-nowrap">
+            {{ tab_label }}
+        </a>
+        {% endfor %}
+    </div>
+
+    <!-- Export orders table -->
+    <div class="bg-white rounded-xl shadow overflow-x-auto">
+        <table class="min-w-full text-sm order-table">
+            <thead class="bg-gray-50 border-b border-gray-100">
+                <tr>
+                    <th class="py-3 px-3 text-left font-semibold text-gray-600 text-xs">ID</th>
+                    <th class="py-3 px-3 text-left font-semibold text-gray-600 text-xs">Buyer</th>
+                    <th class="py-3 px-3 text-left font-semibold text-gray-600 text-xs">Country</th>
+                    <th class="py-3 px-3 text-left font-semibold text-gray-600 text-xs">Invoice Value</th>
+                    <th class="py-3 px-3 text-left font-semibold text-gray-600 text-xs">Stage</th>
+                    <th class="py-3 px-3 text-left font-semibold text-gray-600 text-xs">Created</th>
+                    <th class="py-3 px-3 text-left font-semibold text-gray-600 text-xs">Actions</th>
+                </tr>
+            </thead>
+            <tbody class="divide-y divide-gray-50">
+            {% for o in orders %}
+            <tr>
+                <td class="py-3 px-3 font-mono text-xs text-gray-500">#{{ o.id }}</td>
+                <td class="py-3 px-3">
+                    <div class="font-semibold text-gray-800">{{ o.buyer_name }}</div>
+                    {% if o.buyer_email %}<div class="text-xs text-gray-400">{{ o.buyer_email }}</div>{% endif %}
+                </td>
+                <td class="py-3 px-3 text-xs text-gray-600">{{ o.buyer_country }}</td>
+                <td class="py-3 px-3 font-bold text-gray-800">
+                    {% if o.invoice_value_foreign %}{{ o.currency }} {{ "%.2f"|format(o.invoice_value_foreign) }}
+                    {% else %}<span class="text-gray-300">—</span>{% endif %}
+                </td>
+                <td class="py-3 px-3">
+                    <span class="badge badge-{{ o.status }}">{{ o.status|replace('_',' ')|title }}</span>
+                </td>
+                <td class="py-3 px-3 text-xs text-gray-400">{{ o.created_at|string|truncate(10,true,'') if o.created_at else '—' }}</td>
+                <td class="py-3 px-3">
+                    <a href="{{ url_for('admin_export_order_detail', export_order_id=o.id) }}"
+                       class="action-btn px-3 py-1.5 rounded-lg text-xs font-bold" style="background:#f3f4f6;color:#374151;">View →</a>
+                </td>
+            </tr>
+            {% else %}
+            <tr><td colspan="7" class="py-12 text-center text-gray-400">No export orders found.</td></tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+</body>
+</html>
