@@ -28,6 +28,7 @@ from export_orders import (
     initialize_export_tables_if_needed, EXPORT_ORDER_STATUSES, EXPORT_ORDER_STATUS_LABELS,
     list_export_orders, get_export_order, list_export_invoices, list_export_shipments,
     admin_update_export_order, create_export_invoice, update_export_invoice_pdf_url,
+    create_export_order,
 )
 from export_invoice_pdf import generate_and_upload_export_invoice_pdf
 from catalogues import (
@@ -6751,6 +6752,36 @@ def admin_export_orders():
     return render_template('admin/admin_export_orders.html',
                             orders=orders, current_status=current_status,
                             count_map=count_map, total_count=sum(count_map.values()))
+
+
+@app.route('/admin/export-orders/create', methods=['POST'])
+@admin_required
+def admin_export_order_create():
+    db = get_db()
+    buyer_name = (request.form.get('buyer_name') or '').strip()
+    buyer_address = (request.form.get('buyer_address') or '').strip()
+    buyer_country = (request.form.get('buyer_country') or '').strip()
+    if not buyer_name or not buyer_address or not buyer_country:
+        flash('Buyer name, address, and country are required.', 'error')
+        return redirect(url_for('admin_export_orders'))
+
+    buyer_email = (request.form.get('buyer_email') or '').strip() or None
+    currency = (request.form.get('currency') or 'USD').strip().upper() or 'USD'
+    invoice_value_foreign = request.form.get('invoice_value_foreign', type=float)
+    exchange_rate = request.form.get('exchange_rate', type=float)
+    invoice_value_inr = request.form.get('invoice_value_inr', type=float)
+    advance_percent = request.form.get('advance_percent', type=float) or 50
+    lut_reference = (request.form.get('lut_reference') or '').strip() or None
+
+    order = create_export_order(
+        db, buyer_name, buyer_address, buyer_country,
+        buyer_email=buyer_email, currency=currency,
+        invoice_value_foreign=invoice_value_foreign, exchange_rate=exchange_rate,
+        invoice_value_inr=invoice_value_inr, advance_percent=advance_percent,
+        lut_reference=lut_reference,
+    )
+    flash(f'Export order for {buyer_name} created.')
+    return redirect(url_for('admin_export_order_detail', export_order_id=order['id']))
 
 
 @app.route('/admin/export-orders/<int:export_order_id>', methods=['GET'])
