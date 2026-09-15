@@ -178,14 +178,22 @@ def test_peg_just_under_one_scores_meaningfully_higher_than_peg_in_penalized_ban
     assert ranked[0][1] > ranked[1][1] + 1.0  # more than a token difference
 
 
-def test_diverging_volume_no_longer_excludes_a_golden_cross_candidate():
-    # volume_trend was part of the old three-way hard filter -- it's not
-    # part of is_suggestion_eligible at all anymore (this is the exact
-    # combination that was producing zero suggestions for days: golden
-    # cross without 'confirming' volume used to be excluded outright).
+def test_diverging_volume_excludes_a_golden_cross_candidate():
+    # volume_trend='confirming' was dropped from is_suggestion_eligible for
+    # a while (see that function's own "Volume-confirmation reinstated"
+    # docstring section) on the theory that scoring it was enough -- a real
+    # backtest against realized outcomes (10 of 23 suggestions hit stop
+    # loss, only 2 hit target) showed confirming-volume picks won 3x more
+    # often than diverging-volume ones, so this is now a hard gate again,
+    # same as cross_status and PEG.
     diverging_volume = _candidate(1, 'DIVERGE', volume_trend='diverging')
-    top = select_top_suggestions([diverging_volume])
-    assert [c['symbol'] for c, _ in top] == ['DIVERGE']
+    insufficient_volume = _candidate(2, 'THINVOL', volume_trend='insufficient_data')
+    missing_volume = _candidate(3, 'NOVOL', volume_trend=None)
+
+    assert is_suggestion_eligible(diverging_volume) is False
+    assert is_suggestion_eligible(insufficient_volume) is False
+    assert is_suggestion_eligible(missing_volume) is False
+    assert select_top_suggestions([diverging_volume, insufficient_volume, missing_volume]) == []
 
 
 def test_silver_candidate_preferred_over_a_bronze_one_when_both_available():

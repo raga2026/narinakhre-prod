@@ -165,27 +165,51 @@ def passes_hard_filters(candidate):
 
 def is_suggestion_eligible(candidate):
     """The actual gate for suggestion generation (see generate_daily_suggestions/
-    select_top_suggestions) -- golden cross is required, full stop, no
-    separate volume-trend or RSI hard cutoff. RSI still matters, just as
-    one of the NNS Score's own sub-scores (see
-    utils.nns_score.compute_nns_score's rsi_position) rather than an
-    all-or-nothing gate -- a candidate with poor RSI scores lower and
-    ranks behind better ones, it doesn't get excluded outright over it
-    alone. Quality is enforced afterward by score_candidates' own
-    NNS_BRONZE_MIN floor, not here.
+    select_top_suggestions) -- golden cross AND confirming volume are both
+    required, full stop. RSI still has no hard cutoff here -- it stays one
+    of the NNS Score's own sub-scores (see utils.nns_score.compute_nns_score's
+    rsi_position) rather than an all-or-nothing gate, so a candidate with
+    poor RSI scores lower and ranks behind better ones instead of being
+    excluded outright over it alone. Quality is enforced afterward by
+    score_candidates' own NNS_BRONZE_MIN floor, not here.
 
-    PEG is the one exception, re-checked here too (a candidate with PEG
-    >= PEG_HARD_EXCLUSION_MAX, or no PEG on record at all, is excluded
-    outright, same as failing golden-cross) -- see
+    --- Volume-confirmation reinstated (2026-09) ---
+    This dropped the volume_trend=='confirming' requirement early on
+    (see passes_hard_filters' own docstring -- the golden-cross +
+    confirming-volume + RSI[40,65] three-way combination "produced zero
+    suggestions for days on end" against the watchlist at the time), on
+    the theory that a bare golden cross was good enough and RSI/volume
+    could just be scored instead of gated. It wasn't: of the 23
+    suggestions sent since, only 2 hit target and 10 hit stop-loss (a 17%
+    win rate on closed trades, against a -3%/+5% stop/target that needs
+    >37.5% to break even), and a real backtest against stock_indicators'
+    own stored daily volume_trend showed the picks made on
+    confirming-volume days won 33% of the time (1/3 closed) vs 11% (1/9
+    closed) on diverging-volume days -- roughly 3x better. Small sample,
+    but directionally decisive, and re-checking stock_indicators across
+    the same window showed at least one confirming-volume golden-cross
+    candidate existed on 28 of 29 days -- the watchlist has grown enough
+    since the original "zero suggestions" finding that this no longer
+    appears to be the starvation risk it was. RSI is deliberately NOT
+    also restored as a hard cutoff here -- only the one factor the
+    backtest actually tested for is being changed at a time.
+
+    PEG is the other hard exception (a candidate with PEG >=
+    PEG_HARD_EXCLUSION_MAX, or no PEG on record at all, is excluded
+    outright, same as failing golden-cross or volume confirmation) -- see
     fundamental_screen.PEG_HARD_EXCLUSION_MAX's own docstring for exactly
     why a second PEG check is needed here, on top of the one that already
     gates watchlist admission: admission is a point-in-time check, and a
     watchlisted company's PEG can drift upward afterward without being
     removed from the watchlist for it. Missing PEG data is NOT given the
     benefit of the doubt here either, same rule fundamental_screen.py's
-    own admission-time check already applies."""
+    own admission-time check already applies -- and neither is a missing
+    volume_trend reading (None, or 'insufficient_data', both fail same as
+    'diverging')."""
     peg_ratio = candidate.get('peg_ratio')
     if peg_ratio is None or peg_ratio >= PEG_HARD_EXCLUSION_MAX:
+        return False
+    if candidate.get('volume_trend') != 'confirming':
         return False
     return candidate.get('cross_status') == 'golden_cross'
 
@@ -837,6 +861,96 @@ def get_recommendation_tracker(db):
                )
            ORDER BY s.suggestion_date DESC, s.id DESC'''
     ).fetchall()
+
+
+def attach_volume_trend_at_suggestion(db, tracker_rows):
+    """Looks up stock_indicators.volume_trend AS IT WAS on each row's own
+    suggestion_date -- stock_indicators keeps one row per
+    (watchlist_id, calc_date) (see utils/stock_indicators.py's own UNIQUE
+    constraint), so this reads the actual historical value that gated (or
+    would have gated, for suggestions sent before volume-confirmation was
+    reinstated -- see is_suggestion_eligible's own docstring) that day's
+    suggestion, not today's current volume_trend for the same company.
+
+    One batched query over every row's distinct watchlist_id, not one
+    query per row. Mutates each row in place with a new
+    'volume_trend_at_suggestion' key (None if no indicator snapshot exists
+    for that exact date -- a gap in the daily indicator job, or a
+    suggestion_date from before stock_indicators existed) and returns the
+    same list. Feeds compute_outcome_stats' by_volume_trend breakdown --
+    see /stocks/recommendations/tracker."""
+    watchlist_ids = sorted({r['watchlist_id'] for r in tracker_rows if r.get('watchlist_id') is not None})
+    if not watchlist_ids:
+        return tracker_rows
+    ids_sql = ','.join(str(int(wid)) for wid in watchlist_ids)
+    indicator_rows = db.execute(
+        f'SELECT watchlist_id, calc_date, volume_trend FROM stock_indicators WHERE watchlist_id IN ({ids_sql})'
+    ).fetchall()
+    by_key = {(row['watchlist_id'], str(row['calc_date'])[:10]): row['volume_trend'] for row in indicator_rows}
+    for row in tracker_rows:
+        key = (row.get('watchlist_id'), str(row.get('suggestion_date'))[:10])
+        row['volume_trend_at_suggestion'] = by_key.get(key)
+    return tracker_rows
+
+
+def compute_outcome_stats(tracker_rows):
+    """Pure aggregate arithmetic over already-computed tracker rows (each a
+    dict with at least 'outcome' -- 'target_hit'/'stop_loss_hit'/'open'/
+    'unknown', see compute_tracker_row_stats -- plus 'pct_change',
+    'nns_tier', and optionally 'volume_trend_at_suggestion', see
+    attach_volume_trend_at_suggestion above) -- no DB access, so this is
+    directly unit-testable against plain dicts, same DB-free/DB-
+    orchestration split used throughout this module. Powers the summary
+    panel on /stocks/recommendations/tracker -- the ongoing "did the
+    2026-09 volume-confirmation change actually help" answer, without
+    having to manually re-pull and eyeball the raw numbers the way the
+    2026-09 diagnosis that led to that change did.
+
+    A trade only counts as won/lost once it's CLOSED (outcome is
+    'target_hit' or 'stop_loss_hit') -- 'open'/'unknown' rows are excluded
+    from win_rate_pct (the honest, not-yet-decided outcome) but still
+    included in avg_pct_change and count, since a still-open position's
+    current paper profit/loss is real information even before it resolves.
+
+    Returns {'overall': {...}, 'by_nns_tier': {tier: {...}},
+    'by_volume_trend': {trend: {...}}} -- each {...} is
+    {'count', 'closed_count', 'open_count', 'wins', 'losses',
+    'win_rate_pct' (None if closed_count is 0), 'avg_pct_change' (None if
+    no row has a pct_change)}. by_nns_tier/by_volume_trend only include
+    keys that actually have at least one row -- no zero-count buckets
+    cluttering the panel."""
+    def _bucket(rows):
+        closed = [r for r in rows if r.get('outcome') in ('target_hit', 'stop_loss_hit')]
+        wins = sum(1 for r in closed if r['outcome'] == 'target_hit')
+        losses = sum(1 for r in closed if r['outcome'] == 'stop_loss_hit')
+        pct_values = [r['pct_change'] for r in rows if r.get('pct_change') is not None]
+        return {
+            'count': len(rows),
+            'closed_count': len(closed),
+            'open_count': sum(1 for r in rows if r.get('outcome') == 'open'),
+            'wins': wins,
+            'losses': losses,
+            'win_rate_pct': round(wins / len(closed) * 100, 1) if closed else None,
+            'avg_pct_change': round(sum(pct_values) / len(pct_values), 2) if pct_values else None,
+        }
+
+    by_nns_tier = {}
+    for tier in ('golden', 'silver', 'bronze'):
+        subset = [r for r in tracker_rows if r.get('nns_tier') == tier]
+        if subset:
+            by_nns_tier[tier] = _bucket(subset)
+
+    by_volume_trend = {}
+    for trend in ('confirming', 'diverging', 'insufficient_data'):
+        subset = [r for r in tracker_rows if r.get('volume_trend_at_suggestion') == trend]
+        if subset:
+            by_volume_trend[trend] = _bucket(subset)
+
+    return {
+        'overall': _bucket(tracker_rows),
+        'by_nns_tier': by_nns_tier,
+        'by_volume_trend': by_volume_trend,
+    }
 
 
 def find_pending_target_hit_suggestions(db):

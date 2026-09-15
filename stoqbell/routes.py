@@ -199,6 +199,8 @@ from stoqbell.utils.suggestion_engine import (
     HOLDING_PERIOD_DAYS,
     get_recommendation_tracker,
     compute_tracker_row_stats,
+    attach_volume_trend_at_suggestion,
+    compute_outcome_stats,
     compute_watchlist_nns_scores,
     get_top_stocks,
     get_candidates_for_manual_pick,
@@ -2707,6 +2709,9 @@ def stocks_recommendations_tracker():
         )
         tracker_rows.append(row)
 
+    attach_volume_trend_at_suggestion(db, tracker_rows)
+    outcome_stats = compute_outcome_stats(tracker_rows)
+
     # Only flag today's automatic send as overdue once its expected-by hour
     # (IST) has actually passed -- same threshold check_missed_jobs uses for
     # 'suggestion_email' (see JOB_EXPECTATIONS) -- so this banner doesn't
@@ -2722,6 +2727,7 @@ def stocks_recommendations_tracker():
     return render_template(
         'admin/stocks_recommendation_tracker.html', tracker_rows=tracker_rows,
         today_email_sent=today_email_sent, today_email_overdue=today_email_overdue,
+        outcome_stats=outcome_stats,
     )
 
 

@@ -266,11 +266,11 @@ def send_trading_alert_email(to_email, suggestion, buy_link):
     )
 
 
-def send_highly_recommended_alert_email(to_email, suggestion, include_unsubscribe=False):
+def send_highly_recommended_alerts_email(to_email, candidates, include_unsubscribe=False):
     """Raghav-only (see utils/admin_alerts.py's
     record_and_send_highly_recommended_alerts, always called with
-    to_email=STOP_LOSS_ALERT_EMAIL): one email per golden/silver-tier
-    candidate from that day's analysis, uncapped -- unlike
+    to_email=STOP_LOSS_ALERT_EMAIL): ONE email bundling every golden/
+    silver-tier candidate from that day's analysis, uncapped -- unlike
     send_trading_alert_email above (tied to the single customer-facing Pick
     of the Day, with a Buy Now button linking to the super_admin buy-
     confirmation page for THAT stock_suggestions row), these candidates
@@ -279,19 +279,30 @@ def send_highly_recommended_alert_email(to_email, suggestion, include_unsubscrib
     buy-confirmation page to. Reuses the same stock-card rendering
     (_render_stock_card_html/_render_stock_card_text) minus the Buy Now
     button -- the card's own built-in "View full analysis" link (via
-    universe_id) is enough to let Raghav look the stock up."""
-    subject = f'StoqBell -- Highly Recommended: {_company_display_name(suggestion)}'
+    universe_id) is enough to let Raghav look the stock up.
+
+    candidates: non-empty list of dicts, same shape
+    get_all_highly_recommended_today returns. When more than one stock
+    clears the bar the same day, they all land in this single email
+    (subject and heading pluralize) rather than one email per stock."""
+    count = len(candidates)
+    if count == 1:
+        subject = f'StoqBell -- Highly Recommended: {_company_display_name(candidates[0])}'
+        heading = f"<strong>{_company_display_name(candidates[0])}</strong> is Highly Recommended today."
+    else:
+        subject = f'StoqBell -- {count} Highly Recommended today'
+        heading = f'{count} stocks are Highly Recommended today:'
+
     text_body = (
-        f"{_company_display_name(suggestion)} is Highly Recommended today.\n\n"
-        f'{_render_stock_card_text(suggestion)}\n\n'
-        f'{DISCLAIMER}\n'
+        f'{heading.replace("<strong>", "").replace("</strong>", "")}\n\n'
+        + '\n\n'.join(_render_stock_card_text(c) for c in candidates)
+        + f'\n\n{DISCLAIMER}\n'
     )
     html_inner = (
         f'{_stoqbell_logo_header_html()}'
-        '<p style="font-family:Arial,Helvetica,sans-serif;font-size:16px;color:#0f172a;">'
-        f"<strong>{_company_display_name(suggestion)}</strong> is Highly Recommended today.</p>"
-        f'{_render_stock_card_html(suggestion)}'
-        f'<p style="color:#64748b;font-size:0.85em;margin-top:16px;">{DISCLAIMER}</p>'
+        f'<p style="font-family:Arial,Helvetica,sans-serif;font-size:16px;color:#0f172a;">{heading}</p>'
+        + ''.join(_render_stock_card_html(c) for c in candidates)
+        + f'<p style="color:#64748b;font-size:0.85em;margin-top:16px;">{DISCLAIMER}</p>'
     )
     return send_zeptomail_stocks_email(
         to_email=to_email, to_name=to_email, subject=subject,

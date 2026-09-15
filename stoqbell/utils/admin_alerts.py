@@ -39,7 +39,7 @@ from stoqbell.utils.auto_trader import STOP_LOSS_ALERT_EMAIL
 from stoqbell.utils.kite_client import KiteClient
 from stoqbell.utils.stocks_subscription import active_pro_subscriber_rows, has_stocks_access
 from stoqbell.utils.suggestion_email import (
-    send_highly_recommended_alert_email,
+    send_highly_recommended_alerts_email,
     send_intraday_target_hit_alert_email,
     send_target_achieved_email,
 )
@@ -76,23 +76,23 @@ def record_and_send_highly_recommended_alerts(db):
     same job that emails the customer Pick of the Day (see app.py's
     /stocks/suggestions/send-daily-email). Every golden/silver candidate
     from get_all_highly_recommended_today gets upserted into
-    stock_admin_alerts AND its own email to Raghav -- no cap, and a re-run
-    of this same day's job re-sends rather than silently suppressing
-    (upsert-then-always-email, not upsert-only-if-new), matching "no matter
-    how many times it comes."
+    stock_admin_alerts, then ONE email bundling all of them goes to Raghav
+    and ONE to each Pro subscriber -- not one email per candidate -- so a
+    day with several Highly Recommended stocks lands as a single message,
+    not a flood. A re-run of this same day's job re-sends rather than
+    silently suppressing (upsert-then-always-email, not
+    upsert-only-if-new), matching "no matter how many times it comes."
 
     Returns {'alerted': [...]} -- each entry the same dict shape
     get_all_highly_recommended_today returns, for the caller to log."""
     candidates = get_all_highly_recommended_today(db)
     today = date.today().isoformat()
 
-    # Pro subscribers now get the same per-candidate Highly Recommended
-    # emails Raghav gets -- "all the messages that raga2020@gmail.com
-    # receives". Fetched once, before the loop. Empty until someone
+    # Pro subscribers now get the same bundled Highly Recommended email
+    # Raghav gets. Fetched once, before the loop. Empty until someone
     # actually subscribes to Pro.
     pro_recipients = active_pro_subscriber_rows(db)
 
-    alerted = []
     for c in candidates:
         db.execute(
             '''INSERT INTO stock_admin_alerts
@@ -110,12 +110,13 @@ def record_and_send_highly_recommended_alerts(db):
              c['score'], c['nns_tier'], c['pattern_name'])
         )
         db.commit()
-        send_highly_recommended_alert_email(STOP_LOSS_ALERT_EMAIL, c)
-        for r in pro_recipients:
-            send_highly_recommended_alert_email(r['email'], c, include_unsubscribe=True)
-        alerted.append(c)
 
-    return {'alerted': alerted, 'pro_recipient_count': len(pro_recipients)}
+    if candidates:
+        send_highly_recommended_alerts_email(STOP_LOSS_ALERT_EMAIL, candidates)
+        for r in pro_recipients:
+            send_highly_recommended_alerts_email(r['email'], candidates, include_unsubscribe=True)
+
+    return {'alerted': candidates, 'pro_recipient_count': len(pro_recipients)}
 
 
 def _instrument_key(exchange, symbol):

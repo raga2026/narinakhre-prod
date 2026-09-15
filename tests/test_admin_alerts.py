@@ -142,17 +142,21 @@ class FakeKiteClient:
 
 # --- record_and_send_highly_recommended_alerts ---
 
-def test_records_and_emails_every_golden_silver_candidate_with_no_cap():
+def test_records_every_golden_silver_candidate_and_sends_one_bundled_email():
     candidates = [_golden_candidate(1, 'GOLDCO'), _golden_candidate(2, 'GOLDCO2')]
     db = FakeAdminAlertsDB(candidate_rows=candidates)
 
-    with patch('stoqbell.utils.admin_alerts.send_highly_recommended_alert_email') as mock_send:
+    with patch('stoqbell.utils.admin_alerts.send_highly_recommended_alerts_email') as mock_send:
         summary = record_and_send_highly_recommended_alerts(db)
 
     assert len(summary['alerted']) == 2
-    assert mock_send.call_count == 2
-    sent_to = {call.args[0] for call in mock_send.call_args_list}
-    assert sent_to == {'raga2020@gmail.com'}
+    # One bundled email (to Raghav; no Pro recipients in this fixture),
+    # not one per candidate -- see send_highly_recommended_alerts_email.
+    assert mock_send.call_count == 1
+    call = mock_send.call_args_list[0]
+    assert call.args[0] == 'raga2020@gmail.com'
+    sent_symbols = {c['symbol'] for c in call.args[1]}
+    assert sent_symbols == {'GOLDCO', 'GOLDCO2'}
     assert len(db.admin_alerts) == 2
     assert {a['watchlist_id'] for a in db.admin_alerts} == {1, 2}
 
@@ -161,7 +165,7 @@ def test_rerunning_the_same_day_resends_rather_than_suppressing():
     candidates = [_golden_candidate(1, 'GOLDCO')]
     db = FakeAdminAlertsDB(candidate_rows=candidates)
 
-    with patch('stoqbell.utils.admin_alerts.send_highly_recommended_alert_email') as mock_send:
+    with patch('stoqbell.utils.admin_alerts.send_highly_recommended_alerts_email') as mock_send:
         record_and_send_highly_recommended_alerts(db)
         record_and_send_highly_recommended_alerts(db)
 
@@ -174,7 +178,7 @@ def test_no_alerts_when_nothing_clears_silver():
                               quarterly_revenue_growth_pct=1, opm_pct=5, roce_pct=2, roa_pct=1)
     db = FakeAdminAlertsDB(candidate_rows=[weak])
 
-    with patch('stoqbell.utils.admin_alerts.send_highly_recommended_alert_email') as mock_send:
+    with patch('stoqbell.utils.admin_alerts.send_highly_recommended_alerts_email') as mock_send:
         summary = record_and_send_highly_recommended_alerts(db)
 
     assert summary['alerted'] == []

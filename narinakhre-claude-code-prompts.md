@@ -142,23 +142,7 @@ Test this against a few real product photos (JPEG, varying sizes) and confirm vi
 
 ---
 
-## Prompt 6 — Public catalogue page
 
-```
-Build the public-facing catalogue page at /catalogue/<slug> (no login required — this is the shareable link).
-
-Requirements:
-- If catalogue is_active is false, or slug doesn't exist, show a clean "this catalogue is no longer available" page rather than an error
-- Layout should match the visual language of the NariNakhre homepage (reuse the existing base template, header/footer, fonts, and color scheme — don't build a standalone design)
-- Products grouped by category, each shown as a card with its image(s) in a simple gallery/carousel (reuse the existing product image carousel component from the main site if one already exists), model number/name displayed clearly
-- Should look and feel like browsing the main NariNakhre catalogue, just scoped to this curated set — no price or "add to cart" needed unless you tell me otherwise, this is a viewing/sharing catalogue not a checkout flow
-- Fully responsive — this will mostly be opened from a shared link on mobile (WhatsApp, email)
-- Fast load: lazy-load images below the fold
-
-After this is built, test the full flow end to end: create a catalogue in admin, add a product with images, confirm the compression worked, then open the public link and confirm it displays correctly on both desktop and mobile widths.
-```
-
----
 
 ## Notes for you (not for Claude Code)
 
