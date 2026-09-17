@@ -55,11 +55,55 @@
     .cat-img-strip::-webkit-scrollbar { display:none; }
     .cat-img-strip img {
         flex:0 0 100%; width:100%; aspect-ratio:1/1; max-height:560px; object-fit:contain;
-        scroll-snap-align:center; scroll-snap-stop:always;
+        scroll-snap-align:center; scroll-snap-stop:always; cursor:zoom-in;
     }
     .cat-img-dots { display:flex; justify-content:center; gap:6px; margin-top:10px; }
     .cat-img-dot { width:7px; height:7px; border-radius:50%; background:#fbcfe8; transition:0.2s; }
     .cat-img-dot.active { background:#be185d; width:20px; border-radius:4px; }
+
+    /* Prev/next arrows over the image strip -- a visibly animated slide
+       (see catStripScrollToIndex below) instead of an instant jump. */
+    .cat-img-strip-wrap { position:relative; }
+    .cat-strip-nav {
+        position:absolute; top:50%; transform:translateY(-50%); background:rgba(255,255,255,0.9);
+        color:#be185d; border:none; width:38px; height:38px; border-radius:50%; font-size:1.3rem;
+        cursor:pointer; box-shadow:0 2px 10px rgba(0,0,0,0.18); z-index:3;
+        display:flex; align-items:center; justify-content:center; transition:transform 0.12s;
+    }
+    .cat-strip-nav:hover { background:#fff; }
+    .cat-strip-nav:active { transform:translateY(-50%) scale(0.88); }
+    .cat-strip-prev { left:10px; }
+    .cat-strip-next { right:10px; }
+
+    /* Full-screen image viewer */
+    .cat-lightbox {
+        position:fixed; inset:0; background:rgba(17,10,13,0.94); z-index:99999;
+        display:flex; align-items:center; justify-content:center;
+        animation:catLbFadeIn 0.18s ease;
+    }
+    .cat-lightbox[hidden] { display:none; }
+    @keyframes catLbFadeIn { from { opacity:0; } to { opacity:1; } }
+    .cat-lightbox-img {
+        max-width:92vw; max-height:84vh; object-fit:contain; border-radius:10px;
+        animation:catLbZoomIn 0.22s cubic-bezier(.2,.8,.2,1);
+    }
+    @keyframes catLbZoomIn { from { transform:scale(0.9); opacity:0; } to { transform:scale(1); opacity:1; } }
+    .cat-lightbox-close {
+        position:absolute; top:16px; right:16px; background:rgba(255,255,255,0.15); color:#fff;
+        border:none; width:42px; height:42px; border-radius:50%; font-size:1.3rem; cursor:pointer; z-index:2;
+    }
+    .cat-lightbox-close:hover { background:rgba(255,255,255,0.3); }
+    .cat-lightbox-nav {
+        position:absolute; top:50%; transform:translateY(-50%); background:rgba(255,255,255,0.15); color:#fff;
+        border:none; width:48px; height:48px; border-radius:50%; font-size:1.7rem; cursor:pointer; z-index:2;
+    }
+    .cat-lightbox-nav:hover { background:rgba(255,255,255,0.3); }
+    .cat-lightbox-prev { left:14px; }
+    .cat-lightbox-next { right:14px; }
+    .cat-lightbox-counter {
+        position:absolute; bottom:18px; left:50%; transform:translateX(-50%); color:#fff;
+        font-size:0.78rem; font-weight:600; background:rgba(255,255,255,0.15); padding:5px 14px; border-radius:999px;
+    }
 
     .cat-empty { text-align:center; padding:60px 16px; color:#9ca3af; }
 </style>
@@ -84,16 +128,24 @@
         {% set image_urls = product.images|map(attribute='image_url')|list %}
         <div class="cat-product-card">
             <div class="cat-product-name">{{ product.model_number_or_name }}</div>
-            <div class="cat-img-strip" data-strip>
-                {% if image_urls %}
-                {% for url in image_urls %}
-                <img src="{{ url }}" alt="{{ product.model_number_or_name }}"
-                     {% if not (is_first_overall and loop.first) %}loading="lazy"{% endif %}
-                     onerror="this.src='{{ url_for('static', filename='assets/products/default.jpg') }}'">
-                {% endfor %}
-                {% else %}
-                <img src="{{ url_for('static', filename='assets/products/default.jpg') }}" alt="{{ product.model_number_or_name }}"
-                     {% if not is_first_overall %}loading="lazy"{% endif %}>
+            <div class="cat-img-strip-wrap">
+                <div class="cat-img-strip" data-strip data-images='{{ image_urls|tojson }}'>
+                    {% if image_urls %}
+                    {% for url in image_urls %}
+                    <img src="{{ url }}" alt="{{ product.model_number_or_name }}" data-idx="{{ loop.index0 }}"
+                         {% if not (is_first_overall and loop.first) %}loading="lazy"{% endif %}
+                         onerror="this.src='{{ url_for('static', filename='assets/products/default.jpg') }}'"
+                         onclick="openCatLightbox(this)">
+                    {% endfor %}
+                    {% else %}
+                    <img src="{{ url_for('static', filename='assets/products/default.jpg') }}" alt="{{ product.model_number_or_name }}" data-idx="0"
+                         {% if not is_first_overall %}loading="lazy"{% endif %}
+                         onclick="openCatLightbox(this)">
+                    {% endif %}
+                </div>
+                {% if image_urls|length > 1 %}
+                <button type="button" class="cat-strip-nav cat-strip-prev" aria-label="Previous image">‹</button>
+                <button type="button" class="cat-strip-nav cat-strip-next" aria-label="Next image">›</button>
                 {% endif %}
             </div>
             {% if image_urls|length > 1 %}
@@ -108,22 +160,125 @@
 {% endfor %}
 {% endif %}
 
+<div class="cat-lightbox" id="cat-lightbox" role="dialog" aria-modal="true" aria-label="Product image viewer" hidden
+     onclick="if (event.target === this) closeCatLightbox();">
+    <button type="button" class="cat-lightbox-close" onclick="closeCatLightbox()" aria-label="Close">✕</button>
+    <button type="button" class="cat-lightbox-nav cat-lightbox-prev" onclick="catLightboxNav(-1)" aria-label="Previous image">‹</button>
+    <img class="cat-lightbox-img" id="cat-lightbox-img" src="" alt="">
+    <button type="button" class="cat-lightbox-nav cat-lightbox-next" onclick="catLightboxNav(1)" aria-label="Next image">›</button>
+    <div class="cat-lightbox-counter" id="cat-lightbox-counter"></div>
+</div>
+
 <script>
 document.addEventListener('DOMContentLoaded', function() {
+    /* Eases the strip to a given image index over a visible duration,
+       instead of an instant jump -- used by the prev/next arrows. Native
+       finger-swipe still tracks the touch in real time via scroll-snap. */
+    function catStripScrollTo(strip, targetLeft) {
+        var start = strip.scrollLeft;
+        var change = targetLeft - start;
+        if (!change) return;
+        var duration = 380;
+        var startTime = null;
+        function ease(t) { return 1 - Math.pow(1 - t, 3); }
+        function step(ts) {
+            if (!startTime) startTime = ts;
+            var progress = Math.min((ts - startTime) / duration, 1);
+            strip.scrollLeft = start + change * ease(progress);
+            if (progress < 1) requestAnimationFrame(step);
+        }
+        requestAnimationFrame(step);
+    }
+
     document.querySelectorAll('.cat-img-strip[data-strip]').forEach(function(strip) {
-        var dots = strip.parentElement.querySelectorAll('.cat-img-dots .cat-img-dot');
-        if (dots.length <= 1) return;
-        var ticking = false;
-        strip.addEventListener('scroll', function() {
-            if (ticking) return;
-            ticking = true;
-            requestAnimationFrame(function() {
-                var idx = Math.round(strip.scrollLeft / strip.clientWidth);
-                dots.forEach(function(d, i) { d.classList.toggle('active', i === idx); });
-                ticking = false;
-            });
-        }, { passive: true });
+        var wrap = strip.parentElement;
+        var dotsWrap = wrap.parentElement.querySelector('[data-dots]');
+        var dots = dotsWrap ? dotsWrap.querySelectorAll('.cat-img-dot') : [];
+        var imgCount = strip.querySelectorAll('img').length;
+
+        if (dots.length > 1) {
+            var ticking = false;
+            strip.addEventListener('scroll', function() {
+                if (ticking) return;
+                ticking = true;
+                requestAnimationFrame(function() {
+                    var idx = Math.round(strip.scrollLeft / strip.clientWidth);
+                    dots.forEach(function(d, i) { d.classList.toggle('active', i === idx); });
+                    ticking = false;
+                });
+            }, { passive: true });
+        }
+
+        var prevBtn = wrap.querySelector('.cat-strip-prev');
+        var nextBtn = wrap.querySelector('.cat-strip-next');
+        function goTo(dir) {
+            var idx = Math.round(strip.scrollLeft / strip.clientWidth);
+            var next = Math.max(0, Math.min(imgCount - 1, idx + dir));
+            catStripScrollTo(strip, next * strip.clientWidth);
+        }
+        if (prevBtn) prevBtn.addEventListener('click', function() { goTo(-1); });
+        if (nextBtn) nextBtn.addEventListener('click', function() { goTo(1); });
     });
+});
+
+/* ── Full-screen image viewer ── */
+var catLbImages = [];
+var catLbIndex = 0;
+
+function openCatLightbox(imgEl) {
+    var strip = imgEl.closest('.cat-img-strip');
+    catLbImages = [];
+    try { catLbImages = JSON.parse(strip.getAttribute('data-images') || '[]'); } catch (e) {}
+    if (!catLbImages.length) catLbImages = [imgEl.src];
+    catLbIndex = parseInt(imgEl.getAttribute('data-idx') || '0', 10) || 0;
+    showCatLightboxImage();
+    var lb = document.getElementById('cat-lightbox');
+    lb.hidden = false;
+    document.body.style.overflow = 'hidden';
+    history.pushState({ catLightbox: true }, '');
+}
+
+function showCatLightboxImage() {
+    document.getElementById('cat-lightbox-img').src = catLbImages[catLbIndex];
+    var multi = catLbImages.length > 1;
+    document.getElementById('cat-lightbox-counter').textContent = multi ? (catLbIndex + 1) + ' / ' + catLbImages.length : '';
+    document.querySelector('.cat-lightbox-prev').style.display = multi ? '' : 'none';
+    document.querySelector('.cat-lightbox-next').style.display = multi ? '' : 'none';
+}
+
+function catLightboxNav(dir) {
+    if (catLbImages.length < 2) return;
+    catLbIndex = (catLbIndex + dir + catLbImages.length) % catLbImages.length;
+    showCatLightboxImage();
+}
+
+function closeCatLightbox() {
+    var lb = document.getElementById('cat-lightbox');
+    if (lb.hidden) return;
+    if (history.state && history.state.catLightbox) {
+        history.back();
+    } else {
+        hideCatLightboxNow();
+    }
+}
+
+function hideCatLightboxNow() {
+    var lb = document.getElementById('cat-lightbox');
+    lb.hidden = true;
+    document.body.style.overflow = '';
+}
+
+window.addEventListener('popstate', function() {
+    var lb = document.getElementById('cat-lightbox');
+    if (lb && !lb.hidden) hideCatLightboxNow();
+});
+
+document.addEventListener('keydown', function(e) {
+    var lb = document.getElementById('cat-lightbox');
+    if (!lb || lb.hidden) return;
+    if (e.key === 'Escape') closeCatLightbox();
+    else if (e.key === 'ArrowLeft') catLightboxNav(-1);
+    else if (e.key === 'ArrowRight') catLightboxNav(1);
 });
 </script>
 {% endblock %}
