@@ -32,17 +32,44 @@
     .catalogue-hero { text-align:center; padding:32px 16px 8px; }
     .catalogue-hero h1 { font-family:'Playfair Display',serif; font-size:1.7rem; font-weight:900; color:#881337; }
     .catalogue-hero p { color:#6b7280; font-size:0.92rem; margin-top:8px; max-width:560px; margin-left:auto; margin-right:auto; line-height:1.5; }
+    .catalogue-view-all { display:inline-block; margin-top:10px; font-size:0.82rem; font-weight:700; color:#be185d; text-decoration:none; }
+    .catalogue-view-all:hover { text-decoration:underline; }
+
     .cat-group { margin:28px auto 0; max-width:1200px; padding:0 16px; }
     .cat-group-title { font-family:'Playfair Display',serif; font-size:1.25rem; font-weight:800; color:#be185d; border-bottom:2px solid #fce7f3; padding-bottom:8px; margin-bottom:16px; }
-    .cat-product-img-wrap { width:100%; aspect-ratio:1/1; border-radius:14px; overflow:hidden; background:#fdf2f8; display:flex; align-items:center; justify-content:center; }
-    .cat-product-img-wrap img { width:100%; height:100%; object-fit:contain; }
-    .cat-product-name { margin-top:10px; font-weight:700; font-size:0.85rem; color:#881337; line-height:1.35; }
+
+    .cat-product-grid { display:grid; grid-template-columns: repeat(4, 1fr); gap:20px; }
+    @media (max-width: 900px) { .cat-product-grid { grid-template-columns: repeat(2, 1fr); } }
+    @media (max-width: 640px) { .cat-product-grid { grid-template-columns: 1fr; gap:16px; } }
+
+    .cat-product-card { background:#fff; border-radius:20px; padding:14px; box-shadow:0 1px 4px rgba(0,0,0,0.06); border:1px solid #fce7f3; }
+    .cat-product-name { font-weight:700; font-size:0.85rem; color:#881337; line-height:1.35; margin-bottom:10px; }
+    @media (max-width: 640px) { .cat-product-name { font-size:0.98rem; } }
+
+    /* Swipeable image strip -- native touch scroll + snap gives the
+       "liquid" momentum feel instead of a JS-timed auto-swap. */
+    .cat-img-strip {
+        display:flex; gap:0; overflow-x:auto; scroll-snap-type:x mandatory;
+        -webkit-overflow-scrolling:touch; scroll-behavior:smooth;
+        border-radius:14px; background:#fdf2f8;
+        -ms-overflow-style:none; scrollbar-width:none;
+    }
+    .cat-img-strip::-webkit-scrollbar { display:none; }
+    .cat-img-strip img {
+        flex:0 0 100%; width:100%; aspect-ratio:1/1; object-fit:contain;
+        scroll-snap-align:center; scroll-snap-stop:always;
+    }
+    .cat-img-dots { display:flex; justify-content:center; gap:5px; margin-top:8px; }
+    .cat-img-dot { width:6px; height:6px; border-radius:50%; background:#fbcfe8; transition:0.2s; }
+    .cat-img-dot.active { background:#be185d; width:16px; border-radius:4px; }
+
     .cat-empty { text-align:center; padding:60px 16px; color:#9ca3af; }
 </style>
 
 <div class="catalogue-hero">
     <h1>{{ catalogue.title }}</h1>
     {% if catalogue.description %}<p>{{ catalogue.description }}</p>{% endif %}
+    <a class="catalogue-view-all" href="{{ url_for('public_catalogues_list') }}">📖 View All Catalogues</a>
 </div>
 
 {% if not grouped_products %}
@@ -52,29 +79,30 @@
 {% for category, cat_products in grouped_products.items() %}
 <div class="cat-group">
     <h2 class="cat-group-title">{{ category }}</h2>
-    <div class="grid grid-cols-2 md:grid-cols-4 gap-6">
+    <div class="cat-product-grid">
         {% for product in cat_products %}
         {% set is_first_overall = not ns.rendered_first %}
         {% set ns.rendered_first = true %}
         {% set image_urls = product.images|map(attribute='image_url')|list %}
-        <div class="bg-white rounded-3xl p-4 shadow-sm border border-rose-50">
-            <div class="cat-product-img-wrap">
-                {% if image_urls|length > 1 %}
-                <img id="cat-carousel-{{ product.id }}" src="{{ image_urls[0] }}"
-                     data-images='{{ image_urls|tojson }}' class="cat-carousel-img"
-                     alt="{{ product.model_number_or_name }}"
-                     {% if not is_first_overall %}loading="lazy"{% endif %}
+        <div class="cat-product-card">
+            <div class="cat-product-name">{{ product.model_number_or_name }}</div>
+            <div class="cat-img-strip" data-strip>
+                {% if image_urls %}
+                {% for url in image_urls %}
+                <img src="{{ url }}" alt="{{ product.model_number_or_name }}"
+                     {% if not (is_first_overall and loop.first) %}loading="lazy"{% endif %}
                      onerror="this.src='{{ url_for('static', filename='assets/products/default.jpg') }}'">
-                {% elif image_urls %}
-                <img src="{{ image_urls[0] }}" alt="{{ product.model_number_or_name }}"
-                     {% if not is_first_overall %}loading="lazy"{% endif %}
-                     onerror="this.src='{{ url_for('static', filename='assets/products/default.jpg') }}'">
+                {% endfor %}
                 {% else %}
                 <img src="{{ url_for('static', filename='assets/products/default.jpg') }}" alt="{{ product.model_number_or_name }}"
                      {% if not is_first_overall %}loading="lazy"{% endif %}>
                 {% endif %}
             </div>
-            <div class="cat-product-name">{{ product.model_number_or_name }}</div>
+            {% if image_urls|length > 1 %}
+            <div class="cat-img-dots" data-dots>
+                {% for url in image_urls %}<span class="cat-img-dot {{ 'active' if loop.first else '' }}"></span>{% endfor %}
+            </div>
+            {% endif %}
         </div>
         {% endfor %}
     </div>
@@ -84,36 +112,19 @@
 
 <script>
 document.addEventListener('DOMContentLoaded', function() {
-    document.querySelectorAll('.cat-carousel-img[data-images]').forEach(function(imgEl) {
-        var allUrls = [];
-        try { allUrls = JSON.parse(imgEl.getAttribute('data-images') || '[]'); } catch (e) {}
-        if (allUrls.length <= 1) return;
-
-        var validUrls = [];
-        var checked = 0;
-
-        function startCarousel() {
-            if (validUrls.length <= 1) return;
-            var idx = 0;
-            setInterval(function() {
-                idx = (idx + 1) % validUrls.length;
-                imgEl.src = validUrls[idx];
-            }, 3000);
-        }
-
-        allUrls.forEach(function(url) {
-            var probe = new Image();
-            probe.onload = function() {
-                validUrls.push(url);
-                checked++;
-                if (checked === allUrls.length) startCarousel();
-            };
-            probe.onerror = function() {
-                checked++;
-                if (checked === allUrls.length) startCarousel();
-            };
-            probe.src = url;
-        });
+    document.querySelectorAll('.cat-img-strip[data-strip]').forEach(function(strip) {
+        var dots = strip.parentElement.querySelectorAll('.cat-img-dots .cat-img-dot');
+        if (dots.length <= 1) return;
+        var ticking = false;
+        strip.addEventListener('scroll', function() {
+            if (ticking) return;
+            ticking = true;
+            requestAnimationFrame(function() {
+                var idx = Math.round(strip.scrollLeft / strip.clientWidth);
+                dots.forEach(function(d, i) { d.classList.toggle('active', i === idx); });
+                ticking = false;
+            });
+        }, { passive: true });
     });
 });
 </script>

@@ -7103,6 +7103,22 @@ def admin_catalogue_product_image_move(catalogue_id, product_id, image_id, direc
     return redirect(url_for('admin_catalogue_detail', catalogue_id=catalogue_id))
 
 
+@app.route('/catalogues', methods=['GET'])
+def public_catalogues_list():
+    db = get_db()
+    active_catalogues = [c for c in list_catalogues(db) if c.get('is_active')]
+    catalogues_with_thumb = []
+    for c in active_catalogues:
+        products = get_catalogue_products_with_images(db, c['id'])
+        thumbnail = ''
+        for p in products:
+            if p.get('images'):
+                thumbnail = p['images'][0]['image_url']
+                break
+        catalogues_with_thumb.append({**c, 'thumbnail': thumbnail, 'product_count': len(products)})
+    return render_template('retail/catalogues_list.html', catalogues=catalogues_with_thumb)
+
+
 @app.route('/catalogue/<slug>', methods=['GET'])
 def public_catalogue(slug):
     db = get_db()

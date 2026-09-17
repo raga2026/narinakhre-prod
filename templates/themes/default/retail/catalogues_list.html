@@ -1,0 +1,70 @@
+{% extends "default/retail/base.html" %}
+{% block title %}Catalogues — Nari Nakhre{% endblock %}
+{% block meta_description %}<meta name="description" content="Browse all Nari Nakhre product catalogues.">{% endblock %}
+
+{% block seo_tags %}
+<meta property="og:title" content="Catalogues — Nari Nakhre">
+<meta property="og:description" content="Browse all Nari Nakhre product catalogues.">
+<meta property="og:url" content="{{ request.url }}">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Nari Nakhre">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:title" content="Catalogues — Nari Nakhre">
+<meta name="twitter:description" content="Browse all Nari Nakhre product catalogues.">
+{% endblock %}
+
+{% block content %}
+<style>
+    .cats-hero { text-align:center; padding:32px 16px 8px; }
+    .cats-hero h1 { font-family:'Playfair Display',serif; font-size:1.7rem; font-weight:900; color:#881337; }
+    .cats-hero p { color:#6b7280; font-size:0.92rem; margin-top:8px; }
+    .cats-grid {
+        display:grid; grid-template-columns: repeat(3, 1fr); gap:20px;
+        max-width:1100px; margin:28px auto; padding:0 16px;
+    }
+    @media (max-width: 900px) { .cats-grid { grid-template-columns: repeat(2, 1fr); } }
+    @media (max-width: 640px) { .cats-grid { grid-template-columns: 1fr; } }
+    .cats-card {
+        display:block; background:#fff; border-radius:20px; overflow:hidden;
+        border:1px solid #fce7f3; box-shadow:0 1px 4px rgba(0,0,0,0.06);
+        text-decoration:none; color:inherit; transition:transform 0.15s, box-shadow 0.15s;
+    }
+    .cats-card:hover { transform:translateY(-2px); box-shadow:0 6px 18px rgba(190,24,93,0.15); }
+    .cats-card-img-wrap { width:100%; aspect-ratio:4/3; background:#fdf2f8; display:flex; align-items:center; justify-content:center; }
+    .cats-card-img-wrap img { width:100%; height:100%; object-fit:contain; }
+    .cats-card-body { padding:14px 16px 18px; }
+    .cats-card-title { font-family:'Playfair Display',serif; font-weight:800; font-size:1.05rem; color:#881337; }
+    .cats-card-desc { color:#6b7280; font-size:0.85rem; margin-top:6px; line-height:1.4; }
+    .cats-card-count { color:#be185d; font-size:0.78rem; font-weight:700; margin-top:8px; }
+    .cats-empty { text-align:center; padding:60px 16px; color:#9ca3af; }
+</style>
+
+<div class="cats-hero">
+    <h1>Our Catalogues</h1>
+    <p>Browse curated Nari Nakhre catalogues — tap one to see the full collection.</p>
+</div>
+
+{% if not catalogues %}
+<div class="cats-empty">No catalogues are available right now.</div>
+{% else %}
+<div class="cats-grid">
+    {% for c in catalogues %}
+    <a class="cats-card" href="{{ url_for('public_catalogue', slug=c.slug) }}">
+        <div class="cats-card-img-wrap">
+            {% if c.thumbnail %}
+            <img src="{{ c.thumbnail }}" alt="{{ c.title }}" loading="lazy"
+                 onerror="this.src='{{ url_for('static', filename='assets/products/default.jpg') }}'">
+            {% else %}
+            <img src="{{ url_for('static', filename='assets/products/default.jpg') }}" alt="{{ c.title }}" loading="lazy">
+            {% endif %}
+        </div>
+        <div class="cats-card-body">
+            <div class="cats-card-title">{{ c.title }}</div>
+            {% if c.description %}<div class="cats-card-desc">{{ c.description|truncate(90) }}</div>{% endif %}
+            <div class="cats-card-count">{{ c.product_count }} product{{ 's' if c.product_count != 1 else '' }} →</div>
+        </div>
+    </a>
+    {% endfor %}
+</div>
+{% endif %}
+{% endblock %}
