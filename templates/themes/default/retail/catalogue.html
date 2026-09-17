@@ -280,5 +280,27 @@ document.addEventListener('keydown', function(e) {
     else if (e.key === 'ArrowLeft') catLightboxNav(-1);
     else if (e.key === 'ArrowRight') catLightboxNav(1);
 });
+
+/* Swipe left/right inside the full-screen viewer to move between images. */
+(function() {
+    var lb = document.getElementById('cat-lightbox');
+    var touchStartX = 0, touchStartY = 0, tracking = false;
+    lb.addEventListener('touchstart', function(e) {
+        if (e.touches.length !== 1) return;
+        tracking = true;
+        touchStartX = e.touches[0].clientX;
+        touchStartY = e.touches[0].clientY;
+    }, { passive: true });
+    lb.addEventListener('touchend', function(e) {
+        if (!tracking) return;
+        tracking = false;
+        var touch = e.changedTouches[0];
+        var dx = touch.clientX - touchStartX;
+        var dy = touch.clientY - touchStartY;
+        if (Math.abs(dx) > 40 && Math.abs(dx) > Math.abs(dy) * 1.5) {
+            catLightboxNav(dx < 0 ? 1 : -1);
+        }
+    }, { passive: true });
+})();
 </script>
 {% endblock %}
