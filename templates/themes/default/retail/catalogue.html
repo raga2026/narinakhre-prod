@@ -1,4 +1,4 @@
-{% extends "retail/base.html" %}
+{% extends "default/retail/base.html" %}
 {% block title %}{{ catalogue.title }} — Nari Nakhre{% endblock %}
 {% block meta_description %}<meta name="description" content="{{ (catalogue.description or catalogue.title)|truncate(160) }}">{% endblock %}
 
@@ -85,15 +85,35 @@
 <script>
 document.addEventListener('DOMContentLoaded', function() {
     document.querySelectorAll('.cat-carousel-img[data-images]').forEach(function(imgEl) {
-        var images = [];
-        try { images = JSON.parse(imgEl.getAttribute('data-images')); } catch (e) {}
-        if (Array.isArray(images) && images.length > 1) {
+        var allUrls = [];
+        try { allUrls = JSON.parse(imgEl.getAttribute('data-images') || '[]'); } catch (e) {}
+        if (allUrls.length <= 1) return;
+
+        var validUrls = [];
+        var checked = 0;
+
+        function startCarousel() {
+            if (validUrls.length <= 1) return;
             var idx = 0;
             setInterval(function() {
-                idx = (idx + 1) % images.length;
-                imgEl.src = images[idx];
+                idx = (idx + 1) % validUrls.length;
+                imgEl.src = validUrls[idx];
             }, 3000);
         }
+
+        allUrls.forEach(function(url) {
+            var probe = new Image();
+            probe.onload = function() {
+                validUrls.push(url);
+                checked++;
+                if (checked === allUrls.length) startCarousel();
+            };
+            probe.onerror = function() {
+                checked++;
+                if (checked === allUrls.length) startCarousel();
+            };
+            probe.src = url;
+        });
     });
 });
 </script>
