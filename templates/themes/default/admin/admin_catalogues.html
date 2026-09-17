@@ -14,6 +14,13 @@
         .badge-inactive { background:#f3f4f6; color:#6b7280; }
         .cat-table tr:hover { background:#fafafa; }
         .card { background:white; border:1px solid #f3f4f6; border-radius:16px; padding:20px; }
+        .cat-share-btn {
+            display:inline-flex; align-items:center; gap:4px; margin-top:6px;
+            background:#16a34a; color:#fff; border:none; border-radius:8px;
+            padding:5px 10px; font-size:0.72rem; font-weight:700; cursor:pointer;
+            box-shadow:0 1px 3px rgba(0,0,0,0.15);
+        }
+        .cat-share-btn:hover { background:#15803d; }
     </style>
 </head>
 <body class="bg-gray-50 min-h-screen">
@@ -76,6 +83,12 @@
                 </td>
                 <td class="py-3 px-3 text-xs">
                     <a href="{{ url_for('public_catalogue', slug=c.slug) }}" target="_blank" class="text-blue-600 hover:underline font-mono">/catalogue/{{ c.slug }}</a>
+                    <br>
+                    <button type="button" class="cat-share-btn"
+                            onclick='shareCatalogue({{ url_for("public_catalogue", slug=c.slug, _external=True)|tojson }}, {{ c.title|tojson }}, {{ (c.description or "")|tojson }})'
+                            title="Share this catalogue">
+                        📤 Share Catalogue
+                    </button>
                 </td>
                 <td class="py-3 px-3">
                     <span class="badge {{ 'badge-active' if c.is_active else 'badge-inactive' }}">{{ 'Active' if c.is_active else 'Inactive' }}</span>
@@ -104,5 +117,16 @@
         </table>
     </div>
 </div>
+<script>
+function shareCatalogue(url, title, description) {
+    const desc = description || ('Have a look at our ' + title + ' catalogue. Message us the model name/number to know more details.');
+    const text = '📖 ' + title + ' — Nari Nakhre\n' + desc;
+    if (navigator.share) {
+        navigator.share({ title: title + ' — Nari Nakhre', text: text, url: url }).catch(function () {});
+    } else {
+        window.open('https://wa.me/?text=' + encodeURIComponent(text + '\n' + url), '_blank');
+    }
+}
+</script>
 </body>
 </html>

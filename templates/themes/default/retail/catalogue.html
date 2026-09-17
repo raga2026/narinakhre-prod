@@ -1,6 +1,32 @@
 {% extends "retail/base.html" %}
 {% block title %}{{ catalogue.title }} — Nari Nakhre{% endblock %}
 {% block meta_description %}<meta name="description" content="{{ (catalogue.description or catalogue.title)|truncate(160) }}">{% endblock %}
+
+{% block seo_tags %}
+{%- set cat_desc = catalogue.description|default('Browse the ' ~ catalogue.title ~ ' catalogue by Nari Nakhre. Have a look and message us the model name/number to know more details.', true)|striptags|truncate(160) -%}
+{%- set cat_img = namespace(url='') -%}
+{%- for category, cat_products in (grouped_products or {}).items() -%}
+    {%- for product in cat_products -%}
+        {%- if not cat_img.url and product.images -%}
+            {%- set cat_img.url = product.images[0].image_url -%}
+        {%- endif -%}
+    {%- endfor -%}
+{%- endfor -%}
+{%- set cat_img_final = cat_img.url or url_for('static', filename='assets/products/default.jpg', _external=True) -%}
+<meta property="og:title" content="{{ catalogue.title }} — Nari Nakhre">
+<meta property="og:description" content="{{ cat_desc }}">
+<meta property="og:image" content="{{ cat_img_final }}">
+<meta property="og:image:width" content="800">
+<meta property="og:image:height" content="800">
+<meta property="og:url" content="{{ request.url }}">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Nari Nakhre">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="{{ catalogue.title }} — Nari Nakhre">
+<meta name="twitter:description" content="{{ cat_desc }}">
+<meta name="twitter:image" content="{{ cat_img_final }}">
+{% endblock %}
+
 {% block content %}
 <style>
     .catalogue-hero { text-align:center; padding:32px 16px 8px; }
