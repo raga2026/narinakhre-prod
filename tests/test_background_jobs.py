@@ -25,6 +25,7 @@ class FakeJobsDB:
 
     def __init__(self):
         self.rows = []  # list of dicts, 'id' assigned on insert
+        self.job_runs = {}  # {source: last_success_at}, stock_job_runs stand-in
         self._next_id = 1
         self._lock = threading.Lock()
 
@@ -95,6 +96,11 @@ class FakeJobsDB:
                 matches = [r for r in self.rows if r['job_name'] == job_name and r['status'] == 'done']
                 matches.sort(key=lambda r: r['id'], reverse=True)
                 return FakeCursor(matches[:1])
+
+            if normalized.startswith('SELECT last_success_at FROM stock_job_runs WHERE source=?'):
+                source, = params
+                value = self.job_runs.get(source)
+                return FakeCursor([{'last_success_at': value}] if value else [])
 
             raise AssertionError(f'Unexpected SQL in test: {sql}')
 
@@ -302,3 +308,38 @@ def test_different_job_names_run_independently():
 
     assert get_job_status(db, 'price_sync')['result'] == {'a': 1}
     assert get_job_status(db, 'fundamentals_sync')['result'] == {'b': 2}
+
+
+def test_timestamps_without_offset_are_returned_as_explicit_utc():
+    # finished_at is a plain TIMESTAMP column written in UTC -- without an
+    # explicit offset the dashboard's JS read it as IST, 5h30m early.
+    db = FakeJobsDB()
+    db.rows.append({
+        'id': 1, 'job_name': 'super_sync', 'status': 'done', 'result_json': None,
+        'error_message': None, 'started_at': '2026-09-25T03:47:31.539056',
+        'finished_at': '2026-09-25T04:01:45.111548', 'triggered_by': 1,
+        'progress_current': None, 'progress_total': None, 'progress_label': None,
+    })
+
+    status = get_job_status(db, 'super_sync')
+
+    assert status['finished_at'] == '2026-09-25T04:01:45.111548+00:00'
+    assert status['started_at'] == '2026-09-25T03:47:31.539056+00:00'
+    assert status['last_success_at'] == '2026-09-25T04:01:45.111548+00:00'
+
+
+def test_last_success_at_includes_a_newer_scheduled_cron_run():
+    # A cron run records success in stock_job_runs only -- it must still
+    # count, not leave "Last synced" stuck on an older button click.
+    db = FakeJobsDB()
+    db.rows.append({
+        'id': 1, 'job_name': 'price_sync', 'status': 'done', 'result_json': None,
+        'error_message': None, 'started_at': '2026-08-31T02:10:00',
+        'finished_at': '2026-08-31T02:15:13', 'triggered_by': 1,
+        'progress_current': None, 'progress_total': None, 'progress_label': None,
+    })
+    db.job_runs['price_sync'] = '2026-10-17T01:06:16.411776+00:00'
+
+    status = get_job_status(db, 'price_sync')
+
+    assert status['last_success_at'] == '2026-10-17T01:06:16.411776+00:00'

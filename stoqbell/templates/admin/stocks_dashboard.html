@@ -282,9 +282,18 @@
             progressEl.textContent = running ? formatProgress(progress) : '';
         }
 
-        function updateLastSync(lastSyncEl, lastSuccessAt) {
-            var formatted = formatDateTime(lastSuccessAt);
-            lastSyncEl.textContent = 'Last synced: ' + (formatted || 'never yet');
+        function updateLastSync(lastSyncEl, data) {
+            var formatted = formatDateTime(data && data.last_success_at);
+            var text = 'Last synced: ' + (formatted || 'never yet');
+            // A newer run that was cancelled or failed doesn't count as a
+            // sync, but it must not be hidden either -- otherwise the line
+            // silently shows an older success and looks like nothing ran.
+            if (data && data.status === 'error' && data.finished_at
+                    && (!data.last_success_at || new Date(data.finished_at) > new Date(data.last_success_at))) {
+                text += '. Latest run on ' + formatDateTime(data.finished_at) + ' did not finish: '
+                    + (data.error || 'unknown error');
+            }
+            lastSyncEl.textContent = text;
         }
 
         function pollStatus(jobName, label, form, progressEl, lastSyncEl, cancelEl) {
@@ -303,7 +312,7 @@
                         setButtonRunning(form, false);
                         updateProgress(progressEl, null, false);
                         if (cancelEl) { setCancelVisible(cancelEl, false); }
-                        updateLastSync(lastSyncEl, data.last_success_at);
+                        updateLastSync(lastSyncEl, data);
                         if (data.status === 'done') {
                             announce(label + ': done' + summarizeResult(data.result) + '.');
                         } else if (data.status === 'error') {
@@ -329,7 +338,7 @@
             fetch('/stocks/jobs/' + jobName + '/status', { headers: { 'Accept': 'application/json' } })
                 .then(function (resp) { return resp.json(); })
                 .then(function (data) {
-                    updateLastSync(lastSyncEl, data.last_success_at);
+                    updateLastSync(lastSyncEl, data);
                     if (data.status === 'running') {
                         setButtonRunning(form, true);
                         updateProgress(progressEl, data.progress, true);
@@ -402,7 +411,7 @@
                         // gets 'started' from the server, never 'ok' directly.
                         setButtonRunning(form, false);
                         updateProgress(progressEl, null, false);
-                        updateLastSync(lastSyncEl, data.last_success_at);
+                        updateLastSync(lastSyncEl, data);
                         announce(label + ': done' + summarizeResult(data) + '.');
                     })
                     .catch(function () {

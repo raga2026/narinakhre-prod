@@ -244,13 +244,65 @@ def get_job_status(db, job_name):
         "SELECT finished_at FROM stock_background_jobs WHERE job_name=? AND status='done' ORDER BY id DESC LIMIT 1",
         (job_name,)
     ).fetchone()
+    button_success_at = last_success_row['finished_at'] if last_success_row else None
 
     return {
         'status': row['status'],
         'result': result,
         'error': row.get('error_message'),
-        'started_at': row.get('started_at'),
-        'finished_at': row.get('finished_at'),
+        'started_at': _to_utc_iso(row.get('started_at')),
+        'finished_at': _to_utc_iso(row.get('finished_at')),
         'progress': progress,
-        'last_success_at': last_success_row['finished_at'] if last_success_row else None,
+        'last_success_at': _latest_success_at(button_success_at, _cron_success_at(db, job_name)),
     }
+
+
+def _to_utc_iso(value):
+    """started_at/finished_at are plain TIMESTAMP columns (no timezone),
+    written by Postgres NOW() in UTC, so they come back as e.g.
+    '2026-09-25T04:01:45' with no offset. The dashboard's JS
+    (new Date(...)) reads an offset-less string as the VIEWER's local
+    time, which showed every "Last synced" 5h30m early in IST. Returns
+    an explicit '+00:00' ISO string instead; anything unparseable is
+    returned unchanged."""
+    if not value:
+        return value
+    try:
+        return _parse_timestamp(value).astimezone(timezone.utc).isoformat()
+    except (TypeError, ValueError):
+        return value
+
+
+def _cron_success_at(db, job_name):
+    """stock_job_runs.last_success_at for the same job name -- scheduled
+    (GitHub Actions) runs record success there via record_job_success, but
+    never create a stock_background_jobs row, so without this the
+    dashboard's "Last synced" ignored every cron run (price_sync showed
+    a weeks-old button click even though the cron synced that morning).
+    Best-effort: a lookup failure just falls back to button runs only."""
+    try:
+        row = db.execute(
+            'SELECT last_success_at FROM stock_job_runs WHERE source=?',
+            (job_name,)
+        ).fetchone()
+    except Exception as e:
+        print(f'stock_job_runs lookup failed for {job_name}: {e}')
+        return None
+    return row.get('last_success_at') if row else None
+
+
+def _latest_success_at(*values):
+    """The most recent of the given timestamps as a UTC ISO string, or
+    None if none are set. Unparseable values only win if nothing else
+    parses (keeps the raw value visible rather than hiding it)."""
+    parsed = []
+    for value in values:
+        if not value:
+            continue
+        try:
+            parsed.append(_parse_timestamp(value))
+        except (TypeError, ValueError):
+            continue
+    if parsed:
+        return max(parsed).astimezone(timezone.utc).isoformat()
+    return next((v for v in values if v), None)
