@@ -162,8 +162,9 @@ def test_check_missed_jobs_ignores_a_success_from_a_previous_day():
 
 
 def test_check_missed_jobs_skips_jobs_not_due_yet():
-    # 05:00 UTC = 10:30 IST -- past price_sync/indicator_calc's deadlines,
-    # but before fundamentals_rotation (12 PM) and market_cap_filter (1 PM).
+    # 05:00 UTC = 10:30 IST -- past indicator_calc's deadline, but before
+    # fundamentals_rotation (12 PM), market_cap_filter (1 PM) and
+    # price_sync (6 PM, it runs in the evening after market close).
     fixed_now = RealDatetime(2026, 8, 16, 5, 0, tzinfo=timezone.utc)
     db = FakeAlertingDB(job_runs={})
 
@@ -172,7 +173,8 @@ def test_check_missed_jobs_skips_jobs_not_due_yet():
 
     assert 'fundamentals_rotation' not in summary['checked']
     assert 'market_cap_filter' not in summary['checked']
-    assert 'price_sync' in summary['checked']
+    assert 'price_sync' not in summary['checked']
+    assert 'indicator_calc' in summary['checked']
 
 
 def test_send_zeptomail_stocks_email_missing_config_reports_which_var():

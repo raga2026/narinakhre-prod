@@ -2,9 +2,9 @@ name: Stocks auto-trader reconciliation (dry run)
 
 on:
   schedule:
-    # 01:41 UTC daily = 07:11 IST -- after price_sync (00:37 UTC), before
-    # suggestion_email, so a target/stop hit closes same-day against that
-    # morning's freshly synced price. Triggers POST
+    # 01:41 UTC daily = 07:11 IST -- after price_sync (11:37 UTC the
+    # previous evening), before suggestion_email, so a target/stop hit
+    # closes against the latest synced close. Triggers POST
     # /stocks/auto-trader/reconcile, which closes any open dry-run
     # simulated trade whose price has reached its target or stop-loss --
     # see utils/auto_trader.py. A no-op if the dry-run simulation has never

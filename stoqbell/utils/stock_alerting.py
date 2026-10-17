@@ -44,9 +44,14 @@ IST = timezone(timedelta(hours=5, minutes=30))
 #                          run -- only the early run above is alerted on here,
 #                          since that's the one the market-open pipeline
 #                          actually depends on.)
-#   price_sync             00:30 UTC = 06:00 IST -> expect done by 07:00 IST
+#   price_sync             11:37 UTC = 17:07 IST -> expect done by 18:00 IST
+#                          (evening, after market close, while that
+#                          morning's Kite login is still valid -- Kite
+#                          tokens expire at 06:00 IST, so the old 06:07 IST
+#                          slot always ran with an expired token)
 #   indicator_calc         01:15 UTC = 06:45 IST -> expect done by 08:00 IST
-#                          (runs after price_sync, needs that day's prices)
+#                          (runs the morning after price_sync, reading the
+#                          previous evening's closes)
 #   suggestion_email       02:00 UTC = 07:30 IST -> expect done by 09:00 IST
 #                          (runs after indicator_calc, needs today's
 #                          cross_status/volume_trend/rsi_14 to score against;
@@ -81,7 +86,7 @@ IST = timezone(timedelta(hours=5, minutes=30))
 #                          reasoning as auto_trade_reconcile above)
 JOB_EXPECTATIONS = {
     'shortlist_refresh': {'expected_by_ist_hour': 6, 'label': '6 AM IST'},
-    'price_sync': {'expected_by_ist_hour': 7, 'label': '7 AM IST'},
+    'price_sync': {'expected_by_ist_hour': 18, 'label': '6 PM IST'},
     'auto_trade_reconcile': {'expected_by_ist_hour': 8, 'label': '8 AM IST'},
     'indicator_calc': {'expected_by_ist_hour': 8, 'label': '8 AM IST'},
     'suggestion_email': {'expected_by_ist_hour': 9, 'label': '9 AM IST'},

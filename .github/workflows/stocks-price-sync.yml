@@ -2,18 +2,26 @@ name: Stocks price sync
 
 on:
   schedule:
-    # 00:37 UTC daily = 06:07 IST -- well after NSE/BSE close (15:30 IST)
-    # and settlement, before market open the same day. Triggers
-    # POST /stocks/sync (utils/stock_ingestion.py), which needs an active
-    # Kite session (see /stocks/kite/login) to actually pull candles.
-    # Minute deliberately off the :00/:15/:30/:45 marks -- see
-    # stocks-shortlist-refresh.yml's comment for why.
+    # 11:37 UTC daily = 17:07 IST -- after NSE/BSE close (15:30 IST), while
+    # that morning's Kite login is still valid. Triggers POST /stocks/sync
+    # (utils/stock_ingestion.py), which needs an active Kite session (see
+    # /stocks/kite/login) to actually pull candles. Minute deliberately off
+    # the :00/:15/:30/:45 marks -- see stocks-shortlist-refresh.yml's
+    # comment for why.
+    #
+    # This used to run at 00:37 UTC = 06:07 IST, but Kite tokens expire at
+    # 06:00 IST every day (see utils/kite_session._next_day_6am_ist), so
+    # every one of those runs hit an expired token and synced nothing. The
+    # next morning's indicator calc and Pick of the Day then scored stale
+    # prices, while the stock pages (live_price, manual Super Sync) looked
+    # current. Running in the evening means stocks-indicators-calculate.yml
+    # (06:53 IST next morning) reads that evening's fresh closes.
     #
     # This workflow was missing until stocks-indicators-calculate.yml
     # needed to be scheduled after it -- /stocks/sync itself was made
     # cron-compatible earlier, but nothing was ever wired up to trigger it
     # daily until now.
-    - cron: '37 0 * * *'
+    - cron: '37 11 * * *'
   workflow_dispatch: {}  # lets you trigger it manually from the Actions tab
 
 jobs:

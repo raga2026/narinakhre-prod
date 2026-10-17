@@ -3,10 +3,9 @@ name: Stocks shortlist refresh
 on:
   schedule:
     # 23:48 UTC = 05:18 IST -- before market open (09:15 IST) and, just as
-    # importantly, before stocks-price-sync.yml (00:37 UTC) and
-    # stocks-indicators-calculate.yml (01:23 UTC): both of those read
-    # stock_watchlist, so this needs to update it first, not after, or
-    # they'd be working off yesterday's watchlist all day. Minute
+    # importantly, before stocks-indicators-calculate.yml (01:23 UTC), which
+    # reads stock_watchlist, so this needs to update it first, not after,
+    # or it'd be working off yesterday's watchlist all day. Minute
     # deliberately off the :00/:15/:30/:45 marks -- GitHub's scheduler
     # queues and delays scheduled runs most at those popular times (this
     # whole file's times, and every other stocks-*.yml workflow's, were

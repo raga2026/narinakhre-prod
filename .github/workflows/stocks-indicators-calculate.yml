@@ -2,11 +2,14 @@ name: Stocks indicators calculate
 
 on:
   schedule:
-    # 01:23 UTC daily = 06:53 IST -- ~45 minutes after stocks-price-sync.yml
-    # (00:37 UTC), giving that run a comfortable buffer to finish before
-    # this one reads its output. Indicators need that day's price data to
-    # already be in stock_daily_data (see utils/stock_indicators.py), so
-    # this must run after, never before or in parallel with, price sync.
+    # 01:23 UTC daily = 06:53 IST -- the morning after stocks-price-sync.yml
+    # (11:37 UTC / 17:07 IST the previous evening) synced that day's
+    # closes. Indicators need that price data to already be in
+    # stock_daily_data (see utils/stock_indicators.py), so this must run
+    # after, never before or in parallel with, price sync. It stays in the
+    # morning (rather than right after price sync) because
+    # generate_daily_suggestions only reads stock_indicators rows whose
+    # calc_date is today.
     # Minute deliberately off the :00/:15/:30/:45 marks -- see
     # stocks-shortlist-refresh.yml's comment for why.
     - cron: '23 1 * * *'

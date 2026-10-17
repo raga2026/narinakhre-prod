@@ -464,6 +464,16 @@ def admin_stocks_sync():
     def _job(job_db):
         try:
             summary = sync_daily_data(job_db, kite_client=KiteClient(access_token=access_token))
+            # sync_daily_data catches per-symbol errors, so an expired Kite
+            # token used to come back as a normal summary with every symbol
+            # in 'failures' -- and got recorded as a success, leaving the
+            # next Pick of the Day to score stale prices without any alert.
+            if summary['watchlist_count'] and summary['failed'] == summary['watchlist_count']:
+                first_error = summary['failures'][0]['error'] if summary['failures'] else 'unknown error'
+                raise RuntimeError(
+                    f"Every watchlist symbol failed to sync ({summary['failed']}) -- "
+                    f"Kite session likely expired. First error: {first_error}"
+                )
         except Exception as e:
             current_app.logger.error(f'Stock sync failed: {e}')
             alert_job_error(job_db, 'price_sync', str(e))
