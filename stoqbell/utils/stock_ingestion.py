@@ -155,8 +155,16 @@ def sync_daily_data(db, kite_client=None):
     """
     kite_client = kite_client or KiteClient()
 
+    # universe_id is LEFT JOINed in so every candle this sync writes is also
+    # stamped with it (see _upsert_daily_candle). The company/universe
+    # pages and the watchlist list look prices up by universe_id, so rows
+    # written here with universe_id NULL were invisible to them -- they
+    # kept showing an old "previous close" even after this sync ran.
     watchlist_rows = db.execute(
-        'SELECT id, symbol, exchange FROM stock_watchlist WHERE is_active=1'
+        '''SELECT w.id, w.symbol, w.exchange, u.id AS universe_id
+           FROM stock_watchlist w
+           LEFT JOIN stock_universe u ON u.symbol = w.symbol AND u.exchange = w.exchange
+           WHERE w.is_active=1'''
     ).fetchall()
 
     today = date.today()
@@ -172,10 +180,14 @@ def sync_daily_data(db, kite_client=None):
 
     for i, row in enumerate(watchlist_rows):
         watchlist_id = row['id']
+        universe_id = row.get('universe_id')
         symbol = row['symbol']
         exchange = row['exchange']
 
         try:
+            if universe_id is not None:
+                _unify_daily_data_identity(db, watchlist_id, universe_id)
+
             latest = db.execute(
                 'SELECT MAX(trade_date) AS last_date, COUNT(*) AS row_count FROM stock_daily_data WHERE watchlist_id=?',
                 (watchlist_id,)
@@ -206,21 +218,7 @@ def sync_daily_data(db, kite_client=None):
             for candle in candles:
                 trade_date = candle['trade_date']
                 trade_date = trade_date.isoformat() if hasattr(trade_date, 'isoformat') else trade_date
-
-                db.execute(
-                    '''INSERT INTO stock_daily_data
-                           (watchlist_id, trade_date, open, high, low, close, volume)
-                       VALUES (?, ?, ?, ?, ?, ?, ?)
-                       ON CONFLICT (watchlist_id, trade_date) DO UPDATE SET
-                           open = EXCLUDED.open,
-                           high = EXCLUDED.high,
-                           low = EXCLUDED.low,
-                           close = EXCLUDED.close,
-                           volume = EXCLUDED.volume''',
-                    (watchlist_id, trade_date, candle['open'], candle['high'],
-                     candle['low'], candle['close'], candle['volume'])
-                )
-                db.commit()
+                _upsert_daily_candle(db, trade_date, candle, watchlist_id=watchlist_id, universe_id=universe_id)
                 inserted += 1
 
         except Exception as exc:
@@ -237,6 +235,36 @@ def sync_daily_data(db, kite_client=None):
         'failures': failures,
         'zero_candles': zero_candles,
     }
+
+
+def _unify_daily_data_identity(db, watchlist_id, universe_id):
+    """Merges a watchlisted company's stock_daily_data rows into one
+    identity before sync_daily_data writes more of them. Two kinds of
+    leftover rows exist from before sync_daily_data stamped universe_id:
+    universe-only rows (watchlist_id NULL, written by
+    sync_daily_data_universe before the company was watchlisted) and
+    watchlist-only rows (universe_id NULL). Left alone, inserting
+    (watchlist_id, universe_id, date) would collide with a universe-only row
+    for the same date on the universe_id unique index -- and SupabaseDB
+    swallows that error, so the day would silently go missing.
+
+    Step 1 claims universe-only rows for this watchlist_id (skipping dates
+    it already has); step 2 stamps universe_id onto watchlist-only rows
+    (skipping dates the universe identity already has). Idempotent -- both
+    are no-ops once a company's rows are unified."""
+    db.execute(
+        '''UPDATE stock_daily_data SET watchlist_id = ?
+           WHERE universe_id = ? AND watchlist_id IS NULL
+             AND trade_date NOT IN (SELECT trade_date FROM stock_daily_data WHERE watchlist_id = ?)''',
+        (watchlist_id, universe_id, watchlist_id)
+    )
+    db.execute(
+        '''UPDATE stock_daily_data SET universe_id = ?
+           WHERE watchlist_id = ? AND universe_id IS NULL
+             AND trade_date NOT IN (SELECT trade_date FROM stock_daily_data WHERE universe_id = ?)''',
+        (universe_id, watchlist_id, universe_id)
+    )
+    db.commit()
 
 
 def _upsert_daily_candle(db, trade_date, candle, watchlist_id=None, universe_id=None):

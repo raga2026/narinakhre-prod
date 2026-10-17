@@ -36,14 +36,19 @@ class FakeDB:
         self.watchlist_rows = watchlist_rows
         self.daily_data = dict(existing_daily_data or {})
         self.instrument_map = instrument_map or {}  # {(symbol, exchange): token}
+        self.identity_updates = []
 
     def execute(self, sql, params=None):
         params = params or ()
         normalized = ' '.join(sql.split())
 
-        if normalized.startswith('SELECT id, symbol, exchange FROM stock_watchlist'):
-            rows = [r for r in self.watchlist_rows if r['is_active'] == 1]
+        if normalized.startswith('SELECT w.id, w.symbol, w.exchange, u.id AS universe_id FROM stock_watchlist'):
+            rows = [{'universe_id': None, **r} for r in self.watchlist_rows if r['is_active'] == 1]
             return FakeCursor(rows)
+
+        if normalized.startswith('UPDATE stock_daily_data SET'):
+            self.identity_updates.append(params)
+            return FakeCursor([])
 
         if normalized.startswith('SELECT MAX(trade_date) AS last_date, COUNT(*) AS row_count FROM stock_daily_data'):
             watchlist_id = params[0]
@@ -56,9 +61,10 @@ class FakeDB:
             return FakeCursor([{'kite_instrument_token': token}] if token else [])
 
         if normalized.startswith('INSERT INTO stock_daily_data'):
-            watchlist_id, trade_date, o, h, l, c, v = params
+            watchlist_id, universe_id, trade_date, o, h, l, c, v = params
             self.daily_data[(watchlist_id, trade_date)] = {
                 'open': o, 'high': h, 'low': l, 'close': c, 'volume': v,
+                'universe_id': universe_id,
             }
             return FakeCursor([])
 
@@ -96,6 +102,24 @@ def test_sync_daily_data_upserts_without_duplicating_rows():
     assert second['failed'] == 0
     assert len(db.daily_data) == 1
     assert db.daily_data[(1, candle_date.isoformat())]['close'] == 104.5
+
+
+def test_sync_daily_data_stamps_universe_id_so_company_pages_see_new_closes():
+    # Company/universe pages look up the latest close by universe_id -- a
+    # watchlist sync that left it NULL kept those pages on an old date.
+    watchlist = [{'id': 1, 'symbol': 'RELIANCE', 'exchange': 'NSE', 'is_active': 1, 'universe_id': 77}]
+    db = FakeDB(watchlist)
+
+    mock_kite = MagicMock()
+    mock_kite.fetch_daily_candles.return_value = [
+        {'trade_date': date(2026, 10, 16), 'open': 100.0, 'high': 105.0, 'low': 99.0, 'close': 102.0, 'volume': 1},
+    ]
+    sync_daily_data(db, kite_client=mock_kite)
+
+    assert db.daily_data[(1, '2026-10-16')]['universe_id'] == 77
+    # Leftover rows for the same company get unified first (claim
+    # universe-only rows, then stamp universe_id on watchlist-only rows).
+    assert db.identity_updates == [(1, 77, 1), (77, 1, 77)]
 
 
 def test_sync_daily_data_reports_progress_per_symbol():

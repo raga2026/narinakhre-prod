@@ -454,6 +454,15 @@ def admin_stocks_sync():
         return redirect(url_for('stocks.stocks_admin_login'))
 
     db = get_db()
+    if is_cron and not is_trading_day():
+        # No new candle on a weekend/NSE holiday, and nobody logs into Kite
+        # on those days -- without this skip, the expired token would make
+        # every symbol fail and raise a false job-error alert below. Same
+        # skip-but-record-success pattern as the suggestion email. A manual
+        # (session) run still goes ahead on any day.
+        record_job_success(db, 'price_sync')
+        return jsonify({'status': 'skipped', 'reason': 'not a trading day'})
+
     access_token = get_kite_access_token(db)
     if not access_token:
         return jsonify({
