@@ -1554,11 +1554,16 @@ def wholesale_thank_you():
 # itself is defined in stoqbell/routes.py (imported above) -- Stocks owns
 # its own domain name, the storefront just imports it for this redirect.
 OLD_STOCKS_HOSTS = {'narinakhre.com', 'www.narinakhre.com', 'wholesale.narinakhre.com'}
+# Kite Connect's registered Redirect URL stays on narinakhre.com and must be
+# served directly, with no redirect hop, so it is exempt from the move.
+STOCKS_DOMAIN_REDIRECT_EXEMPT_PATHS = {'/stocks/kite/callback'}
 
 
 @app.before_request
 def redirect_stocks_to_own_domain():
     if not request.path.startswith('/stocks') or request.method != 'GET':
+        return None
+    if request.path in STOCKS_DOMAIN_REDIRECT_EXEMPT_PATHS:
         return None
     host = request.host.lower().split(':')[0]
     if host not in OLD_STOCKS_HOSTS:
