@@ -23,6 +23,7 @@ from stoqbell.utils.stock_shortlist import run_fundamental_shortlist
 from stoqbell.utils.stock_ingestion import sync_daily_data, sync_daily_data_universe
 from stoqbell.utils.stock_indicators import run_indicator_calculation, run_indicator_calculation_universe
 from stoqbell.utils.job_progress import report as report_progress
+from stoqbell.utils.stock_alerting import record_job_success
 
 # Order matters:
 #   1. Kite instrument map first -- both price syncs below use it to
@@ -86,6 +87,13 @@ def run_super_sync(db, access_token):
             steps.append({'step': name, 'status': 'ok', 'summary': summary})
         except Exception as e:
             steps.append({'step': name, 'status': 'error', 'error': str(e)})
+            return
+        # Each step's own dashboard button reads its "Last synced" from
+        # stock_job_runs (see background_jobs._cron_success_at) -- without
+        # this, a Super Sync only ever updated super_sync's own time, and
+        # the universe-wide buttons (no cron of their own) stayed stuck on
+        # whenever they were last clicked individually.
+        record_job_success(db, name)
 
     _run('kite_instrument_map_sync', lambda: sync_kite_instrument_map(db, KiteClient(access_token=access_token)))
     _run('market_cap_filter', lambda: refresh_market_cap_filter(db))
