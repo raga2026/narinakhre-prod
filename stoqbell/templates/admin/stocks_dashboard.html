@@ -49,6 +49,12 @@
                 Usually done within a couple of minutes. Doesn't include Screener.in fundamentals -- that refreshes on
                 its own automatic schedule, see "Fundamentals data" below.
             </p>
+            <h3 id="super-sync-steps-heading" class="text-slate-200 font-semibold mb-2">Steps, in order</h3>
+            <ol aria-labelledby="super-sync-steps-heading" class="list-decimal list-inside text-slate-300 text-sm mb-4 space-y-1">
+                {% for step_name, step_label in super_sync_steps %}
+                <li>{{ step_label }}. <span class="text-slate-400" data-super-sync-step="{{ step_name }}">Last synced: checking…</span></li>
+                {% endfor %}
+            </ol>
             <form method="POST" action="{{ url_for('stocks.stocks_super_sync') }}"
                   data-job-form data-job-name="super_sync" data-job-label="Super Sync">
                 <button type="submit" class="stocks-btn py-3 px-8 rounded-2xl font-bold text-lg transition hover:opacity-90">
@@ -313,6 +319,7 @@
                         updateProgress(progressEl, null, false);
                         if (cancelEl) { setCancelVisible(cancelEl, false); }
                         updateLastSync(lastSyncEl, data);
+                        if (jobName === 'super_sync') { refreshSuperSyncSteps(); }
                         if (data.status === 'done') {
                             announce(label + ': done' + summarizeResult(data.result) + '.');
                         } else if (data.status === 'error') {
@@ -353,6 +360,18 @@
         function setCancelVisible(cancelEl, visible) {
             cancelEl.style.display = visible ? 'inline' : 'none';
         }
+
+        // Fills each step in the Super Sync list with its own last synced
+        // time -- on page load, and again once a Super Sync finishes.
+        function refreshSuperSyncSteps() {
+            document.querySelectorAll('[data-super-sync-step]').forEach(function (stepEl) {
+                fetch('/stocks/jobs/' + stepEl.dataset.superSyncStep + '/status', { headers: { 'Accept': 'application/json' } })
+                    .then(function (resp) { return resp.json(); })
+                    .then(function (data) { updateLastSync(stepEl, data); })
+                    .catch(function () { stepEl.textContent = 'Last synced: could not load.'; });
+            });
+        }
+        refreshSuperSyncSteps();
 
         document.querySelectorAll('form[data-job-form]').forEach(function (form) {
             var jobName = form.dataset.jobName;

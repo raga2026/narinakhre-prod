@@ -169,7 +169,7 @@ from stoqbell.utils.price_pattern import (
     compute_projection_targets,
 )
 from stoqbell.utils.suggestion_chart import build_prediction_chart_image_url
-from stoqbell.utils.super_sync import run_super_sync
+from stoqbell.utils.super_sync import run_super_sync, SUPER_SYNC_STEPS, STEP_LABELS
 from stoqbell.utils.stock_indicators import (
     initialize_stock_indicators_table_if_needed,
     run_indicator_calculation,
@@ -4055,6 +4055,7 @@ def stocks_admin_dashboard():
         kite_expires_at_ist=kite_expires_at_ist,
         kite_login_allowed=is_kite_login_allowed(),
         fundamentals_last_synced_ist=fundamentals_last_synced_ist,
+        super_sync_steps=[(name, STEP_LABELS[name]) for name in SUPER_SYNC_STEPS],
     )
 
 

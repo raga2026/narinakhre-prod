@@ -225,9 +225,12 @@ def get_job_status(db, job_name):
         (job_name,)
     ).fetchone()
     if not row:
+        # No button run ever, but a cron or Super Sync step may still have
+        # recorded one (e.g. market_cap_filter, which has no button).
         return {
             'status': 'never_run', 'result': None, 'error': None, 'started_at': None,
-            'finished_at': None, 'progress': None, 'last_success_at': None,
+            'finished_at': None, 'progress': None,
+            'last_success_at': _latest_success_at(_cron_success_at(db, job_name)),
         }
 
     result = json.loads(row['result_json']) if row.get('result_json') else None
