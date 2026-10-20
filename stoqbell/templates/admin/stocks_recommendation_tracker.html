@@ -4,7 +4,8 @@
     <meta charset="UTF-8">
     <link rel="icon" type="image/png" href="{{ url_for('stocks.static', filename='assets/stoqbell-icon.png') }}">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Recommendation Tracker - StoqBell</title>
+    {% set is_highly = tracker_kind == 'highly_recommended' %}
+    <title>{{ 'Highly Recommended Tracker' if is_highly else 'Recommendation Tracker' }} - StoqBell</title>
     <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
     <style>
         body { background: #0f172a; color: #f8fafc; }
@@ -32,8 +33,15 @@
     <div class="max-w-7xl mx-auto">
         <div class="flex items-center justify-between mb-6">
             <div>
+                {% if is_highly %}
+                <h1 class="text-2xl font-extrabold stocks-accent font-serif">Highly Recommended Tracker</h1>
+                <p class="text-slate-400 text-sm mt-1">Every Highly Recommended stock ever alerted, all-time, against its current price.</p>
+                <p class="mt-2"><a href="{{ url_for('stocks.stocks_recommendations_tracker') }}" class="text-sky-400 hover:text-sky-300 underline text-sm">Go to the Pick of the Day tracker</a></p>
+                {% else %}
                 <h1 class="text-2xl font-extrabold stocks-accent font-serif">Recommendation Tracker</h1>
                 <p class="text-slate-400 text-sm mt-1">Every Pick of the Day ever sent, all-time, against its current price.</p>
+                <p class="mt-2"><a href="{{ url_for('stocks.stocks_highly_recommended_tracker') }}" class="text-sky-400 hover:text-sky-300 underline text-sm">Go to the Highly Recommended tracker</a></p>
+                {% endif %}
             </div>
             <a href="{{ url_for('stocks.stocks_admin_dashboard') }}" class="text-sm text-slate-400 hover:text-sky-400 underline">Back to dashboard</a>
         </div>
@@ -130,7 +138,7 @@
                     <div class="stat-card-sub">needs ~37.5%+ to break even at -3%/+5%</div>
                 </div>
                 <div class="stat-card">
-                    <div class="stat-card-label">Avg P/L (all rows)</div>
+                    <div class="stat-card-label">Avg P/L (closed at exit, open at current)</div>
                     <div class="stat-card-value {{ 'pct-up' if outcome_stats.overall.avg_pct_change and outcome_stats.overall.avg_pct_change >= 0 else 'pct-down' }}">
                         {% if outcome_stats.overall.avg_pct_change is not none %}{{ '+' if outcome_stats.overall.avg_pct_change >= 0 }}{{ outcome_stats.overall.avg_pct_change }}%{% else %}—{% endif %}
                     </div>
@@ -148,6 +156,8 @@
                     "Current price" is the latest synced close, not live intraday. Target/stop-loss outcomes are
                     computed purely from that close vs. the price levels recorded at suggestion time -- click a row
                     to see the full reasoning and current fundamentals/technicals on that company's own page.
+                    Once a close reaches the target or the stop-loss, whichever came first closes the trade: P/L %
+                    shows that exit level, with today's move underneath as "Now".
                 </caption>
                 <thead>
                     <tr>
@@ -163,7 +173,7 @@
                         <th scope="col">P/L %</th>
                         <th scope="col">Outcome</th>
                         <th scope="col">StoqBell</th>
-                        <th scope="col">Buy</th>
+                        {% if not is_highly %}<th scope="col">Buy</th>{% endif %}
                     </tr>
                 </thead>
                 <tbody>
@@ -204,6 +214,9 @@
                                 <span class="{{ 'pct-up' if r.pct_change >= 0 else 'pct-down' }}">
                                     {{ '+' if r.pct_change >= 0 }}{{ r.pct_change }}%
                                 </span>
+                                {% if r.outcome in ('target_hit', 'stop_loss_hit') and r.current_pct_change is not none and r.current_pct_change != r.pct_change %}
+                                <div class="text-xs text-slate-400">Now {{ '+' if r.current_pct_change >= 0 }}{{ r.current_pct_change }}%</div>
+                                {% endif %}
                             {% else %}—{% endif %}
                         </td>
                         <td>
@@ -216,18 +229,23 @@
                                 </div>
                                 {% endif %}
                             {% elif r.outcome == 'stop_loss_hit' %}<span class="badge badge-stop">Stop-loss hit</span>
+                                {% if r.stop_hit_date %}
+                                <div class="text-xs text-slate-400 mt-1">{{ r.stop_hit_date.strftime('%d %b %Y') }}</div>
+                                {% endif %}
                             {% elif r.outcome == 'open' %}<span class="badge badge-open">Open</span>
                             {% else %}<span class="badge badge-unknown">No price yet</span>
                             {% endif %}
                         </td>
                         <td>{{ r.nns_tier | title if r.nns_tier else '—' }} {{ r.nns_score if r.nns_score is not none else '' }}</td>
+                        {% if not is_highly %}
                         <td onclick="event.stopPropagation();">
                             <a href="{{ url_for('stocks.stocks_suggestion_buy', suggestion_id=r.id) }}" class="text-sky-400 hover:text-sky-300 underline">Buy</a>
                         </td>
+                        {% endif %}
                     </tr>
                     {% else %}
                     <tr>
-                        <td colspan="13" class="text-slate-400">No recommendations sent yet.</td>
+                        <td colspan="{{ 12 if is_highly else 13 }}" class="text-slate-400">{{ 'No Highly Recommended alerts yet.' if is_highly else 'No recommendations sent yet.' }}</td>
                     </tr>
                     {% endfor %}
                 </tbody>

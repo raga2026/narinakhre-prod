@@ -737,6 +737,16 @@ def _pricing_from_rsi_backtest(closes_oldest_first, latest_close):
 MIN_TARGET_GAIN_MULTIPLIER = 1.03  # at least +3%
 
 
+# Paused 2026-10-20. Of 28 picks priced off a rounding bottom (5 daily
+# picks, 23 Highly Recommended alerts, Aug-Oct 2026) not one was in profit,
+# and some carried unusable levels (a target +298% and a stop -36% from the
+# buy price). While False, a stock that only fits a rounding bottom falls
+# through to the RSI-backtest / flat-percentage pricing like any other.
+# detect_rounding_pattern itself is untouched -- flip this back to True
+# once its target/stop math is fixed and re-tested.
+ROUNDING_BOTTOM_PRICING_ENABLED = False
+
+
 def compute_suggestion_pricing(closes_oldest_first, latest_close, fallback_target_multiplier,
                                 fallback_stop_loss_multiplier, fallback_holding_period_days=10):
     """Tries a confirmed reverse head-and-shoulders first, then a confirmed
@@ -770,7 +780,10 @@ def compute_suggestion_pricing(closes_oldest_first, latest_close, fallback_targe
     count: this stock's own backtest window when rsi_backtest_detail is
     set, else fallback_holding_period_days."""
     result = None
-    for finder in (_pattern_pricing_from_head_and_shoulders, _pattern_pricing_from_rounding_bottom):
+    finders = [_pattern_pricing_from_head_and_shoulders]
+    if ROUNDING_BOTTOM_PRICING_ENABLED:
+        finders.append(_pattern_pricing_from_rounding_bottom)
+    for finder in finders:
         result = finder(closes_oldest_first, latest_close)
         if result:
             break

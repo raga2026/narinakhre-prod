@@ -1,5 +1,6 @@
 import math
 
+from stoqbell.utils import price_pattern
 from stoqbell.utils.price_pattern import (
     PATTERN_RESEARCH_CONTEXT,
     backtest_rsi_zone_outcomes,
@@ -416,7 +417,10 @@ def test_confirmed_reverse_head_and_shoulders_drives_pricing():
     assert result['pattern_research']['source']
 
 
-def test_confirmed_rounding_bottom_drives_pricing_when_no_hs_present():
+def test_confirmed_rounding_bottom_drives_pricing_when_no_hs_present(monkeypatch):
+    # Only while rounding-bottom pricing is switched on -- see
+    # ROUNDING_BOTTOM_PRICING_ENABLED and the paused test below.
+    monkeypatch.setattr(price_pattern, 'ROUNDING_BOTTOM_PRICING_ENABLED', True)
     latest_close = ROUNDING_BOTTOM_CONFIRMED[-1]
     result = compute_suggestion_pricing(
         ROUNDING_BOTTOM_CONFIRMED, latest_close, fallback_target_multiplier=1.05, fallback_stop_loss_multiplier=0.97
@@ -426,6 +430,15 @@ def test_confirmed_rounding_bottom_drives_pricing_when_no_hs_present():
     assert result['buy_price'] == latest_close
     assert result['target_sell_price'] > latest_close
     assert result['stop_loss_price'] < latest_close
+
+
+def test_rounding_bottom_is_not_used_for_pricing_while_paused():
+    assert price_pattern.ROUNDING_BOTTOM_PRICING_ENABLED is False
+    latest_close = ROUNDING_BOTTOM_CONFIRMED[-1]
+    result = compute_suggestion_pricing(
+        ROUNDING_BOTTOM_CONFIRMED, latest_close, fallback_target_multiplier=1.05, fallback_stop_loss_multiplier=0.97
+    )
+    assert result['pattern_name'] != 'rounding_bottom'
 
 
 def test_head_and_shoulders_takes_priority_over_rounding_when_both_present():

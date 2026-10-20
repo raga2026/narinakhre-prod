@@ -198,6 +198,7 @@ from stoqbell.utils.suggestion_engine import (
     passes_hard_filters,
     HOLDING_PERIOD_DAYS,
     get_recommendation_tracker,
+    get_highly_recommended_tracker,
     compute_tracker_row_stats,
     attach_volume_trend_at_suggestion,
     compute_outcome_stats,
@@ -2714,22 +2715,7 @@ def stocks_recommendations_tracker():
     page covers both halves of what this links out to, so there's no
     separate per-suggestion detail page to build."""
     db = get_db()
-    rows = get_recommendation_tracker(db)
-    tracker_rows = []
-    for row in rows:
-        row = dict(row)
-        row.update(compute_tracker_row_stats(
-            row.get('buy_price'), row.get('target_sell_price'), row.get('stop_loss_price'),
-            row.get('latest_price'), row['suggestion_date'], target_hit_date=row.get('target_hit_date'),
-        ))
-        row['projection'] = compute_projection_targets(
-            row.get('buy_price'), row.get('target_sell_price'), row.get('pattern_name'),
-            row.get('holding_period_days')
-        )
-        tracker_rows.append(row)
-
-    attach_volume_trend_at_suggestion(db, tracker_rows)
-    outcome_stats = compute_outcome_stats(tracker_rows)
+    tracker_rows, outcome_stats = _build_tracker_rows(db, get_recommendation_tracker(db))
 
     # Only flag today's automatic send as overdue once its expected-by hour
     # (IST) has actually passed -- same threshold check_missed_jobs uses for
@@ -2746,7 +2732,42 @@ def stocks_recommendations_tracker():
     return render_template(
         'admin/stocks_recommendation_tracker.html', tracker_rows=tracker_rows,
         today_email_sent=today_email_sent, today_email_overdue=today_email_overdue,
-        outcome_stats=outcome_stats,
+        outcome_stats=outcome_stats, tracker_kind='daily',
+    )
+
+
+def _build_tracker_rows(db, rows):
+    """Shared by both trackers: adds each row's P/L, outcome and projected
+    targets, the volume trend on its own date, and the summary stats."""
+    tracker_rows = []
+    for row in rows:
+        row = dict(row)
+        row.update(compute_tracker_row_stats(
+            row.get('buy_price'), row.get('target_sell_price'), row.get('stop_loss_price'),
+            row.get('latest_price'), row['suggestion_date'], target_hit_date=row.get('target_hit_date'),
+            stop_hit_date=row.get('stop_hit_date'),
+        ))
+        row['projection'] = compute_projection_targets(
+            row.get('buy_price'), row.get('target_sell_price'), row.get('pattern_name'),
+            row.get('holding_period_days')
+        )
+        tracker_rows.append(row)
+
+    attach_volume_trend_at_suggestion(db, tracker_rows)
+    return tracker_rows, compute_outcome_stats(tracker_rows)
+
+
+@stocks_bp.route('/stocks/recommendations/highly-recommended-tracker', methods=['GET'])
+@stocks_role_required('super_admin', 'child_admin')
+def stocks_highly_recommended_tracker():
+    """Staff-only: same tracker and analysis as stocks_recommendations_tracker,
+    over every Highly Recommended alert (stock_admin_alerts) instead of the
+    single daily Pick of the Day -- see get_highly_recommended_tracker."""
+    db = get_db()
+    tracker_rows, outcome_stats = _build_tracker_rows(db, get_highly_recommended_tracker(db))
+    return render_template(
+        'admin/stocks_recommendation_tracker.html', tracker_rows=tracker_rows,
+        outcome_stats=outcome_stats, tracker_kind='highly_recommended',
     )
 
 
@@ -2911,6 +2932,7 @@ def stocks_auto_trader():
         stats = compute_tracker_row_stats(
             row.get('buy_price'), row.get('target_sell_price'), row.get('stop_loss_price'),
             row.get('latest_price'), row['suggestion_date'],
+            target_hit_date=row.get('target_hit_date'), stop_hit_date=row.get('stop_hit_date'),
         )
         if stats['outcome'] not in ('open', 'unknown'):
             continue

@@ -107,20 +107,72 @@ def test_scoring_picks_the_objectively_better_candidate():
     assert scored[0][1] > scored[1][1]
 
 
-def test_rsi_outside_range_lowers_score_but_no_longer_excludes_outright():
-    # RSI moved from a hard pass/fail gate to just one of NNS Score's ten
-    # sub-scores (rsi_position) -- a golden-cross candidate with terrible
-    # RSI now ranks BEHIND a similar one with ideal RSI, instead of being
-    # excluded from consideration entirely (see is_suggestion_eligible).
+def test_rsi_above_max_entry_is_excluded():
+    # Overextended entries are a hard exclusion again (2026-10-20) -- RSI
+    # 60-70 picks averaged -10.7%. See MAX_ENTRY_RSI.
     overbought = _candidate(1, 'OVERBOUGHT', rsi_14=85)
+    just_over = _candidate(2, 'JUSTOVER', rsi_14=60.5)
+    at_limit = _candidate(3, 'ATLIMIT', rsi_14=60)
+
+    assert is_suggestion_eligible(overbought) is False
+    assert is_suggestion_eligible(just_over) is False
+    assert is_suggestion_eligible(at_limit) is True
+    assert [c['symbol'] for c, _ in select_top_suggestions([overbought, just_over, at_limit], top_n=5)] == ['ATLIMIT']
+
+
+def test_price_too_far_above_50_day_average_is_excluded():
+    stretched = _candidate(1, 'STRETCHED', latest_close=111.0, ma_50=100.0)  # 11% above
+    at_limit = _candidate(2, 'ATLIMIT', latest_close=110.0, ma_50=100.0)  # exactly 10%
+    no_ma50 = _candidate(3, 'NOMA50', latest_close=150.0, ma_50=None)  # check skipped
+
+    assert is_suggestion_eligible(stretched) is False
+    assert is_suggestion_eligible(at_limit) is True
+    assert is_suggestion_eligible(no_ma50) is True
+
+
+def test_rsi_within_range_still_only_lowers_score():
+    # Inside the allowed band RSI is still just a score component.
+    low_rsi = _candidate(1, 'LOWRSI', rsi_14=35)
     ideal_rsi = _candidate(2, 'IDEALRSI', rsi_14=52.5)
 
-    assert passes_hard_filters(overbought) is False  # still fails the OLD, now-unused hard filter
-    top = select_top_suggestions([overbought], top_n=5)
-    assert [c['symbol'] for c, _ in top] == ['OVERBOUGHT']  # included on its own
+    ranked = score_candidates([low_rsi, ideal_rsi])
+    assert [c['symbol'] for c, _ in ranked] == ['IDEALRSI', 'LOWRSI']
 
-    ranked = score_candidates([overbought, ideal_rsi])
-    assert [c['symbol'] for c, _ in ranked] == ['IDEALRSI', 'OVERBOUGHT']  # still ranks worse
+
+def test_weak_market_creates_no_daily_pick_and_no_highly_recommended():
+    today = date.today().isoformat()
+    weak = {'calc_date': today, 'total': 1000, 'up': 250}  # 25% -- below WEAK_MARKET_BREADTH_PCT
+    db = FakeSuggestionDB([_candidate(1, 'SYM1')], market_breadth=weak)
+
+    summary = generate_daily_suggestions(db)
+
+    assert summary['created'] == []
+    assert summary['weak_market']['pct_up'] == 25.0
+    assert db.suggestions == []
+    assert get_all_highly_recommended_today(db) == []
+
+
+def test_healthy_or_stale_market_breadth_does_not_block_picks():
+    today = date.today()
+    healthy = {'calc_date': today.isoformat(), 'total': 1000, 'up': 600}
+    stale_weak = {'calc_date': (today - timedelta(days=30)).isoformat(), 'total': 1000, 'up': 100}
+
+    for breadth in (healthy, stale_weak):
+        db = FakeSuggestionDB([_candidate(1, 'SYM1')], market_breadth=breadth)
+        assert len(generate_daily_suggestions(db)['created']) == 1
+
+
+def test_recently_stopped_out_company_is_skipped_for_the_next_best():
+    candidates = [
+        _candidate(1, 'STOPPED'),  # ranks first
+        _candidate(2, 'NEXT', peg_ratio=0.9, quarterly_profit_growth_pct=11, opm_pct=26, roce_pct=10, roa_pct=5),
+    ]
+    db = FakeSuggestionDB(candidates, stopped_out_watchlist_ids={1})
+
+    summary = generate_daily_suggestions(db)
+
+    assert [c['symbol'] for c in summary['created']] == ['NEXT']
+    assert summary['skipped_duplicates'][0]['reason'] == 'stopped_out'
 
 
 def test_non_golden_cross_is_excluded_regardless_of_nns_score():
@@ -298,8 +350,14 @@ class FakeSuggestionDB:
     don't care about pattern pricing keep working unchanged."""
 
     def __init__(self, candidate_rows, existing_suggestions=None, price_history=None,
-                 universe_candidate_rows=None, universe_price_history=None):
+                 universe_candidate_rows=None, universe_price_history=None,
+                 market_breadth=None, stopped_out_watchlist_ids=None):
         self.candidate_rows = candidate_rows
+        # get_market_breadth's row ({'calc_date', 'total', 'up'}) or None for
+        # "no universe indicators" (is_weak_market then fails open).
+        self.market_breadth = market_breadth
+        # watchlist_ids _recently_stopped_out should report as stopped out.
+        self.stopped_out_watchlist_ids = set(stopped_out_watchlist_ids or ())
         self.suggestions = existing_suggestions or []  # list of dicts: watchlist_id, status, suggestion_date
         self.price_history = price_history or {}
         # get_special_recommendations_today's own candidate pool (see
@@ -337,6 +395,13 @@ class FakeSuggestionDB:
             # news_sentiment_bonus is neutral (0.0), same as a real
             # watchlist company nothing has been synced for yet.
             return FakeCursor([])
+
+        if normalized.startswith('SELECT calc_date, COUNT(*) AS total'):
+            return FakeCursor([self.market_breadth] if self.market_breadth else [])
+
+        if normalized.startswith('SELECT s.id FROM stock_suggestions s WHERE s.watchlist_id = ?'):
+            watchlist_id = params[0]
+            return FakeCursor([{'id': 1}] if watchlist_id in self.stopped_out_watchlist_ids else [])
 
         if normalized.startswith('SELECT score, target_sell_price, pattern_name, nns_tier FROM stock_suggestions'):
             watchlist_id, cutoff, today = params

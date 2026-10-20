@@ -65,6 +65,9 @@ class FakeAdminAlertsDB:
         if normalized.startswith('SELECT watchlist_id, headline FROM stock_news'):
             return FakeCursor([])
 
+        if normalized.startswith('SELECT calc_date, COUNT(*) AS total'):
+            return FakeCursor([])  # no market breadth data -- is_weak_market fails open
+
         if normalized.startswith('INSERT INTO stock_admin_alerts'):
             (watchlist_id, alert_date, buy_price, target_sell_price, stop_loss_price,
              nns_score, nns_tier, pattern_name) = params

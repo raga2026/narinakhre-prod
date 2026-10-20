@@ -52,6 +52,30 @@ PATTERN_LOOKBACK_DAYS = 900
 
 RSI_MIN, RSI_MAX = 40, 65
 
+# --- Pick quality rules (2026-10-20) ----------------------------------------
+# From a study of 42 Picks of the Day and 224 Highly Recommended alerts
+# (Aug-Oct 2026): most double-digit losers were bought after the price had
+# already run up, re-picked after hitting their stop-loss, or picked while
+# the whole market was falling. See is_suggestion_eligible,
+# _recently_stopped_out and is_weak_market.
+#
+# Overextended entry: picks with RSI 60-70 averaged -10.7% (8 of the 13 big
+# losers); picks 10-20% above their 50-day average averaged -9.3%.
+MAX_ENTRY_RSI = 60
+MAX_ENTRY_ABOVE_MA50_PCT = 10
+# A company whose pick closed at/below its stop-loss is not picked again
+# for this many days, whatever its score does -- CONCORDBIO, GNFC and
+# AARTIPHARM were each re-picked after stopping out and kept falling.
+STOP_LOSS_COOLDOWN_DAYS = 30
+# Market strength = share of the universe whose 5-day average is at/above
+# its 50-day average (see get_market_breadth). Below this, no Pick of the
+# Day or Highly Recommended alerts go out. It fell from ~57% in mid-August
+# to 45% by mid-September and 25% by 20 October, tracking the losses.
+WEAK_MARKET_BREADTH_PCT = 45
+# Breadth older than this (the universe indicator job didn't run) is
+# ignored rather than trusted -- see is_weak_market.
+MARKET_BREADTH_MAX_AGE_DAYS = 5
+
 STOCK_SUGGESTIONS_TABLE_SQL = [
     '''CREATE TABLE IF NOT EXISTS stock_suggestions (
         id BIGSERIAL PRIMARY KEY,
@@ -205,13 +229,33 @@ def is_suggestion_eligible(candidate):
     benefit of the doubt here either, same rule fundamental_screen.py's
     own admission-time check already applies -- and neither is a missing
     volume_trend reading (None, or 'insufficient_data', both fail same as
-    'diverging')."""
+    'diverging').
+
+    --- Overextended entries excluded (2026-10-20) ---
+    RSI above MAX_ENTRY_RSI, or a latest close more than
+    MAX_ENTRY_ABOVE_MA50_PCT above the 50-day average, is now a hard
+    exclusion too -- see those constants for the numbers behind it. A
+    missing RSI or ma_50 (e.g. under 50 days of history) skips that one
+    check rather than excluding; volume and cross status still gate."""
     peg_ratio = candidate.get('peg_ratio')
     if peg_ratio is None or peg_ratio >= PEG_HARD_EXCLUSION_MAX:
         return False
     if candidate.get('volume_trend') != 'confirming':
         return False
-    return candidate.get('cross_status') == 'golden_cross'
+    if candidate.get('cross_status') != 'golden_cross':
+        return False
+    return not _is_overextended(candidate)
+
+
+def _is_overextended(candidate):
+    rsi = candidate.get('rsi_14')
+    if rsi is not None and float(rsi) > MAX_ENTRY_RSI:
+        return True
+    ma_50 = candidate.get('ma_50')
+    close = candidate.get('latest_close')
+    if ma_50 and close is not None:
+        return float(close) > float(ma_50) * (1 + MAX_ENTRY_ABOVE_MA50_PCT / 100)
+    return False
 
 
 def score_candidates(candidates, previous_snapshots_by_universe=None, industry_benchmarks_by_industry=None,
@@ -469,7 +513,7 @@ def _fetch_candidates(db, market_cap_tier=None):
         f'''SELECT w.id AS watchlist_id, w.symbol, w.exchange, w.name AS company_name,
                   w.fundamental_tier, w.market_cap_tier,
                   u.id AS universe_id, u.industry, u.isin,
-                  i.rsi_14, i.cross_status, i.volume_trend,
+                  i.rsi_14, i.cross_status, i.volume_trend, i.ma_50,
                   f.pe_ratio, f.peg_ratio, f.opm_pct, f.roce_pct, f.roa_pct,
                   f.quarterly_profit_growth_pct, f.quarterly_revenue_growth_pct,
                   f.price_to_book, f.promoter_holding_pct, f.fii_holding_pct,
@@ -518,7 +562,7 @@ def _fetch_universe_candidates(db):
         '''SELECT u.id AS universe_id, u.symbol, u.exchange, u.company_name,
                   w.id AS watchlist_id, w.fundamental_tier, w.market_cap_tier,
                   u.industry, u.isin,
-                  i.rsi_14, i.cross_status, i.volume_trend,
+                  i.rsi_14, i.cross_status, i.volume_trend, i.ma_50,
                   f.pe_ratio, f.peg_ratio, f.opm_pct, f.roce_pct, f.roa_pct,
                   f.quarterly_profit_growth_pct, f.quarterly_revenue_growth_pct,
                   f.price_to_book, f.promoter_holding_pct, f.fii_holding_pct,
@@ -759,7 +803,8 @@ def get_suggestion_by_id(db, suggestion_id):
     ).fetchone()
 
 
-def compute_tracker_row_stats(buy_price, target_sell_price, stop_loss_price, latest_price, suggestion_date, today=None, target_hit_date=None):
+def compute_tracker_row_stats(buy_price, target_sell_price, stop_loss_price, latest_price, suggestion_date, today=None,
+                              target_hit_date=None, stop_hit_date=None):
     """Pure per-row math for the recommendation tracker (see
     get_recommendation_tracker and app.py's /stocks/recommendations/tracker)
     -- kept separate from the DB query so the profit/loss and outcome
@@ -783,17 +828,45 @@ def compute_tracker_row_stats(buy_price, target_sell_price, stop_loss_price, lat
         reached target_sell_price -- passed straight through as a date
         object (parsed if given as a string). days_to_target_hit is the
         whole-day gap from suggestion_date to it, or None if no hit date
-        was given (never hit, or outcome isn't currently 'target_hit')."""
+        was given (never hit, or outcome isn't currently 'target_hit').
+
+    --- Closed trades count at their exit level (2026-10-20) ---
+    stop_hit_date is the first close at/below stop_loss_price on/after
+    suggestion_date. When either date is given, whichever came FIRST
+    closes the trade (a same-day tie counts as the target): outcome is
+    that event and pct_change is fixed at its level -- a stopped-out pick
+    counts as its ~-3% stop, not today's -15% price, and a target hit
+    counts as its gain even if the price later fell back. Before this, 26
+    of 42 picks had stopped out but the tracker kept marking them to the
+    current price. current_pct_change always holds the live latest-vs-buy
+    figure. With neither date, outcome falls back to the latest price as
+    before."""
     if isinstance(suggestion_date, str):
         suggestion_date = date.fromisoformat(suggestion_date[:10])
+    if isinstance(target_hit_date, str):
+        target_hit_date = date.fromisoformat(target_hit_date[:10])
+    if isinstance(stop_hit_date, str):
+        stop_hit_date = date.fromisoformat(stop_hit_date[:10])
     today = today or date.today()
     days_elapsed = max(0, (today - suggestion_date).days)
 
-    pct_change = None
-    if buy_price and latest_price is not None:
-        pct_change = round((latest_price - buy_price) / buy_price * 100, 1)
+    def _pct(price):
+        if not buy_price or price is None:
+            return None
+        return round((price - buy_price) / buy_price * 100, 1)
 
-    if latest_price is None:
+    current_pct_change = _pct(latest_price)
+    pct_change = current_pct_change
+
+    if target_hit_date is not None and (stop_hit_date is None or target_hit_date <= stop_hit_date):
+        outcome = 'target_hit'
+        pct_change = _pct(target_sell_price)
+        stop_hit_date = None
+    elif stop_hit_date is not None:
+        outcome = 'stop_loss_hit'
+        pct_change = _pct(stop_loss_price)
+        target_hit_date = None
+    elif latest_price is None:
         outcome = 'unknown'
     elif target_sell_price is not None and latest_price >= target_sell_price:
         outcome = 'target_hit'
@@ -803,14 +876,13 @@ def compute_tracker_row_stats(buy_price, target_sell_price, stop_loss_price, lat
         outcome = 'open'
 
     days_to_target_hit = None
-    if isinstance(target_hit_date, str):
-        target_hit_date = date.fromisoformat(target_hit_date[:10])
     if target_hit_date is not None:
         days_to_target_hit = max(0, (target_hit_date - suggestion_date).days)
 
     return {
-        'days_elapsed': days_elapsed, 'pct_change': pct_change, 'outcome': outcome,
-        'target_hit_date': target_hit_date, 'days_to_target_hit': days_to_target_hit,
+        'days_elapsed': days_elapsed, 'pct_change': pct_change, 'current_pct_change': current_pct_change,
+        'outcome': outcome, 'target_hit_date': target_hit_date, 'days_to_target_hit': days_to_target_hit,
+        'stop_hit_date': stop_hit_date,
     }
 
 
@@ -852,7 +924,11 @@ def get_recommendation_tracker(db):
                   (SELECT MIN(d3.trade_date) FROM stock_daily_data d3
                     WHERE d3.watchlist_id = w.id AND d3.trade_date >= s.suggestion_date
                       AND s.target_sell_price IS NOT NULL AND d3.close >= s.target_sell_price
-                  ) AS target_hit_date
+                  ) AS target_hit_date,
+                  (SELECT MIN(d4.trade_date) FROM stock_daily_data d4
+                    WHERE d4.watchlist_id = w.id AND d4.trade_date >= s.suggestion_date
+                      AND s.stop_loss_price IS NOT NULL AND d4.close <= s.stop_loss_price
+                  ) AS stop_hit_date
            FROM stock_suggestions s
            JOIN stock_watchlist w ON w.id = s.watchlist_id
            LEFT JOIN stock_daily_data d ON d.watchlist_id = w.id
@@ -860,6 +936,39 @@ def get_recommendation_tracker(db):
                    SELECT MAX(d2.trade_date) FROM stock_daily_data d2 WHERE d2.watchlist_id = w.id
                )
            ORDER BY s.suggestion_date DESC, s.id DESC'''
+    ).fetchall()
+
+
+def get_highly_recommended_tracker(db):
+    """Same shape as get_recommendation_tracker, but over every Highly
+    Recommended alert (stock_admin_alerts -- see
+    utils.admin_alerts.record_and_send_highly_recommended_alerts) instead
+    of the single daily Pick of the Day. alert_date is aliased to
+    suggestion_date so compute_tracker_row_stats, attach_volume_trend_at_suggestion
+    and compute_outcome_stats all work on these rows unchanged.
+    stock_admin_alerts stores no holding period, note or rationale, so
+    those come back as NULL."""
+    return db.execute(
+        '''SELECT a.id, w.id AS watchlist_id, w.symbol, w.exchange, a.alert_date AS suggestion_date,
+                  a.buy_price, a.target_sell_price, a.stop_loss_price, a.status,
+                  a.nns_tier, a.nns_score, a.pattern_name, NULL AS pattern_note,
+                  NULL AS holding_period_days, NULL AS rationale,
+                  d.close AS latest_price, d.trade_date AS price_date,
+                  (SELECT MIN(d3.trade_date) FROM stock_daily_data d3
+                    WHERE d3.watchlist_id = w.id AND d3.trade_date >= a.alert_date
+                      AND a.target_sell_price IS NOT NULL AND d3.close >= a.target_sell_price
+                  ) AS target_hit_date,
+                  (SELECT MIN(d4.trade_date) FROM stock_daily_data d4
+                    WHERE d4.watchlist_id = w.id AND d4.trade_date >= a.alert_date
+                      AND a.stop_loss_price IS NOT NULL AND d4.close <= a.stop_loss_price
+                  ) AS stop_hit_date
+           FROM stock_admin_alerts a
+           JOIN stock_watchlist w ON w.id = a.watchlist_id
+           LEFT JOIN stock_daily_data d ON d.watchlist_id = w.id
+               AND d.trade_date = (
+                   SELECT MAX(d2.trade_date) FROM stock_daily_data d2 WHERE d2.watchlist_id = w.id
+               )
+           ORDER BY a.alert_date DESC, a.id DESC'''
     ).fetchall()
 
 
@@ -1131,6 +1240,42 @@ def _rank_todays_candidates(db, market_cap_tier=None):
     )
 
 
+def get_market_breadth(db):
+    """Market strength on the latest universe indicator date: the share of
+    the ~1,067-company universe whose 5-day average is at/above its 50-day
+    average. Returns {'calc_date', 'total', 'pct_up'} or None when no
+    universe indicators exist."""
+    row = db.execute(
+        '''SELECT calc_date, COUNT(*) AS total,
+                  SUM(CASE WHEN ma_5 >= ma_50 THEN 1 ELSE 0 END) AS up
+           FROM stock_indicators
+           WHERE universe_id IS NOT NULL AND ma_5 IS NOT NULL AND ma_50 IS NOT NULL
+             AND calc_date = (SELECT MAX(calc_date) FROM stock_indicators WHERE universe_id IS NOT NULL)
+           GROUP BY calc_date'''
+    ).fetchone()
+    if not row or not row.get('total'):
+        return None
+    return {
+        'calc_date': str(row['calc_date'])[:10],
+        'total': int(row['total']),
+        'pct_up': round(100 * float(row['up'] or 0) / float(row['total']), 1),
+    }
+
+
+def is_weak_market(breadth, today=None):
+    """True when breadth is fresh (within MARKET_BREADTH_MAX_AGE_DAYS) and
+    under WEAK_MARKET_BREADTH_PCT. Missing or stale breadth returns False --
+    a broken universe indicator job shouldn't silently stop every pick, so
+    it fails open (the dashboard's per-step "Last synced" shows the gap)."""
+    if not breadth:
+        return False
+    today = today or date.today()
+    age_days = (today - date.fromisoformat(breadth['calc_date'])).days
+    if age_days > MARKET_BREADTH_MAX_AGE_DAYS:
+        return False
+    return breadth['pct_up'] < WEAK_MARKET_BREADTH_PCT
+
+
 def generate_daily_suggestions(db):
     """Builds the candidate pool (active watchlist joined to today's
     indicators and each symbol's latest fundamentals snapshot within 20
@@ -1170,7 +1315,15 @@ def generate_daily_suggestions(db):
     are set instead, and it's pattern_note (not holding_period_days) that
     the email/viewer pages show for those, since chart-pattern shape
     doesn't reliably predict timing the way a fixed number of days would
-    misleadingly imply."""
+    misleadingly imply.
+
+    On a weak-market day (see is_weak_market) nothing is created at all;
+    the summary's 'weak_market' key carries the breadth reading that
+    stopped it."""
+    breadth = get_market_breadth(db)
+    if is_weak_market(breadth):
+        return {'candidates_evaluated': 0, 'created': [], 'skipped_duplicates': [], 'weak_market': breadth}
+
     ranked = _rank_todays_candidates(db)
 
     today_date = date.today()
@@ -1243,6 +1396,35 @@ def _recent_suggestion_for_company(db, candidate, repeat_window_cutoff, today):
     ).fetchone()
 
 
+def _recently_stopped_out(db, candidate, today):
+    """True if this company was picked within the last
+    STOP_LOSS_COOLDOWN_DAYS and a close since that pick reached its
+    stop-loss. Unlike the repeat window, no score change overrides this.
+    Matched by ISIN across both listings, like _recent_suggestion_for_company,
+    falling back to the plain watchlist_id."""
+    cutoff = (date.fromisoformat(today) - timedelta(days=STOP_LOSS_COOLDOWN_DAYS)).isoformat()
+    stopped_clause = '''s.suggestion_date >= ? AND s.suggestion_date < ? AND s.stop_loss_price IS NOT NULL
+               AND EXISTS (SELECT 1 FROM stock_daily_data d
+                           WHERE d.watchlist_id = s.watchlist_id AND d.trade_date >= s.suggestion_date
+                             AND d.close <= s.stop_loss_price)'''
+    isin = (candidate.get('isin') or '').strip()
+    if isin:
+        row = db.execute(
+            f'''SELECT s.id FROM stock_suggestions s
+               JOIN stock_watchlist w ON w.id = s.watchlist_id
+               JOIN stock_universe u ON u.symbol = w.symbol AND u.exchange = w.exchange
+               WHERE u.isin = ? AND {stopped_clause} LIMIT 1''',
+            (isin, cutoff, today)
+        ).fetchone()
+    else:
+        row = db.execute(
+            f'''SELECT s.id FROM stock_suggestions s
+               WHERE s.watchlist_id = ? AND {stopped_clause} LIMIT 1''',
+            (candidate['watchlist_id'], cutoff, today)
+        ).fetchone()
+    return row is not None
+
+
 def _create_or_update_suggestion(db, candidate, nns_score, today, repeat_window_cutoff):
     """Shared per-candidate row-creation logic, extracted from
     generate_daily_suggestions's loop so get_candidates_for_manual_pick/
@@ -1258,8 +1440,15 @@ def _create_or_update_suggestion(db, candidate, nns_score, today, repeat_window_
     genuine change (see _is_genuine_change) -- the caller decides what to do
     with a skip (generate_daily_suggestions moves on to the next-ranked
     candidate; the manual picker instead reports it so the admin knows why
-    a chosen stock didn't go out)."""
+    a chosen stock didn't go out). A company that recently stopped out
+    (see _recently_stopped_out) is skipped the same way."""
     watchlist_id = candidate['watchlist_id']
+
+    if _recently_stopped_out(db, candidate, today):
+        return None, {
+            'watchlist_id': watchlist_id, 'symbol': candidate['symbol'], 'exchange': candidate['exchange'],
+            'reason': 'stopped_out',
+        }
 
     price_history = _fetch_price_history(db, watchlist_id)
     pricing = compute_suggestion_pricing(
@@ -1338,6 +1527,8 @@ def _todays_eligible_candidates_off_cooldown(db):
     off_cooldown = []
     for candidate, nns_score in ranked:
         watchlist_id = candidate['watchlist_id']
+        if _recently_stopped_out(db, candidate, today):
+            continue
         existing_recent = _recent_suggestion_for_company(db, candidate, repeat_window_cutoff, today)
         # _is_genuine_change needs this candidate's current pattern_name,
         # which means a price-history fetch + compute_suggestion_pricing
@@ -1500,7 +1691,10 @@ def get_all_highly_recommended_today(db):
     _create_or_update_suggestion builds a row to insert, just never inserted
     (see utils/admin_alerts.py, which stores these in its own
     stock_admin_alerts table instead). Uncapped -- may be empty on a day
-    nothing clears the silver bar."""
+    nothing clears the silver bar, and is always empty on a weak-market
+    day (see is_weak_market), same as the Pick of the Day."""
+    if is_weak_market(get_market_breadth(db)):
+        return []
     ranked = _rank_todays_candidates(db)
     results = []
     for candidate, nns_score in ranked:

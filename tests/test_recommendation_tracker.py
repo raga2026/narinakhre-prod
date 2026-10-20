@@ -13,9 +13,47 @@ def test_open_position_with_price_between_stop_and_target():
         suggestion_date=date(2026, 8, 1), today=date(2026, 8, 6),
     )
     assert stats == {
-        'days_elapsed': 5, 'pct_change': 4.0, 'outcome': 'open',
-        'target_hit_date': None, 'days_to_target_hit': None,
+        'days_elapsed': 5, 'pct_change': 4.0, 'current_pct_change': 4.0, 'outcome': 'open',
+        'target_hit_date': None, 'days_to_target_hit': None, 'stop_hit_date': None,
     }
+
+
+def test_stop_hit_first_closes_the_trade_at_the_stop_level():
+    # Stopped out on 3 Aug, then kept falling to -15%: the trade counts as
+    # the -5% stop, with today's -15% kept separately.
+    stats = compute_tracker_row_stats(
+        buy_price=100, target_sell_price=110, stop_loss_price=95, latest_price=85,
+        suggestion_date=date(2026, 8, 1), today=date(2026, 8, 20),
+        stop_hit_date=date(2026, 8, 3),
+    )
+    assert stats['outcome'] == 'stop_loss_hit'
+    assert stats['pct_change'] == -5.0
+    assert stats['current_pct_change'] == -15.0
+    assert stats['stop_hit_date'] == date(2026, 8, 3)
+
+
+def test_target_hit_first_stays_a_win_even_if_price_falls_back():
+    stats = compute_tracker_row_stats(
+        buy_price=100, target_sell_price=110, stop_loss_price=95, latest_price=90,
+        suggestion_date=date(2026, 8, 1), today=date(2026, 8, 20),
+        target_hit_date='2026-08-05', stop_hit_date='2026-08-12',
+    )
+    assert stats['outcome'] == 'target_hit'
+    assert stats['pct_change'] == 10.0
+    assert stats['current_pct_change'] == -10.0
+    assert stats['stop_hit_date'] is None
+
+
+def test_stop_before_target_is_a_loss_even_if_target_reached_later():
+    stats = compute_tracker_row_stats(
+        buy_price=100, target_sell_price=110, stop_loss_price=95, latest_price=112,
+        suggestion_date=date(2026, 8, 1), today=date(2026, 8, 20),
+        target_hit_date=date(2026, 8, 15), stop_hit_date=date(2026, 8, 4),
+    )
+    assert stats['outcome'] == 'stop_loss_hit'
+    assert stats['pct_change'] == -5.0
+    assert stats['target_hit_date'] is None
+    assert stats['days_to_target_hit'] is None
 
 
 def test_target_hit_when_latest_price_at_or_above_target():
