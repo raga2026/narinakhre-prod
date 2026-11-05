@@ -1,4 +1,4 @@
-claude"""All Nari Nakhre Stocks (StoqBell) routes, on their own Blueprint.
+"""All Nari Nakhre Stocks (StoqBell) routes, on their own Blueprint.
 
 Registered onto the main Flask app in app.py via
 `app.register_blueprint(stocks_bp)`. Route paths already include the
