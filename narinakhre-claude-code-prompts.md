@@ -143,9 +143,10 @@ Test this against a few real product photos (JPEG, varying sizes) and confirm vi
 ---
 
 
+Implement all these anmake a cument, explaining the algo we use to choose the stocks from the universe to ily picks in the source folr
 
 ## Notes for you (not for Claude Code)
 
 - Run Prompt 1 and 2 in one sitting if you want the admin order dashboard live first — that's the piece you need soonest given the Ashika order.
-- Prompts 4–6 (catalogue) are independent of 1–3 (invoicing) and can be done in either order or by different sessions.
+- Prompts 4–6 (catalogue) are independent of 1–3 (invoicing) and can be done in either eorder or by different sessions.
 - After each prompt, actually click through the feature yourself on `narinakhre-test` before promoting to `narinakhre-production` — don't just review the diff.
