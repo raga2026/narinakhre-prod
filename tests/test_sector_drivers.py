@@ -126,3 +126,21 @@ def test_nns_score_applies_sector_adjustment():
     assert base_breakdown['sector_pressure_adjustment'] == 0.0
     assert hit_breakdown['sector_pressure_adjustment'] == -0.8
     assert hit_score < base_score
+
+
+def test_probabilities_follow_pressure_and_sum_to_100():
+    from stoqbell.utils.sector_drivers import estimate_move_probabilities
+    up, down = estimate_move_probabilities(0.8)
+    assert up > 50 > down and up + down == 100
+    up, down = estimate_move_probabilities(-0.8)
+    assert down > 50 > up and up + down == 100
+    assert estimate_move_probabilities(0.0) == (50, 50)
+
+
+def test_probabilities_clamped_and_trend_nudged_and_none_safe():
+    from stoqbell.utils.sector_drivers import estimate_move_probabilities
+    assert estimate_move_probabilities(1.0) == (85, 15)
+    assert estimate_move_probabilities(-1.0) == (15, 85)
+    assert estimate_move_probabilities(0.0, 'golden_cross')[0] > 50
+    assert estimate_move_probabilities(0.0, 'death_cross')[0] < 50
+    assert estimate_move_probabilities(None) == (None, None)

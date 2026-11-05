@@ -213,6 +213,7 @@ from stoqbell.utils.industry_growth import compute_industry_growth
 from stoqbell.utils.market_signals import (
     initialize_market_signals_tables_if_needed,
     sync_market_signals,
+    get_market_drivers_report,
     get_market_drivers_summary,
 )
 from stoqbell.utils.stock_news import (
@@ -1692,6 +1693,20 @@ def stocks_market_signals_sync():
         return jsonify({'status': 'error', 'message': str(e)}), 500
     record_job_success(db, 'market_signals_sync')
     return jsonify({'status': 'ok', **summary})
+
+
+@stocks_bp.route('/stocks/market-drivers', methods=['GET'])
+@stocks_role_required('super_admin')
+def stocks_market_drivers_report():
+    """super_admin-only: the whole market-drivers process in one place --
+    when it last ran, each commodity/FX/volatility driver, each sector's
+    pressure and what's behind it, and the watchlist stocks in those
+    sectors with a heuristic rise/decline probability (see
+    utils/sector_drivers.estimate_move_probabilities -- display only, not
+    a calibrated forecast). Read-only; the sync itself runs from the
+    stocks-market-signals-sync GitHub workflow."""
+    report = get_market_drivers_report(get_db())
+    return render_template('admin/stocks_market_drivers.html', report=report)
 
 
 @stocks_bp.route('/stocks/watchlist', methods=['GET'])

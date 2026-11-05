@@ -23,6 +23,8 @@ Matching is by case-insensitive SUBSTRING against stock_universe.industry
 must come before broader ones. An industry matching nothing falls into
 DEFAULT_RULE (market-wide risk only).
 """
+import math
+
 
 # driver key -> display label, Yahoo Finance symbol, and the Google News query
 # used to pull driver-specific headlines (see market_signals.sync_market_signals).
@@ -243,3 +245,39 @@ def is_gated(pressure):
     """True when a sector's pressure is bad enough to suppress NEW buy
     suggestions in it. None (no data) never gates."""
     return pressure is not None and pressure <= GATE_PRESSURE
+
+
+# ---------------------------------------------------------------------------
+# Rise/decline estimate (display only)
+# ---------------------------------------------------------------------------
+
+# Steepness of the pressure -> probability curve, the nudge a golden/death
+# cross gives the score, and the clamp that stops the estimate from ever
+# claiming certainty.
+PROBABILITY_STEEPNESS = 2.2
+TREND_NUDGE = 0.15
+PROBABILITY_FLOOR = 0.15
+PROBABILITY_CEILING = 0.85
+
+
+def estimate_move_probabilities(pressure, cross_status=None):
+    """(p_rise, p_decline) as percentages summing to 100, for display on the
+    super-admin Market Drivers page.
+
+    This is a HEURISTIC read of the sector's driver/news/move pressure
+    (-1..1) plus a small nudge from the stock's own golden/death cross --
+    squashed through a logistic curve and clamped to 15-85%. It is NOT a
+    calibrated forecast and has never been back-tested; it exists to rank
+    which stocks are most exposed and in which direction. None pressure
+    (no data) returns (None, None)."""
+    if pressure is None:
+        return None, None
+    score = float(pressure)
+    if cross_status == 'golden_cross':
+        score += TREND_NUDGE
+    elif cross_status == 'death_cross':
+        score -= TREND_NUDGE
+    p_rise = 1.0 / (1.0 + math.exp(-PROBABILITY_STEEPNESS * score))
+    p_rise = min(PROBABILITY_CEILING, max(PROBABILITY_FLOOR, p_rise))
+    rise = round(p_rise * 100)
+    return rise, 100 - rise

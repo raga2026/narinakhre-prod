@@ -45,6 +45,7 @@ from stoqbell.utils.sector_drivers import (
     all_rules,
     compute_driver_shock,
     compute_sector_pressure,
+    estimate_move_probabilities,
     group_for_industry,
     rule_for_group,
 )
@@ -582,3 +583,104 @@ def get_market_drivers_summary(db, limit_sectors=6):
         'headwinds': [_entry(p) for p in headwinds[:limit_sectors]],
         'tailwinds': [_entry(p) for p in tailwinds[:limit_sectors]],
     }
+
+
+# ---------------------------------------------------------------------------
+# Super-admin report
+# ---------------------------------------------------------------------------
+
+def get_market_drivers_report(db, max_stocks=80):
+    """Everything the super-admin Market Drivers page shows. Fail-open per
+    section: a failing query empties that section, never the page.
+
+    {'last_sync': ISO str|None, 'drivers': [...], 'sectors': [...],
+     'stocks': [...]}
+      drivers: {'key','label','value','change_1d_pct','change_5d_pct','zscore','is_shock','as_of_date','headlines'}
+      sectors: {'group','title','pressure','label','driver_component','news_component',
+                'move_component','top_driver_label','gated','headlines','as_of_date'}
+      stocks:  {'watchlist_id','symbol','company_name','industry','group','pressure','sector_label',
+                'cross_status','price','p_rise','p_decline'} -- the curated watchlist,
+               most-exposed sector first, capped at max_stocks. p_rise/p_decline come
+               from sector_drivers.estimate_move_probabilities (heuristic, display only)."""
+    report = {'last_sync': None, 'drivers': [], 'sectors': [], 'stocks': []}
+
+    try:
+        row = db.execute(
+            "SELECT last_success_at FROM stock_job_runs WHERE source = 'market_signals_sync'"
+        ).fetchone()
+        if row and row.get('last_success_at'):
+            report['last_sync'] = str(row['last_success_at'])
+    except Exception as e:
+        print(f'market drivers report: last_sync failed: {e}')
+
+    def _headlines(scope_key, limit=3):
+        try:
+            return [dict(h) for h in get_sector_headlines(db, scope_key, limit)]
+        except Exception:
+            return []
+
+    try:
+        signals = get_latest_driver_signals(db)
+    except Exception as e:
+        print(f'market drivers report: drivers failed: {e}')
+        signals = {}
+    for key, driver in DRIVERS.items():
+        sig = signals.get(key)
+        if not sig:
+            continue
+        z = sig.get('zscore')
+        report['drivers'].append({
+            'key': key, 'label': driver['label'], 'value': sig['value'],
+            'change_1d_pct': sig['change_1d_pct'], 'change_5d_pct': sig['change_5d_pct'],
+            'zscore': z, 'is_shock': z is not None and abs(z) >= SHOCK_ZSCORE,
+            'as_of_date': sig['as_of_date'], 'headlines': _headlines(f'driver:{key}', 2),
+        })
+
+    try:
+        pressures = get_sector_pressure_by_group(db)
+    except Exception as e:
+        print(f'market drivers report: sectors failed: {e}')
+        pressures = {}
+    for p in sorted(pressures.values(), key=lambda p: p['pressure']):
+        report['sectors'].append({
+            'group': p['group_key'], 'title': p['group_key'].replace('_', ' ').title(),
+            'pressure': p['pressure'], 'label': p.get('label') or 'neutral',
+            'driver_component': p['driver_component'], 'news_component': p['news_component'],
+            'move_component': p['move_component'],
+            'top_driver_label': DRIVERS.get(p['top_driver'] or '', {}).get('label'),
+            'gated': p['pressure'] <= GATE_PRESSURE, 'as_of_date': p['as_of_date'],
+            'headlines': _headlines(p['group_key']),
+        })
+
+    try:
+        rows = db.execute(
+            '''SELECT w.id AS watchlist_id, w.symbol, w.company_name, u.industry,
+                      u.live_price, i.cross_status,
+                      (SELECT d.close FROM stock_daily_data d WHERE d.watchlist_id = w.id
+                        ORDER BY d.trade_date DESC LIMIT 1) AS latest_close
+               FROM stock_watchlist w
+               LEFT JOIN stock_universe u ON u.symbol = w.symbol AND u.exchange = w.exchange
+               LEFT JOIN stock_indicators i ON i.watchlist_id = w.id
+                   AND i.calc_date = (SELECT MAX(i2.calc_date) FROM stock_indicators i2 WHERE i2.watchlist_id = w.id)'''
+        ).fetchall()
+    except Exception as e:
+        print(f'market drivers report: stocks failed: {e}')
+        rows = []
+    stocks = []
+    for r in rows:
+        group = group_for_industry(r.get('industry'))
+        entry = pressures.get(group)
+        if not entry:
+            continue
+        p_rise, p_decline = estimate_move_probabilities(entry['pressure'], r.get('cross_status'))
+        stocks.append({
+            'watchlist_id': r['watchlist_id'], 'symbol': r['symbol'], 'company_name': r.get('company_name'),
+            'industry': r.get('industry'), 'group': group,
+            'pressure': entry['pressure'], 'sector_label': entry.get('label') or 'neutral',
+            'cross_status': r.get('cross_status'),
+            'price': _num(r.get('live_price')) or _num(r.get('latest_close')),
+            'p_rise': p_rise, 'p_decline': p_decline,
+        })
+    stocks.sort(key=lambda s: -abs(s['pressure']))
+    report['stocks'] = stocks[:max_stocks]
+    return report

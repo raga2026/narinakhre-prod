@@ -170,3 +170,50 @@ def test_attach_sector_pressure_maps_group_and_is_fail_open():
 def test_get_sector_pressure_skips_null_pressure():
     db = FakeDB(pressure_rows=[{'group_key': 'it', 'as_of_date': '2026-11-05', 'pressure': None}])
     assert get_sector_pressure_by_group(db, today=TODAY) == {}
+
+
+class ReportDB:
+    """Fake DB for get_market_drivers_report: one driver, one sector under
+    pressure, two watchlist stocks (one in the sector, one not)."""
+    def execute(self, sql, params=None):
+        sql = ' '.join(sql.split())
+        if sql.startswith('SELECT last_success_at FROM stock_job_runs'):
+            return FakeCursor([{'last_success_at': '2026-11-05T11:03:00+00:00'}])
+        if sql.startswith('SELECT s.driver_key'):
+            return FakeCursor([{'driver_key': 'brent', 'as_of_date': '2026-11-05', 'value': 90.0,
+                                'change_1d_pct': 5.0, 'change_5d_pct': 8.0, 'zscore': 3.1}])
+        if sql.startswith('SELECT p.group_key'):
+            return FakeCursor([{'group_key': 'auto', 'as_of_date': date.today().isoformat(), 'pressure': -0.6,
+                                'label': 'headwind', 'driver_component': -0.7, 'news_component': -0.2,
+                                'move_component': -0.3, 'top_driver': 'brent', 'top_driver_impact': -0.7}])
+        if sql.startswith('SELECT headline, link, source, published_at FROM sector_news'):
+            return FakeCursor([{'headline': 'Crude jumps', 'link': 'x', 'source': 's', 'published_at': None}])
+        if sql.startswith('SELECT w.id AS watchlist_id'):
+            return FakeCursor([
+                {'watchlist_id': 1, 'symbol': 'ASHOKLEY', 'company_name': 'Ashok Leyland', 'industry': 'Auto - Commercial Vehicles',
+                 'live_price': 200.0, 'cross_status': 'death_cross', 'latest_close': 199.0},
+                {'watchlist_id': 2, 'symbol': 'UNKNOWN', 'company_name': 'No Sector', 'industry': None,
+                 'live_price': None, 'cross_status': None, 'latest_close': None},
+            ])
+        return FakeCursor([])
+
+
+def test_report_lists_driver_sector_and_exposed_stock_with_probabilities():
+    from stoqbell.utils.market_signals import get_market_drivers_report
+    report = get_market_drivers_report(ReportDB())
+    assert report['last_sync'].startswith('2026-11-05')
+    assert report['drivers'][0]['key'] == 'brent' and report['drivers'][0]['is_shock']
+    assert report['sectors'][0]['group'] == 'auto' and report['sectors'][0]['gated']
+    assert [s['symbol'] for s in report['stocks']] == ['ASHOKLEY']  # no-sector stock excluded
+    stock = report['stocks'][0]
+    assert stock['p_decline'] > stock['p_rise'] and stock['p_rise'] + stock['p_decline'] == 100
+
+
+def test_report_never_raises_when_queries_fail():
+    from stoqbell.utils.market_signals import get_market_drivers_report
+
+    class BrokenDB:
+        def execute(self, *a, **k):
+            raise RuntimeError('db down')
+    report = get_market_drivers_report(BrokenDB())
+    assert report == {'last_sync': None, 'drivers': [], 'sectors': [], 'stocks': []}

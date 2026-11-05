@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <link rel="icon" type="image/png" href="{{ url_for('stocks.static', filename='assets/stoqbell-icon.png') }}">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Market Drivers - StoqBell</title>
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+    <style>
+        body { background: #0f172a; color: #f8fafc; }
+        .stocks-accent { color: #0ea5e9; }
+        table { border-collapse: collapse; width: 100%; }
+        th, td { text-align: left; padding: 0.55rem 0.9rem; border-bottom: 1px solid rgba(14, 165, 233, 0.15); }
+        th { color: #7dd3fc; font-weight: 600; background: #1e293b; }
+        tbody tr:hover { background: rgba(14, 165, 233, 0.06); }
+        .panel { background:#1e293b; border:1px solid rgba(14,165,233,0.2); border-radius:16px; padding:20px; margin-bottom:24px; }
+        .up { color:#4ade80; font-weight:600; }
+        .down { color:#f87171; font-weight:600; }
+        .muted { color:#94a3b8; }
+        .badge { display:inline-flex; padding:2px 10px; border-radius:999px; font-size:0.7rem; font-weight:700; }
+        .badge-headwind { background:#7f1d1d; color:#fecaca; }
+        .badge-tailwind { background:#14532d; color:#bbf7d0; }
+        .badge-neutral { background:#334155; color:#cbd5e1; }
+        .badge-shock { background:#78350f; color:#fde68a; }
+        .bar { height:8px; border-radius:4px; background:#7f1d1d; overflow:hidden; min-width:90px; }
+        .bar > span { display:block; height:100%; background:#16a34a; }
+        .scroll { overflow-x:auto; }
+    </style>
+</head>
+<body class="min-h-screen p-4 md:p-8">
+<div class="max-w-6xl mx-auto">
+    <div class="mb-6">
+        <h1 class="text-2xl font-extrabold stocks-accent font-serif">Market Drivers</h1>
+        <p class="text-slate-400 text-sm mt-1">Why sectors may rise or fall: commodity, currency and volatility moves feeding into stock picks.</p>
+        <p class="mt-2"><a href="{{ url_for('stocks.stocks_admin_dashboard') }}" class="text-sky-400 hover:text-sky-300 underline text-sm">&larr; Back to dashboard</a></p>
+    </div>
+
+    <div class="panel">
+        <h2 class="text-lg font-bold mb-2">How the process works</h2>
+        <ol class="list-decimal list-inside text-sm text-slate-300 space-y-1">
+            <li><strong>Fetch</strong> daily prices for each driver (Brent crude, natural gas, copper, USD/INR, US 10-year yield, India VIX) and flag a <em>shock</em> when a move is unusually large against its own recent volatility.</li>
+            <li><strong>News</strong> headlines are pulled per sector and per driver and scored for sentiment.</li>
+            <li><strong>Pressure</strong> per sector (-1 to +1) blends driver moves (50%), news sentiment (25%) and the sector's own recent price move (25%). Below -0.5 new buy picks in that sector are paused.</li>
+            <li><strong>Effect on picks:</strong> pressure adjusts each stock's NNS score (up to -1.0 for headwinds, +0.25 for tailwinds).</li>
+            <li><strong>Alerts:</strong> a driver shock emails the owner with the exposed watchlist companies.</li>
+        </ol>
+        <p class="text-sm mt-3">
+            Last successful sync:
+            {% if report.last_sync %}<strong>{{ report.last_sync[:16] | replace('T', ' ') }}</strong> (UTC){% else %}<span class="down">never recorded</span>{% endif %}
+            <span class="muted">&middot; runs automatically at 08:08 IST daily and 16:38 IST on weekdays.</span>
+        </p>
+    </div>
+
+    <div class="panel">
+        <h2 class="text-lg font-bold mb-3">Drivers</h2>
+        {% if report.drivers %}
+        <div class="scroll"><table>
+            <thead><tr><th>Driver</th><th>Latest</th><th>1-day</th><th>5-day</th><th>Z-score</th><th>As of</th></tr></thead>
+            <tbody>
+            {% for d in report.drivers %}
+            <tr>
+                <td>{{ d.label }}{% if d.is_shock %} <span class="badge badge-shock">SHOCK</span>{% endif %}
+                    {% for h in d.headlines %}<div class="muted text-xs">{{ h.headline }}</div>{% endfor %}</td>
+                <td>{{ '%.2f'|format(d.value) if d.value is not none else 'n/a' }}</td>
+                <td class="{{ 'up' if (d.change_1d_pct or 0) >= 0 else 'down' }}">{{ ('%+.2f%%'|format(d.change_1d_pct)) if d.change_1d_pct is not none else 'n/a' }}</td>
+                <td class="{{ 'up' if (d.change_5d_pct or 0) >= 0 else 'down' }}">{{ ('%+.2f%%'|format(d.change_5d_pct)) if d.change_5d_pct is not none else 'n/a' }}</td>
+                <td>{{ '%.2f'|format(d.zscore) if d.zscore is not none else 'n/a' }}</td>
+                <td class="muted">{{ d.as_of_date }}</td>
+            </tr>
+            {% endfor %}
+            </tbody>
+        </table></div>
+        {% else %}<p class="muted text-sm">No driver data yet -- run the sync.</p>{% endif %}
+    </div>
+
+    <div class="panel">
+        <h2 class="text-lg font-bold mb-3">Sector pressure</h2>
+        {% if report.sectors %}
+        <div class="scroll"><table>
+            <thead><tr><th>Sector</th><th>Outlook</th><th>Pressure</th><th>Drivers</th><th>News</th><th>Move</th><th>Main driver</th></tr></thead>
+            <tbody>
+            {% for s in report.sectors %}
+            <tr>
+                <td>{{ s.title }}{% if s.gated %} <span class="muted text-xs">&middot; new picks paused</span>{% endif %}
+                    {% for h in s.headlines %}<div class="muted text-xs">{{ h.headline }}</div>{% endfor %}</td>
+                <td><span class="badge badge-{{ s.label }}">{{ s.label|upper }}</span></td>
+                <td class="{{ 'up' if s.pressure >= 0 else 'down' }}">{{ '%+.2f'|format(s.pressure) }}</td>
+                <td>{{ '%+.2f'|format(s.driver_component) if s.driver_component is not none else '-' }}</td>
+                <td>{{ '%+.2f'|format(s.news_component) if s.news_component is not none else '-' }}</td>
+                <td>{{ '%+.2f'|format(s.move_component) if s.move_component is not none else '-' }}</td>
+                <td class="muted">{{ s.top_driver_label or '-' }}</td>
+            </tr>
+            {% endfor %}
+            </tbody>
+        </table></div>
+        {% else %}<p class="muted text-sm">No sector data yet.</p>{% endif %}
+    </div>
+
+    <div class="panel">
+        <h2 class="text-lg font-bold mb-1">Probable stocks &mdash; chance of rise or decline</h2>
+        <p class="text-xs text-slate-400 mb-3">Watchlist stocks, most-exposed sectors first. The percentage is a <strong>heuristic estimate</strong> from sector pressure plus a small golden/death-cross nudge, capped at 15&ndash;85%. It is not a calibrated forecast and has not been back-tested &mdash; use it to rank exposure, not as a prediction.</p>
+        {% if report.stocks %}
+        <div class="scroll"><table>
+            <thead><tr><th>Stock</th><th>Sector</th><th>Pressure</th><th>Trend</th><th>Price</th><th>Rise</th><th>Decline</th><th>Lean</th></tr></thead>
+            <tbody>
+            {% for st in report.stocks %}
+            <tr>
+                <td><a href="{{ url_for('stocks.stocks_company_detail', watchlist_id=st.watchlist_id) }}" class="text-sky-400 hover:text-sky-300 underline">{{ st.symbol }}</a>
+                    <div class="muted text-xs">{{ st.company_name or '' }}</div></td>
+                <td>{{ st.group|replace('_', ' ')|title }}</td>
+                <td class="{{ 'up' if st.pressure >= 0 else 'down' }}">{{ '%+.2f'|format(st.pressure) }}</td>
+                <td class="muted text-xs">{{ (st.cross_status or 'n/a')|replace('_', ' ') }}</td>
+                <td>{% if st.price is not none %}&#8377;{{ '%.2f'|format(st.price) }}{% else %}n/a{% endif %}</td>
+                <td class="up">{{ st.p_rise }}%</td>
+                <td class="down">{{ st.p_decline }}%</td>
+                <td><div class="bar"><span style="width: {{ st.p_rise }}%"></span></div></td>
+            </tr>
+            {% endfor %}
+            </tbody>
+        </table></div>
+        {% else %}<p class="muted text-sm">No watchlist stocks matched a scored sector yet.</p>{% endif %}
+    </div>
+</div>
+</body>
+</html>
