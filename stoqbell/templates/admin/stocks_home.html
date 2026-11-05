@@ -237,6 +237,45 @@
         </div>
         {% endif %}
 
+        {% if market_drivers and market_drivers.available %}
+        <div class="card growth-card p-5 mb-6">
+            <h2 class="text-base font-bold text-gray-900 mb-1">Market Drivers</h2>
+            <p class="text-gray-500 text-xs mb-4">
+                Commodity, currency and volatility moves that can swing whole sectors -- often the real reason a stock
+                moves when its own chart and headlines look quiet. A risk flag, not a trade signal.
+            </p>
+
+            {% for d in market_drivers.drivers %}
+            <div class="growth-row {{ 'is-up' if (d.change_1d_pct or 0) >= 0 else 'is-down' }}">
+                <span class="text-gray-800">{{ d.label }}{% if d.is_shock %} <strong>&middot; shock</strong>{% endif %}</span>
+                <span class="{{ 'up' if (d.change_1d_pct or 0) >= 0 else 'down' }}">
+                    {% if d.change_1d_pct is not none %}{{ '+' if d.change_1d_pct >= 0 }}{{ '%.2f'|format(d.change_1d_pct) }}%{% else %}n/a{% endif %}
+                </span>
+            </div>
+            {% endfor %}
+
+            {% if market_drivers.headwinds %}
+            <p class="text-gray-500 text-xs uppercase tracking-wide font-semibold mb-2 mt-4">Sectors under pressure</p>
+            {% for s in market_drivers.headwinds %}
+            <div class="growth-row is-down">
+                <span class="text-gray-800">{{ s.title }}{% if s.top_driver_label %} <span class="text-gray-500 text-xs">(via {{ s.top_driver_label }})</span>{% endif %}{% if s.gated %} <span class="text-xs">&middot; new picks paused</span>{% endif %}</span>
+                <span class="down">{{ '%.2f'|format(s.pressure) }}</span>
+            </div>
+            {% endfor %}
+            {% endif %}
+
+            {% if market_drivers.tailwinds %}
+            <p class="text-gray-500 text-xs uppercase tracking-wide font-semibold mb-2 mt-4">Sectors with a tailwind</p>
+            {% for s in market_drivers.tailwinds %}
+            <div class="growth-row is-up">
+                <span class="text-gray-800">{{ s.title }}{% if s.top_driver_label %} <span class="text-gray-500 text-xs">(via {{ s.top_driver_label }})</span>{% endif %}</span>
+                <span class="up">+{{ '%.2f'|format(s.pressure) }}</span>
+            </div>
+            {% endfor %}
+            {% endif %}
+        </div>
+        {% endif %}
+
         <div class="card growth-card p-5">
             <h2 class="text-base font-bold text-gray-900 mb-1">Industry Growth</h2>
             {% if industry_growth.available %}

@@ -65,6 +65,7 @@ collapsing the eligible pool to zero); (2) PEG's weight below is raised
 from the old equal 10 to 15 (out of 100), so a PEG in the still-tolerated
 [1.0, 1.5) band -- which still scores 0 for this component, same curve as
 before -- now costs meaningfully more of the total than it used to."""
+from stoqbell.utils.sector_drivers import pressure_score_adjustment
 from stoqbell.utils.fundamental_screen import (
     MIN_INDUSTRY_SAMPLE_SIZE,
     OPM_SILVER_MIN_PCT,
@@ -349,9 +350,17 @@ def compute_nns_score(candidate, previous_fundamentals_row=None, industry_benchm
     }
     breakdown['golden_cross_bonus'] = GOLDEN_CROSS_BONUS if candidate.get('cross_status') == 'golden_cross' else 0.0
     breakdown['news_sentiment_bonus'] = round((news_sentiment_score or 0.0) * NEWS_SENTIMENT_BONUS_MAX, 3)
+    # Sector headwind malus / tailwind bonus from the market-drivers layer
+    # (utils/sector_drivers.py) -- candidate['sector_pressure'] is -1..1 or
+    # absent/None (no fresh data -> no adjustment). Additive and capped,
+    # same shape as the two bonuses above.
+    breakdown['sector_pressure_adjustment'] = pressure_score_adjustment(candidate.get('sector_pressure'))
 
     weighted_total = sum(breakdown[name] * WEIGHTS[name] / 10 for name in WEIGHTS)
-    uncapped = weighted_total + breakdown['golden_cross_bonus'] + breakdown['news_sentiment_bonus']
+    uncapped = (
+        weighted_total + breakdown['golden_cross_bonus'] + breakdown['news_sentiment_bonus']
+        + breakdown['sector_pressure_adjustment']
+    )
     score = round(max(0.0, min(10.0, uncapped)), 1)
     return score, breakdown
 

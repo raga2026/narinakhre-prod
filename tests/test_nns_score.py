@@ -44,7 +44,8 @@ def test_excellent_candidate_scores_a_perfect_ten():
     assert score == 10.0
     assert breakdown['golden_cross_bonus'] == 0.0
     assert breakdown['news_sentiment_bonus'] == 0.0
-    assert all(v == 1.0 for k, v in breakdown.items() if k not in ('golden_cross_bonus', 'news_sentiment_bonus'))
+    assert breakdown['sector_pressure_adjustment'] == 0.0
+    assert all(v == 1.0 for k, v in breakdown.items() if k not in ('golden_cross_bonus', 'news_sentiment_bonus', 'sector_pressure_adjustment'))
 
 
 def test_worst_candidate_scores_zero():
@@ -63,7 +64,7 @@ def test_twelve_sub_scores_are_all_present_in_breakdown():
     assert set(breakdown.keys()) == {
         'pe_fit', 'peg', 'opm', 'roce', 'roa', 'profit_growth', 'revenue_growth',
         'price_to_book_fit', 'reserves_to_debt', 'fcf', 'rsi_position', 'holding_trend',
-        'golden_cross_bonus', 'news_sentiment_bonus',
+        'golden_cross_bonus', 'news_sentiment_bonus', 'sector_pressure_adjustment',
     }
 
 

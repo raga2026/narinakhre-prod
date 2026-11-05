@@ -1055,7 +1055,7 @@ def test_daily_email_includes_each_recipients_own_referral_footer():
     assert 'BBBCODE2' not in calls_by_email['a@example.com']['textbody']
     assert 'AAACODE1' not in calls_by_email['b@example.com']['textbody']
     assert 'ref=AAACODE1' in calls_by_email['a@example.com']['htmlbody']
-    assert 'month free' in calls_by_email['a@example.com']['textbody'].lower()
+    assert 'month of pro free' in calls_by_email['a@example.com']['textbody'].lower()
 
 
 def test_daily_email_generates_a_referral_code_for_a_recipient_who_has_none_yet():

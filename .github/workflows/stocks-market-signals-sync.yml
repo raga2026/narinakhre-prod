@@ -1,0 +1,30 @@
+name: Stocks market signals sync
+
+on:
+  schedule:
+    # 02:38 UTC daily = 08:08 IST -- before the 9 AM suggestion email, so
+    # sector pressure (commodity/FX/VIX shocks + sector news) is fresh when
+    # picks are generated. Triggers POST /stocks/signals/sync (see
+    # utils/market_signals.py). Minute deliberately off the :00/:15/:30/:45
+    # marks -- see stocks-shortlist-refresh.yml's comment for why.
+    - cron: '38 2 * * *'
+    # 11:08 UTC = 16:38 IST -- post-close refresh so the home-page card and
+    # shock alerts reflect the day's Indian session, weekdays only.
+    - cron: '8 11 * * 1-5'
+  workflow_dispatch: {}  # lets you trigger it manually from the Actions tab
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: POST to /stocks/signals/sync
+        run: |
+          status=$(curl -s -o /tmp/response.txt -w "%{http_code}" --max-time 600 -X POST \
+            -H "X-Cron-Secret: ${{ secrets.STOCKS_FUNDAMENTALS_CRON_SECRET }}" \
+            https://narinakhre.com/stocks/signals/sync)
+          echo "HTTP status: $status"
+          cat /tmp/response.txt
+          if [ "$status" != "200" ]; then
+            echo "Request failed"
+            exit 1
+          fi

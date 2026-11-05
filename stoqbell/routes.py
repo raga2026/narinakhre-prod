@@ -1,4 +1,4 @@
-"""All Nari Nakhre Stocks (StoqBell) routes, on their own Blueprint.
+claude"""All Nari Nakhre Stocks (StoqBell) routes, on their own Blueprint.
 
 Registered onto the main Flask app in app.py via
 `app.register_blueprint(stocks_bp)`. Route paths already include the
@@ -210,6 +210,11 @@ from stoqbell.utils.suggestion_engine import (
     get_special_recommendations_today,
 )
 from stoqbell.utils.industry_growth import compute_industry_growth
+from stoqbell.utils.market_signals import (
+    initialize_market_signals_tables_if_needed,
+    sync_market_signals,
+    get_market_drivers_summary,
+)
 from stoqbell.utils.stock_news import (
     initialize_stock_news_table_if_needed,
     sync_stock_news,
@@ -350,6 +355,7 @@ def init_stocks_tables():
     initialize_admin_alerts_table_if_needed(client)
     initialize_announcements_table_if_needed(client)
     initialize_stock_news_table_if_needed(client)
+    initialize_market_signals_tables_if_needed(client)
     initialize_email_delivery_log_table_if_needed(client)
 
 
@@ -1665,6 +1671,29 @@ def stocks_news_sync():
     return jsonify({'status': 'ok', **summary})
 
 
+@stocks_bp.route('/stocks/signals/sync', methods=['POST'])
+def stocks_market_signals_sync():
+    """Market-drivers job (see utils/market_signals.sync_market_signals):
+    commodity/FX/VIX driver prices, sector news, per-sector pressure
+    scores, and driver-shock alert emails. Cron-secret only, same
+    reasoning as stocks_news_sync above (external fetches on its own
+    schedule). Individual source failures are reported in the response's
+    'failures' list but don't fail the job -- only an exception outside
+    the per-source isolation does."""
+    if not has_valid_cron_secret(request.headers, STOCKS_FUNDAMENTALS_CRON_SECRET):
+        return jsonify({'status': 'error', 'message': 'Unauthorized'}), 403
+
+    db = get_db()
+    try:
+        summary = sync_market_signals(db)
+    except Exception as e:
+        current_app.logger.error(f'Market signals sync failed: {e}')
+        alert_job_error(db, 'market_signals_sync', str(e))
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+    record_job_success(db, 'market_signals_sync')
+    return jsonify({'status': 'ok', **summary})
+
+
 @stocks_bp.route('/stocks/watchlist', methods=['GET'])
 @stocks_watchlist_access_required
 def stocks_watchlist():
@@ -2390,12 +2419,14 @@ def stocks_home():
 
     industry_growth = compute_industry_growth(db, top_n=5)
     prominent_news = get_prominent_news(db)
+    market_drivers = get_market_drivers_summary(db)
 
     return render_template(
         'admin/stocks_home.html',
         suggestion_summary=suggestion_summary,
         industry_growth=industry_growth,
         prominent_news=prominent_news,
+        market_drivers=market_drivers,
     )
 
 

@@ -10,6 +10,8 @@ from stoqbell.utils.price_pattern import compute_suggestion_pricing, compute_pro
 from stoqbell.utils.nns_score import NNS_BRONZE_MIN, compute_nns_score, nns_tier
 from stoqbell.utils.stock_shortlist import _compute_industry_benchmarks
 from stoqbell.utils.news_sentiment import compute_company_sentiment
+from stoqbell.utils.sector_drivers import is_gated as is_sector_gated
+from stoqbell.utils.market_signals import attach_sector_pressure
 
 # The daily cap -- exactly one stock_suggestions row per day (the "Pick of
 # the Day"), not every currently-qualifying candidate. Also the default for
@@ -243,6 +245,12 @@ def is_suggestion_eligible(candidate):
     if candidate.get('volume_trend') != 'confirming':
         return False
     if candidate.get('cross_status') != 'golden_cross':
+        return False
+    # Market-drivers layer (utils/sector_drivers.py): suppress NEW buys in a
+    # sector under heavy pressure (e.g. a crude spike hitting autos). Absent
+    # or None sector_pressure -- no fresh data, or a caller that never
+    # attached it -- never gates (fail-open).
+    if is_sector_gated(candidate.get('sector_pressure')):
         return False
     return not _is_overextended(candidate)
 
@@ -509,7 +517,7 @@ def _fetch_candidates(db, market_cap_tier=None):
     fundamentals_cutoff = (date.today() - timedelta(days=20)).isoformat()
     tier_clause = ' AND w.market_cap_tier = ?' if market_cap_tier else ''
     params = (today, fundamentals_cutoff) + ((market_cap_tier,) if market_cap_tier else ())
-    return db.execute(
+    rows = db.execute(
         f'''SELECT w.id AS watchlist_id, w.symbol, w.exchange, w.name AS company_name,
                   w.fundamental_tier, w.market_cap_tier,
                   u.id AS universe_id, u.industry, u.isin,
@@ -534,6 +542,7 @@ def _fetch_candidates(db, market_cap_tier=None):
            WHERE w.is_active = 1{tier_clause}''',
         params
     ).fetchall()
+    return attach_sector_pressure(db, rows)
 
 
 def _fetch_universe_candidates(db):
@@ -558,7 +567,7 @@ def _fetch_universe_candidates(db):
     same company could be ranked (and shown) twice."""
     today = date.today().isoformat()
     fundamentals_cutoff = (date.today() - timedelta(days=20)).isoformat()
-    return db.execute(
+    rows = db.execute(
         '''SELECT u.id AS universe_id, u.symbol, u.exchange, u.company_name,
                   w.id AS watchlist_id, w.fundamental_tier, w.market_cap_tier,
                   u.industry, u.isin,
@@ -589,6 +598,7 @@ def _fetch_universe_candidates(db):
              )''',
         (today, fundamentals_cutoff)
     ).fetchall()
+    return attach_sector_pressure(db, rows)
 
 
 def _fetch_previous_snapshots(db, candidates):
@@ -665,7 +675,7 @@ def compute_watchlist_nns_scores(db, watchlist_rows):
     Returns NEW dicts (does not mutate the input rows); a row with missing
     data still gets a score (compute_nns_score treats missing fields as
     failing that sub-score, same as everywhere else it's used)."""
-    rows = [dict(r) for r in watchlist_rows]
+    rows = attach_sector_pressure(db, watchlist_rows)
     for row in rows:
         row.setdefault('watchlist_id', row.get('id'))
     industry_benchmarks = _compute_industry_benchmarks(rows)

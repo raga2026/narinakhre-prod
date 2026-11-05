@@ -14,6 +14,38 @@ we already scrape, not a substitute for an official index."""
 INDUSTRY_GROWTH_MIN_SAMPLE_SIZE = 3
 
 
+def compute_industry_changes(db):
+    """{industry: avg 1-day % change} for EVERY industry with at least
+    INDUSTRY_GROWTH_MIN_SAMPLE_SIZE reporting stocks (not just top movers)
+    -- the realised-move input to sector pressure (see
+    utils/sector_drivers.compute_sector_pressure). {} when fewer than two
+    trade dates exist."""
+    dates = db.execute(
+        '''SELECT DISTINCT trade_date FROM stock_daily_data
+           WHERE universe_id IS NOT NULL ORDER BY trade_date DESC LIMIT 2'''
+    ).fetchall()
+    if len(dates) < 2:
+        return {}
+    rows = db.execute(
+        '''SELECT u.industry, d1.close AS latest_close, d0.close AS prev_close
+           FROM stock_daily_data d1
+           JOIN stock_daily_data d0 ON d0.universe_id = d1.universe_id AND d0.trade_date = ?
+           JOIN stock_universe u ON u.id = d1.universe_id
+           WHERE d1.trade_date = ? AND d1.universe_id IS NOT NULL
+             AND u.industry IS NOT NULL AND d0.close IS NOT NULL AND d0.close > 0 AND d1.close IS NOT NULL''',
+        (dates[1]['trade_date'], dates[0]['trade_date'])
+    ).fetchall()
+    changes = {}
+    for row in rows:
+        changes.setdefault(row['industry'], []).append(
+            (row['latest_close'] - row['prev_close']) / row['prev_close'] * 100
+        )
+    return {
+        industry: sum(vals) / len(vals)
+        for industry, vals in changes.items() if len(vals) >= INDUSTRY_GROWTH_MIN_SAMPLE_SIZE
+    }
+
+
 def compute_industry_growth(db, top_n=5):
     """Compares the two most recent trade dates present in stock_daily_data
     (universe-wide, via universe_id -- covers the full ~1,067-company
